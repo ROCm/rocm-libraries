@@ -157,6 +157,14 @@ public:
     {
     }
 
+    /// \brief Creates a \p hipTextureObject_t and binds this iterator to it.
+    ///
+    /// \tparam Texture data pointer type
+    ///
+    /// \param ptr - pointer to the texture data on the device
+    /// \param bytes - size of the texture data (in bytes)
+    /// \param texture_offset - an offset from ptr to load texture data from
+    /// (Defaults to 0)
     template<class Qualified>
     inline
     hipError_t bind_texture(Qualified* ptr,
@@ -180,13 +188,14 @@ public:
         return hipCreateTextureObject(&texture_object, &resourse_desc, &texture_desc, NULL);
     }
 
+    /// \brief Destroys the texture object that this iterator points at.
     inline
     hipError_t unbind_texture()
     {
         return hipDestroyTextureObject(texture_object);
     }
 
-    //! \skip_doxy_start
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS
     ROCPRIM_HOST_DEVICE inline
     texture_cache_iterator& operator++()
     {
@@ -325,7 +334,7 @@ public:
     {
         return os;
     }
-    //! \skip_doxy_end
+    #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:
     using texture_type = typename ::rocprim::detail::match_texture_type<T>::type;
@@ -335,6 +344,7 @@ private:
     hipTextureObject_t texture_object;
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 template<
     class T,
     class Difference
@@ -346,10 +356,11 @@ operator+(typename texture_cache_iterator<T, Difference>::difference_type distan
 {
     return iterator + distance;
 }
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
+END_ROCPRIM_NAMESPACE
 
 /// @}
 // end of group iteratormodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_ITERATOR_TEXTURE_CACHE_ITERATOR_HPP_

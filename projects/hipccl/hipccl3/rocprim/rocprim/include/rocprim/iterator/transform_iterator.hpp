@@ -91,7 +91,7 @@ public:
     {
     }
 
-    //! \skip_doxy_start
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS
     ROCPRIM_HOST_DEVICE inline
     transform_iterator& operator++()
     {
@@ -213,13 +213,14 @@ public:
     {
         return os;
     }
-    //! \skip_doxy_end
+    #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:
     InputIterator iterator_;
     UnaryFunction transform_;
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 template<
     class InputIterator,
     class UnaryFunction,
@@ -232,6 +233,7 @@ operator+(typename transform_iterator<InputIterator, UnaryFunction, ValueType>::
 {
     return iterator + distance;
 }
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// make_transform_iterator creates a transform_iterator using \p iterator as
 /// the underlying iterator and \p transform as the unary function.
@@ -254,9 +256,9 @@ make_transform_iterator(InputIterator iterator, UnaryFunction transform)
     return transform_iterator<InputIterator, UnaryFunction>(iterator, transform);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group iteratormodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_ITERATOR_TRANSFORM_ITERATOR_HPP_

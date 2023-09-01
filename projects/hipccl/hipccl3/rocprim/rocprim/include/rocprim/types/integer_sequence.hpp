@@ -49,6 +49,9 @@ class integer_sequence
     }
 };
 
+/// \brief Compile-time sequence of indices
+///
+/// This is a helper alias template built on top on \p integer_sequence .
 template<size_t... Ints>
 using index_sequence = integer_sequence<size_t, Ints...>;
 
@@ -79,12 +82,20 @@ struct make_integer_sequence_impl<T, 0>
 
 } // end detail namespace
 
+/// \brief Generates a compile time integer sequence.
+/// \tparam T - the integer type to use
+/// \tparam N - the number of values to generate
 template<class T, T N>
 using make_integer_sequence = typename detail::make_integer_sequence_impl<T, N>::type;
 
+/// \brief Generates a compile time index sequence using type size_t.
+/// \tparam N - the number of values to generate
 template<size_t N>
 using make_index_sequence = make_integer_sequence<size_t, N>;
 
+/// \brief Generates a compile time integer sequence whose length is equal
+/// to the length of the supplied template parameter pack.
+/// \tparam T - template parameter pack
 template<class... T>
 using index_sequence_for = make_index_sequence<sizeof...(T)>;
 #endif

@@ -411,6 +411,15 @@ public:
         scatter_to_blocked(input, output, ranks, storage);
     }
 
+    /// \brief Gathers items from a striped arrangement based on their ranks
+    /// across the thread block.
+    ///
+    /// \tparam U - [inferred] the output type.
+    /// \tparam Offset - [inferred] the rank type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [out] ranks - array that has rank of data.
     template<class U, class Offset>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void gather_from_striped(const T (&input)[ItemsPerThread],
@@ -476,6 +485,16 @@ public:
         }
     }
 
+    /// \brief Gathers items from a striped arrangement based on their ranks
+    /// across the thread block, using temporary storage.
+    ///
+    /// \tparam U - [inferred] the output type.
+    /// \tparam Offset - [inferred] the rank type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [out] ranks - array that has rank of data.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     template <class U, class Offset>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void gather_from_striped(const T (&input)[ItemsPerThread],

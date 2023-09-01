@@ -32,10 +32,10 @@
 #include "detail/block_histogram_atomic.hpp"
 #include "detail/block_histogram_sort.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup blockmodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Available algorithms for block_histogram primitive.
 enum class block_histogram_algorithm

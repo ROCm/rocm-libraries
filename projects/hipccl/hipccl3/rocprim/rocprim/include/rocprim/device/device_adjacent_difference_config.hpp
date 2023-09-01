@@ -52,8 +52,8 @@ template <unsigned int       BlockSize,
           unsigned int       SizeLimit   = ROCPRIM_GRID_SIZE_LIMIT>
 struct adjacent_difference_config : kernel_config<BlockSize, ItemsPerThread, SizeLimit>
 {
-    static constexpr block_load_method  load_method  = LoadMethod;
-    static constexpr block_store_method store_method = StoreMethod;
+    static constexpr block_load_method  load_method  = LoadMethod; ///< input values are loaded using this method
+    static constexpr block_store_method store_method = StoreMethod; ///< input values are stored using this method
 };
 
 namespace detail

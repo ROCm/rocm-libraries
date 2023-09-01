@@ -9,11 +9,11 @@
  */
 
 /**
- * \defgroup intrinsicsmodule_flat_id
+ * \defgroup intrinsicsmodule_flat_id Flat ID
  * \ingroup intrinsicsmodule
  */
 
 /**
- * \defgroup intrinsicsmodule_warp_id
+ * \defgroup intrinsicsmodule_warp_id Warp ID
  * \ingroup intrinsicsmodule
  */

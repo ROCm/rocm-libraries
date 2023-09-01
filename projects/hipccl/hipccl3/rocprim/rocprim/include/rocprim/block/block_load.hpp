@@ -381,9 +381,6 @@ public:
     }
 };
 
-/// @}
-// end of group blockmodule
-
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
 template<
@@ -887,5 +884,8 @@ public:
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group blockmodule
 
 #endif // ROCPRIM_BLOCK_BLOCK_LOAD_HPP_

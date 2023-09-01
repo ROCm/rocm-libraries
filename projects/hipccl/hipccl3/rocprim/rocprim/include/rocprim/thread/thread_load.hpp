@@ -34,6 +34,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \brief These enum values are used to specify caching behaviour on load
 enum cache_load_modifier : int
 {
     load_default,   ///< Default (no modifier)

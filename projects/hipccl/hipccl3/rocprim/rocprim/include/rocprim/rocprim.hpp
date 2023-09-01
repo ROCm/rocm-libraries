@@ -67,6 +67,7 @@
 #include "device/device_select.hpp"
 #include "device/device_transform.hpp"
 
+/// \brief The top level rocPRIM namespace.
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Returns version of rocPRIM library.

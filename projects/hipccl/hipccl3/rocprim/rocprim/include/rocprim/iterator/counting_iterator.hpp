@@ -87,7 +87,7 @@ public:
     {
     }
 
-    //! \skip_doxy_start
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS
     ROCPRIM_HOST_DEVICE inline
     counting_iterator& operator++()
     {
@@ -212,7 +212,7 @@ public:
         os << "[" << iter.value_ << "]";
         return os;
     }
-    //! \skip_doxy_end
+    #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:
     template<class T>
@@ -231,6 +231,7 @@ private:
     value_type value_;
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 template<
     class Incrementable,
     class Difference
@@ -242,6 +243,7 @@ operator+(typename counting_iterator<Incrementable, Difference>::difference_type
 {
     return iter + distance;
 }
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// make_counting_iterator creates a counting_iterator with its initial value
 /// set to \p value.

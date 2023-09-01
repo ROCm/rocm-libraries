@@ -121,8 +121,7 @@ public:
 
     /// \brief Shuffles data across threads in a block, offseted by the distance value.
     ///
-    /// \par A thread with  threadId i receives data from a thread with threadIdx (i-distance), whre distance may be a negative value.
-    /// allocated by the method itself.
+    /// \par A thread with threadIdx i receives data from a thread with threadIdx (i - distance), where distance may be a negative value.
     /// \par Any shuffle operation with invalid input or output threadIds are not carried out, i.e. threadId < 0 || threadId >= BlockSize.
     ///
     /// \param [in] input - input data to be shuffled to another thread.
@@ -156,6 +155,15 @@ public:
         );
     }
 
+    /// \brief Shuffles data across threads in a block, offseted by the distance value.
+    ///
+    /// \par A thread with threadIdx i receives data from a thread with threadIdx (i - distance), where distance may be a negative value.
+    /// \par Any shuffle operation with invalid input or output threadIds are not carried out, i.e. threadId < 0 || threadId >= BlockSize.
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in] input - input data to be shuffled to another thread.
+    /// \param [out] output - reference to a output value, that receives data from another thread
+    /// \param [in] distance - The input threadId + distance = output threadId.
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void offset(const size_t& flat_id,
                 T input,
@@ -166,6 +174,16 @@ public:
         offset(flat_id, input, output, distance, storage);
     }
 
+    /// \brief Shuffles data across threads in a block, offseted by the distance value, using temporary storage.
+    ///
+    /// \par A thread with threadIdx i receives data from a thread with threadIdx (i - distance), where distance may be a negative value.
+    /// \par Any shuffle operation with invalid input or output threadIds are not carried out, i.e. threadId < 0 || threadId >= BlockSize.
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in] input - input data to be shuffled to another thread.
+    /// \param [out] output - reference to a output value, that receives data from another thread
+    /// \param [in] distance - The input threadId + distance = output threadId.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void offset(const size_t& flat_id,
                 T input,
@@ -187,8 +205,7 @@ public:
 
     /// \brief Shuffles data across threads in a block, offseted by the distance value.
     ///
-    /// \par A thread with  threadId i receives data from a thread with threadIdx (i-distance)%BlockSize, whre distance may be a negative value.
-    /// allocated by the method itself.
+    /// \par A thread with threadIdx i receives data from a thread with threadIdx (i - distance) % BlockSize, where distance may be a negative value.
     /// \par Data is rotated around the block, using (input_threadId + distance) modulous BlockSize to ensure valid threadIds.
     ///
     /// \param [in] input - input data to be shuffled to another thread.
@@ -222,6 +239,15 @@ public:
         );
     }
 
+    /// \brief Shuffles data across threads in a block, offseted by the distance value.
+    ///
+    /// \par A thread with threadIdx i receives data from a thread with threadIdx (i - distance) % BlockSize, where distance may be a negative value.
+    /// \par Data is rotated around the block, using (input_threadId + distance) modulous BlockSize to ensure valid threadIds.
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in] input - input data to be shuffled to another thread.
+    /// \param [out] output - reference to a output value, that receives data from another thread
+    /// \param [in] distance - The input threadId + distance = output threadId.
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void rotate(const size_t& flat_id,
                 T input,
@@ -232,6 +258,16 @@ public:
         rotate(flat_id, input, output, distance, storage);
     }
 
+    /// \brief Shuffles data across threads in a block, offseted by the distance value, using temporary storage.
+    ///
+    /// \par A thread with threadIdx i receives data from a thread with threadIdx (i - distance) % BlockSize, where distance may be a negative value.
+    /// \par Data is rotated around the block, using (input_threadId + distance) modulous BlockSize to ensure valid threadIds.
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in] input - input data to be shuffled to another thread.
+    /// \param [out] output - reference to a output value, that receives data from another thread
+    /// \param [in] distance - The input threadId + distance = output threadId.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void rotate(const size_t& flat_id,
                 T input,
@@ -286,6 +322,13 @@ public:
         );
     }
 
+    /// \brief The thread block rotates a blocked arrange of input items,
+    /// shifting it up by one item
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in]  input -  The calling thread's input items
+    /// \param [out] prev  -  The corresponding predecessor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void up(const size_t& flat_id,
@@ -296,7 +339,14 @@ public:
         this->up(flat_id, input, prev, storage);
     }
 
-
+    /// \brief The thread block rotates a blocked arrange of input items,
+    /// shifting it up by one item, using temporary storage.
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in]  input -  The calling thread's input items
+    /// \param [out] prev  -  The corresponding predecessor items (may be aliased to \p input).
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void up(const size_t& flat_id,
@@ -322,7 +372,6 @@ public:
     }
 
 
-
     /// \brief The thread block rotates a blocked arrange of input items,
     /// shifting it up by one item
     ///
@@ -343,6 +392,15 @@ public:
         );
     }
 
+    /// \brief The thread block rotates a blocked arrange of input items,
+    /// shifting it up by one item
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in]  input - The calling thread's input items
+    /// \param [out] prev  - The corresponding predecessor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
+    /// \param [out] block_suffix - The item \p input[ItemsPerThread-1] from
+    /// <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void up(const size_t& flat_id,
@@ -354,6 +412,16 @@ public:
         this->up(flat_id, input, prev, block_suffix, storage);
     }
 
+    /// \brief The thread block rotates a blocked arrange of input items,
+    /// shifting it up by one item, using temporary storage.
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in]  input - The calling thread's input items
+    /// \param [out] prev  - The corresponding predecessor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
+    /// \param [out] block_suffix - The item \p input[ItemsPerThread-1] from
+    /// <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     template <int ItemsPerThread>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void up(const size_t& flat_id,
@@ -402,6 +470,13 @@ public:
         );
     }
 
+    /// \brief The thread block rotates a blocked arrange of input items,
+    /// shifting it down by one item
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in]  input -  The calling thread's input items
+    /// \param [out] next  -  The corresponding successor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void down(const size_t& flat_id,
@@ -412,6 +487,14 @@ public:
         this->down(flat_id, input, next, storage);
     }
 
+    /// \brief The thread block rotates a blocked arrange of input items,
+    /// shifting it down by one item, using temporary storage.
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in]  input -  The calling thread's input items
+    /// \param [out] next  -  The corresponding successor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void down(const size_t& flat_id,
@@ -455,6 +538,14 @@ public:
         );
     }
 
+    /// \brief The thread block rotates a blocked arrange of input items,
+    /// shifting it down by one item
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in]  input -  The calling thread's input items
+    /// \param [out] next  -  The corresponding successor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
+    /// \param [out] block_prefix -  The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void down(const size_t& flat_id,
@@ -466,6 +557,15 @@ public:
         this->down(flat_id, input, next, block_prefix, storage);
     }
 
+    /// \brief The thread block rotates a blocked arrange of input items,
+    /// shifting it down by one item, using temporary storage.
+    ///
+    /// \param [in] flat_id - flat thread ID obtained from rocprim::flat_block_thread_id
+    /// \param [in]  input -  The calling thread's input items
+    /// \param [out] next  -  The corresponding successor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
+    /// \param [out] block_prefix -  The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void down(const size_t& flat_id,

@@ -85,6 +85,43 @@ hipError_t binary_search(void * temporary_storage,
 
 } // end of detail namespace
 
+/// \brief Performs a device-level lower bound check.
+///
+/// \par Overview
+/// Runs multiple lower bound checks in parallel (one for each \p needle in <tt>needles</tt>).
+/// A lower bound check returns the index of the first element in \p haystack that
+/// causes \p compare_op(element,needle) to return false. If no item in \p haystack satisfies
+/// this criteria, then \p haystack_size is returned.
+/// Results are written by \p output.
+///
+/// \tparam Config - [optional] configuration information for the primitive. This can be 
+/// \p lower_bound_config or a custom class with the same members.
+/// \tparam HaystackIterator - Iterator type for items we'll be searching through (values).
+/// \tparam NeedlesIterator - Iterator type for items we are performing lower bound checks
+/// for (keys).
+/// \tparam OutputIterator - Iterator type for the output indices.
+/// \tparam CompareFunction [optional] A callable that can be used to compare two values.
+/// defaults to rocprim::less.
+///
+/// \param [in] temporary_storage - pointer to device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and the function returns without performing the search operation.
+/// \param [in,out] storage_size - reference to the size (in bytes) of \p temporary_storage.
+/// \param haystack [in] - iterator pointing to the beginning of the range to search through.
+/// \param needles [in] - iterator pointing to the first of the elements to perform lower
+/// bound checks on.
+/// \param output [out] - Iterator pointing to the beginning of the range where the results
+/// are to be stored.
+/// \param haystack_size [in] - the total number of values to search through.
+/// \param needles_size [in] - the total number of keys to perform lower bound checks for.
+/// \param compare_op [in] - binary operation function that will be used for comparison.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but the function object must not modify the objects passed to it.
+/// The default value is \p CompareFunction().
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
 template<
     class Config = default_config,
     class HaystackIterator,
@@ -124,6 +161,43 @@ hipError_t lower_bound(void * temporary_storage,
                                          debug_synchronous);
 }
 
+/// \brief Performs a device-level upper bound check.
+///
+/// \par Overview
+/// Runs multiple upper bound checks in parallel (one for each \p needle in <tt>needles</tt>).
+/// An upper bound check returns the index of the first element in \p haystack that
+/// causes \p compare_op(needle,element) to return true. If no item in \p haystack satisfies
+/// this criteria, then \p haystack_size is returned.
+/// Results are written by \p output.
+///
+/// \tparam Config - [optional] configuration information for the primitive. This can be 
+/// \p upper_bound_config or a custom class with the same members.
+/// \tparam HaystackIterator - Iterator type for items we'll be searching through (values).
+/// \tparam NeedlesIterator - Iterator type for items we are performing upper bound checks
+/// for (keys).
+/// \tparam OutputIterator - Iterator type for the output indices.
+/// \tparam CompareFunction [optional] A callable that can be used to compare two values.
+/// defaults to rocprim::less.
+///
+/// \param [in] temporary_storage - pointer to device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and the function returns without performing the search operation.
+/// \param [in,out] storage_size - reference to the size (in bytes) of \p temporary_storage.
+/// \param haystack [in] - iterator pointing to the beginning of the range to search through.
+/// \param needles [in] - iterator pointing to the first of the elements to perform upper
+/// bound checks on.
+/// \param output [out] - Iterator pointing to the beginning of the range where the results
+/// are to be stored.
+/// \param haystack_size [in] - the total number of values to search through.
+/// \param needles_size [in] - the total number of keys to perform upper bound checks for.
+/// \param compare_op [in] - binary operation function that will be used for comparison.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but the function object must not modify the objects passed to it.
+/// The default value is \p CompareFunction().
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
 template<
     class Config = default_config,
     class HaystackIterator,
@@ -163,6 +237,39 @@ hipError_t upper_bound(void * temporary_storage,
                                          debug_synchronous);
 }
 
+/// \brief Performs a device-level parallel binary search.
+///
+/// \par Overview
+/// Runs multiple binary searches in parallel. The result is a sequence of bools,
+/// where each bool indicates if the corresponding search succeeded (the key was found)
+/// or not. Results are written by \p output.
+///
+/// \tparam Config - [optional] configuration information for the primitive. This can be 
+/// \p binary_search_config or a custom class with the same members.
+/// \tparam HaystackIterator - Iterator type for items we'll be searching through (values).
+/// \tparam NeedlesIterator - Iterator type for item we are searching for (keys).
+/// \tparam OutputIterator - Iterator type for the output bools.
+/// \tparam CompareFunction [optional] A callable that can be used to compare two values.
+/// defaults to rocprim::less.
+///
+/// \param [in] temporary_storage - pointer to device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and the function returns without performing the search operation.
+/// \param [in,out] storage_size - reference to the size (in bytes) of \p temporary_storage.
+/// \param haystack [in] - iterator pointing to the beginning of the range to search through.
+/// \param needles [in] - iterator pointing to the first of the elements to find.
+/// \param output [out] - Iterator pointing to the beginning of the range where the results
+/// are to be stored.
+/// \param haystack_size [in] - the total number of values to search through.
+/// \param needles_size [in] - the total number of keys to search for.
+/// \param compare_op [in] - binary operation function that will be used for comparison.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but the function object must not modify the objects passed to it.
+/// The default value is \p CompareFunction().
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
 template<
     class Config = default_config,
     class HaystackIterator,

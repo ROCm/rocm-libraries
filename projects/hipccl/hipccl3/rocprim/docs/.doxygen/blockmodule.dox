@@ -11,11 +11,11 @@
  */
 
 /**
- * \defgroup blockmodule_warp_load_functions
+ * \defgroup blockmodule_warp_load_functions Load Functions
  * \ingroup blockmodule
  */
 
 /**
- * \defgroup blockmodule_warp_store_functions
+ * \defgroup blockmodule_warp_store_functions Store Functions
  * \ingroup blockmodule
  */

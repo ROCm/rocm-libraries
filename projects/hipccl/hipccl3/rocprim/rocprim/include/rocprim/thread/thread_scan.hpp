@@ -62,8 +62,8 @@ BEGIN_ROCPRIM_NAMESPACE
      typename    ScanOp>
  ROCPRIM_DEVICE ROCPRIM_INLINE
  T thread_scan_exclusive(
-     T                   inclusive,
-     T                   exclusive,
+     T                   inclusive,              ///< [in] Initial value for inclusive aggregate
+     T                   exclusive,              ///< [in] Initial value for exclusive aggregate
      T                   *input,                 ///< [in] Input array
      T                   *output,                ///< [out] Output array (may be aliased to \p input)
      ScanOp              scan_op,                ///< [in] Binary scan operator
@@ -79,7 +79,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
      return inclusive;
  }
-
 
 
  /// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
@@ -155,7 +154,7 @@ BEGIN_ROCPRIM_NAMESPACE
      typename    ScanOp>
  ROCPRIM_DEVICE ROCPRIM_INLINE
  T thread_scan_inclusive(
-     T                   inclusive,
+     T                   inclusive,              ///< [in] Initial value for inclusive aggregate
      T                   *input,                 ///< [in] Input array
      T                   *output,                ///< [out] Output array (may be aliased to \p input)
      ScanOp              scan_op,                ///< [in] Binary scan operator

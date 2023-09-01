@@ -56,12 +56,28 @@ template<unsigned int         BlockSize,
          unsigned int         SizeLimit        = ROCPRIM_GRID_SIZE_LIMIT>
 struct reduce_by_key_config_v2
 {
+    /// Number of threads in a block.
     static constexpr unsigned int         block_size         = BlockSize;
+
+    /// Number of tiles (`BlockSize` * `ItemsPerThread` items) to process per block
     static constexpr unsigned int         tiles_per_block    = TilesPerBlock;
+
+    /// Number of items processed by each thread per tile. 
     static constexpr unsigned int         items_per_thread   = ItemsPerThread;
+
+    /// A rocprim::block_load_method emum value indicating how the keys should be loaded.
+    /// Defaults to block_load_method::block_load_transpose
     static constexpr block_load_method    load_keys_method   = LoadKeysMethod;
+
+    /// A rocprim::block_load_method emum value indicating how the values should be loaded.
+    /// Defaults to block_load_method::block_load_transpose
     static constexpr block_load_method    load_values_method = LoadValuesMethod;
+
+    /// A rocprim::block_scan_algorithm enum value indicating how the reduction should
+    /// be done. Defaults to block_scan_algorithm::using_warp_scan
     static constexpr block_scan_algorithm scan_algorithm     = ScanAlgorithm;
+
+    /// Maximum possible number of values. Defaults to ROCPRIM_GRID_SIZE_LIMIT.
     static constexpr unsigned int         size_limit         = SizeLimit;
 };
 

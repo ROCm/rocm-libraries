@@ -31,6 +31,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \addtogroup utilsmodule_functional
 /// @{
 
+/// \brief Prints the supplied error message only once (using only one of the active threads).
+/// \note Currently, this is not defined for Navi devices.
 #if ROCPRIM_NAVI
 ROCPRIM_PRAGMA_MESSAGE("GPU printf warnings for invalid rocPRIM warp operations on Navi GPUs "
                        "temporarily disabled, due to performance issues with printf.")
@@ -47,6 +49,7 @@ ROCPRIM_PRAGMA_MESSAGE("GPU printf warnings for invalid rocPRIM warp operations 
         }
 #endif
 
+/// \brief Returns the maximum of its arguments.
 template<class T>
 ROCPRIM_HOST_DEVICE inline
 constexpr T max(const T& a, const T& b)
@@ -54,6 +57,7 @@ constexpr T max(const T& a, const T& b)
     return a < b ? b : a;
 }
 
+/// \brief Returns the minimum of its arguments.
 template<class T>
 ROCPRIM_HOST_DEVICE inline
 constexpr T min(const T& a, const T& b)
@@ -61,6 +65,7 @@ constexpr T min(const T& a, const T& b)
     return a < b ? a : b;
 }
 
+/// \brief Swaps two values.
 template<class T>
 ROCPRIM_HOST_DEVICE inline
 void swap(T& a, T& b)
@@ -70,9 +75,11 @@ void swap(T& a, T& b)
     b = c;
 }
 
+/// \brief Returns true if a < b. Otherwise returns false.
 template<class T = void>
 struct less
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
@@ -80,9 +87,12 @@ struct less
     }
 };
 
+/// \brief Returns true if a < b. Otherwise returns false.
+/// This version is a specialization for type void.
 template<>
 struct less<void>
 {
+    /// \brief Invocation operator
     template<class T, class U>
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const U& b) const
@@ -91,9 +101,11 @@ struct less<void>
     }
 };
 
+/// \brief Functor that returns true if a <= b. Otherwise returns false.
 template<class T = void>
 struct less_equal
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
@@ -101,9 +113,12 @@ struct less_equal
     }
 };
 
+/// \brief Functor that returns true if a <= b. Otherwise returns false.
+/// This version is a specialization for type void.
 template<>
 struct less_equal<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
@@ -112,9 +127,11 @@ struct less_equal<void>
     }
 };
 
+/// \brief Functor that returns true if a > b. Otherwise returns false.
 template<class T = void>
 struct greater
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
@@ -122,9 +139,12 @@ struct greater
     }
 };
 
+/// \brief Functor that returns true if a > b. Otherwise returns false.
+/// This version is a specialization for type void.
 template<>
 struct greater<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
@@ -133,9 +153,11 @@ struct greater<void>
     }
 };
 
+/// \brief Functor that returns true if a >= b. Otherwise returns false.
 template<class T = void>
 struct greater_equal
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
@@ -143,9 +165,12 @@ struct greater_equal
     }
 };
 
+/// \brief Functor that returns true if a >= b. Otherwise returns false.
+/// This version is a specialization for type void.
 template<>
 struct greater_equal<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
@@ -154,9 +179,11 @@ struct greater_equal<void>
     }
 };
 
+/// \brief Functor that returns true if a == b. Otherwise returns false.
 template<class T = void>
 struct equal_to
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
@@ -164,9 +191,12 @@ struct equal_to
     }
 };
 
+/// \brief Functor that returns true if a == b. Otherwise returns false.
+/// This version is a specialization for type void.
 template<>
 struct equal_to<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
@@ -175,9 +205,11 @@ struct equal_to<void>
     }
 };
 
+/// \brief Functor that returns true if a != b. Otherwise returns false.
 template<class T = void>
 struct not_equal_to
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
@@ -185,9 +217,12 @@ struct not_equal_to
     }
 };
 
+/// \brief Functor that returns true if a != b. Otherwise returns false.
+/// This version is a specialization for type void.
 template<>
 struct not_equal_to<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
@@ -196,9 +231,11 @@ struct not_equal_to<void>
     }
 };
 
+/// \brief Functor that returns a + b.
 template<class T = void>
 struct plus
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
     {
@@ -206,9 +243,12 @@ struct plus
     }
 };
 
+/// \brief Functor that returns a + b.
+/// This version is a specialization for type void.
 template<>
 struct plus<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
@@ -217,9 +257,11 @@ struct plus<void>
     }
 };
 
+/// \brief Functor that returns a - b.
 template<class T = void>
 struct minus
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
     {
@@ -227,9 +269,12 @@ struct minus
     }
 };
 
+/// \brief Functor that returns a - b.
+/// This version is a specialization for type void.
 template<>
 struct minus<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
@@ -238,9 +283,11 @@ struct minus<void>
     }
 };
 
+/// \brief Functor that returns a * b.
 template<class T = void>
 struct multiplies
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
     {
@@ -248,9 +295,12 @@ struct multiplies
     }
 };
 
+/// \brief Functor that returns a * b.
+/// This version is a specialization for type void.
 template<>
 struct multiplies<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
@@ -259,9 +309,11 @@ struct multiplies<void>
     }
 };
 
+/// \brief Functor that returns the maximum of its arguments.
 template<class T = void>
 struct maximum
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
     {
@@ -269,9 +321,12 @@ struct maximum
     }
 };
 
+/// \brief Functor that returns the maximum of its arguments.
+/// This version is a specialization for type void.
 template<>
 struct maximum<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
@@ -280,9 +335,11 @@ struct maximum<void>
     }
 };
 
+/// \brief Functor that returns the minimum of its arguments.
 template<class T = void>
 struct minimum
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
     {
@@ -290,9 +347,12 @@ struct minimum
     }
 };
 
+/// \brief Functor that returns the minimum of its arguments.
+/// This version is a specialization for type void.
 template<>
 struct minimum<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
@@ -301,9 +361,11 @@ struct minimum<void>
     }
 };
 
+/// \brief Functor that returns its argument.
 template<class T = void>
 struct identity
 {
+    /// \brief Invocation operator
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a) const
     {
@@ -311,9 +373,12 @@ struct identity
     }
 };
 
+/// \brief Functor that returns its argument.
+/// This version is a specialization for type void.
 template<>
 struct identity<void>
 {
+    /// \brief Invocation operator
     template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a) const
@@ -375,13 +440,13 @@ struct Equals <A, A>
     };
 };
 
-#endif // DOXYGEN_SHOULD_SKIP_THIS
-
 template <int A>
 struct Int2Type
 {
    enum {VALUE = A};
 };
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// @}
 // end of group utilsmodule_functional

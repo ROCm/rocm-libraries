@@ -28,6 +28,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \brief Convenience struct that allows you to store key-value pairs as a composite entity.
 template<
     class Key_,
     class Value_
@@ -39,11 +40,11 @@ struct key_value_pair
     using Value = Value_;
     #endif
 
-    using key_type = Key_;
-    using value_type = Value_;
+    using key_type = Key_; ///< the key's type
+    using value_type = Value_; ///< the value's type
 
-    key_type key;
-    value_type value;
+    key_type key; ///< the stored key
+    value_type value; ///< the stored value
 
     ROCPRIM_HOST_DEVICE inline
     key_value_pair() = default;
@@ -51,11 +52,14 @@ struct key_value_pair
     ROCPRIM_HOST_DEVICE inline
     ~key_value_pair() = default;
 
+    /// \brief Constructs a key-value pair using the supplied values.
     ROCPRIM_HOST_DEVICE inline
     key_value_pair(const key_type key, const value_type value) : key(key), value(value)
     {
     }
 
+    /// \brief Returns true if the given key-value pair is not equal to this one.
+    /// Otherwise returns false.
     ROCPRIM_HOST_DEVICE inline
     bool operator !=(const key_value_pair& kvb)
     {

@@ -28,10 +28,10 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup blockmodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Stores a blocked arrangement of items from across the thread block
 /// into a blocked arrangement on continuous memory.
