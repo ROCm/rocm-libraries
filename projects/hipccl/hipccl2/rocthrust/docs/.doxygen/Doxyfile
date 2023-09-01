@@ -735,6 +735,12 @@ WARNINGS               = YES
 
 WARN_IF_UNDOCUMENTED   = YES
 
+# If the WARN_AS_ERROR tag is set to YES then doxygen will immediately stop when
+# a warning is encountered.
+# The default value is: NO.
+
+WARN_AS_ERROR          = YES
+
 # If the WARN_IF_DOC_ERROR tag is set to YES, doxygen will generate warnings for
 # potential errors in the documentation, such as not documenting some parameters
 # in a documented function, or documenting parameters that don't exist or using

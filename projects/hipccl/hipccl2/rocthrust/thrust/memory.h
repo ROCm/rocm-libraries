@@ -304,6 +304,7 @@ void free(const thrust::detail::execution_policy_base<DerivedPolicy> &system, Po
  *
  *  \param system The Thrust system with which the storage is associated.
  *  \param p A pointer previously returned by \p thrust::get_temporary_buffer. If \p ptr is null, \p return_temporary_buffer does nothing.
+ *  \param n
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *
@@ -363,7 +364,7 @@ typename thrust::detail::pointer_traits<Pointer>::raw_pointer
  *  If the argument is not a reference wrapper, the result is a reference to the argument.
  *
  *  \param ref The reference of interest.
- *  \return <tt>*thrust::raw_pointer_cast(&ref)</tt>.
+ *  \return <tt>*raw_pointer_cast(&ref)</tt>.
  *  \note There are two versions of \p raw_reference_cast. One for <tt>const</tt> references,
  *        and one for non-<tt>const</tt>.
  *  \see raw_pointer_cast
@@ -380,7 +381,7 @@ typename detail::raw_reference<T>::type
  *  If the argument is not a reference wrapper, the result is a reference to the argument.
  *
  *  \param ref The reference of interest.
- *  \return <tt>*thrust::raw_pointer_cast(&ref)</tt>.
+ *  \return <tt>*raw_reference_cast(&ref)</tt>.
  *  \note There are two versions of \p raw_reference_cast. One for <tt>const</tt> references,
  *        and one for non-<tt>const</tt>.
  *  \see raw_pointer_cast

@@ -164,10 +164,10 @@ class system_error
      */
 }; // end system_error
 
-} // end system
-
 /*! \} // end system_diagnostics
  */
+
+} // end system
 
 // import names into thrust::
 using system::system_error;

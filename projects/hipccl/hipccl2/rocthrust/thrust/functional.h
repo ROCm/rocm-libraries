@@ -138,6 +138,8 @@ struct binary_function
  *  \{
  */
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
 #define THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(func, impl)                   \
   template <>                                                                  \
   struct func<void>                                                            \
@@ -171,6 +173,8 @@ struct binary_function
 #define THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(func, op)                 \
   THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION(                                   \
     func, THRUST_FWD(t1) op THRUST_FWD(t2))
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 
 /*! \p plus is a function object. Specifically, it is an Adaptable Binary Function.
@@ -234,6 +238,8 @@ struct plus
   }
 }; // end plus
 
+/*! \brief Specialization of \p plus for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(plus, +);
 
 /*! \p minus is a function object. Specifically, it is an Adaptable Binary Function.
@@ -297,6 +303,8 @@ struct minus
   }
 }; // end minus
 
+/*! \brief Specialization of \p minus for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(minus, -);
 
 /*! \p multiplies is a function object. Specifically, it is an Adaptable Binary Function.
@@ -360,6 +368,8 @@ struct multiplies
   }
 }; // end multiplies
 
+/*! \brief Specialization of \p multiplies for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(multiplies, *);
 
 /*! \p divides is a function object. Specifically, it is an Adaptable Binary Function.
@@ -423,6 +433,8 @@ struct divides
   }
 }; // end divides
 
+/*! \brief Specialization of \p divides for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(divides, /);
 
 /*! \p modulus is a function object. Specifically, it is an Adaptable Binary Function.
@@ -486,6 +498,8 @@ struct modulus
   }
 }; // end modulus
 
+/*! \brief Specialization of \p modulus for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(modulus, %);
 
 /*! \p negate is a function object. Specifically, it is an Adaptable Unary Function.
@@ -541,6 +555,8 @@ struct negate
   }
 }; // end negate
 
+/*! \brief Specialization of \p negate for type void.
+ */
 THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(negate, -THRUST_FWD(x));
 
 /*! \p square is a function object. Specifically, it is an Adaptable Unary Function.
@@ -595,6 +611,8 @@ struct square
   }
 }; // end square
 
+/*! \brief Specialization of \p square for type void.
+ */
 THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(square, x*x);
 
 /*! \}
@@ -644,6 +662,8 @@ struct equal_to
   }
 }; // end equal_to
 
+/*! \brief Specialization of \p equal_to for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(equal_to, ==);
 
 /*! \p not_equal_to is a function object. Specifically, it is an Adaptable Binary
@@ -685,6 +705,8 @@ struct not_equal_to
   }
 }; // end not_equal_to
 
+/*! \brief Specialization of \p not_equal_to for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(not_equal_to, !=);
 
 /*! \p greater is a function object. Specifically, it is an Adaptable Binary
@@ -726,6 +748,8 @@ struct greater
   }
 }; // end greater
 
+/*! \brief Specialization of \p greater for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(greater, >);
 
 /*! \p less is a function object. Specifically, it is an Adaptable Binary
@@ -767,6 +791,8 @@ struct less
   }
 }; // end less
 
+/*! \brief Specialization of \p less for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(less, <);
 
 /*! \p greater_equal is a function object. Specifically, it is an Adaptable Binary
@@ -808,6 +834,8 @@ struct greater_equal
   }
 }; // end greater_equal
 
+/*! \brief Specialization of \p greater_equal for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(greater_equal, >=);
 
 /*! \p less_equal is a function object. Specifically, it is an Adaptable Binary
@@ -849,6 +877,8 @@ struct less_equal
   }
 }; // end less_equal
 
+/*! \brief Specialization of \p less_equal for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(less_equal, <=);
 
 /*! \}
@@ -899,6 +929,8 @@ struct logical_and
   }
 }; // end logical_and
 
+/*! \brief Specialization of \p logical_and for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(logical_and, &&);
 
 /*! \p logical_or is a function object. Specifically, it is an Adaptable Binary Predicate,
@@ -940,6 +972,8 @@ struct logical_or
   }
 }; // end logical_or
 
+/*! \brief Specialization of \p logical_or for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(logical_or, ||);
 
 /*! \p logical_not is a function object. Specifically, it is an Adaptable Predicate,
@@ -995,6 +1029,8 @@ struct logical_not
   }
 }; // end logical_not
 
+/*! \brief Specialization of \p logical_not for type void.
+ */
 THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(logical_not, !THRUST_FWD(x));
 
 /*! \}
@@ -1065,6 +1101,8 @@ struct bit_and
   }
 }; // end bit_and
 
+/*! \brief Specialization of \p bit_and for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(bit_and, &);
 
 /*! \p bit_or is a function object. Specifically, it is an Adaptable Binary Function.
@@ -1127,6 +1165,8 @@ struct bit_or
   }
 }; // end bit_or
 
+/*! \brief Specialization of \p bit_or for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(bit_or, |);
 
 /*! \p bit_xor is a function object. Specifically, it is an Adaptable Binary Function.
@@ -1189,6 +1229,8 @@ struct bit_xor
   }
 }; // end bit_xor
 
+/*! \brief Specialization of \p bit_xor for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(bit_xor, ^);
 
 /*! \}
@@ -1242,6 +1284,8 @@ struct identity
   }
 }; // end identity
 
+/*! \brief Specialization of \p identity for type void.
+ */
 THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(identity, THRUST_FWD(x));
 
 /*! \p maximum is a function object that takes two arguments and returns the greater
@@ -1296,6 +1340,8 @@ struct maximum
   }
 }; // end maximum
 
+/*! \brief Specialization of \p maximum for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION(maximum,
                                           t1 < t2 ? THRUST_FWD(t2)
                                                   : THRUST_FWD(t1));
@@ -1352,6 +1398,8 @@ struct minimum
   }
 }; // end minimum
 
+/*! \brief Specialization of \p minimum for type void.
+ */
 THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION(minimum,
                                           t1 < t2 ? THRUST_FWD(t1)
                                                   : THRUST_FWD(t2));
@@ -1401,10 +1449,15 @@ struct project1st
   }
 }; // end project1st
 
+/*! \brief Specialization of \p project1st for two void arguments.
+ */
 template <>
 struct project1st<void, void>
 {
+  /// Indicate that this functor is transparent: it accepts any argument that can be
+  /// converted to the required type, and uses perfect forwarding.
   using is_transparent = void;
+  /// \brief Invocation operator - returns its first argument.
   __thrust_exec_check_disable__
   template <typename T1, typename T2>
   __host__ __device__
@@ -1461,10 +1514,15 @@ struct project2nd
   }
 }; // end project2nd
 
+/*! \brief Specialization of \p project2nd for two void arguments.
+ */
 template <>
 struct project2nd<void, void>
 {
+  /// Indicate that this functor is transparent: it accepts any argument that can be
+  /// converted to the required type, and uses perfect forwarding.
   using is_transparent = void;
+  /// \brief Invocation operator - returns its second argument.
   __thrust_exec_check_disable__
   template <typename T1, typename T2>
   __host__ __device__

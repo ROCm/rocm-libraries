@@ -30,36 +30,6 @@ THRUST_NAMESPACE_BEGIN
  *  \{
  */
 
-/*! This version of \p device_malloc allocates sequential device storage
- *  for bytes.
- *
- *  \param n The number of bytes to allocate sequentially
- *           in device memory.
- *  \return A \p device_ptr to the newly allocated memory.
- *
- *  The following code snippet demonstrates how to use \p device_malloc to
- *  allocate a range of device memory.
- *
- *  \code
- *  #include <thrust/device_malloc.h>
- *  #include <thrust/device_free.h>
- *  ...
- *  // allocate some memory with device_malloc
- *  const int N = 100;
- *  thrust::device_ptr<void> void_ptr = thrust::device_malloc(N);
- *
- *  // manipulate memory
- *  ...
- *
- *  // deallocate with device_free
- *  thrust::device_free(void_ptr);
- *  \endcode
- *
- *  \see device_ptr
- *  \see device_free
- */
-inline thrust::device_ptr<void> device_malloc(const std::size_t n);
-
 /*! This version of \p device_malloc allocates sequential device storage for
  *  new objects of the given type.
  *
@@ -89,7 +59,37 @@ inline thrust::device_ptr<void> device_malloc(const std::size_t n);
  *  \see device_free
  */
 template<typename T>
-  inline thrust::device_ptr<T> device_malloc(const std::size_t n);
+inline thrust::device_ptr<T> device_malloc(const std::size_t n);
+
+/*! This version of \p device_malloc allocates untyped sequential device storage.
+ *
+ *  \param n The number of bytes to allocate sequentially
+ *           in device memory.
+ *  \return A \p device_ptr to the newly allocated memory.
+ *
+ *  The following code snippet demonstrates how to use \p device_malloc to
+ *  allocate a range of device memory.
+ *
+ *  \code
+ *  #include <thrust/device_malloc.h>
+ *  #include <thrust/device_free.h>
+ *  ...
+ *  // allocate some memory with device_malloc
+ *  const int N = 100;
+ *  thrust::device_ptr<void> void_ptr = thrust::device_malloc(N);
+ *
+ *  // manipulate memory
+ *  ...
+ *
+ *  // deallocate with device_free
+ *  thrust::device_free(void_ptr);
+ *  \endcode
+ *
+ *  \see device_ptr
+ *  \see device_free
+ */
+template<>
+inline thrust::device_ptr<void> device_malloc(const std::size_t n);
 
 /*! \} // memory_management
  */

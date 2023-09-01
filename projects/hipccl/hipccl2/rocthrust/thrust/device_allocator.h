@@ -67,12 +67,23 @@ public:
     {
     }
 
+    /*! Allocates space using the upstream resource.
+     *
+     *  \param bytes - the size of the requested allocation, in bytes
+     *  \param alignment - alignment size, in bytes
+     *  \return a pointer to the newly allocated storage.
+     */
     THRUST_NODISCARD __host__
     virtual pointer do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
         return pointer(m_upstream->do_allocate(bytes, alignment).get());
     }
 
+    /*! Deallocates space that was previously allocated using this allocator.
+     * \param p - the pointer that was previously returned by \p do_allocate
+    *  \param bytes - size of the allocation, in bytes
+    *  \param alignment - alignment size, in bytes
+     */
     __host__
     virtual void do_deallocate(pointer p, std::size_t bytes, std::size_t alignment) override
     {
@@ -127,6 +138,7 @@ public:
     __host__ __device__
     device_allocator(const device_allocator<U>& other) : base(other) {}
 
+    /*! Use the default equality comparator. */
     device_allocator & operator=(const device_allocator &) = default;
 
     /*! Destructor has no effect. */

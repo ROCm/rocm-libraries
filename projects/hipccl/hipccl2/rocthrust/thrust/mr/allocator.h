@@ -15,7 +15,7 @@
  */
 
 /*! \file 
- *  \brief Allocator types usable with \ref Memory Resources.
+ *  \brief Allocator types usable with \ref memory_resources.
  */
 
 #pragma once
@@ -171,14 +171,27 @@ bool operator!=(const allocator<T, MR> & lhs, const allocator<T, MR> & rhs) noex
 
 #if THRUST_CPP_DIALECT >= 2011
 
+/*! An allocator whose memory resource we can dynamically configure at runtime.
+ *
+ * \tparam T - the type that will be allocated by this allocator
+ * \tparam Pointer - the pointer type that will be used to create the memory resource
+ */
 template<typename T, typename Pointer>
 using polymorphic_allocator = allocator<T, polymorphic_adaptor_resource<Pointer> >;
 
 #else // C++11
 
+/*! An allocator whose behaviour depends on a memory resource that we can dynamically configure at runtime.
+ *
+ * \tparam T - the type that will be allocated by this allocator
+ * \tparam Pointer - the pointer type that will be used to create the memory resource
+ */
 template<typename T, typename Pointer>
 class polymorphic_allocator : public allocator<T, polymorphic_adaptor_resource<Pointer> >
 {
+    /// Use a regular allocator, created with a polymorphic_adaptor_resource memory resource,
+    /// an instance of which we can pass into the constructor.
+    /// The polymorphic_adaptor_resource can implement custom allocation behaviour.
     typedef allocator<T, polymorphic_adaptor_resource<Pointer> > base;
 
 public:

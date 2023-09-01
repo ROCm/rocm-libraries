@@ -37,7 +37,7 @@ template <typename T> class device_reference;
  *  resides in memory associated with the \ref device system.
  *
  *  \c device_ptr has pointer semantics: it may be dereferenced safely from
- *  anywhere, including the \ref host, and may be manipulated with pointer
+ *  anywhere, including the host, and may be manipulated with pointer
  *  arithmetic.
  *
  *  \c device_ptr can be created with \ref device_new, \ref device_malloc,
@@ -88,7 +88,7 @@ class device_ptr
 
     /*! \brief Construct a null \c device_ptr.
      *
-     *  \param ptr A null pointer.
+     *  \param - A null pointer.
      *
      *  \post <tt>get() == nullptr</tt>.
      */
@@ -147,7 +147,7 @@ class device_ptr
 
     /*! \brief Set this \c device_ptr to null.
      *
-     *  \param ptr A null pointer.
+     *  \param - A null pointer.
      *
      *  \post <tt>get() == nullptr</tt>.
      *

@@ -1197,9 +1197,6 @@ template<typename InputIterator1,
                           Predicate pred);
 
 
-/*! \} // end stream_compaction
- */
-
 /*! \} // end reordering
  */
 

@@ -15,7 +15,7 @@
  */
 
 
-/*! \file scan.h
+/*! \file thrust/scan.h
  *  \brief Functions for computing prefix sums
  */
 

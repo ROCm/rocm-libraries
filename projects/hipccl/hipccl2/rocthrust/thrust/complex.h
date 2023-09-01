@@ -29,6 +29,8 @@
 #include <sstream>
 #include <thrust/detail/type_traits.h>
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
 #if THRUST_CPP_DIALECT >= 2011
 #  define THRUST_STD_COMPLEX_REAL(z) \
     reinterpret_cast< \
@@ -44,6 +46,8 @@
 #  define THRUST_STD_COMPLEX_IMAG(z) (z).imag()
 #  define THRUST_STD_COMPLEX_DEVICE
 #endif
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 THRUST_NAMESPACE_BEGIN
 
