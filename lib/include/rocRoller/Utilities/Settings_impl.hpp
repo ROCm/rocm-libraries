@@ -40,13 +40,12 @@ namespace rocRoller
     template <typename T>
     inline T SettingsOption<T>::getValue() const
     {
-        const char* var   = std::getenv(name.c_str());
-        std::string s_var = "";
+        const char* var = std::getenv(name.c_str());
 
         // If explicit flag is set
         if(var)
         {
-            s_var = var;
+            std::string s_var = var;
             return getTypeValue(s_var);
         }
         // Default to defaultValue
@@ -108,14 +107,13 @@ namespace rocRoller
 
     inline Settings::Settings()
     {
-        auto settings = SettingsOptionBase::instances();
-
-        bitFieldType bitfield;
-        const char*  bitfieldChars = std::getenv(Settings::BitfieldName.c_str());
+        const char* bitfieldChars = std::getenv(Settings::BitfieldName.c_str());
 
         if(bitfieldChars)
         {
-            bitfield = bitFieldType{bitfieldChars};
+            bitFieldType bitfield = bitFieldType{strtoull(bitfieldChars, NULL, 0)};
+
+            auto settings = SettingsOptionBase::instances();
 
             for(auto const* setting : settings)
             {
@@ -169,10 +167,6 @@ namespace rocRoller
         {
             return fromString<T>(var);
         }
-        else if constexpr(std::same_as<Settings::bitFieldType, T>)
-        {
-            return Settings::bitFieldType{var};
-        }
         else if constexpr(std::same_as<bool, T>)
         {
             return var != "0";
@@ -193,12 +187,11 @@ namespace rocRoller
     template <typename T>
     inline std::optional<std::any> SettingsOption<T>::getFromEnv() const
     {
-        const char* var   = std::getenv(name.c_str());
-        std::string s_var = "";
+        const char* var = std::getenv(name.c_str());
 
         if(var)
         {
-            s_var = var;
+            std::string s_var = var;
             return getTypeValue(s_var);
         }
         else

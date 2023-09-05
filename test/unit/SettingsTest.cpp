@@ -25,10 +25,6 @@ namespace rocRollerTest
 
     class EnvSettings : public GenericContextFixture
     {
-    public:
-        std::shared_ptr<Settings> m_settings = Settings::getInstance();
-        std::vector<std::pair<std::string, std::optional<std::string>>> m_envVars;
-
         void SetUp()
         {
             for(auto const& setting : SettingsOptionBase::instances())
@@ -41,11 +37,10 @@ namespace rocRollerTest
                 m_envVars.emplace_back(setting->name, std::move(val));
             }
 
-            setenv(Settings::BitfieldName.c_str(), "11111111111111111111111111111111", 1);
+            setenv(Settings::BitfieldName.c_str(), "0xFFFFFFFF", 1);
             setenv(Settings::LogConsole.name.c_str(), "0", 1);
             setenv(Settings::AssemblyFile.name.c_str(), "assemblyFileTest.s", 1);
             setenv(Settings::RandomSeed.name.c_str(), "31415", 1);
-            setenv(Settings::SaveAssembly.name.c_str(), "1", 1);
             setenv(Settings::Scheduler.name.c_str(), "invalidScheduler", 1);
 
             GenericContextFixture::SetUp();
@@ -67,6 +62,9 @@ namespace rocRollerTest
 
             GenericContextFixture::TearDown();
         }
+
+    private:
+        std::vector<std::pair<std::string, std::optional<std::string>>> m_envVars;
     };
 
     TEST_F(GenericSettings, DefaultValueTest)
@@ -143,8 +141,10 @@ namespace rocRollerTest
         Settings::reset();
         auto settings = Settings::getInstance();
 
-        // Env Vars take Precedence over bitfield
+        // Env Var takes precedence over bitfield
         EXPECT_EQ(settings->get(Settings::LogConsole), false);
+
+        // bitfield takes precedence over default value
         EXPECT_EQ(settings->get(Settings::SaveAssembly), true);
     }
 
@@ -172,8 +172,9 @@ namespace rocRollerTest
         EXPECT_EQ(settings->get(Settings::AssemblyFile), "assemblyFileTest.s");
         EXPECT_EQ(Settings::Get(Settings::RandomSeed), 31415);
 
-        // Fatal error reading unparseable env var
+        // set BreakOnThrow to false (previously true via bitfield)
         settings->set(Settings::BreakOnThrow, false);
+        // Fatal error reading unparseable env var
         EXPECT_THROW(settings->get(Settings::Scheduler), FatalError);
     }
 
@@ -183,6 +184,7 @@ namespace rocRollerTest
         // otherwise it may throw without a prior settings instance
         // and infinitely recurse
         Settings::reset();
+        // unsetenv bitfield revert BreakOnThrow to false (default value)
         unsetenv(Settings::BitfieldName.c_str());
         auto settings = Settings::getInstance();
         EXPECT_THROW(settings->get(Settings::Scheduler), FatalError);

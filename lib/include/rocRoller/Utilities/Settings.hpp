@@ -212,44 +212,6 @@ namespace rocRoller
     private:
         friend rocRoller::LazySingleton<Settings>;
 
-        /**
-         * @brief Get the value of a SettingsOption.
-         *
-         * The value we get for a SettingsOption follows the precedence:
-         *   - explicit call to set() will set the value, if not
-         *   - corresponding env var will be used, if no env var then
-         *   - coresponding bit in SettingsBitField will be used, if bit < 0 then
-         *   - default value set in struct is used.
-         *
-         * @tparam Option SettingsOption templated by its defaultValue type.
-         * @param opt The Settingsption whose value is being fetched.
-         * @return A value of type Option::Type that opt will be set to.
-         */
-        template <typename Option>
-        typename Option::Type getValue(Option const& opt);
-
-        /**
-         * @brief Extract the value of an Option from the bit field.
-         *
-         * SettingsOption with bit >= 0 will probe SettingsBitField for their value.
-         *
-         * @tparam Option SettingsOption templated by its value type.
-         * @param opt SettingsOption whose value we are extracting from SettingsBitField.
-         * @return Corresponding bool value of bit or defaultValue if not in SettingsBitField.
-         */
-        template <typename Option>
-        typename Option::Type extractBitValue(Option const& opt);
-
-        /**
-         * @brief Get correct corresponding typed value of a string.
-         *
-         * @tparam T The type the string will be converted to.
-         * @param var The string whose value will be converted.
-         * @return T The typed conversion of the string.
-         */
-        template <typename T>
-        T getTypeValue(std::string const& var) const;
-
         std::map<std::string, std::any> m_values;
         std::vector<std::string>        m_setBitOptions;
     };
