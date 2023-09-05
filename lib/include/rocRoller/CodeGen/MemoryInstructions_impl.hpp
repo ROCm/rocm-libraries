@@ -60,7 +60,15 @@ namespace rocRoller
             break;
 
         case Scalar:
-            co_yield loadScalar(dest, newAddr, offset, numBytes);
+            // If the provided offset is not a literal, create a new register that will store the value
+            // of addr + offset and pass it to loadScalar
+            if(offset && offset->regType() != Register::Type::Literal)
+            {
+                newAddr
+                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
+                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
+            }
+            co_yield loadScalar(dest, newAddr, offsetVal, numBytes, buffOpts.getGlc());
             break;
 
         case Buffer:
@@ -140,6 +148,18 @@ namespace rocRoller
             }
 
             co_yield storeBuffer(data, newAddr, offsetVal, bufDesc, buffOpts, numBytes, high);
+            break;
+        case Scalar:
+            // If the provided offset is not a literal, create a new register that will store the value
+            // of addr + offset and pass it to storeScalar
+            if(offset && offset->regType() != Register::Type::Literal)
+            {
+                newAddr
+                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
+                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
+            }
+
+            co_yield storeScalar(newAddr, data, offsetVal, numBytes, buffOpts.getGlc());
             break;
 
         default:
@@ -323,10 +343,8 @@ namespace rocRoller
                 WaitCount::Zero("DEBUG: Wait after store", ctx->targetArchitecture()));
     }
 
-    inline Generator<Instruction> MemoryInstructions::loadScalar(Register::ValuePtr dest,
-                                                                 Register::ValuePtr base,
-                                                                 Register::ValuePtr offset,
-                                                                 int                numBytes)
+    inline Generator<Instruction> MemoryInstructions::loadScalar(
+        Register::ValuePtr dest, Register::ValuePtr base, int offset, int numBytes, bool glc)
     {
         AssertFatal(dest != nullptr);
         AssertFatal(base != nullptr);
@@ -334,17 +352,49 @@ namespace rocRoller
         AssertFatal(contains({4, 8, 16, 32, 64}, numBytes),
                     "Unsupported number of bytes for load.: " + std::to_string(numBytes));
 
+        auto offsetLiteral = Register::Value::Literal(offset);
+
         std::string instruction_string
             = concatenate("s_load_dword",
                           (numBytes > 4 ? "x" : ""),
                           (numBytes > 4 ? std::to_string(numBytes / 4) : ""));
 
-        co_yield_(Instruction(instruction_string, {dest}, {base, offset}, {}, "Load value"));
+        std::string modifier = glc ? "glc" : "";
+
+        co_yield_(Instruction(
+            instruction_string, {dest}, {base, offsetLiteral}, {modifier}, "Load scalar value"));
 
         auto ctx = m_context.lock();
         if(ctx->kernelOptions().alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
+    }
+
+    inline Generator<Instruction> MemoryInstructions::storeScalar(
+        Register::ValuePtr addr, Register::ValuePtr data, int offset, int numBytes, bool glc)
+    {
+        AssertFatal(data != nullptr);
+        AssertFatal(addr != nullptr);
+
+        AssertFatal(contains({4, 8, 16, 32, 64}, numBytes),
+                    "Unsupported number of bytes for load.: " + std::to_string(numBytes));
+
+        auto offsetLiteral = Register::Value::Literal(offset);
+
+        std::string instruction_string
+            = concatenate("s_store_dword",
+                          (numBytes > 4 ? "x" : ""),
+                          (numBytes > 4 ? std::to_string(numBytes / 4) : ""));
+
+        std::string modifier = glc ? "glc" : "";
+
+        co_yield_(Instruction(
+            instruction_string, {}, {data, addr, offsetLiteral}, {modifier}, "Store scalar value"));
+
+        auto ctx = m_context.lock();
+        if(ctx->kernelOptions().alwaysWaitAfterStore)
+            co_yield Instruction::Wait(
+                WaitCount::Zero("DEBUG: Wait after store", ctx->targetArchitecture()));
     }
 
     inline Generator<Instruction> MemoryInstructions::genLocalAddr(Register::ValuePtr& addr) const

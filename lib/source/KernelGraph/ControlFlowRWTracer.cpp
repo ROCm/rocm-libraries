@@ -358,6 +358,13 @@ namespace rocRoller::KernelGraph
         trackConnections(tag, {dst}, ReadWrite::READ);
     }
 
+    void ControlFlowRWTracer::operator()(LoadSGPR const& op, int tag)
+    {
+        auto dst = m_graph.mapper.get<VGPR>(tag);
+        trackRegister(tag, dst, ReadWrite::WRITE);
+        trackConnections(tag, {dst}, ReadWrite::READ);
+    }
+
     void ControlFlowRWTracer::operator()(Multiply const& op, int tag)
     {
         auto a = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
@@ -420,6 +427,13 @@ namespace rocRoller::KernelGraph
     }
 
     void ControlFlowRWTracer::operator()(StoreVGPR const& op, int tag)
+    {
+        auto src = m_graph.mapper.get<VGPR>(tag);
+        trackRegister(tag, src, ReadWrite::READ);
+        trackConnections(tag, {src}, ReadWrite::READ);
+    }
+
+    void ControlFlowRWTracer::operator()(StoreSGPR const& op, int tag)
     {
         auto src = m_graph.mapper.get<VGPR>(tag);
         trackRegister(tag, src, ReadWrite::READ);

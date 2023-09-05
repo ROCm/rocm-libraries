@@ -70,6 +70,7 @@ namespace rocRoller::KernelGraph
         void operator()(LoadLinear const& op, int tag);
         void operator()(LoadTiled const& op, int tag);
         void operator()(LoadVGPR const& op, int tag);
+        void operator()(LoadSGPR const& op, int tag);
         void operator()(Multiply const& op, int tag);
         void operator()(NOP const& op, int tag);
         void operator()(Scope const& op, int tag);
@@ -78,6 +79,7 @@ namespace rocRoller::KernelGraph
         void operator()(StoreLinear const& op, int tag);
         void operator()(StoreTiled const& op, int tag);
         void operator()(StoreVGPR const& op, int tag);
+        void operator()(StoreSGPR const& op, int tag);
         void operator()(TensorContraction const& op, int tag);
         void operator()(UnrollOp const& op, int tag);
         void operator()(WaitZero const& op, int tag);

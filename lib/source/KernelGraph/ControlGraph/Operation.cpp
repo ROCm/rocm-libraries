@@ -65,6 +65,13 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
     }
 
+    LoadSGPR::LoadSGPR() = default;
+    LoadSGPR::LoadSGPR(VariableType const varType, bool const glc)
+        : varType(varType)
+        , glc(glc)
+    {
+    }
+
     LoadLDSTile::LoadLDSTile() = default;
     LoadLDSTile::LoadLDSTile(VariableType const varType)
         : varType(varType)
@@ -74,6 +81,13 @@ namespace rocRoller::KernelGraph::ControlGraph
     StoreTiled::StoreTiled() = default;
     StoreTiled::StoreTiled(DataType const dtype)
         : dataType(dtype)
+    {
+    }
+
+    StoreSGPR::StoreSGPR() = default;
+    StoreSGPR::StoreSGPR(DataType const dtype, bool const glc)
+        : dataType(dtype)
+        , glc(glc)
     {
     }
 
@@ -101,8 +115,10 @@ namespace rocRoller::KernelGraph::ControlGraph
     RR_CLASS_NAME_IMPL(LoadLinear);
     RR_CLASS_NAME_IMPL(LoadTiled);
     RR_CLASS_NAME_IMPL(LoadVGPR);
+    RR_CLASS_NAME_IMPL(LoadSGPR);
     RR_CLASS_NAME_IMPL(LoadLDSTile);
     RR_CLASS_NAME_IMPL(StoreTiled);
+    RR_CLASS_NAME_IMPL(StoreSGPR);
     RR_CLASS_NAME_IMPL(StoreLDSTile);
     RR_CLASS_NAME_IMPL(TensorContraction);
 

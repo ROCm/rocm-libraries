@@ -272,8 +272,7 @@ namespace MixedArithmeticTest
 
             size_t offset = idx * varType.getElementSize();
 
-            co_yield context->mem()->loadScalar(
-                reg, inputPtr, Register::Value::Literal(offset), varType.getElementSize());
+            co_yield context->mem()->loadScalar(reg, inputPtr, offset, varType.getElementSize());
 
             if(regType == Register::Type::Vector)
             {

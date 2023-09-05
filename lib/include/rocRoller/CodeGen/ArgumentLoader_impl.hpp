@@ -92,12 +92,7 @@ namespace rocRoller
             auto regRange  = Generated(iota(regIdx, regIdx + widthDwords));
             auto regSubset = value->subset(regRange);
 
-            auto offsetLiteral = Register::Value::Literal(offset);
-
-            auto comment = concatenate("Load ", offset, "..", endOffset);
-
-            co_yield m_context.lock()->mem()->loadScalar(
-                regSubset, argPtr, offsetLiteral, widthBytes);
+            co_yield m_context.lock()->mem()->loadScalar(regSubset, argPtr, offset, widthBytes);
 
             offset += widthBytes;
             regIter += widthDwords;

@@ -236,10 +236,10 @@ namespace rocRoller
 
             auto flagVGPR = graph.coordinates.addElement(VGPR());
 
-            auto assignFlag = graph.control.addElement(Assign{Register::Type::Vector, one});
+            auto assignFlag = graph.control.addElement(Assign{Register::Type::Scalar, one});
             graph.mapper.connect(assignFlag, flagVGPR, NaryArgument::DEST);
 
-            auto storeFlag = graph.control.addElement(StoreVGPR());
+            auto storeFlag = graph.control.addElement(StoreSGPR(rocRoller::DataType::Int32, true));
             graph.mapper.connect<User>(storeFlag, flagsScratchTag);
             graph.mapper.connect<VGPR>(storeFlag, flagVGPR);
 
@@ -257,7 +257,7 @@ namespace rocRoller
             replaceMacroTile(graph, uses, macTileTag, destMacTileTag);
 
             auto flagExpr = std::make_shared<Expression::Expression>(
-                Expression::DataFlowTag{flagVGPR, Register::Type::Vector, DataType::UInt32});
+                Expression::DataFlowTag{flagVGPR, Register::Type::Scalar, DataType::UInt32});
             auto conditionalTag = graph.control.addElement(ConditionalOp{(flagExpr == one)});
             graph.control.addElement(Sequence(), {waitZeroTag2}, {conditionalTag});
 
@@ -272,7 +272,7 @@ namespace rocRoller
 
             auto newWG = graph.coordinates.addElement(Linear());
             graph.coordinates.addElement(Split(), {newWG}, {wg, elemNum});
-            auto loadFlag = graph.control.addElement(LoadVGPR(DataType::UInt32, false));
+            auto loadFlag = graph.control.addElement(LoadSGPR(DataType::UInt32, true));
 
             auto numScratch  = Expression::literal(context->kernelOptions().numScratchTiles);
             auto boundsCheck = graph.control.addElement(ConditionalOp{(wgExpr + one < numScratch)});

@@ -200,7 +200,7 @@ namespace rocRoller
             std::same_as<
                 Op,
                 KernelGraph::ControlGraph::
-                    LoadLinear> || std::same_as<Op, KernelGraph::ControlGraph::LoadTiled> || std::same_as<Op, KernelGraph::ControlGraph::LoadVGPR> || std::same_as<Op, KernelGraph::ControlGraph::LoadLDSTile>) struct
+                    LoadLinear> || std::same_as<Op, KernelGraph::ControlGraph::LoadTiled> || std::same_as<Op, KernelGraph::ControlGraph::LoadVGPR> || std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR> || std::same_as<Op, KernelGraph::ControlGraph::LoadLDSTile>) struct
             MappingTraits<Op, IO, Context>
         {
             // If this assertion starts failing, it's likely one of these classes has had a member added.
@@ -208,7 +208,7 @@ namespace rocRoller
                 std::same_as<
                     Op,
                     KernelGraph::ControlGraph::
-                        LoadVGPR> || sizeof(Op) == sizeof(KernelGraph::ControlGraph::LoadLinear));
+                        LoadVGPR> || std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR> || sizeof(Op) == sizeof(KernelGraph::ControlGraph::LoadLinear));
 
             using iot = IOTraits<IO>;
             static void mapping(IO& io, Op& op, Context&)
@@ -218,6 +218,10 @@ namespace rocRoller
                 if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadVGPR>)
                 {
                     iot::mapRequired(io, "scalar", op.scalar);
+                }
+                if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR>)
+                {
+                    iot::mapRequired(io, "glc", op.glc);
                 }
             }
 
@@ -235,16 +239,24 @@ namespace rocRoller
             std::same_as<
                 Op,
                 KernelGraph::ControlGraph::
-                    StoreTiled> || std::same_as<Op, KernelGraph::ControlGraph::StoreLDSTile>) struct
+                    StoreTiled> || std::same_as<Op, KernelGraph::ControlGraph::StoreSGPR> || std::same_as<Op, KernelGraph::ControlGraph::StoreLDSTile>) struct
             MappingTraits<Op, IO, Context>
         {
             // If this assertion starts failing, it's likely one of these classes has had a member added.
-            static_assert(sizeof(Op) == sizeof(KernelGraph::ControlGraph::StoreTiled));
+            static_assert(
+                std::same_as<
+                    Op,
+                    KernelGraph::ControlGraph::
+                        StoreSGPR> || sizeof(Op) == sizeof(KernelGraph::ControlGraph::StoreTiled));
 
             using iot = IOTraits<IO>;
             static void mapping(IO& io, Op& op, Context&)
             {
                 iot::mapRequired(io, "dataType", op.dataType);
+                if constexpr(std::same_as<Op, KernelGraph::ControlGraph::StoreSGPR>)
+                {
+                    iot::mapRequired(io, "glc", op.glc);
+                }
             }
 
             static void mapping(IO& io, Op& op)

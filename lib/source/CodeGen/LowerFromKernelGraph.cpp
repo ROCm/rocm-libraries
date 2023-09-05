@@ -579,6 +579,51 @@ namespace rocRoller
                 co_yield m_loadStoreTileGenerator.genLoadLDSTile(tag, load, coords);
             }
 
+            Generator<Instruction> operator()(int tag, LoadSGPR const& load, Transformer coords)
+            {
+                auto [userTag, user] = m_graph->getDimension<User>(tag);
+                auto [vgprTag, vgpr] = m_graph->getDimension<VGPR>(tag);
+
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::LoadSGPR({}): User({}), VGPR({})",
+                    tag,
+                    userTag,
+                    vgprTag);
+
+                auto dst = m_context->registerTagManager()->getRegister(
+                    vgprTag, Register::Type::Scalar, load.varType.dataType);
+
+                auto offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, DataType::Int64, 1);
+
+                co_yield Instruction::Comment("GEN: LoadSGPR; user index");
+
+                auto indexes = coords.reverse({userTag});
+                co_yield generateOffset(
+                    offset, indexes[0], dst->variableType().dataType, user.offset);
+
+                Register::ValuePtr vPtr;
+
+                {
+                    Register::ValuePtr sPtr;
+                    co_yield m_context->argLoader()->getValue(user.argumentName, sPtr);
+                    co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Scalar);
+                }
+
+                auto numBytes = DataTypeInfo::Get(dst->variableType()).elementSize;
+                auto options  = BufferInstructionOptions();
+                options.setGlc(load.glc);
+                co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Scalar,
+                                                dst,
+                                                vPtr,
+                                                offset,
+                                                numBytes,
+                                                "",
+                                                false,
+                                                nullptr,
+                                                options);
+            }
+
             Generator<Instruction> operator()(int tag, LoadVGPR const& load, Transformer coords)
             {
                 auto [userTag, user] = m_graph->getDimension<User>(tag);
@@ -763,6 +808,46 @@ namespace rocRoller
                 auto numBytes = DataTypeInfo::Get(src->variableType()).elementSize;
                 co_yield m_context->mem()->store(
                     MemoryInstructions::MemoryKind::Flat, vPtr, src, offset, numBytes);
+            }
+
+            Generator<Instruction> operator()(int tag, StoreSGPR const& store, Transformer coords)
+            {
+                co_yield Instruction::Comment("GEN: StoreSGPR");
+
+                auto [vgprTag, vgpr] = m_graph->getDimension<VGPR>(tag);
+                auto [userTag, user] = m_graph->getDimension<User>(tag);
+
+                auto src = m_context->registerTagManager()->getRegister(vgprTag);
+
+                auto offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, DataType::Int64, 1);
+
+                auto indexes = coords.forward({userTag});
+
+                co_yield Instruction::Comment("GEN: StoreSGPR; user index");
+                co_yield generateOffset(
+                    offset, indexes[0], src->variableType().dataType, user.offset);
+
+                Register::ValuePtr vPtr;
+
+                {
+                    Register::ValuePtr sPtr;
+                    co_yield m_context->argLoader()->getValue(user.argumentName, sPtr);
+                    co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Scalar);
+                }
+
+                auto numBytes = DataTypeInfo::Get(src->variableType()).elementSize;
+                auto options  = BufferInstructionOptions();
+                options.setGlc(store.glc);
+                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Scalar,
+                                                 vPtr,
+                                                 src,
+                                                 offset,
+                                                 numBytes,
+                                                 "",
+                                                 false,
+                                                 nullptr,
+                                                 options);
             }
 
             Generator<Instruction> operator()(int, WaitZero const&, Transformer)

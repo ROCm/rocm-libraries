@@ -288,6 +288,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(LoadLinear);
             MAKE_OPERATION_VISITOR(LoadTiled);
             MAKE_OPERATION_VISITOR(LoadVGPR);
+            MAKE_OPERATION_VISITOR(LoadSGPR);
             MAKE_OPERATION_VISITOR(Multiply);
             MAKE_OPERATION_VISITOR(NOP);
             MAKE_OPERATION_VISITOR(Scope);
@@ -296,6 +297,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(StoreLinear);
             MAKE_OPERATION_VISITOR(StoreTiled);
             MAKE_OPERATION_VISITOR(StoreVGPR);
+            MAKE_OPERATION_VISITOR(StoreSGPR);
             MAKE_OPERATION_VISITOR(TensorContraction);
             MAKE_OPERATION_VISITOR(UnrollOp);
             MAKE_OPERATION_VISITOR(WaitZero);

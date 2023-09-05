@@ -256,6 +256,20 @@ namespace rocRoller
         };
 
         /**
+         * LoadSGPR - load scalar value from memory.
+         */
+        struct LoadSGPR
+        {
+            LoadSGPR();
+            LoadSGPR(VariableType const varType, bool const glc = false);
+
+            VariableType varType;
+            bool         glc;
+
+            std::string name() const;
+        };
+
+        /**
          * LoadLDSTile - loads a tile from LDS
          */
         struct LoadLDSTile
@@ -303,6 +317,20 @@ namespace rocRoller
          * StoreVGPR - replaces StoreLinear.
          */
         RR_EMPTY_STRUCT_WITH_NAME(StoreVGPR);
+
+        /**
+         * StoreSGPR - stores a scalar value to memory.
+         */
+        struct StoreSGPR
+        {
+            StoreSGPR();
+            StoreSGPR(DataType const dtype, bool const glc = true);
+
+            DataType dataType = DataType::Count;
+            bool     glc;
+
+            std::string name() const;
+        };
 
         /**
          * StoreLDSTile - store a tile into LDS

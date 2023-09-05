@@ -17,6 +17,7 @@ namespace rocRoller
         struct LoadLDSTile;
         struct LoadLinear;
         struct LoadVGPR;
+        struct LoadSGPR;
         struct LoadTiled;
         struct Multiply;
         struct NOP;
@@ -26,6 +27,7 @@ namespace rocRoller
         struct StoreLinear;
         struct StoreTiled;
         struct StoreVGPR;
+        struct StoreSGPR;
         struct TensorContraction;
         struct UnrollOp;
         struct WaitZero;
@@ -42,6 +44,7 @@ namespace rocRoller
                                        LoadLinear,
                                        LoadTiled,
                                        LoadVGPR,
+                                       LoadSGPR,
                                        Multiply,
                                        NOP,
                                        Scope,
@@ -50,6 +53,7 @@ namespace rocRoller
                                        StoreLinear,
                                        StoreTiled,
                                        StoreVGPR,
+                                       StoreSGPR,
                                        TensorContraction,
                                        UnrollOp,
                                        WaitZero>;

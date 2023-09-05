@@ -32,6 +32,122 @@ namespace MemoryInstructionsTest
     {
     };
 
+    struct ScalarMemoryInstructionsTest : public GPUContextFixtureParam<int>
+    {
+        int numBytesParam()
+        {
+            return std::get<1>(GetParam());
+        }
+
+        void genScalarTest()
+        {
+            int  N = numBytesParam();
+            auto k = m_context->kernel();
+
+            k->setKernelName("ScalarTest");
+            k->setKernelDimensions(1);
+
+            k->addArgument({"result",
+                            {DataType::Int32, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly});
+            k->addArgument(
+                {"a", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::ReadOnly});
+
+            m_context->schedule(k->preamble());
+            m_context->schedule(k->prolog());
+
+            auto kb = [&]() -> Generator<Instruction> {
+                Register::ValuePtr s_result, s_a_ptr;
+                co_yield m_context->argLoader()->getValue("result", s_result);
+                co_yield m_context->argLoader()->getValue("a", s_a_ptr);
+
+                int                         size = (N % 4 == 0) ? N / 4 : N / 4 + 1;
+                Register::AllocationOptions options;
+                options.alignment = size;
+                auto s_a          = std::make_shared<Register::Value>(
+                    m_context, Register::Type::Scalar, DataType::Int32, size, options);
+                co_yield s_a->allocate();
+
+                co_yield m_context->mem()->loadScalar(s_a, s_a_ptr, 0, N);
+                co_yield m_context->mem()->storeScalar(s_result, s_a, 0, N);
+            };
+
+            m_context->schedule(kb());
+            m_context->schedule(k->postamble());
+            m_context->schedule(k->amdgpu_metadata());
+        }
+
+        void executeScalarTest()
+        {
+            genScalarTest();
+            int N          = numBytesParam();
+            int bufferSize = N + 20;
+
+            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+                = m_context->instructions()->getExecutableKernel();
+
+            std::vector<char> a(bufferSize);
+            for(int i = 0; i < N; i++)
+                a[i] = i + 10;
+            for(int i = N; i < bufferSize; i++)
+                a[i] = -i;
+
+            std::vector<char> initialResult(bufferSize);
+            for(int i = 0; i < bufferSize; i++)
+                initialResult[i] = 2 * i;
+
+            auto d_a      = make_shared_device(a);
+            auto d_result = make_shared_device<char>(initialResult);
+
+            KernelArguments kargs;
+            kargs.append<void*>("result", d_result.get());
+            kargs.append<void*>("a", d_a.get());
+            KernelInvocation invocation;
+
+            executableKernel->executeKernel(kargs, invocation);
+
+            std::vector<char> result(bufferSize);
+            ASSERT_THAT(
+                hipMemcpy(
+                    result.data(), d_result.get(), sizeof(char) * bufferSize, hipMemcpyDefault),
+                HasHipSuccess(0));
+
+            for(int i = 0; i < N; i++)
+                EXPECT_EQ(result[i], a[i]);
+            for(int i = N; i < result.size(); i++)
+                EXPECT_EQ(result[i], 2 * i);
+        }
+
+        void assembleScalarTest()
+        {
+            genScalarTest();
+
+            std::vector<char> assembledKernel = m_context->instructions()->assemble();
+            EXPECT_GT(assembledKernel.size(), 0);
+        }
+    };
+
+    TEST_P(ScalarMemoryInstructionsTest, Basic)
+    {
+        if(!contains({4, 8, 16, 32, 64}, numBytesParam()))
+        {
+            EXPECT_THROW(genScalarTest(), FatalError);
+            return;
+        }
+        else
+        {
+            if(isLocalDevice())
+                executeScalarTest();
+            else
+                assembleScalarTest();
+        }
+    }
+
+    INSTANTIATE_TEST_SUITE_P(ScalarMemoryInstructionsTest,
+                             ScalarMemoryInstructionsTest,
+                             ::testing::Combine(::testing::Values("gfx90a", "gfx908"),
+                                                ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
+
     struct FlatMemoryInstructionsTest : public GPUContextFixtureParam<int>
     {
         int numBytesParam()

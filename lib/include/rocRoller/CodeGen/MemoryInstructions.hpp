@@ -196,11 +196,29 @@ namespace rocRoller
          * @param base  The register containing the address to load the data from.
          * @param offset The value containing an offset to be added to the address in base.
          * @param numBytes The total number of bytes to load.
+         * @param glc Globally Coherent modifier, controls L1 cache policy: false=hit_lru, true=miss_evict. (Default=false)
          */
         Generator<Instruction> loadScalar(Register::ValuePtr dest,
                                           Register::ValuePtr base,
-                                          Register::ValuePtr offset,
-                                          int                numBytes);
+                                          int                offset,
+                                          int                numBytes,
+                                          bool               glc = false);
+
+        /**
+         * @brief Generate the instructions required to perform a scalar store.
+         *
+         *
+         * @param addr The register containing the address to store the data.
+         * @param data  The register containing the data to store.
+         * @param offset Offset to be added to addr.
+         * @param numBytes The number of bytes to load.
+         * @param glc Globally Coherent modifier, controls L1 cache bypass: false=write-combine, true=write-thru. (Default=true)
+         */
+        Generator<Instruction> storeScalar(Register::ValuePtr addr,
+                                           Register::ValuePtr data,
+                                           int                offset,
+                                           int                numBytes,
+                                           bool               glc = true);
 
         /**
          * @brief Generate the instructions required to perform an LDS load.
