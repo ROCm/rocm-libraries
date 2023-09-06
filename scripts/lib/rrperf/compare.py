@@ -172,7 +172,13 @@ def summary_statistics(perf_runs):
             kb_median = statistics.median(kb)
             kb_mean = statistics.mean(kb)
 
-            _, p, _, _ = scipy.stats.median_test(ka, kb)
+            try:
+                _, p, _, _ = scipy.stats.median_test(ka, kb)
+            except ValueError as e:
+                if "All values are below the grand median" in str(e):
+                    p = 1.0
+                else:
+                    raise e
             stats[run][token] = A.token, ComparisonResult(
                 mean=[ka_mean, kb_mean],
                 median=[ka_median, kb_median],
