@@ -139,6 +139,8 @@ namespace rocRoller
 
             // No more need for packed value.
             m_packedWorkitemIndex.reset();
+            if(ctx->kernelOptions().preloadKernelArguments)
+                m_argumentPointer.reset();
         }
     }
 
