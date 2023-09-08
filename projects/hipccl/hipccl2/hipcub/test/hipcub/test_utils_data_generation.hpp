@@ -258,7 +258,7 @@ struct special_values {
         }else {
             using traits          = hipcub::NumericTraits<T>;
             using unsigned_bits   = typename traits::UnsignedBits;
-            auto nan_with_payload = [](unsigned_bits payload)
+            auto nan_with_payload = [](const unsigned_bits& payload)
             {
                 T             value = test_utils::numeric_limits<T>::quiet_NaN();
                 unsigned_bits int_value;

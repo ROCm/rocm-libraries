@@ -38,7 +38,6 @@ void run_flagged_benchmark(benchmark::State& state,
 {
     std::vector<T> input;
     std::vector<FlagType> flags = benchmark_utils::get_random_data01<FlagType>(size, true_probability);
-    std::vector<unsigned int> selected_count_output(1);
     if(std::is_floating_point<T>::value)
     {
         input = benchmark_utils::get_random_data<T>(size, T(-1000), T(1000));
@@ -160,7 +159,6 @@ void run_selectop_benchmark(benchmark::State& state,
                             float true_probability)
 {
     std::vector<T> input = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
-    std::vector<unsigned int> selected_count_output(1);
 
     auto select_op = [true_probability] __device__ (const T& value) -> bool
     {
@@ -278,7 +276,6 @@ void run_unique_benchmark(benchmark::State& state,
             input[i] = op(acc, input01[i]);
         }
     }
-    std::vector<unsigned int> selected_count_output(1);
 
     T * d_input;
     T * d_output;
