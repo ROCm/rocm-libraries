@@ -38,6 +38,9 @@ namespace rocRoller
                 exprMap.emplace(key, sdims[i]);
             }
 
+            // traverse through the edges in the path from `starts` to `ends`
+            // and generate expressions (populates exprMap) for the target
+            // dimension(s) in `ends` via the given visitor.
             for(auto const elemId : path<Dir>(starts, ends, edgeSelector))
             {
                 Element const& element = getElement(elemId);

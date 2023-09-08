@@ -25,10 +25,13 @@ namespace rocRoller
                         Expression::ExpressionTransducer = nullptr);
 
             /**
-             * Set/get expression transducer.
+             * Set expression transducer.
              */
             void setTransducer(Expression::ExpressionTransducer);
 
+            /**
+             * Get expression transducer.
+             */
             Expression::ExpressionTransducer getTransducer() const;
 
             /**
@@ -36,6 +39,9 @@ namespace rocRoller
              */
             void setCoordinate(int, Expression::ExpressionPtr);
 
+            /**
+             * Get the index expression for the dimension.
+             */
             Expression::ExpressionPtr getCoordinate(int) const;
 
             /**

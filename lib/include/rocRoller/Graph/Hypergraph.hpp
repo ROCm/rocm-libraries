@@ -227,7 +227,8 @@ namespace rocRoller
             Generator<int> breadthFirstVisit(int start) const;
 
             /**
-            * @brief Yields node indices that form the paths from the starts to the ends
+            * @brief Yields element indices (both nodes and edges) that form the paths
+            * from the starts to the ends
             */
             template <Direction            Dir,
                       CForwardRangeOf<int> RangeStart,

@@ -703,7 +703,7 @@ namespace rocRollerTest
         EXPECT_EQ(sexpr, "32j");
     }
 
-    TEST_F(CoordinateGraphTest, SunderOne)
+    TEST_F(CoordinateGraphTest, SunderBasicOne)
     {
         auto zero = Expression::literal(0u);
         auto one  = Expression::literal(1u);
@@ -722,18 +722,15 @@ namespace rocRollerTest
 
         ct.addElement(Tile(), {linX}, {a, b});
 
-        auto graph = ct.toDOT("");
-
         auto aVal = Expression::literal(8u);
         auto bVal = Expression::literal(3u);
 
         auto exprX
             = only(ct.reverse({aVal, bVal, zero}, {input}, {a, b, sw}, Expression::identity));
         EXPECT_THROW(only(ct.reverse({aVal, bVal, one}, {input}, {a, b, sw}, Expression::identity)),
-                     FatalError)
-            << graph;
+                     FatalError);
 
-        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX)) << graph;
+        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX));
     }
 
     TEST_F(CoordinateGraphTest, SunderBasicTwo)
@@ -762,8 +759,6 @@ namespace rocRollerTest
 
         ct.addElement(Tile(), {linY}, {c, d});
 
-        auto graph = ct.toDOT("");
-
         auto aVal = Expression::literal(8u);
         auto bVal = Expression::literal(3u);
         auto cVal = Expression::literal(1u);
@@ -777,11 +772,10 @@ namespace rocRollerTest
                                      {input},
                                      {a, b, c, d, sw},
                                      Expression::identity)),
-                     FatalError)
-            << graph;
+                     FatalError);
 
-        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX)) << graph;
-        EXPECT_EQ("Add(Add(Multiply(1j, 6j), 4j), 100j)", toString(*exprY)) << graph;
+        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX));
+        EXPECT_EQ("Add(Add(Multiply(1j, 6j), 4j), 100j)", toString(*exprY));
     }
 
     TEST_F(CoordinateGraphTest, SunderBasicThree)
@@ -816,7 +810,6 @@ namespace rocRollerTest
         auto f = ct.addElement(Linear(Expression::literal(9u), one));
 
         ct.addElement(Tile(), {linZ}, {e, f});
-        auto graph = ct.toDOT("");
 
         auto aVal = Expression::literal(8u);
         auto bVal = Expression::literal(3u);
@@ -841,12 +834,206 @@ namespace rocRollerTest
                                      {input},
                                      {a, b, c, d, e, f, sw},
                                      Expression::identity)),
-                     FatalError)
-            << graph;
+                     FatalError);
 
-        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX)) << graph;
-        EXPECT_EQ("Add(Add(Multiply(1j, 6j), 4j), 100j)", toString(*exprY)) << graph;
-        EXPECT_EQ("Add(Add(Multiply(0j, 9j), 19j), Add(100j, 24j))", toString(*exprZ)) << graph;
+        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX));
+        EXPECT_EQ("Add(Add(Multiply(1j, 6j), 4j), 100j)", toString(*exprY));
+        EXPECT_EQ("Add(Add(Multiply(0j, 9j), 19j), Add(100j, 24j))", toString(*exprZ));
+    }
+
+    TEST_F(CoordinateGraphTest, SunderBasicOneViaTransformer)
+    {
+        auto zero = Expression::literal(0u);
+        auto one  = Expression::literal(1u);
+
+        auto ct = CoordinateGraph();
+
+        auto input = ct.addElement(User());
+
+        auto linX = ct.addElement(Linear(Expression::literal(100u), one));
+        auto sw   = ct.addElement(Linear(Expression::literal(2u), one));
+
+        auto sunder = ct.addElement(Sunder(), {input}, {linX, sw});
+
+        auto a = ct.addElement(Linear());
+        auto b = ct.addElement(Linear(Expression::literal(10u), one));
+
+        ct.addElement(Tile(), {linX}, {a, b});
+
+        auto tf = Transformer(std::make_shared<CoordinateGraph>(ct), nullptr, Expression::identity);
+        tf.setCoordinate(a, Expression::literal(8u));
+        tf.setCoordinate(b, Expression::literal(3u));
+
+        tf.setCoordinate(sw, zero);
+        auto exprX = only(tf.reverse({input}));
+        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX));
+        auto strideExprX = only(tf.reverseStride(b, Expression::literal(2u), {input}));
+        EXPECT_EQ("2j", toString(*strideExprX));
+        strideExprX = only(tf.reverseStride(a, Expression::literal(2u), {input}));
+        EXPECT_EQ("20j", toString(*strideExprX));
+
+        tf.setCoordinate(sw, one);
+        EXPECT_THROW(tf.reverse({input}), FatalError);
+        EXPECT_THROW(tf.reverseStride(b, Expression::literal(2u), {input}), FatalError);
+        EXPECT_THROW(tf.reverseStride(a, Expression::literal(2u), {input}), FatalError);
+    }
+
+    TEST_F(CoordinateGraphTest, SunderBasicTwoViaTransformer)
+    {
+        auto zero = Expression::literal(0u);
+        auto one  = Expression::literal(1u);
+        auto two  = Expression::literal(2u);
+
+        auto ct = CoordinateGraph();
+
+        auto input = ct.addElement(User());
+
+        auto linX = ct.addElement(Linear(Expression::literal(100u), one));
+        auto linY = ct.addElement(Linear(Expression::literal(24u), one));
+        auto sw   = ct.addElement(Linear(Expression::literal(2u), one));
+
+        auto sunder = ct.addElement(Sunder(), {input}, {linX, linY, sw});
+
+        auto a = ct.addElement(Linear());
+        auto b = ct.addElement(Linear(Expression::literal(10u), one));
+
+        ct.addElement(Tile(), {linX}, {a, b});
+
+        auto c = ct.addElement(Linear());
+        auto d = ct.addElement(Linear(Expression::literal(6u), one));
+
+        ct.addElement(Tile(), {linY}, {c, d});
+
+        auto tf = Transformer(std::make_shared<CoordinateGraph>(ct), nullptr, Expression::identity);
+
+        tf.setCoordinate(a, Expression::literal(8u));
+        tf.setCoordinate(b, Expression::literal(3u));
+        tf.setCoordinate(c, Expression::literal(1u));
+        tf.setCoordinate(d, Expression::literal(4u));
+
+        tf.setCoordinate(sw, zero);
+        auto exprX = only(tf.reverse({input}));
+        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX));
+        auto strideExprX = only(tf.reverseStride(b, Expression::literal(2u), {input}));
+        EXPECT_EQ("2j", toString(*strideExprX));
+        strideExprX = only(tf.reverseStride(a, Expression::literal(2u), {input}));
+        EXPECT_EQ("20j", toString(*strideExprX));
+        strideExprX = only(tf.reverseStride(d, Expression::literal(3u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprX));
+        strideExprX = only(tf.reverseStride(c, Expression::literal(3u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprX));
+
+        tf.setCoordinate(sw, one);
+        auto exprY = only(tf.reverse({input}));
+        EXPECT_EQ("Add(Add(Multiply(1j, 6j), 4j), 100j)", toString(*exprY));
+        auto strideExprY = only(tf.reverseStride(d, Expression::literal(3u), {input}));
+        EXPECT_EQ("3j", toString(*strideExprY));
+        strideExprY = only(tf.reverseStride(c, Expression::literal(3u), {input}));
+        EXPECT_EQ("18j", toString(*strideExprY));
+        strideExprY = only(tf.reverseStride(b, Expression::literal(2u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprY));
+        strideExprY = only(tf.reverseStride(a, Expression::literal(2u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprY));
+
+        tf.setCoordinate(sw, two);
+        EXPECT_THROW(tf.reverse({input}), FatalError);
+    }
+
+    TEST_F(CoordinateGraphTest, SunderBasicThreeViaTransformer)
+    {
+        auto zero  = Expression::literal(0u);
+        auto one   = Expression::literal(1u);
+        auto two   = Expression::literal(2u);
+        auto three = Expression::literal(3u);
+
+        auto ct = CoordinateGraph();
+
+        auto input = ct.addElement(User());
+
+        auto linX = ct.addElement(Linear(Expression::literal(100u), one));
+        auto linY = ct.addElement(Linear(Expression::literal(24u), one));
+        auto linZ = ct.addElement(Linear(Expression::literal(17u), one));
+        auto sw   = ct.addElement(Linear(Expression::literal(2u), one));
+
+        auto sunder = ct.addElement(Sunder(), {input}, {linX, linY, linZ, sw});
+
+        auto a = ct.addElement(Linear());
+        auto b = ct.addElement(Linear(Expression::literal(10u), one));
+
+        ct.addElement(Tile(), {linX}, {a, b});
+
+        auto c = ct.addElement(Linear());
+        auto d = ct.addElement(Linear(Expression::literal(6u), one));
+
+        ct.addElement(Tile(), {linY}, {c, d});
+
+        auto e = ct.addElement(Linear());
+        auto f = ct.addElement(Linear(Expression::literal(9u), one));
+
+        ct.addElement(Tile(), {linZ}, {e, f});
+
+        auto tf = Transformer(std::make_shared<CoordinateGraph>(ct), nullptr, Expression::identity);
+
+        tf.setCoordinate(a, Expression::literal(8u));
+        tf.setCoordinate(b, Expression::literal(3u));
+        tf.setCoordinate(c, nullptr);
+        tf.setCoordinate(d, nullptr);
+        tf.setCoordinate(sw, zero);
+        tf.setCoordinate(e, nullptr);
+        tf.setCoordinate(f, nullptr);
+        auto exprX = only(tf.reverse({input}));
+        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX));
+        auto strideExprX = only(tf.reverseStride(b, Expression::literal(2u), {input}));
+        EXPECT_EQ("2j", toString(*strideExprX));
+        strideExprX = only(tf.reverseStride(a, Expression::literal(2u), {input}));
+        EXPECT_EQ("20j", toString(*strideExprX));
+        strideExprX = only(tf.reverseStride(d, Expression::literal(3u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprX));
+        strideExprX = only(tf.reverseStride(c, Expression::literal(3u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprX));
+        strideExprX = only(tf.reverseStride(e, Expression::literal(1u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprX));
+        strideExprX = only(tf.reverseStride(f, Expression::literal(3u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprX));
+
+        tf.setCoordinate(c, Expression::literal(1u));
+        tf.setCoordinate(d, Expression::literal(4u));
+        tf.setCoordinate(sw, one);
+        auto exprY = only(tf.reverse({input}));
+        EXPECT_EQ("Add(Add(Multiply(1j, 6j), 4j), 100j)", toString(*exprY));
+        auto strideExprY = only(tf.reverseStride(d, Expression::literal(3u), {input}));
+        EXPECT_EQ("3j", toString(*strideExprY));
+        strideExprY = only(tf.reverseStride(c, Expression::literal(3u), {input}));
+        EXPECT_EQ("18j", toString(*strideExprY));
+        strideExprY = only(tf.reverseStride(b, Expression::literal(2u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprY));
+        strideExprY = only(tf.reverseStride(a, Expression::literal(2u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprY));
+        strideExprY = only(tf.reverseStride(e, Expression::literal(1u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprY));
+        strideExprY = only(tf.reverseStride(f, Expression::literal(3u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprY));
+
+        tf.setCoordinate(e, Expression::literal(0u));
+        tf.setCoordinate(f, Expression::literal(19u));
+        tf.setCoordinate(sw, two);
+        auto exprZ = only(tf.reverse({input}));
+        EXPECT_EQ("Add(Add(Multiply(0j, 9j), 19j), Add(100j, 24j))", toString(*exprZ));
+        auto strideExprZ = only(tf.reverseStride(f, Expression::literal(1u), {input}));
+        EXPECT_EQ("1j", toString(*strideExprZ));
+        strideExprZ = only(tf.reverseStride(e, Expression::literal(3u), {input}));
+        EXPECT_EQ("27j", toString(*strideExprZ));
+        strideExprZ = only(tf.reverseStride(b, Expression::literal(2u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprZ));
+        strideExprZ = only(tf.reverseStride(a, Expression::literal(2u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprZ));
+        strideExprZ = only(tf.reverseStride(d, Expression::literal(3u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprZ));
+        strideExprZ = only(tf.reverseStride(c, Expression::literal(3u), {input}));
+        EXPECT_EQ("0j", toString(*strideExprZ));
+
+        tf.setCoordinate(sw, three);
+        EXPECT_THROW(tf.reverse({input}), FatalError);
     }
 
     TEST_F(CoordinateGraphTest, WaveTileBasic)
