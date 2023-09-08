@@ -93,7 +93,7 @@ template<
     typename OffsetT
 >
 __global__ void KernelGridEvenShare(
-    T* device_output,
+    const T* device_output,
     T* device_output_reductions,
     hipcub::GridEvenShare<OffsetT>  even_share)
 {
@@ -208,7 +208,7 @@ template<
     typename OffsetT
 >
 __global__ void KernelGridQueue(
-    T* device_output,
+    const T* device_output,
     T* device_output_reductions,
     OffsetT num_tiles,
     hipcub::GridQueue<OffsetT> tile_queue)

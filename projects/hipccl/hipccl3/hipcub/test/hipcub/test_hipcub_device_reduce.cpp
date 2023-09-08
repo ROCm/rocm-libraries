@@ -298,7 +298,7 @@ struct ArgMinDispatch
                     OutputIteratorT d_out,
                     int             num_items,
                     hipStream_t     stream,
-                    bool            debug_synchronous)
+                    bool            debug_synchronous) const
     {
         return hipcub::DeviceReduce::ArgMin(d_temp_storage,
                                             temp_storage_bytes,
@@ -319,7 +319,7 @@ struct ArgMaxDispatch
                     OutputIteratorT d_out,
                     int             num_items,
                     hipStream_t     stream,
-                    bool            debug_synchronous)
+                    bool            debug_synchronous) const
     {
         return hipcub::DeviceReduce::ArgMax(d_temp_storage,
                                             temp_storage_bytes,

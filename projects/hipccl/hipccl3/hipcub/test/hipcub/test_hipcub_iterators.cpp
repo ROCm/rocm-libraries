@@ -93,7 +93,7 @@ struct TransformOp
 struct SelectOp
 {
     template <typename T>
-    __host__ __device__ __forceinline__ bool operator()(T input)
+    __host__ __device__ __forceinline__ bool operator()(T input) const
     {
         (void) input;
         return true;

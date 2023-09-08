@@ -144,7 +144,7 @@ struct CooMatrix
         OffsetT            col;
         ValueT             val;
 
-        CooTuple() {}
+        CooTuple() : row(OffsetT(), col(OffsetT()), val(ValueT()) {}
         CooTuple(OffsetT row, OffsetT col) : row(row), col(col) {}
         CooTuple(OffsetT row, OffsetT col, ValueT val) : row(row), col(col), val(val) {}
 
@@ -250,7 +250,7 @@ struct CooMatrix
      * Builds a COO sparse from a relabeled CSR matrix.
      */
     template <typename CsrMatrixT>
-    void InitCsrRelabel(CsrMatrixT &csr_matrix, OffsetT* relabel_indices)
+    void InitCsrRelabel(CsrMatrixT &csr_matrix, const OffsetT* relabel_indices)
     {
         if (coo_tuples)
         {
@@ -282,7 +282,7 @@ struct CooMatrix
     /**
      * Builds a METIS COO sparse from the given file.
      */
-    void InitMetis(const string &metis_filename)
+    void InitMetis(const string &metis_filename) const
     {
         if (coo_tuples)
         {
@@ -807,7 +807,7 @@ struct CsrMatrix
         Clear();
     }
 
-    GraphStats Stats()
+    GraphStats Stats() const
     {
         GraphStats stats;
         stats.num_rows = num_rows;
@@ -912,8 +912,6 @@ struct CsrMatrix
 
         double s_xx     = ss_x / num_nonzeros;
         double s_yy     = ss_y / num_nonzeros;
-
-        double deming_slope = (s_yy - s_xx + sqrt(((s_yy - s_xx) * (s_yy - s_xx)) + (4 * s_xy * s_xy))) / (2 * s_xy);
 
         stats.pearson_r = (num_nonzeros * s_xy) / (sqrt(ss_x) * sqrt(ss_y));
 
@@ -1077,7 +1075,7 @@ struct OrderByLow
     OffsetT* row_degrees;
     OrderByLow(OffsetT* row_degrees) : row_degrees(row_degrees) {}
 
-    bool operator()(const OffsetT &a, const OffsetT &b)
+    bool operator()(const OffsetT &a, const OffsetT &b) const
     {
         if (row_degrees[a] < row_degrees[b])
             return true;
@@ -1095,7 +1093,7 @@ struct OrderByHigh
     OffsetT* row_degrees;
     OrderByHigh(OffsetT* row_degrees) : row_degrees(row_degrees) {}
 
-    bool operator()(const OffsetT &a, const OffsetT &b)
+    bool operator()(const OffsetT &a, const OffsetT &b) const
     {
         if (row_degrees[a] > row_degrees[b])
             return true;

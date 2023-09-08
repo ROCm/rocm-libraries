@@ -143,7 +143,7 @@ struct bfloat16_t
 
     /// Get raw storage
     __host__ __device__ __forceinline__
-    uint16_t raw()
+    uint16_t raw() const
     {
         return this->__x;
     }
@@ -156,7 +156,7 @@ struct bfloat16_t
 
     /// Inequality
     __host__ __device__ __forceinline__
-    bool operator !=(const bfloat16_t &other)
+    bool operator !=(const bfloat16_t &other) const
     {
         return (this->__x != other.__x);
     }

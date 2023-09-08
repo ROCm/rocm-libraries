@@ -206,7 +206,7 @@ struct custom_type
     U y;
 
     HIPCUB_HOST_DEVICE inline
-    constexpr custom_type() {}
+    constexpr custom_type() : x(T()), y(U()) {}
 
     HIPCUB_HOST_DEVICE inline
     constexpr custom_type(T xx, U yy) : x(xx), y(yy)
@@ -220,10 +220,8 @@ struct custom_type
 
     template<class V, class W = V>
     HIPCUB_HOST_DEVICE inline
-    custom_type(const custom_type<V,W>& other)
+    custom_type(const custom_type<V,W>& other) : x(other.x), y(other.y)
     {
-        x = other.x;
-        y = other.y;
     }
 
     #ifndef HIPCUB_CUB_API

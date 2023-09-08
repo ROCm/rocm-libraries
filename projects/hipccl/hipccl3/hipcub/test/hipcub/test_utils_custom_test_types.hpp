@@ -47,10 +47,8 @@ struct custom_test_type
 
     template<class U>
     HIPCUB_HOST_DEVICE inline
-        custom_test_type(const custom_test_type<U>& other)
+        custom_test_type(const custom_test_type<U>& other) : x(other.x), y(other.y)
     {
-        x = other.x;
-        y = other.y;
     }
 
 #ifndef HIPCUB_CUB_API
@@ -132,10 +130,8 @@ struct custom_test_type<test_utils::half>
 
     template<class U>
     HIPCUB_HOST_DEVICE inline
-        custom_test_type(const custom_test_type<U>& other)
+        custom_test_type(const custom_test_type<U>& other) : x(other.x), y(other.y)
     {
-        x = other.x;
-        y = other.y;
     }
 
     HIPCUB_HOST_DEVICE inline
@@ -208,10 +204,8 @@ struct custom_test_type<test_utils::bfloat16>
 
     template<class U>
     HIPCUB_HOST_DEVICE inline
-        custom_test_type(const custom_test_type<U>& other)
+        custom_test_type(const custom_test_type<U>& other) : x(other.x), y(other.y)
     {
-        x = other.x;
-        y = other.y;
     }
 
     HIPCUB_HOST_DEVICE inline

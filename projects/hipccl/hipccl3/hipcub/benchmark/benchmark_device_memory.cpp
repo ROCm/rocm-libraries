@@ -60,7 +60,7 @@ struct operation<no_operation, T, ItemsPerThread, BlockSize>
 {
     typedef empty_storage_type storage_type;
 
-    HIPCUB_DEVICE inline void operator()(storage_type& storage, T (&)[ItemsPerThread], T* = nullptr)
+    HIPCUB_DEVICE inline void operator()(storage_type& storage, T (&)[ItemsPerThread], T* = nullptr) const
     {}
 };
 
@@ -72,7 +72,7 @@ struct operation<custom_operation, T, ItemsPerThread, BlockSize>
 
     HIPCUB_DEVICE inline void operator()(storage_type& storage,
                                          T (&input)[ItemsPerThread],
-                                         T* global_mem_output = nullptr)
+                                         T* global_mem_output = nullptr) const
     {
         (void)storage;
         (void)global_mem_output;
@@ -363,6 +363,10 @@ void run_benchmark_memcpy(benchmark::State& state, size_t size, const hipStream_
     T* d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
+
+    // Copy input from host to device
+    HIP_CHECK(hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {

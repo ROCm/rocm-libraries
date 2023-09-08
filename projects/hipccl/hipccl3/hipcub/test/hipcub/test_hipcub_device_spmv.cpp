@@ -110,8 +110,8 @@ template <
     typename OffsetType>
 void SpmvGold(
     CsrMatrix<T, OffsetType>&  a,
-    T*                         vector_x,
-    T*                         vector_y_in,
+    const T*                         vector_x,
+    const T*                         vector_y_in,
     T*                         vector_y_out,
     T                          alpha,
     T                          beta)
