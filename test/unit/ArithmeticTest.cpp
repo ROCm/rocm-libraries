@@ -833,6 +833,10 @@ namespace ArithmeticTest
                 v_c, Register::Value::Literal(LITERAL_TEST), v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(176), 8);
+
+            co_yield generateOp<Expression::MultiplyHigh>(v_c, v_a, v_b);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(184), 8);
         };
 
         m_context->schedule(kb());
@@ -858,7 +862,7 @@ namespace ArithmeticTest
                 {
                     for(uint64_t shift : TestValues::shiftValues)
                     {
-                        std::vector<int64_t> result(23);
+                        std::vector<int64_t> result(24);
                         auto                 d_result = make_shared_device<int64_t>(result.size());
 
                         KernelArguments runtimeArgs;
@@ -916,6 +920,8 @@ namespace ArithmeticTest
                         {
                             EXPECT_EQ(result[22], LITERAL_TEST % b) << "b: " << b;
                         }
+                        EXPECT_EQ(result[23], (int64_t)(((__int128_t)a * (__int128_t)b) >> 64))
+                            << "a: " << a << "b: " << b;
                     }
                 }
             }
@@ -1103,6 +1109,11 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(176), 8);
+
+            co_yield generateOp<Expression::MultiplyHigh>(s_c, s_a, s_b);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(184), 8);
         };
 
         m_context->schedule(kb());
@@ -1118,7 +1129,7 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            auto d_result = make_shared_device<int64_t>(23);
+            auto d_result = make_shared_device<int64_t>(24);
             static_assert(sizeof(int64_t) == 8);
 
             for(int64_t a : TestValues::int64Values)
@@ -1135,7 +1146,7 @@ namespace ArithmeticTest
 
                         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-                        std::vector<int64_t> result(23);
+                        std::vector<int64_t> result(24);
                         ASSERT_THAT(hipMemcpy(result.data(),
                                               d_result.get(),
                                               result.size() * sizeof(int64_t),
@@ -1179,6 +1190,8 @@ namespace ArithmeticTest
                         EXPECT_EQ(result[21], a % LITERAL_TEST) << "a: " << a;
                         if(b != 0)
                             EXPECT_EQ(result[22], LITERAL_TEST % b) << "b: " << b;
+                        EXPECT_EQ(result[23], (int64_t)(((__int128_t)a * (__int128_t)b) >> 64))
+                            << "a: " << a << ", b: " << b;
                     }
                 }
             }

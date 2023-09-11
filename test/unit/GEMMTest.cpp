@@ -502,6 +502,11 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMStreamK)
     {
+        if(m_context->targetArchitecture().target().getVersionString() != "gfx90a")
+        {
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+        }
+
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
         uint numCUs = deviceProperties.multiProcessorCount;

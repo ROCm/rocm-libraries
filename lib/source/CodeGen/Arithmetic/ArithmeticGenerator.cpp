@@ -98,10 +98,11 @@ namespace rocRoller
             }
         }
 
-        Throw<FatalError>(concatenate("Conversion not implemented for register type scalar",
-                                      input->regType(),
-                                      "/",
-                                      input->variableType()));
+        Throw<FatalError>(
+            concatenate("get2DwordsScalar: Conversion not implemented for register type ",
+                        input->regType(),
+                        "/",
+                        input->variableType()));
     }
 
     Generator<Instruction> ArithmeticGenerator::get2DwordsVector(Register::ValuePtr& lsd,
@@ -152,10 +153,11 @@ namespace rocRoller
             }
         }
 
-        Throw<FatalError>(concatenate("Conversion not implemented for register type dfgdgfd",
-                                      input->regType(),
-                                      "/",
-                                      input->variableType()));
+        Throw<FatalError>(
+            concatenate("get2DwordsVector: Conversion not implemented for register type ",
+                        input->regType(),
+                        "/",
+                        input->variableType()));
     }
 
     Generator<Instruction> ArithmeticGenerator::describeOpArgs(std::string const& argName0,

@@ -345,6 +345,27 @@ namespace rocRoller
 
                 return (lhs * (uint64_t)rhs) >> 32;
             }
+
+            int64_t evaluate(int const& lhs, int64_t const& rhs) const
+            {
+                return evaluate((int64_t)lhs, rhs);
+            }
+
+            int64_t evaluate(int64_t const& lhs, int64_t const& rhs) const
+            {
+                assertNonNullPointer(lhs);
+                assertNonNullPointer(rhs);
+
+                return ((__int128_t)lhs * (__int128_t)rhs) >> 64;
+            }
+
+            uint64_t evaluate(uint64_t const& lhs, uint64_t const& rhs) const
+            {
+                assertNonNullPointer(lhs);
+                assertNonNullPointer(rhs);
+
+                return ((__uint128_t)lhs * (__uint128_t)rhs) >> 64;
+            }
         };
 
         template <>
@@ -367,6 +388,14 @@ namespace rocRoller
             {
                 assertNonNullPointer(arg);
                 auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
+
+                return magic.magic;
+            }
+
+            int64_t evaluate(int64_t const& arg) const
+            {
+                assertNonNullPointer(arg);
+                auto magic = libdivide::libdivide_s64_branchfree_gen(arg);
 
                 return magic.magic;
             }
@@ -398,7 +427,7 @@ namespace rocRoller
         template <>
         struct OperationEvaluatorVisitor<MagicShifts> : public UnaryEvaluatorVisitor<MagicShifts>
         {
-            int evaluate(int const& arg) const
+            int evaluate(int32_t const& arg) const
             {
                 assertNonNullPointer(arg);
 
@@ -406,18 +435,36 @@ namespace rocRoller
 
                 return magic.more & libdivide::LIBDIVIDE_32_SHIFT_MASK;
             }
+
+            int evaluate(int64_t const& arg) const
+            {
+                assertNonNullPointer(arg);
+
+                auto magic = libdivide::libdivide_s64_branchfree_gen(arg);
+
+                return magic.more & libdivide::LIBDIVIDE_64_SHIFT_MASK;
+            }
         };
 
         template <>
         struct OperationEvaluatorVisitor<MagicSign> : public UnaryEvaluatorVisitor<MagicSign>
         {
-            int evaluate(int const& arg) const
+            int evaluate(int32_t const& arg) const
             {
                 assertNonNullPointer(arg);
 
                 auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
 
-                return (int8_t)magic.more >> 7;
+                return static_cast<int32_t>((int8_t)magic.more >> 7);
+            }
+
+            int64_t evaluate(int64_t const& arg) const
+            {
+                assertNonNullPointer(arg);
+
+                auto magic = libdivide::libdivide_s64_branchfree_gen(arg);
+
+                return static_cast<int64_t>((int8_t)magic.more >> 7);
             }
         };
 

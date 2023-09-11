@@ -66,6 +66,27 @@ namespace rocRoller
 
         ExpressionPtr magicNumberDivision(ExpressionPtr lhs, ExpressionPtr rhs, ContextPtr context)
         {
+            auto rhsType = resultVariableType(rhs);
+            auto lhsType = resultVariableType(lhs);
+
+            if(!(rhsType == DataType::Int32 || rhsType == DataType::Int64))
+            {
+                // Unhandled case
+                return nullptr;
+            }
+
+            auto numerator   = lhs;
+            auto denominator = rhs;
+            auto dataType    = DataType::Int32;
+
+            if(DataTypeInfo::Get(rhsType).elementSize > 4
+               || DataTypeInfo::Get(lhsType).elementSize > 4)
+            {
+                numerator   = convert(DataType::Int64, lhs);
+                denominator = convert(DataType::Int64, rhs);
+                dataType    = DataType::Int64;
+            }
+
             auto k = context->kernel();
 
             // Create unique names for the new arguments
@@ -75,11 +96,13 @@ namespace rocRoller
 
             // Add the new arguments to the AssemblyKernel
             k->addArgument(
-                {magicNumStr, DataType::Int32, DataDirection::ReadOnly, magicMultiple(rhs)});
+                {magicNumStr, dataType, DataDirection::ReadOnly, magicMultiple(denominator)});
+            k->addArgument({magicShiftStr,
+                            DataType::Int32,
+                            DataDirection::ReadOnly,
+                            magicShifts(denominator)});
             k->addArgument(
-                {magicShiftStr, DataType::Int32, DataDirection::ReadOnly, magicShifts(rhs)});
-            k->addArgument(
-                {magicSignStr, DataType::Int32, DataDirection::ReadOnly, magicSign(rhs)});
+                {magicSignStr, dataType, DataDirection::ReadOnly, magicSign(denominator)});
 
             // Create expressions of the new arguments
             auto magicExpr = std::make_shared<Expression>(
@@ -90,12 +113,24 @@ namespace rocRoller
                 std::make_shared<AssemblyKernelArgument>(k->findArgument(magicSignStr)));
 
             // Create expression that performs division using the new arguments
-            auto q       = multiplyHigh(lhs, magicExpr) + lhs;
-            auto signOfQ = q >> literal(31);
+
+            auto numBytes = DataTypeInfo::Get(dataType).elementSize;
+
+            auto q       = multiplyHigh(numerator, magicExpr) + numerator;
+            auto signOfQ = arithmeticShiftR(q, literal(numBytes * 8 - 1));
+
+            // auto magicIsPow2 = -(magicExpr == literal(0, dataType));
+
+            auto magicIsPow2 = logicalShiftR((-magicExpr) | magicExpr, literal(numBytes * 8 - 1))
+                               - literal(1, dataType); // 0 if != 0, -1 if equal to 0
+
             auto handleSignOfLHS
-                = q + (signOfQ & ((literal(1) << numShiftsExpr) - (magicExpr == literal(0))));
-            auto shiftedQ = handleSignOfLHS >> numShiftsExpr;
-            auto result   = (shiftedQ ^ signExpr) - signExpr;
+                = q + (signOfQ & ((literal(1, dataType) << numShiftsExpr) + magicIsPow2));
+
+            auto shiftedQ = arithmeticShiftR(handleSignOfLHS, numShiftsExpr);
+
+            auto result = (shiftedQ ^ signExpr) - signExpr;
+
             return result;
         }
 
@@ -386,13 +421,14 @@ namespace rocRoller
                     return divByConst.call(lhs, rhsVal);
                 }
 
-                auto rhs_type = resultVariableType(rhs);
-
-                if(rhsEvalTimes[EvaluationTime::KernelLaunch] && rhs_type == DataType::Int32)
+                auto rhsType = resultVariableType(rhs);
+                if(rhsEvalTimes[EvaluationTime::KernelLaunch]
+                   && (rhsType == DataType::Int32 || rhsType == DataType::Int64))
                 {
-                    return magicNumberDivision(lhs, rhs, m_context);
+                    auto div = magicNumberDivision(lhs, rhs, m_context);
+                    if(div)
+                        return div;
                 }
-
                 return std::make_shared<Expression>(Divide({lhs, rhs}));
             }
 
@@ -412,12 +448,14 @@ namespace rocRoller
                     return modByConst.call(lhs, rhsVal);
                 }
 
-                auto rhs_type = resultVariableType(rhs);
+                auto rhsType = resultVariableType(rhs);
 
-                if(rhsEvalTimes[EvaluationTime::KernelLaunch] && rhs_type == DataType::Int32)
+                if(rhsEvalTimes[EvaluationTime::KernelLaunch]
+                   && (rhsType == DataType::Int32 || rhsType == DataType::Int64))
                 {
                     auto div = magicNumberDivision(lhs, rhs, m_context);
-                    return lhs - (div * rhs);
+                    if(div)
+                        return lhs - (div * rhs);
                 }
 
                 return std::make_shared<Expression>(Modulo({lhs, rhs}));
