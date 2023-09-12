@@ -17,6 +17,7 @@ if(BUILD_CLIENT)
     Parser.cpp
     gemm.cpp
     GEMMParameters.cpp
+    BenchmarkSolution.cpp
     visualize.cpp
 
     ../test/unit/Utilities.cpp
