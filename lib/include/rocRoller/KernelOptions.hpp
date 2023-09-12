@@ -18,53 +18,51 @@ namespace rocRoller
 
     struct KernelOptions
     {
-        KernelOptions();
+        LogLevel logLevel = LogLevel::Verbose;
 
-        LogLevel logLevel;
+        bool alwaysWaitAfterLoad         = false;
+        bool alwaysWaitAfterStore        = false;
+        bool alwaysWaitBeforeBranch      = false;
+        bool alwaysWaitZeroBeforeBarrier = false;
 
-        bool alwaysWaitAfterLoad;
-        bool alwaysWaitAfterStore;
-        bool alwaysWaitBeforeBranch;
-        bool alwaysWaitZeroBeforeBarrier;
+        bool preloadKernelArguments = true;
 
-        bool preloadKernelArguments;
+        unsigned int maxACCVGPRs      = 256;
+        unsigned int maxSGPRs         = 102;
+        unsigned int maxVGPRs         = 256;
+        unsigned int loadLocalWidth   = 4;
+        unsigned int loadGlobalWidth  = 8;
+        unsigned int storeLocalWidth  = 4;
+        unsigned int storeGlobalWidth = 4;
+        unsigned int unrollX          = 0;
+        unsigned int unrollY          = 0;
+        unsigned int unrollK          = 0;
 
-        unsigned int maxACCVGPRs;
-        unsigned int maxSGPRs;
-        unsigned int maxVGPRs;
-        unsigned int loadLocalWidth;
-        unsigned int loadGlobalWidth;
-        unsigned int storeLocalWidth;
-        unsigned int storeGlobalWidth;
-        unsigned int unrollX;
-        unsigned int unrollY;
-        unsigned int unrollK;
+        bool fuseLoops                 = true;
+        bool allowAmbiguousMemoryNodes = false;
 
-        bool fuseLoops;
-        bool allowAmbiguousMemoryNodes;
+        bool prefetch          = false;
+        int  prefetchInFlight  = 1;
+        int  prefetchLDSFactor = 0;
+        bool prefetchMixMemOps = false;
 
-        bool prefetch;
-        int  prefetchInFlight;
-        int  prefetchLDSFactor;
-        bool prefetchMixMemOps;
+        bool streamK = false;
 
-        bool streamK;
-
-        std::vector<int>  loopOverOutputTilesDimensions;
-        std::string       loopOverOutputTilesTopLoop;
-        std::vector<uint> loopOverOutputTilesCoordSizes;
+        std::vector<int>  loopOverOutputTilesDimensions = {};
+        std::string       loopOverOutputTilesTopLoop    = XLOOP;
+        std::vector<uint> loopOverOutputTilesCoordSizes = {};
         uint              loopOverOutputTilesIteratedTiles;
 
-        bool enableScratch;
-        uint numScratchTiles;
+        bool enableScratch   = false;
+        uint numScratchTiles = 0;
 
-        EnumBitset<LayoutType> transposeMemoryAccess;
+        EnumBitset<LayoutType> transposeMemoryAccess = {};
 
-        bool assertWaitCntState;
+        bool assertWaitCntState = true;
 
-        bool packMultipleElementsInto1VGPR;
-        bool enableLongDwordInstructions;
-        bool setNextFreeVGPRToMax;
+        bool packMultipleElementsInto1VGPR = true;
+        bool enableLongDwordInstructions   = true;
+        bool setNextFreeVGPRToMax          = false;
 
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);

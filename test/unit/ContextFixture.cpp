@@ -78,6 +78,11 @@ std::string ContextFixture::testKernelName(std::string const& suffix) const
     return rv;
 }
 
+void ContextFixture::setKernelOptions(rocRoller::KernelOptions const& kernelOption)
+{
+    m_context->m_kernelOptions = kernelOption;
+}
+
 bool ContextFixture::isLocalDevice() const
 {
     return m_context && m_context->hipDeviceIndex() >= 0;

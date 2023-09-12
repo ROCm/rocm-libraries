@@ -121,7 +121,7 @@ namespace rocRoller
         return m_random;
     }
 
-    inline KernelOptions& Context::kernelOptions()
+    inline KernelOptions const& Context::kernelOptions()
     {
         return m_kernelOptions;
     }

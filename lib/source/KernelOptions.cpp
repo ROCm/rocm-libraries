@@ -4,42 +4,6 @@
 
 namespace rocRoller
 {
-    KernelOptions::KernelOptions()
-        : logLevel(LogLevel::Verbose)
-        , alwaysWaitAfterLoad(false)
-        , alwaysWaitAfterStore(false)
-        , alwaysWaitBeforeBranch(false)
-        , alwaysWaitZeroBeforeBarrier(false)
-        , preloadKernelArguments(true)
-        , maxACCVGPRs(256)
-        , maxSGPRs(102)
-        , maxVGPRs(256)
-        , loadLocalWidth(4)
-        , loadGlobalWidth(8)
-        , storeLocalWidth(4)
-        , storeGlobalWidth(4)
-        , fuseLoops(true)
-        , allowAmbiguousMemoryNodes(false)
-        , prefetch(false)
-        , prefetchInFlight(1)
-        , prefetchLDSFactor(0)
-        , prefetchMixMemOps(false)
-        , loopOverOutputTilesDimensions({})
-        , loopOverOutputTilesTopLoop(XLOOP)
-        , enableScratch(false)
-        , numScratchTiles(0)
-        , unrollX(0)
-        , unrollY(0)
-        , unrollK(0)
-        , streamK(false)
-        , transposeMemoryAccess({})
-        , assertWaitCntState(true)
-        , packMultipleElementsInto1VGPR(true)
-        , enableLongDwordInstructions(true)
-        , setNextFreeVGPRToMax(false)
-    {
-    }
-
     std::ostream& operator<<(std::ostream& os, const KernelOptions& input)
     {
         os << "Kernel Options:" << std::endl;

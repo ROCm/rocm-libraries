@@ -1041,13 +1041,14 @@ namespace MemoryInstructionsTest
             };
 
             clearOutput();
-            m_context->kernelOptions().storeGlobalWidth = 4;
+            setKernelOptions({.storeGlobalWidth = 4});
+
             m_context->schedule(kb());
             expected = R"(flat_store_dwordx4 v[4:5], v[0:3])";
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().storeGlobalWidth = 3;
+            setKernelOptions({.storeGlobalWidth = 3});
             m_context->schedule(kb());
             expected = R"(
             flat_store_dwordx3 v[4:5], v[0:2]
@@ -1056,7 +1057,7 @@ namespace MemoryInstructionsTest
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().storeGlobalWidth = 2;
+            setKernelOptions({.storeGlobalWidth = 2});
             m_context->schedule(kb());
             expected = R"(
             flat_store_dwordx2 v[4:5], v[0:1]
@@ -1065,7 +1066,7 @@ namespace MemoryInstructionsTest
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().storeGlobalWidth = 1;
+            setKernelOptions({.storeGlobalWidth = 1});
             m_context->schedule(kb());
             expected = R"(
             flat_store_dword v[4:5], v0
@@ -1083,7 +1084,7 @@ namespace MemoryInstructionsTest
             };
 
             clearOutput();
-            m_context->kernelOptions().loadGlobalWidth = 4;
+            setKernelOptions({.loadGlobalWidth = 4});
             m_context->schedule(kb());
             expected = R"(
             flat_load_dwordx4 v[0:3], v[4:5]
@@ -1091,7 +1092,7 @@ namespace MemoryInstructionsTest
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().loadGlobalWidth = 3;
+            setKernelOptions({.loadGlobalWidth = 3});
             m_context->schedule(kb());
             expected = R"(
             flat_load_dwordx3 v[0:2], v[4:5]
@@ -1100,7 +1101,7 @@ namespace MemoryInstructionsTest
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().loadGlobalWidth = 2;
+            setKernelOptions({.loadGlobalWidth = 2});
             m_context->schedule(kb());
             expected = R"(
             flat_load_dwordx2 v[0:1], v[4:5]
@@ -1109,7 +1110,7 @@ namespace MemoryInstructionsTest
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().loadGlobalWidth = 1;
+            setKernelOptions({.loadGlobalWidth = 1});
             m_context->schedule(kb());
             expected = R"(
             flat_load_dword v0, v[4:5]
@@ -1127,13 +1128,13 @@ namespace MemoryInstructionsTest
             };
 
             clearOutput();
-            m_context->kernelOptions().storeLocalWidth = 4;
+            setKernelOptions({.storeLocalWidth = 4});
             m_context->schedule(kb());
             expected = R"(ds_write_b128 v6, v[0:3])";
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().storeLocalWidth = 3;
+            setKernelOptions({.storeLocalWidth = 3});
             m_context->schedule(kb());
             expected = R"(
             ds_write_b96 v6, v[0:2]
@@ -1142,7 +1143,7 @@ namespace MemoryInstructionsTest
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().storeLocalWidth = 2;
+            setKernelOptions({.storeLocalWidth = 2});
             m_context->schedule(kb());
             expected = R"(
             ds_write_b64 v6, v[0:1]
@@ -1151,7 +1152,7 @@ namespace MemoryInstructionsTest
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().storeLocalWidth = 1;
+            setKernelOptions({.storeLocalWidth = 1});
             m_context->schedule(kb());
             expected = R"(
             ds_write_b32 v6, v0
@@ -1170,7 +1171,7 @@ namespace MemoryInstructionsTest
             };
 
             clearOutput();
-            m_context->kernelOptions().loadLocalWidth = 4;
+            setKernelOptions({.loadLocalWidth = 4});
             m_context->schedule(kb());
             expected = R"(
             ds_read_b128 v[0:3], v6
@@ -1178,7 +1179,7 @@ namespace MemoryInstructionsTest
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().loadLocalWidth = 3;
+            setKernelOptions({.loadLocalWidth = 3});
             m_context->schedule(kb());
             expected = R"(
             ds_read_b96 v[0:2], v6
@@ -1187,7 +1188,7 @@ namespace MemoryInstructionsTest
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().loadLocalWidth = 2;
+            setKernelOptions({.loadLocalWidth = 2});
             m_context->schedule(kb());
             expected = R"(
             ds_read_b64 v[0:1], v6
@@ -1196,7 +1197,7 @@ namespace MemoryInstructionsTest
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
-            m_context->kernelOptions().loadLocalWidth = 1;
+            setKernelOptions({.loadLocalWidth = 1});
             m_context->schedule(kb());
             expected = R"(
             ds_read_b32 v0, v6

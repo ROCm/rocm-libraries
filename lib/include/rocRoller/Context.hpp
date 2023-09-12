@@ -35,6 +35,8 @@
 #include "GPUArchitecture/GPUArchitecture.hpp"
 #include "Scheduling/WaitStateHazardCounter.hpp"
 
+class ContextFixture;
+
 namespace rocRoller
 {
     using RegisterHazardMap = std::unordered_map<Register::RegisterId,
@@ -86,7 +88,7 @@ namespace rocRoller
         std::shared_ptr<MemoryInstructions>    mem() const;
         std::shared_ptr<CopyGenerator>         copier() const;
         std::shared_ptr<BranchGenerator>       brancher() const;
-        KernelOptions&                         kernelOptions();
+        KernelOptions const&                   kernelOptions();
 
         std::shared_ptr<RandomGenerator> random() const;
         void                             setRandomSeed(int seed);
@@ -124,6 +126,8 @@ namespace rocRoller
          * @brief Set register scope manager.
          */
         void setScopeManager(std::shared_ptr<KernelGraph::ScopeManager>);
+
+        friend class ::ContextFixture;
 
     private:
         static ContextPtr Create(int                    deviceIndex,

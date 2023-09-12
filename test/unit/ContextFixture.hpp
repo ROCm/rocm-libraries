@@ -23,6 +23,8 @@ protected:
     std::string testKernelName() const;
     std::string testKernelName(std::string const& suffix) const;
 
+    void setKernelOptions(rocRoller::KernelOptions const& kernelOption);
+
     virtual rocRoller::ContextPtr createContext() = 0;
 
     bool isLocalDevice() const;

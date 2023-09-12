@@ -106,7 +106,7 @@ namespace rocRollerTest
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
-        m_context->kernelOptions().alwaysWaitBeforeBranch = true;
+        setKernelOptions({.alwaysWaitBeforeBranch = true});
 
         auto kb = [&]() -> Generator<Instruction> {
             auto l0 = m_context->labelAllocator()->label("l0");
@@ -138,8 +138,8 @@ namespace rocRollerTest
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
-        m_context->kernelOptions().alwaysWaitBeforeBranch = false;
-        auto kb                                           = [&]() -> Generator<Instruction> {
+        setKernelOptions({.alwaysWaitBeforeBranch = false});
+        auto kb = [&]() -> Generator<Instruction> {
             auto l0 = m_context->labelAllocator()->label("l0");
             co_yield Instruction::Lock(Scheduling::Dependency::Branch);
             co_yield Instruction::Label(l0);

@@ -2812,7 +2812,7 @@ namespace KernelGraphTest
         auto kgraph = example.getKernelGraph();
         auto params = example.getCommandParameters();
 
-        m_context->kernelOptions().enableScratch = true;
+        setKernelOptions({.enableScratch = true});
 
         auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
         auto lowerLinearTransform      = std::make_shared<LowerLinear>(m_context);
@@ -2848,11 +2848,11 @@ namespace KernelGraphTest
         auto kgraph = example.getKernelGraph();
         auto params = example.getCommandParameters();
 
-        m_context->kernelOptions().unrollK           = 3;
-        m_context->kernelOptions().prefetch          = true;
-        m_context->kernelOptions().prefetchInFlight  = 3;
-        m_context->kernelOptions().prefetchLDSFactor = 3;
-        m_context->kernelOptions().prefetchMixMemOps = true;
+        setKernelOptions({.unrollK           = 3,
+                          .prefetch          = true,
+                          .prefetchInFlight  = 3,
+                          .prefetchLDSFactor = 3,
+                          .prefetchMixMemOps = true});
 
         std::vector<GraphTransformPtr> transforms;
         transforms.push_back(std::make_shared<UpdateParameters>(params));
