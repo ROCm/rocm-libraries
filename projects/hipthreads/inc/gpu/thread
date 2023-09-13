@@ -5,10 +5,10 @@
 #include <type_traits>
 #include <system_error>
 #include <iostream>
+#include <cstdint>
 
-// TODO: Define a custom assert macro for the GPU that cleans up the thread state (e.g. by setting
-// fn_table[gpu::this_thread::get_id()] = nullptr) before invoking __assert_fail(#expr, __FILE__, __LINE__,
-// __ASSERT_FUNCTION). Maybe do the cleanup work in a function that wraps around __assert_fail?
+// TODO: Define a custom assert macro for the GPU that cleans up the thread state before invoking __assert_fail(#expr,
+// __FILE__, __LINE__, __ASSERT_FUNCTION). Maybe do the cleanup work in a function that wraps around __assert_fail?
 #include <cassert>
 
 #include "hip/hip_runtime.h"
@@ -16,13 +16,13 @@
 #include "gpu/__functional/invoke.h"
 #include "gpu/__support/hip_check.h"
 #include "gpu/__clib/malloc.h"
+#include "gpu/__clib/memcpy.h"
 
 namespace gpu {
 
 namespace internal {
 
 enum {
-    MAX_VTHREADS = 0x100000, // TODO: Increase this later. For a demo prototype this is good enough.
 #if defined(__gfx1030__)
     NUM_VCORES = 130U, // We can't occupy all cores or the host will have a hard time spawning vthreads or terminating us
                      // TODO: this should be dynamic and depend on the number of CUs or something
@@ -30,6 +30,8 @@ enum {
     NUM_VCORES = 33U,
 #elif defined(__gfx1100__)
     NUM_VCORES = 83U, // Conservative for demo
+// #elif defined(__gfx803__)
+//     NUM_VCORES = 15U,
 #elif defined(__HIP_DEVICE_COMPILE__)
 #warning "Running on a gpu that hasn't had NUM_VCORES configured"
     NUM_VCORES = 15U,
@@ -43,17 +45,22 @@ extern __device__ uint32_t numVcores;
 //      THREAD CLASS DEFINITION
 //====================================================================================================================//
 
-class thread {
-    volatile uint32_t vthreadId = MAX_VTHREADS;
+struct WorkNode_Header;
 
+class thread {
   public:
     // TODO: temporary measure. Should to be replaced with an actual class.
     // Right now a default constructed id is a valid thread id, and it shouldn't be.
     typedef uint32_t id;
 
+    // TODO: The default member initializer for worknode_d makes it impossible to have an instance of gpu::thread in
+    // __shared__ or __device__ memory (pointers to gpu::thread are still allowed). This is not ideal.
     __host__ __device__ thread() noexcept {}
     __host__ __device__ thread(const thread &) = delete;
-    __host__ __device__ thread(thread &&other) noexcept : vthreadId(other.vthreadId) { other.vthreadId = MAX_VTHREADS; }
+    __host__ __device__ thread(thread &&other) noexcept
+        : worknode_d(other.worknode_d), worknodeSize(other.worknodeSize) {
+        other.worknode_d = nullptr;
+    }
     __host__ __device__ thread &operator=(thread &&other) noexcept;
 
     template <class Fn_t, class... Args_t>
@@ -63,15 +70,95 @@ class thread {
 
     __host__ __device__ ~thread();
 
-    __host__ __device__ thread::id get_id() const noexcept { return vthreadId; }
-    __host__ __device__ bool joinable() const noexcept { return vthreadId < MAX_VTHREADS; }
+    __device__ inline thread::id get_id() const;
+    __host__ inline thread::id get_id() const;
+    __host__ __device__ bool joinable() const noexcept { return worknode_d != nullptr; }
     __device__ void join();
     __host__ void join();
-    __host__ __device__ void detach();
+    __device__ void detach();
+    __host__ void detach();
 
     __device__ static unsigned int hardware_concurrency() noexcept { return NUM_VCORES; }
     __host__ static inline unsigned int hardware_concurrency() noexcept;
+  private:
+    // If we don't initialize worknode_d to nullptr, operator= might fail when assigning to a default constructed gpu::thread.
+    WorkNode_Header *worknode_d = nullptr;
+    size_t worknodeSize;
 };
+
+typedef void (*WrappedFnPointer)(WorkNode_Header *, WorkNode_Header **);
+
+struct WorkNode_Header {
+    WorkNode_Header **link_to_self = nullptr; // (link_to_self == nullptr || *link_to_self = this)
+    // Enables thread::detach() to copy a worknode into memory the gpu can free on its own.
+    // Can be either nullptr, &workListHead, &currentWorkNode[blockIdx.x], or &(prev->next)
+    // Use currentWorkNode[blockIdx.x] = nullptr to indicate we're idle
+    // Use link_to_self == nullptr to indicate we're locked?
+    WorkNode_Header *next = nullptr; // Must always be device-accessible. Either zero-copy pinned host memory, or device memory
+    uint32_t finishedOrDetached = false; // For join(). Actually operates as a bool, but in some places we use atomic functions to modify it
+    // uint32_t width; // How many threads per block/vthread are active
+    thread::id vthread_id = {}; // TODO: switch to a ?32? wide array when we allow more than 1 thread per block
+    WrappedFnPointer wrapper_fn = nullptr;
+};
+static_assert(std::is_standard_layout_v<WorkNode_Header>);
+
+template <class Callable_t>
+struct WorkNode {
+    WorkNode(WorkNode &&other) = default;
+    inline __device__ WorkNode(Callable_t &&callable);
+    inline __host__ WorkNode(Callable_t &&callable);
+
+    // Note: Don't try to flatten access to Header's member variables, as it would result in a bunch of strict aliasing
+    // violations.
+    using Header = WorkNode_Header;
+    Header header;
+    Callable_t fn;
+};
+
+template <class Fn_t, class... Args_t>
+static __host__ auto make_worknode(Fn_t &&typed_fn, Args_t &&...args) {
+    // Ideally, we would also forward args in the capture (...args = std::forward<Args_t>(args)) to avoid an extra copy,
+    // but that requires C++20
+    auto lambda = [typed_fn = std::forward<Fn_t>(typed_fn), args...] __device__() {
+        gpu::__invoke(std::move(typed_fn), std::move(args)...);
+    };
+    using WorkNode_t = WorkNode<decltype(lambda)>;
+    WorkNode_t *worknode_ptr = new WorkNode_t(std::move(lambda));
+    // Sadly, hipHostUnregister performs an implicit device-wide synchronization. Thus, in order to use pinned host
+    // memory for the async copy, we would either end up with a gradually growing amount of pinned memory, or need to
+    // re-use the same pinned memory every time.
+    // __LIBGPU_HIP_CHECK__(hipHostRegister(worknode_ptr, sizeof(WorkNode_t), hipHostRegisterDefault));
+
+    // Use a functor so that unique_ptr doesn't have to carry a function pointer around, and can inline the destruction.
+    // Not technically needed if we aren't making a call to hipHostUnregister.
+    struct Deleter {
+        void operator()(WorkNode_t* ptr) {
+            // __LIBGPU_HIP_CHECK__(hipHostUnregister(ptr));
+            // Skip invoking the destructor for WorkNode_t because we're expecting the WorkNode to be memcpy'd to device
+            // memory. Not technically required since TriviallyCopyable implies it's trivially destructible
+            operator delete(ptr);
+        }
+    };
+    return std::unique_ptr<WorkNode_t, Deleter>(worknode_ptr);
+}
+template <class Fn_t, class... Args_t>
+static __device__ auto make_worknode(Fn_t &&typed_fn, Args_t &&...args) {
+    // These will give a more user-friendly error message when the lambda is not move-constructible.
+    static_assert(std::is_move_constructible_v<Fn_t>);
+    static_assert((std::is_move_constructible_v<Args_t> && ...));
+
+    // Ideally, we would also forward args in the capture (...args = std::forward<Args_t>(args)) to avoid an extra copy,
+    // but that requires C++20
+    auto lambda = [typed_fn = std::forward<Fn_t>(typed_fn), args...] __device__() {
+        gpu::__invoke(std::move(typed_fn), std::move(args)...);
+    };
+
+    // Allocate memory using malloc instead of new, to guaranteed that ::free(worknode) is valid.
+    // The C++ standard doesn't guarantee that new and malloc allocate from the same pool of memory.
+    void *buf = ::malloc(sizeof(WorkNode<decltype(lambda)>));
+    return new(buf) WorkNode<decltype(lambda)>(std::move(lambda));
+}
+
 
 //====================================================================================================================//
 //      GLOBAL VARIABLE DECLARATIONS
@@ -80,151 +167,229 @@ class thread {
 // TODO: These globals currently prevent us from being a header-only library
 // Maybe use an inline (non-static) __device__ function that returns a pointer to a static local variable instead?
 // E.g. https://stackoverflow.com/questions/51612866/global-variables-in-header-only-library
-typedef void (*WrappedFnPointer)(void *);
-// These are indexed by the vthreadId
-extern __device__ volatile WrappedFnPointer wrapper_table[MAX_VTHREADS];
-extern __device__ void *volatile fn_table[MAX_VTHREADS];
-// TODO: Maybe change the above tables into a linked-list? We already have to allocate heap space for the fn anyways.
-/* E.g.
-__device__ volatile void *vthreadHead;
-__device__ void *volatile *vthreadTail = &vthreadHead;
-template <class Callable_t> class thread { // Or, make it a separate class from gpu::thread only used internally
-    void *next; // must always be device-accessible. Either zero-copy pinned host memory, or device memory
-    uint32_t threadId;
-    bool finished; // for join()
-    Callable_t fn;
-};
-// But how to implement kernel_terminate()? Just a global variable?
-*/
 
-extern __device__ volatile uint32_t nextVthreadId_stored;
-extern __device__ volatile uint32_t nextVthreadId_launched;
-// if nextVthreadId_launched > nextVthreadId_stored, then (nextVthreadId_launched-nextVthreadId_stored) vcores are
-// spinning waiting for work. Otherwise (nextVthreadId_stored-nextVthreadId_launched) vthreads have been constructed, but
-// not started/assigned to a vcore
+// TODO: should these be static members of WorkNode_Header?
+extern __device__ WorkNode_Header *workListHead;
+extern __device__ WorkNode_Header **workListTail; // Use workListTail = nullptr as a global lock.
+extern __device__ WorkNode_Header *volatile currentWorkNode[NUM_VCORES];
 
 extern hipStream_t mainStream;
 extern bool started;
-
-// Doesn't need to be volatile because this will only ever be read/written to by a single vcore/(real, non-v) thread
-// TODO: switch to a ?32? wide array when we allow more than 1 thread per block
-extern __shared__ gpu::internal::thread::id currentVthreadId;
+extern __device__ volatile bool finishing;
 
 //====================================================================================================================//
 //      INTERNAL/HELPER FUNCTIONS
 //====================================================================================================================//
 
-template <class Fn_t>
-static __device__ void wrapper(void *fn) {
-    Fn_t *typed_fn = static_cast<Fn_t *>(fn);
-    (*typed_fn)();
+[[nodiscard]] static inline __device__ WorkNode_Header **lockAndFetchTail() {
+    uintptr_t currentTail;
+    // Roughly equivalent to, but faster than:
+    // uintptr_t old = *reinterpret_cast<uintptr_t*>(&workListTail), assumed;
+    // do {
+    //     assumed = old;
+    //     old = atomicCAS(reinterpret_cast<uintptr_t*>(&workListTail), assumed, 0);
+    // } while (assumed != old || assumed == 0);
+    // Note: I think access through this cast might be a strict aliasing violation, but it's kind of unavoidable.
+    // atomicExch only accepts arithmetic types, so we have to cast worklistTail to an arithmetic type like uintptr_t,
+    // resulting in a strict aliasing violation.
+    while((currentTail = atomicExch(reinterpret_cast<uintptr_t*>(&workListTail), 0)) == 0) {
+        //__builtin_amdgcn_s_sleep(1);
+    }
+    return reinterpret_cast<WorkNode_Header **>(currentTail);
+}
+static inline __device__ void setAndUnlockTail(WorkNode_Header **newTail) {
     __threadfence();
-    // If we start using thread groups > 1, then this becomes necessary (and probably more stuff like it elsewhere)
+    // assert(workListTail == nullptr);
+    // I think this might be a strict aliasing violation, but it's kind of unavoidable
+    atomicExch(reinterpret_cast<uintptr_t*>(&workListTail), reinterpret_cast<uintptr_t>(newTail));
+}
+
+// Precondition: We're still holding the lock acquired in invokeNext
+template <class Callable_t>
+static __device__ void wrapper(WorkNode_Header *worknode, WorkNode_Header **currentTail) {
+    static_assert(std::is_standard_layout_v<WorkNode<Callable_t>>);
+    // TODO: Part of C++20, not yet implemented in libc++. See https://libcxx.llvm.org/Status/Cxx20.html -> P0466R5
+    // static_assert(std::is_pointer_interconvertible_with_class(WorkNode<Callable_t>::header));
+
+    // Because of pointer-interconvertability of WorkNode<Callable_t>::header and WorkNode<Callable_t>, reading from typed_node_ptr
+    // shouldn't result in a strict-aliasing violation.
+    WorkNode<Callable_t> *typed_node_ptr = reinterpret_cast<WorkNode<Callable_t> *>(worknode);
+    Callable_t fn = std::move(typed_node_ptr->fn);
+    setAndUnlockTail(currentTail);
+    fn();
+    __threadfence();
+
+    // If we start using thread groups > 1, then this might be necessary (and probably more stuff like it elsewhere)
     //__syncthreads();
-    delete typed_fn;
 }
 
-template <class Fn_t, class... Args_t>
-static inline __device__ uint32_t store(Fn_t &&typed_fn, Args_t &&...args) {
-    // Store args by capturing them in a lambda. This allows wrapper<T> to focus on invoking an arbitrary object of
-    // callable type.
-    // Ideally, we would also forward args in the capture (...args = std::forward<Args_t>(args)) to avoid an extra copy,
-    // but that requires C++20
-    auto arg_wrapper =
-        new auto([typed_fn = std::forward<Fn_t>(typed_fn), args...] __device__() { gpu::__invoke(std::move(typed_fn), std::move(args)...); });
-    uint32_t vthreadId = atomicAdd(const_cast<uint32_t *>(&nextVthreadId_stored), 1);
-    if (vthreadId >= MAX_VTHREADS) {
-        delete arg_wrapper;
-        return MAX_VTHREADS;
-    }
-    wrapper_table[vthreadId] = wrapper<std::remove_reference_t<decltype(*arg_wrapper)>>;
-    __threadfence(); // ensure fn_table[i] != nullptr implies wrapper_table[i] != nullptr so invokeNext only needs to
-                     // check fn_table[i] != nullptr
-    // TODO: determine if using a __threadfence() is actually better than having invokeNext check both fn_table[i] !=
-    // nullptr and wrapper_table[i] != nullptr
-    fn_table[vthreadId] = static_cast<void *>(arg_wrapper);
-    return vthreadId;
+template <class Callable_t>
+__device__ WorkNode<Callable_t>::WorkNode(Callable_t &&callable) : fn(std::move(callable)) {
+    header.wrapper_fn = wrapper<Callable_t>;
 }
 
-// Before calling invokeNext(true), the caller should check that there is work available (nextVthreadId_launched <=
-// nextVthreadId_stored)
-static inline __device__ uint32_t invokeNext(const bool dontWait = false) {
-    uint32_t vthreadId = atomicAdd(const_cast<uint32_t *>(&nextVthreadId_launched), 1);
-    if (vthreadId >= MAX_VTHREADS) {
-        return MAX_VTHREADS;
+template <class Callable_t>
+__host__ WorkNode<Callable_t>::WorkNode(Callable_t &&callable) : fn(std::move(callable)) {
+    // Only way to pass the device the information about how to invoke WorkNode<Callable_t>.fn is by launching a kernel.
+    // Thus, we initialize header.wrapper_fn later in insertWorkNodeFromHost.
+    // Since we have to incur the overhead of launching a kernel anyways, we also use that kernel to initialize
+    // header.link_to_self and header.vthread_id - that way we can keep all the status information in device memory,
+    // rather than in pinned host memory.
+
+    // Why do we NEED a kernel?
+    // We can't reference __device__ functions from __host__ functions, so this is illegal:
+    // header = {nullptr, nullptr, false, {}, 0, wrapper<Callable_t> };
+    //
+    // Extended lambda's don't define a pointer-to-function conversion operator, so wrapping the invokation of the
+    // __device__ function in an extended lambda without captures doesn't work:
+    // header = {nullptr, nullptr, false, {}, 0, [] __device__ () { wrapper<Callable_t>() } };
+    // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html 14.7.2.16 Extended Lambda Restrictions
+    //
+    // __device__ template variables cannot be instantiated using a type defined in host code, so this doesn't work:
+    // template <class Fn_t> __device__ WrappedFnPointer wrapper_ptr = wrapper<Fn_t>;
+    // __LIBGPU_HIP_CHECK__(hipMemcpyFromSymbol(&temp, HIP_SYMBOL(wrapper_ptr<Callable_t>), sizeof(temp), 0,
+    // hipMemcpyDeviceToHost)); https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html 14.5.12 Restrictions ->
+    // Templates
+    //
+    // If there's some other way of bundling the arguments up, and passing them to the device along with a function that
+    // accepts those arguments, we could use that and avoid a kernel launch from the host.
+}
+
+// TODO: many of these might be better as member functions of WorkNode or WorkNode_Header, and we could potentially make
+// a bunch of WorkNode_Header's member variables private
+static inline __device__ void insertWorkNodeAtTail(WorkNode_Header *worknode) {
+    WorkNode_Header **currentTail = worknode->link_to_self = lockAndFetchTail();
+    *(worknode->link_to_self) = worknode;
+    if (currentTail != &workListHead) {
+        WorkNode_Header* prev = reinterpret_cast<WorkNode_Header*>(reinterpret_cast<char*>(currentTail) - offsetof(WorkNode_Header, next));
+        worknode->vthread_id = prev->vthread_id + 1;
+    } else {
+        worknode->vthread_id = 1;
     }
-    currentVthreadId = vthreadId;
-    __threadfence(); // Make sure everybody sees our update to nextVthreadId_launched before the vthread function
-                     // potentially spawns a thread and in the process updates nextVthreadId_stored.
-    while (fn_table[vthreadId] == nullptr) {
-        // All constructed vthreads are already assigned/running. If dontWait == false, spin while we wait for work.
-        // If dontWait == true, construct dummy vthreads until we get some 'work' to run (an empty lambda).
-        //
-        // This hack is needed because incrementing nextVthreadId_launched signalled that we'd take responsibility for
-        // whatever work gets stored at fn_table[vthreadId].
-        if (dontWait) {
-            store([] __device__() { ; });
+    setAndUnlockTail(&(worknode->next));
+}
+
+static inline __device__ void setCurrentWorkNode(WorkNode_Header *node) {
+    // This is non-null if and only if invokeNext was called from pseudo_yield.
+    WorkNode_Header *yieldingWorkNode = currentWorkNode[blockIdx.x];
+    currentWorkNode[blockIdx.x] = node;
+    if (node == nullptr)
+        return;
+    node->link_to_self = const_cast<WorkNode_Header **>(&currentWorkNode[blockIdx.x]);
+    // If we're called from pseudo_yield, set node->next to the yielding thread so we can restore later.
+    node->next = yieldingWorkNode;
+    if (yieldingWorkNode != nullptr) {
+        yieldingWorkNode->link_to_self = &node->next;
+    }
+}
+static inline __device__ WorkNode_Header *popWorkNodeFromHead() {
+    // assert(workListHead != nullptr);
+    WorkNode_Header *head = reinterpret_cast<WorkNode_Header *>(atomicAdd(reinterpret_cast<uintptr_t*>(&workListHead), 0));
+    workListHead = head->next;
+    setCurrentWorkNode(head);
+    if (workListHead != nullptr) {
+        workListHead->link_to_self = &workListHead;
+    }
+    return head;
+}
+
+// Returns true if there was work waiting
+static inline __device__ bool invokeNext() {
+    WorkNode_Header **currentTail = lockAndFetchTail();
+    if (currentTail == &workListHead) {
+        // assert(workListHead == nullptr);
+        setAndUnlockTail(&workListHead);
+        return false;
+    }
+
+    WorkNode_Header *worknode = popWorkNodeFromHead();
+    if (workListHead == nullptr) {
+        currentTail = &workListHead;
+    }
+    // Invoke the user-provided function.
+    // So we don't have to keep locking and re-loading worknode from currentWorkNode[], wrapper_fn is responsible for unlock
+    worknode->wrapper_fn(worknode, currentTail);
+
+    // Now we have to re-lock it and re-fetch worknode in case it was detached while the user function was running.
+    currentTail = lockAndFetchTail();
+    worknode = currentWorkNode[blockIdx.x];
+    // If we're called from pseudo_yield, restore the original worknode.
+    // Otherwise, this sets currentWorkNode[blockIdx.x] to nullptr, signaling that we're 'idle'
+    setCurrentWorkNode(worknode->next);
+    if (worknode->finishedOrDetached) { // Detach has been called
+        ::free(worknode);
+    } else {
+        worknode->finishedOrDetached = true;
+    }
+
+    setAndUnlockTail(currentTail);
+    return true;
+}
+
+static inline __device__ uint32_t getActiveVcoreCount() {
+    WorkNode_Header **currentTail = lockAndFetchTail();
+    uint32_t count = 0;
+    // TODO: convert this to a strided loop?
+    for (uint32_t i = 0; i < NUM_VCORES; ++i) {
+        // TODO: If we're only ever using this function to check whether getActiveVcoreCount() != 0, we could exit early
+        if (currentWorkNode[i] != nullptr) {
+            ++count;
         }
     }
-    wrapper_table[vthreadId](fn_table[vthreadId]);
-    __threadfence(); // Make sure all the writes the vthread function made are visible before we do anything further
-    currentVthreadId = MAX_VTHREADS;
-    wrapper_table[vthreadId] = nullptr;
-    fn_table[vthreadId] = nullptr;
-    return vthreadId;
+    setAndUnlockTail(currentTail);
+    return count;
 }
 
 //====================================================================================================================//
 //      KERNELS
 //====================================================================================================================//
 
-//TODO: should these all be static? This creates duplicate copies in each compilation unit that includes this header
+// TODO: should these all be static? This creates duplicate copies in each compilation unit that includes this header
 // Maybe they should be declared inline instead (to avoid multiple definition errors)
-// Note that we need to disable -Wcuda-compat using a pragma if we do this
+// Note that we need to disable -Wcuda-compat for this section using a pragma if we do this
 static __global__ void threading_main() {
-    currentVthreadId = MAX_VTHREADS;
-    for (uint32_t vthreadId = invokeNext(); vthreadId < MAX_VTHREADS;) {
-        vthreadId = invokeNext();
+    for (bool workFound = true; workFound || !finishing || getActiveVcoreCount() != 0;) {
+        workFound = invokeNext();
+        if (!workFound)
+            __builtin_amdgcn_s_sleep(8);
     }
 }
 
-template <class Fn_t, class... Args_t>
-static __global__ void spawnVthreadFromHost(thread *thd, Fn_t typed_fn, Args_t... args) {
-    new (thd) thread(std::move(typed_fn), std::move(args)...);
+template <class Callable_t>
+static __global__ void insertWorkNodeFromHost(WorkNode_Header *worknode) {
+    worknode->wrapper_fn = wrapper<Callable_t>;
+    insertWorkNodeAtTail(worknode);
 }
 
-// This needs to be launched in the same stream as the host-side thread creation to ensure it happens after that
-static __global__ void kernel_terminate() {
-    // Wait for ALL queued/waiting and started/running vthreads to complete.
-    // Note that one of the vthreads might themselves spawn more vthreads we have to wait for!
-    for (uint32_t nextVthreadId_executed_local = 0; nextVthreadId_executed_local < nextVthreadId_stored + NUM_VCORES;) {
-        // We use a local copy of nextVthreadId_launched to force the read of nextVthreadId_launched to happen before
-        // the read of nextVthreadId_stored. If we don't force this ordering, it's possible that we read
-        // nextVthreadId_stored right before the last vthread spawns another vthread, finishes, and then the vcore it
-        // was on increments nextVthreadId_launched before we read it.
-        nextVthreadId_executed_local = nextVthreadId_launched;
-        // Looking at the example use of __threadfence() in
-        // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#memory-fence-functions, we might need a
-        // threadfence between the load of nextVthreadId_launched and the load of nextVthreadId_stored
+static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t worknodeSize) {
+    WorkNode_Header *newWorkNode = static_cast<WorkNode_Header *>(::malloc(worknodeSize));
+    WorkNode_Header **currentTail = lockAndFetchTail();
+
+    if (oldWorkNode->finishedOrDetached) {
+        // It's already finished, so oldWorkNode is not in the list, nor in currentWorkNode[]. Thus, we don't have to
+        // worry about updating its state or copying it. Just return so gpu::thread can free oldWorkNode.
+        setAndUnlockTail(currentTail);
+        ::free(newWorkNode);
+        return;
     }
-    __threadfence();
-    // When a vcore sees that we have hit MAX_VTHREADS, it exits. We can use this to make them stop running.
-    nextVthreadId_launched = MAX_VTHREADS;
-    // The vcores are now spinning waiting for work and won't notice the update to nextVthreadId_launched until we give
-    // them some. So we'll give them an empty job to do.
-    // TODO: this could probably be parallelized if we launch this kernel with a block size of NUM_VCORES instead of 1.
-    for (int i = 0; i < NUM_VCORES; ++i) {
-        store([] __device__() { ; });
+
+    oldWorkNode->finishedOrDetached = true;
+    *(oldWorkNode->link_to_self) = newWorkNode;
+    gpu::memcpy(newWorkNode, oldWorkNode, worknodeSize);
+
+    // Not equivalent to `oldWorkNode->next == nullptr` b/c pseudo_yield uses oldWorkNode->next to store a pointer to
+    // the yielding thread
+    if (currentTail == &(oldWorkNode->next)) {
+        setAndUnlockTail(&(newWorkNode->next));
+    } else {
+        // Using oldWorkNode to access next means nothing in this function requires a read from newWorkNode. Not sure if
+        // that matters
+        if (oldWorkNode->next != nullptr)
+            oldWorkNode->next->link_to_self = &(newWorkNode->next);
+        setAndUnlockTail(currentTail);
     }
-    // The vcores should all exit on their own now.
-    // If we need to wait for them to actually exit, we can do that in host code using hipStreamSynchronize(mainStream).
 }
 
-static __global__ void kernel_join(thread::id vthreadId) {
-    while (fn_table[vthreadId] != nullptr) {
-        // spin while we wait for it to finish.
-    }
-}
 } // namespace internal
 
 //====================================================================================================================//
@@ -236,19 +401,13 @@ using internal::thread;
 namespace this_thread {
 static inline __device__ gpu::thread::id get_id() noexcept {
     using namespace internal;
-    return currentVthreadId;
+    return currentWorkNode[blockIdx.x]->vthread_id;
 }
 
 static inline __device__ void pseudo_yield() {
     using namespace internal;
 
-    // If there's no work waiting, return immediately.
-    if (nextVthreadId_launched > nextVthreadId_stored) {
-        return;
-    }
-    uint32_t old_vthreadId = currentVthreadId;
-    invokeNext(true);
-    currentVthreadId = old_vthreadId;
+    invokeNext();
 }
 } // namespace this_thread
 
@@ -268,10 +427,10 @@ static inline __host__ void finish(bool blocking = true) {
     if (!started) {
         throw std::logic_error("called gpu::finish() before calling gpu::start()");
     }
-    hipLaunchKernelGGL(kernel_terminate, dim3(1), dim3(1), 0, getEnqueingStream());
-    __LIBGPU_HIP_CHECK__(hipGetLastError());
+    bool temp = true;
+    __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(finishing), &temp, sizeof(bool), 0, hipMemcpyHostToDevice, getEnqueingStream()));
     if (blocking) {
-        // We could wait for kernel_terminate to finish (with hipStreamSynchronize(enqueingStream)) before
+        // We could wait for the memcpy to finish (with hipStreamSynchronize(enqueingStream)) before
         // synchronizing on mainStream, but there's no need.
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(mainStream));
         __LIBGPU_HIP_CHECK__(hipStreamDestroy(mainStream));
@@ -292,6 +451,20 @@ inline __host__ unsigned int thread::hardware_concurrency() noexcept {
     }
 }
 
+__device__ inline thread::id thread::get_id() const {
+    // Don't need to lock because it's illegal for gpu::thread::detach to be called at the same time as any other
+    // gpu::thread method, so we know worknode_d won't change while we're in this function.
+    // Also, since vthread_id doesn't change, we don't need to force a fetch from memory, a cached value is fine.
+    return worknode_d->vthread_id;
+}
+__host__ inline thread::id thread::get_id() const {
+    thread::id vthread_id;
+    // TODO: Do we want to store a copy of the vthread_id in gpu::thread (and only fetch from worknode_d->vthread_id if the cached copy is invalid)?
+    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&vthread_id, &(worknode_d->vthread_id), sizeof(worknode_d->vthread_id), hipMemcpyDeviceToHost, getEnqueingStream()));
+    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+    return vthread_id;
+}
+
 __host__ __device__ inline thread &thread::operator=(thread &&other) noexcept {
     if (joinable()) {
 #ifdef __HIP_DEVICE_COMPILE__
@@ -300,30 +473,59 @@ __host__ __device__ inline thread &thread::operator=(thread &&other) noexcept {
         std::terminate();
 #endif
     }
-    vthreadId = other.vthreadId;
-    other.vthreadId = MAX_VTHREADS;
+    worknode_d = other.worknode_d;
+    other.worknode_d = nullptr;
+    worknodeSize = other.worknodeSize;
     return *this;
 }
 
 template <class Fn_t, class... Args_t>
 inline __host__ thread::thread(Fn_t &&typed_fn, Args_t &&...args) {
-    gpu::thread *temp, *temp_d;
-    // We would use hipHostMalloc here instead of malloc + hipHostRegister, except that hipHostFree performs an implicit
-    // hipDeviceSynchronize() which will cause problems
-    temp = static_cast<gpu::thread *>(std::malloc(sizeof(*temp)));
-    __LIBGPU_HIP_CHECK__(hipHostRegister(temp, sizeof(*temp), hipHostRegisterDefault));
-    __LIBGPU_HIP_CHECK__(hipHostGetDevicePointer(reinterpret_cast<void **>(&temp_d), temp, 0));
-    hipLaunchKernelGGL(spawnVthreadFromHost, dim3(1), dim3(1), 0, getEnqueingStream(), temp_d,
-                       std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
-    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
-    __LIBGPU_HIP_CHECK__(hipHostUnregister(temp));
-    *this = std::move(*temp);
-    std::free(temp);
+    std::unique_ptr worknode_h = make_worknode(std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+    // First two are prerequisites for the third, and produce more user-friendly error messages
+    // Note: is_trivially_copyable can behave strangely for extended lambdas. See
+    // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html 14.7.2.18 Extended Lambda Restrictions
+    static_assert(std::is_trivially_copyable_v<std::remove_reference_t<Fn_t>>);
+    static_assert((std::is_trivially_copyable_v<std::remove_reference_t<Args_t>> && ...));
+    // We're about to memcpy the WorkNode from host to device memory. Make sure that's ok.
+    // TODO: could these requirements be relaxed to is_trivially_destructible<T> and
+    // is_trivially_constructible<remove_ref<T>, decltype(t)> (i.e. is_trivially_move_constructible or
+    // is_trivially_copy_constructible depending on if T is rvalue or lvalue ref)?
+    // Note: Do we need to worry about non-object Fn_t's?
+    static_assert(std::is_trivially_copyable_v<typename decltype(worknode_h)::element_type>);
+
+    // TODO: do we even want to move the worknode into device memory, or just leave it in pinned host memory?
+    __LIBGPU_HIP_CHECK__(hipMallocAsync(&worknode_d, sizeof(*worknode_h), getEnqueingStream()));
+    // Maybe we want to do this memcpy in the kernel?
+    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d, worknode_h.get(), sizeof(*worknode_h), hipMemcpyHostToDevice, getEnqueingStream()));
+    hipEvent_t event; // Create a synchronization point after hipMemcpyAsync, so we can make sure the copy is finished before unregistering and/or freeing worknode_h.
+    __LIBGPU_HIP_CHECK__(hipEventCreate(&event));
+    __LIBGPU_HIP_CHECK__(hipEventRecord(event, getEnqueingStream()));
+
+    hipLaunchKernelGGL(insertWorkNodeFromHost<decltype(worknode_h->fn)>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d);
+
+    worknodeSize = sizeof(*worknode_h);
+
+    // Make sure that the copy is finished before worknode_h goes out of scope and gets unregistered and/or destroyed.
+    __LIBGPU_HIP_CHECK__(hipEventSynchronize(event));
+    __LIBGPU_HIP_CHECK__(hipEventDestroy(event));
 }
 
 template <class Fn_t, class... Args_t>
 inline __device__ thread::thread(Fn_t &&typed_fn, Args_t &&...args) {
-    vthreadId = store(std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+    auto typed_worknode_ptr = make_worknode(std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+
+    // First two are prerequisites for the third, and produce more user-friendly error messages
+    static_assert(std::is_trivially_destructible_v<Fn_t>);
+    static_assert((std::is_trivially_destructible_v<Args_t> && ...));
+    // gpu::thread loses the information about what type WorkNode<Callable_t> is, so can't call the destructor
+    static_assert(std::is_trivially_destructible_v<decltype(*typed_worknode_ptr)>);
+
+    // Because of pointer-interconvertability of WorkNode<Callable_t> and WorkNode<Callable_t>::header, reading from
+    // worknode_d shouldn't result in a strict-aliasing violation.
+    worknode_d = reinterpret_cast<WorkNode_Header *>(typed_worknode_ptr);
+    // TODO: Should we bother initializing worknodeSize? It's never used in device code...
+    insertWorkNodeAtTail(worknode_d);
 }
 
 __host__ __device__ inline thread::~thread() {
@@ -337,19 +539,28 @@ __host__ __device__ inline thread::~thread() {
 }
 
 __device__ inline void thread::join() {
-    // TODO: check that the user has called gpu::start()
+    // TODO: check that the user has called gpu::start(), in case they use a hip kernel launch to get here
     if (!joinable()) {
         assert(joinable() && "Attempted to join a gpu::thread object that doesn't have an associated thread");
     }
-    if (this->get_id() == gpu::this_thread::get_id()) {
-        assert(this->get_id() != gpu::this_thread::get_id() &&
-                   "Attempted to join the gpu::thread object associated with the active thread");
+    // This is safe b/c if we call join on ourself, then 1) we were the ones to write to currentWorkNode[blockIdx.x], so
+    // a cached value is ok. 2) Nobody else can call detach on us, so currentWorkNode[blockIdx.x] won't get updated.
+    if (currentWorkNode[blockIdx.x] == worknode_d) {
+        assert(false && "Attempted to join the gpu::thread object associated with the active thread");
     }
-    assert(vthreadId < nextVthreadId_stored && "Internal library error");
-    while (fn_table[vthreadId] != nullptr) {
+    // We don't need to lock here because we know nobody is going to call detach on worknode_d, but we do need to make
+    // sure that this does a load from memory and not a cache, so we use an atomicAdd(..., 0).
+    //
+    // Note that finishedOrDetached == true implies the thread has finished, since we can't possibly have called detach
+    while (!atomicAdd(&(worknode_d->finishedOrDetached), 0)) {
         // spin while we wait for it to finish.
+        __builtin_amdgcn_s_sleep(8);
     }
-    vthreadId = MAX_VTHREADS;
+
+    // WorkNode<T> is trivially destructible (checked in gpu::thread constructor), so we can safely use free instead
+    // of delete
+    ::free(worknode_d);
+    worknode_d = nullptr;
 }
 
 __host__ inline void thread::join() {
@@ -359,21 +570,45 @@ __host__ inline void thread::join() {
     if (!joinable()) {
         throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::join failed");
     }
-    // TODO: This is an ugly way of doing this. Try to come up with something better
-    hipLaunchKernelGGL(kernel_join, dim3(1), dim3(1), 0, getEnqueingStream(), vthreadId);
-    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
-    vthreadId = MAX_VTHREADS;
+
+    for (uint32_t finished = false; !finished;) {
+        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&finished, &(worknode_d->finishedOrDetached), sizeof(worknode_d->finishedOrDetached), hipMemcpyDeviceToHost, getEnqueingStream()));
+        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+        // Maybe sleep or yield here? On the other hand, hipStreamSynchronize is a blocking call that is likely to take a while
+    }
+    // WorkNode<T> is trivially destructible (implied by std::is_trivially_copyable), so we can safely use free instead
+    // of delete
+    __LIBGPU_HIP_CHECK__(hipFreeAsync(worknode_d, getEnqueingStream()));
+    worknode_d = nullptr;
 }
 
-__host__ __device__ inline void thread::detach() {
+__host__ inline void thread::detach() {
     if (!joinable()) {
-#ifdef __HIP_DEVICE_COMPILE__
-        assert(joinable() && "Attempted to detach a gpu::thread object that doesn't have an associated thread");
-#else
         throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::detach failed");
-#endif
     }
-    vthreadId = MAX_VTHREADS;
+    hipLaunchKernelGGL(detachWorkNode, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d, worknodeSize);
+    __LIBGPU_HIP_CHECK__(hipFreeAsync(worknode_d, getEnqueingStream()));
+    worknode_d = nullptr;
+}
+
+__device__ inline void thread::detach() {
+    if (!joinable()) {
+        assert(joinable() && "Attempted to detach a gpu::thread object that doesn't have an associated thread");
+    }
+    WorkNode_Header **currentTail = lockAndFetchTail();
+    if (worknode_d->finishedOrDetached) {
+        // It's already finished, so we have the only pointer to worknode_d. Thus, we can just free the memory.
+        setAndUnlockTail(currentTail);
+        ::free(worknode_d);
+        return;
+    }
+
+    worknode_d->finishedOrDetached = true;
+    // Since the gpu::thread instance is in device memory, we know the gpu did the allocation for worknode_d, no need to
+    // copy the data to memory the gpu can free on its own.
+    setAndUnlockTail(currentTail);
+
+    worknode_d = nullptr;
 }
 
 } // namespace gpu
