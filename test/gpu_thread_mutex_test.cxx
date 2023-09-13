@@ -130,7 +130,7 @@ int main() {
     std::vector<gpu::thread> threads(1<<16);
     for (unsigned int i = 0; i < threads.size(); ++i) {
         threads[i] = gpu::thread([] __device__(){block_sync_test();});
-        assert(threads[i].get_id() < gpu::internal::MAX_VTHREADS);
+        assert(threads[i].joinable());
     }
     for (unsigned int i = 0; i < threads.size(); ++i) {
         try {
