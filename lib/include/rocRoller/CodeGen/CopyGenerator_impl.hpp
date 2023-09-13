@@ -48,10 +48,10 @@ namespace rocRoller
         // Catch unhandled copy cases
         else
         {
-            throw FatalError("Unhandled copy case: ",
-                             Register::toString(src->regType()),
-                             " to ",
-                             Register::toString(dest->regType()));
+            Throw<FatalError>("Unhandled copy case: ",
+                              Register::toString(src->regType()),
+                              " to ",
+                              Register::toString(dest->regType()));
         }
     }
 
@@ -189,14 +189,14 @@ namespace rocRoller
         // Catch unhandled copy cases
         else
         {
-            throw FatalError("Unhandled copy case: ",
-                             Register::toString(src->regType()),
-                             ": ",
-                             src->toString(),
-                             " to ",
-                             Register::toString(dest->regType()),
-                             ": ",
-                             dest->toString());
+            Throw<FatalError>("Unhandled copy case: ",
+                              Register::toString(src->regType()),
+                              ": ",
+                              src->toString(),
+                              " to ",
+                              Register::toString(dest->regType()),
+                              ": ",
+                              dest->toString());
         }
     }
 

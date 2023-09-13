@@ -161,6 +161,16 @@ namespace rocRoller
                 return [this](int x) -> bool { return get<T>(x).has_value(); };
             }
 
+            /**
+             * Connects each argument in order with a separate edge of type `Edge`. Accepts
+             * any number of arguments.  The edges will be default-constructed.
+             *
+             * e.g. chain<Sequence>(a, b, c) will create two sequence edges, one from a to b,
+             * and one from b to c.
+             */
+            template <CControlEdge Edge, std::convertible_to<int>... Nodes>
+            void chain(int a, int b, Nodes... remaining);
+
         private:
             virtual void clearCache() override;
             void         checkOrderCache() const;

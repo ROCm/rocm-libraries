@@ -243,14 +243,18 @@ namespace rocRoller
             graph.mapper.connect<User>(storeFlag, flagsScratchTag);
             graph.mapper.connect<VGPR>(storeFlag, flagVGPR);
 
-            graph.control.addElement(Sequence(), {storePartialTag}, {waitZeroTag});
-            graph.control.addElement(Sequence(), {waitZeroTag}, {assignFlag});
-            graph.control.addElement(Sequence(), {assignFlag}, {storeFlag});
+            //ReadFlag for workgroup + 1
+            auto elemNum      = graph.coordinates.addElement(Linear(0, one));
+            auto setCoordElem = graph.control.addElement(SetCoordinate(one));
+            graph.mapper.connect<ElementNumber>(setCoordElem, elemNum);
 
             // clear waitcnt queues before ConditionalOp
             // TODO : remove this WaitZero after waitcount observer handles if/else control flow.
             auto waitZeroTag2 = graph.control.addElement(WaitZero());
-            graph.control.addElement(Sequence(), {storeFlag}, {waitZeroTag2});
+
+            graph.control.chain<Sequence>(storePartialTag, waitZeroTag, assignFlag, setCoordElem);
+
+            graph.control.addElement(Body{}, {setCoordElem}, {storeFlag});
 
             // create destMacTileTag before the if/else part
             auto destMacTileTag = graph.coordinates.addElement(MacroTile());
@@ -258,24 +262,21 @@ namespace rocRoller
 
             auto flagExpr = std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{flagVGPR, Register::Type::Scalar, DataType::UInt32});
-            auto conditionalTag = graph.control.addElement(ConditionalOp{(flagExpr == one)});
-            graph.control.addElement(Sequence(), {waitZeroTag2}, {conditionalTag});
+
+            auto numScratch = Expression::literal(context->kernelOptions().numScratchTiles);
+
+            auto conditionalTag = graph.control.addElement(
+                ConditionalOp{(flagExpr == one) && (wgExpr + one < numScratch)});
+
+            graph.control.chain<Sequence>(storeFlag, waitZeroTag2, conditionalTag);
 
             auto loadPartialTag = graph.control.addElement(LoadTiled(varType.dataType));
             for(auto const& c : loadConnections)
                 graph.mapper.connect(loadPartialTag, c.coordinate, c.connectionSpec);
 
-            //ReadFlag for workgroup + 1
-            auto elemNum      = graph.coordinates.addElement(ElementNumber(0, zero));
-            auto setCoordElem = graph.control.addElement(SetCoordinate(one));
-            graph.mapper.connect<ElementNumber>(setCoordElem, elemNum);
-
             auto newWG = graph.coordinates.addElement(Linear());
             graph.coordinates.addElement(Split(), {newWG}, {wg, elemNum});
             auto loadFlag = graph.control.addElement(LoadSGPR(DataType::UInt32, true));
-
-            auto numScratch  = Expression::literal(context->kernelOptions().numScratchTiles);
-            auto boundsCheck = graph.control.addElement(ConditionalOp{(wgExpr + one < numScratch)});
 
             graph.mapper.connect<User>(loadFlag, flagsScratchTag);
             graph.mapper.connect<VGPR>(loadFlag, flagVGPR);
@@ -286,9 +287,7 @@ namespace rocRoller
             // flagsArray in scratch. If the wg + 1 is in bounds we perform the wait cycle.
             // Else continue.
             auto doWhile    = graph.control.addElement(DoWhileOp{(flagExpr == zero), "WaitCycle"});
-            auto trueBranch = graph.control.addElement(Body(), {conditionalTag}, {setCoordElem});
-            graph.control.addElement(Body(), {setCoordElem}, {boundsCheck});
-            auto boundTrue = graph.control.addElement(Body(), {boundsCheck}, {doWhile});
+            auto trueBranch = graph.control.addElement(Body(), {conditionalTag}, {doWhile});
             graph.control.addElement(Body(), {doWhile}, {loadFlag});
             graph.control.addElement(Sequence(), {doWhile}, {loadPartialTag});
 
@@ -301,10 +300,7 @@ namespace rocRoller
             // copy AGPRs to VGPRs
             auto copyTag
                 = copyAssign(graph, macTileTag, destMacTileTag, varType.dataType, numAGPRs);
-            auto falseBranch = graph.control.addElement(Else(), {conditionalTag}, {copyTag});
-            auto copyBoundsTag
-                = copyAssign(graph, macTileTag, destMacTileTag, varType.dataType, numAGPRs);
-            graph.control.addElement(Else(), {boundsCheck}, {copyBoundsTag});
+            graph.control.addElement(Else(), {conditionalTag}, {copyTag});
 
             return conditionalTag;
         }
@@ -601,21 +597,18 @@ namespace rocRoller
                 //       scheduling has been implemented.
                 //graph.control.addElement(
                 //    e, elem, std::vector<int>{forWaveTilesY}, std::vector<int>{index});
-                graph.control.addElement(Sequence(), {forK}, {index});
-                if(context->kernelOptions().enableScratch)
-                {
-                    graph.control.addElement(Sequence(), {finalContractionOp}, {index});
-                }
+                graph.control.addElement(Sequence(), {finalContractionOp}, {index});
             }
 
             for(auto const index : otherOps)
             {
-                auto e = graph.control.getNeighbours<Graph::Direction::Downstream>(index)
-                             .to<std::vector>()[0];
-                auto elem = graph.control.getElement(e);
-                graph.control.deleteElement(e);
+                auto e = graph.control.getNeighbours<Graph::Direction::Downstream>(index).only();
+                AssertFatal(e.has_value());
+
+                auto elem = graph.control.getElement(*e);
+                graph.control.deleteElement(*e);
                 graph.control.addElement(
-                    e, elem, std::vector<int>{index}, std::vector<int>{forWaveTilesX});
+                    *e, elem, std::vector<int>{index}, std::vector<int>{forWaveTilesX});
             }
 
             // make nested inner loops (forWaveTilesY inside the forWaveTilesX loop)

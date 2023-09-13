@@ -56,6 +56,10 @@ namespace rocRoller
 
                 co_yield Instruction::Comment("CodeGeneratorVisitor::generate() begin");
                 auto candidates = m_graph->control.roots().to<std::set>();
+                AssertFatal(candidates.size() == 1,
+                            "The control graph should only contain one root node, the Kernel node.",
+                            ShowValue(candidates.size()));
+
                 co_yield generate(candidates, coords);
                 co_yield Instruction::Comment("CodeGeneratorVisitor::generate() end");
             }
@@ -221,7 +225,8 @@ namespace rocRoller
                 co_yield Instruction::Comment(concatenate(opName, "(", tag, ") BEGIN"));
 
                 AssertFatal(m_completedControlNodes.find(tag) == m_completedControlNodes.end(),
-                            ShowValue(operation));
+                            ShowValue(operation),
+                            ShowValue(tag));
 
                 co_yield std::visit(
                     *this, std::variant<int>(tag), operation, std::variant<Transformer>(coords));

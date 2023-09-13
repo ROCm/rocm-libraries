@@ -195,6 +195,15 @@ namespace rocRoller::KernelGraph::ControlGraph
         return {};
     }
 
+    template <CControlEdge Edge, std::convertible_to<int>... Nodes>
+    void ControlGraph::chain(int a, int b, Nodes... remaining)
+    {
+        addElement(Edge(), {a}, {b});
+
+        if constexpr(sizeof...(remaining) > 0)
+            chain<Edge>(b, remaining...);
+    }
+
     template <typename T>
     requires(std::constructible_from<Operation, T>) inline bool isOperation(auto const& x)
     {

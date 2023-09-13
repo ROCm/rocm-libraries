@@ -34,10 +34,10 @@ namespace rocRollerTest
 
         int mul_index       = control.addElement(Assign());
         int sequence3_index = control.addElement(Sequence(), {add_index}, {mul_index});
-        int sequence4_index = control.addElement(Sequence(), {loadB_index}, {mul_index});
 
-        int storeC_index    = control.addElement(StoreLinear());
-        int sequence5_index = control.addElement(Sequence(), {mul_index}, {storeC_index});
+        int storeC_index = control.addElement(StoreLinear());
+
+        control.chain<Sequence>(loadB_index, mul_index, storeC_index);
 
         std::vector<int> root = control.roots().to<std::vector>();
         EXPECT_EQ(1, root.size());
@@ -126,14 +126,14 @@ namespace rocRollerTest
                 "8"[label="Sequence(8)",shape=box];
                 "9"[label="Assign Count nullptr(9)"];
                 "10"[label="Sequence(10)",shape=box];
-                "11"[label="Sequence(11)",shape=box];
-                "12"[label="StoreLinear(12)"];
+                "11"[label="StoreLinear(11)"];
+                "12"[label="Sequence(12)",shape=box];
                 "13"[label="Sequence(13)",shape=box];
                 "1" -> "4"
                 "1" -> "5"
                 "2" -> "7"
                 "3" -> "8"
-                "3" -> "11"
+                "3" -> "12"
                 "4" -> "2"
                 "5" -> "3"
                 "6" -> "10"
@@ -141,8 +141,8 @@ namespace rocRollerTest
                 "8" -> "6"
                 "9" -> "13"
                 "10" -> "9"
-                "11" -> "9"
-                "13" -> "12"
+                "12" -> "9"
+                "13" -> "11"
             }
         ).";
 

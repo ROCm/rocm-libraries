@@ -346,7 +346,32 @@ namespace rocRoller
         template <typename T>
         T Hypergraph<Node, Edge, Hyper>::getNode(int index) const
         {
-            return std::get<T>(std::get<Node>(getElement(index)));
+            static_assert(std::constructible_from<Node, T>);
+            auto const& node = std::get<Node>(getElement(index));
+            if constexpr(std::same_as<Node, T>)
+            {
+                return node;
+            }
+            else
+            {
+                return std::get<T>(node);
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <typename T>
+        T Hypergraph<Node, Edge, Hyper>::getEdge(int index) const
+        {
+            static_assert(std::constructible_from<Edge, T>);
+            auto const& edge = std::get<Edge>(getElement(index));
+            if constexpr(std::same_as<Edge, T>)
+            {
+                return edge;
+            }
+            else
+            {
+                return std::get<T>(edge);
+            }
         }
 
         template <typename Node, typename Edge, bool Hyper>

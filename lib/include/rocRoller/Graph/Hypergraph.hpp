@@ -91,6 +91,9 @@ namespace rocRoller
             template <typename T>
             T getNode(int index) const;
 
+            template <typename T>
+            T getEdge(int index) const;
+
             /**
              * @brief Returns whether `e` is a node or an edge.
              */
