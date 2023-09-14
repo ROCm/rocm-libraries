@@ -15,10 +15,10 @@ GlobalParameters:
   PrintWinnersOnly: True
   # ForceGenerateKernel: True
   NumElementsToValidate: 0
-  # DataInitTypeA: 0
-  # DataInitTypeB: 0
-  # DataInitTypeC: 0
-  # DataInitTypeD: 3
+  DataInitTypeA: 16
+  DataInitTypeB: 16
+  DataInitTypeC: 16
+  DataInitTypeD: 16
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
   NewClient: 2
@@ -32,7 +32,7 @@ GlobalParameters:
   MaxWorkspaceSize: 33554432
   # BoundsCheck: 4
   MaxFileName: 256
-  CEqualD: True
+  CEqualD: False
   PristineOnGPU: False
   PinClocks: False
 

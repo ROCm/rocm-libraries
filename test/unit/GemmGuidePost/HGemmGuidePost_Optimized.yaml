@@ -8,15 +8,17 @@ GlobalParameters:
   SleepPercent: 50
   PrintWinnersOnly: True
   NumElementsToValidate: 0
-  DataInitTypeBeta: 0
-  DataInitTypeAlpha: 1
+  DataInitTypeAB: 16
+  DataInitTypeC: 16
+  DataInitTypeBeta: 16
+  DataInitTypeAlpha: 16
   NewClient: 2
   CSVExportWinner: 1
   CSVMergeSameProblemID: 1
   #Device: 0
   MaxWorkspaceSize: 33554432
   MaxFileName: 256
-  CEqualD: True
+  CEqualD: False
   PristineOnGPU: False
   PinClocks: False
 
