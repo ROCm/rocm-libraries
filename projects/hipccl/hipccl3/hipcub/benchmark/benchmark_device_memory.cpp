@@ -60,7 +60,7 @@ struct operation<no_operation, T, ItemsPerThread, BlockSize>
 {
     typedef empty_storage_type storage_type;
 
-    HIPCUB_DEVICE inline void operator()(storage_type& storage, T (&)[ItemsPerThread], T* = nullptr)
+    HIPCUB_DEVICE inline void operator()(storage_type& storage, T (&)[ItemsPerThread], T* = nullptr) const
     {}
 };
 
@@ -72,7 +72,7 @@ struct operation<custom_operation, T, ItemsPerThread, BlockSize>
 
     HIPCUB_DEVICE inline void operator()(storage_type& storage,
                                          T (&input)[ItemsPerThread],
-                                         T* global_mem_output = nullptr)
+                                         T* global_mem_output = nullptr) const
     {
         (void)storage;
         (void)global_mem_output;
@@ -348,21 +348,15 @@ void run_benchmark(benchmark::State& state, size_t size, const hipStream_t strea
 template<typename T>
 void run_benchmark_memcpy(benchmark::State& state, size_t size, const hipStream_t stream)
 {
-    std::vector<T> input;
-    if(std::is_floating_point<T>::value)
-    {
-        input = benchmark_utils::get_random_data<T>(size, (T)-1000, (T) + 1000);
-    }
-    else
-    {
-        input = benchmark_utils::get_random_data<T>(size,
-                                                    std::numeric_limits<T>::min(),
-                                                    std::numeric_limits<T>::max());
-    }
+    // Allocate device buffers
+    // Note: since this benchmark only tests memcpy performance between device buffers,
+    // we don't really need to copy data into these from the host - whatever happens
+    // to be in memory will suffice.
     T* d_input;
     T* d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
+
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {

@@ -149,7 +149,7 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
     if( (logical_warp_size > current_device_warp_size) ||
         (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
         GTEST_SKIP();
     }
@@ -295,7 +295,7 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
     if( (logical_warp_size > current_device_warp_size) ||
         (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
         GTEST_SKIP();
     }
@@ -440,7 +440,7 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
     if( (logical_warp_size > current_device_warp_size) ||
         (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
         GTEST_SKIP();
     }
@@ -633,7 +633,7 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
     if( (logical_warp_size > current_device_warp_size) ||
         (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
-        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %u.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
         GTEST_SKIP();
     }

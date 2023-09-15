@@ -54,7 +54,7 @@ template<class T>
 struct custom_flag_op1
 {
     HIPCUB_HOST_DEVICE
-    bool operator()(const T& a, const T& b)
+    bool operator()(const T& a, const T& b) const
     {
         return (a == b);
     }

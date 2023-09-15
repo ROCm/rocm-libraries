@@ -39,7 +39,7 @@ struct custom_notaligned
     unsigned int u;
 
     HIPCUB_HOST_DEVICE
-    custom_notaligned() {};
+    custom_notaligned() : i(0), d(0), f(0), u(0) {};
     HIPCUB_HOST_DEVICE
     ~custom_notaligned() {};
 };
@@ -142,7 +142,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
 
     if (logical_warp_size > current_device_warp_size)
     {
-        printf("Unsupported test warp size: %d Current device warp size: %d.    Skipping test\n",
+        printf("Unsupported test warp size: %u Current device warp size: %u.    Skipping test\n",
             logical_warp_size, current_device_warp_size);
         GTEST_SKIP();
     }
@@ -259,7 +259,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
 
     if (logical_warp_size > current_device_warp_size)
     {
-        printf("Unsupported test warp size: %d Current device warp size: %d.    Skipping test\n",
+        printf("Unsupported test warp size: %u Current device warp size: %u.    Skipping test\n",
             logical_warp_size, current_device_warp_size);
         GTEST_SKIP();
     }
@@ -374,7 +374,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
 
     if (logical_warp_size > current_device_warp_size)
     {
-        printf("Unsupported test warp size: %d Current device warp size: %d.    Skipping test\n",
+        printf("Unsupported test warp size: %u Current device warp size: %u.    Skipping test\n",
             logical_warp_size, current_device_warp_size);
         GTEST_SKIP();
     }
