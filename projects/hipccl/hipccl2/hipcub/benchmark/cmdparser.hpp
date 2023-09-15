@@ -95,7 +95,7 @@ namespace cli {
                 CmdBase(name, alternative, description, required, dominant, ArgumentCountChecker<T>::Variadic) {
             }
 
-            virtual bool parse(std::ostream& output, std::ostream& error) {
+            virtual bool parse(std::ostream& output, std::ostream& error) override {
                 try {
                     CallbackArgs args { arguments, output, error };
                     value = callback(args);
@@ -105,7 +105,7 @@ namespace cli {
                 }
             }
 
-            virtual std::string print_value() const {
+            virtual std::string print_value() const override {
                 return "";
             }
 
@@ -117,10 +117,10 @@ namespace cli {
         class CmdArgument final : public CmdBase {
         public:
             explicit CmdArgument(const std::string& name, const std::string& alternative, const std::string& description, bool required, bool dominant) :
-                CmdBase(name, alternative, description, required, dominant, ArgumentCountChecker<T>::Variadic) {
+                CmdBase(name, alternative, description, required, dominant, ArgumentCountChecker<T>::Variadic), value(T()) {
             }
 
-            virtual bool parse(std::ostream&, std::ostream&) {
+            virtual bool parse(std::ostream&, std::ostream&) override {
                 try {
                     value = Parser::parse(arguments, value);
                     return true;
@@ -129,7 +129,7 @@ namespace cli {
                 }
             }
 
-            virtual std::string print_value() const {
+            virtual std::string print_value() const override {
                 return stringify(value);
             }
 

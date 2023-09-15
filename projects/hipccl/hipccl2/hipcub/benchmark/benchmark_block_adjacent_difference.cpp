@@ -97,7 +97,7 @@ struct subtract_left
 struct subtract_left_partial_tile
 {
     template <unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
-    __device__ static void run(const T* d_input, int* tile_sizes, T* d_output, unsigned int trials)
+    __device__ static void run(const T* d_input, const int* tile_sizes, T* d_output, unsigned int trials)
     {
         const unsigned int lid = threadIdx.x;
         const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
@@ -185,7 +185,7 @@ struct subtract_right
 struct subtract_right_partial_tile
 {
     template <unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
-    __device__ static void run(const T* d_input, int* tile_sizes, T* d_output, unsigned int trials)
+    __device__ static void run(const T* d_input, const int* tile_sizes, T* d_output, unsigned int trials)
     {
         const unsigned int lid = threadIdx.x;
         const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;

@@ -98,7 +98,6 @@ struct broadcast
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        auto                                     scan_op = hipcub::Sum();
 #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {

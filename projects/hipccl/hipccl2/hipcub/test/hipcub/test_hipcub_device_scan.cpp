@@ -782,12 +782,12 @@ public:
     __host__ __device__ single_index_iterator& operator=(const single_index_iterator&) = default;
 
     // clang-format off
-    __host__ __device__ bool operator==(const single_index_iterator& rhs) { return index_ == rhs.index_; }
-    __host__ __device__ bool operator!=(const single_index_iterator& rhs) { return !(this == rhs);       }
+    __host__ __device__ bool operator==(const single_index_iterator& rhs) const { return index_ == rhs.index_; }
+    __host__ __device__ bool operator!=(const single_index_iterator& rhs) const { return !(this == rhs);       }
 
     __host__ __device__ reference operator*() { return value_type{value_, index_ == expected_index_}; }
 
-    __host__ __device__ reference operator[](const difference_type distance) { return *(*this + distance); }
+    __host__ __device__ reference operator[](const difference_type distance) const { return *(*this + distance); }
 
     __host__ __device__ single_index_iterator& operator+=(const difference_type rhs) { index_ += rhs; return *this; }
     __host__ __device__ single_index_iterator& operator-=(const difference_type rhs) { index_ -= rhs; return *this; }

@@ -575,7 +575,7 @@ struct ArgMinDispatch
                     OffsetIteratorT d_begin_offsets,
                     OffsetIteratorT d_end_offsets,
                     hipStream_t     stream,
-                    bool            debug_synchronous)
+                    bool            debug_synchronous) const
     {
         return hipcub::DeviceSegmentedReduce::ArgMin(d_temp_storage,
                                                      temp_storage_bytes,
@@ -600,7 +600,7 @@ struct ArgMaxDispatch
                     OffsetIteratorT d_begin_offsets,
                     OffsetIteratorT d_end_offsets,
                     hipStream_t     stream,
-                    bool            debug_synchronous)
+                    bool            debug_synchronous) const
     {
         return hipcub::DeviceSegmentedReduce::ArgMax(d_temp_storage,
                                                      temp_storage_bytes,
@@ -812,8 +812,6 @@ void test_argminmax_allinf(TypeParam value, TypeParam empty_value)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data and calculate expected results
-        std::vector<key_value> aggregates_expected;
-
         std::vector<input_type> values_input(size, value);
 
         std::vector<offset_type> offsets;
