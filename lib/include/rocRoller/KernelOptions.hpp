@@ -53,7 +53,6 @@ namespace rocRoller
         std::vector<uint> loopOverOutputTilesCoordSizes = {};
         uint              loopOverOutputTilesIteratedTiles;
 
-        bool enableScratch   = false;
         uint numScratchTiles = 0;
 
         EnumBitset<LayoutType> transposeMemoryAccess = {};

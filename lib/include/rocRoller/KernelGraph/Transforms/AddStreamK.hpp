@@ -12,13 +12,15 @@ namespace rocRoller
          *
          * See `StreamKCoordinatetransformDesign`.
          *
-         * The AddStreamK transformation is typically in matrix-matrix
-         * multiply problems of the form D = A B where A and B have
-         * been tiled with A: M x K tiles, and B: K x N tiles.  Here
-         * the K tiles are the accumulation tiles.
+         * The AddStreamK transformation is typically applied in
+         * matrix-matrix multiply problems of the form D = A B where A
+         * and B have been tiled with A: M x K tiles, and B: K x N
+         * tiles.  Here the K tiles are the accumulation tiles.
          *
-         * The `dims` parameter selects the M and N dimensions.  The
-         * `topLoop` parameter selects the K dimension.
+         * The `dims` parameter selects the free (M and N) dimensions.
+         * The `topLoop` parameter selects the accumulation loop
+         * (which was most likely created during the
+         * LowerTensorContraction transformation).
          *
          * The AddStreamK transform creates a flattened "global tile
          * space" from all of the M/N/K tiles.  The flattened M/N/K
@@ -36,7 +38,10 @@ namespace rocRoller
          * @param tileNumberCoordSizes Sizes of `MacroTileNumber`s
          * matched by `dims`.
          *
-         * @param topLoop Which accumulation loop to stream.
+         * @param topLoop Which loop to insert the local tile-loop
+         * above.
+	 *
+         * @param accmulatorLoop Which accumulation loop to stream.
          *
          * @param numWGs How many workgroups will be launched.
          */
@@ -67,34 +72,21 @@ namespace rocRoller
 
             ContextPtr m_context;
 
-            // Location
-
             /**
-             * The sub-dimensions of dangling `MacroTileNumber`s that should be included in the streaming
-             * construct
+             * The sub-dimensions of dangling `MacroTileNumber`s that
+             * should be included in the streaming construct.
              */
             std::vector<int> m_dimensionIndices;
-            /**
-             * Name of the top loop
-             */
-            std::string m_topLoop;
-            /**
-             * Name of the K loop.
-             */
-            std::string m_accumulatorLoop;
 
             /**
-             * Control node of the top loop.
+             * Name of the loop to insert the local tile-loop above.
              */
-            int m_topLoopOp;
+            std::string m_topLoop;
+
             /**
-             * Control node of the K loop.
+             * Name of the accumulator (K) loop.
              */
-            int m_accumulatorLoopOp;
-            /**
-             * Coordinate dimension of the K loop.
-             */
-            int m_accumulatorCoord;
+            std::string m_accumulatorLoop;
 
             // Kernel arguments
             std::vector<Expression::ExpressionPtr> m_numTiles, m_numTileArgExprs;
@@ -104,6 +96,16 @@ namespace rocRoller
             //
             // Mapping: dimension -> set of MacroTileNumber coordinates
             std::map<int, std::unordered_set<int>> m_tileNumberCoords;
+
+            // Internal
+            int m_accumulatorCoord; /// Coordinate dimension of the K loop.
+            int m_accumulatorLoopOp; /// Control node of the accumulator loop.
+            int m_accumulatorTile; /// Coordinate dimension of tile into which the K loop accumulated
+            int m_topLoopOp; /// Control node of the top loop.
+
+            std::unordered_set<int> m_usesAccumulatorTile; /// Set of control nodes, after
+                /// the accumulator loop, that used the accumulator
+                /// tile.
         };
     }
 }

@@ -113,15 +113,19 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Return existing Buffer edge between src and dst, or
      * create a new one.
+     *
+     * Returns -1 if the operation doesn't need a buffer descriptor.
      */
-    int getBuffer(KernelGraph& graph, int src, int dst)
+    int getBuffer(KernelGraph& graph, int opTag, int src, int dst)
     {
+        auto op = graph.control.getElement(opTag);
+        if(isOperation<LoadLDSTile>(op) || isOperation<StoreLDSTile>(op))
+            return -1;
+
         for(auto neighbour : graph.coordinates.getNeighbours<GD::Upstream>(dst).to<std::vector>())
         {
             if(graph.coordinates.get<Buffer>(neighbour))
-            {
                 return neighbour;
-            }
         }
         return graph.coordinates.addElement(Buffer(), {src}, {dst});
     }
@@ -216,7 +220,7 @@ namespace rocRoller::KernelGraph
         auto rowStride = graph.coordinates.addElement(Stride(), {user}, {elemX});
         auto colOffset = graph.coordinates.addElement(Offset(), {user}, {elemY});
         auto colStride = graph.coordinates.addElement(Stride(), {user}, {elemY});
-        auto buffer    = getBuffer(graph, user, mac);
+        auto buffer    = getBuffer(graph, load, user, mac);
 
         std::vector<DeferredConnection> connections;
         connections.push_back(DC<Offset>(offsetMac, -1));
@@ -309,7 +313,7 @@ namespace rocRoller::KernelGraph
             rowStride = graph.coordinates.addElement(Stride(), {elemX}, {source});
             colOffset = graph.coordinates.addElement(Offset(), {elemY}, {source});
             colStride = graph.coordinates.addElement(Stride(), {elemY}, {source});
-            buffer    = getBuffer(graph, elemX, source);
+            buffer    = getBuffer(graph, loadstore, elemX, source);
         }
         else
         {
@@ -317,7 +321,7 @@ namespace rocRoller::KernelGraph
             rowStride = graph.coordinates.addElement(Stride(), {source}, {elemX});
             colOffset = graph.coordinates.addElement(Offset(), {source}, {elemY});
             colStride = graph.coordinates.addElement(Stride(), {source}, {elemY});
-            buffer    = getBuffer(graph, source, elemX);
+            buffer    = getBuffer(graph, loadstore, source, elemX);
         }
 
         std::vector<DeferredConnection> connections;
@@ -325,7 +329,8 @@ namespace rocRoller::KernelGraph
         connections.push_back(DC<Offset>(colOffset, 1));
         connections.push_back(DC<Stride>(rowStride, 0));
         connections.push_back(DC<Stride>(colStride, 1));
-        connections.push_back(DC<Buffer>(buffer));
+        if(buffer != -1)
+            connections.push_back(DC<Buffer>(buffer));
 
         std::vector<int> ciOperations;
 
@@ -478,7 +483,7 @@ namespace rocRoller::KernelGraph
         auto strideWave = graph.coordinates.addElement(Stride(), {user}, {wave});
         auto offsetVgpr = graph.coordinates.addElement(Offset(), {user}, {vgpr});
         auto strideVgpr = graph.coordinates.addElement(Stride(), {user}, {vgpr});
-        auto buffer     = getBuffer(graph, user, mac);
+        auto buffer     = getBuffer(graph, load, user, mac);
 
         std::vector<DeferredConnection> connections;
         connections.push_back(DC<Offset>(offsetMac, -1));
@@ -599,7 +604,7 @@ namespace rocRoller::KernelGraph
             strideVgprBlock = graph.coordinates.addElement(Stride(), {vgprBlock}, {source});
             offsetVgprIndex = graph.coordinates.addElement(Offset(), {vgprIndex}, {source});
             strideVgprIndex = graph.coordinates.addElement(Stride(), {vgprIndex}, {source});
-            buffer          = getBuffer(graph, vgprIndex, source);
+            buffer          = getBuffer(graph, op, vgprIndex, source);
         }
         else
         {
@@ -607,7 +612,7 @@ namespace rocRoller::KernelGraph
             strideVgprBlock = graph.coordinates.addElement(Stride(), {source}, {vgprBlock});
             offsetVgprIndex = graph.coordinates.addElement(Offset(), {source}, {vgprIndex});
             strideVgprIndex = graph.coordinates.addElement(Stride(), {source}, {vgprIndex});
-            buffer          = getBuffer(graph, source, vgprIndex);
+            buffer          = getBuffer(graph, op, source, vgprIndex);
         }
 
         std::vector<DeferredConnection> connections;
@@ -615,7 +620,8 @@ namespace rocRoller::KernelGraph
         connections.push_back(DC<Offset>(offsetVgprIndex, 1));
         connections.push_back(DC<Stride>(strideVgprBlock, 0));
         connections.push_back(DC<Stride>(strideVgprIndex, 1));
-        connections.push_back(DC<Buffer>(buffer));
+        if(buffer != -1)
+            connections.push_back(DC<Buffer>(buffer));
 
         std::vector<int> ciOperations;
 

@@ -1,19 +1,19 @@
 ################################################################################
-# 
+#
 # MIT License
-# 
+#
 # Copyright (c) 2023 Advanced Micro Devices, Inc.
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,7 +21,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-# 
+#
 ################################################################################
 
 if(NOT TARGET docs)
@@ -37,7 +37,7 @@ function(clean_doc_output DIR)
     set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES ${DIR})
 endfunction()
 
-#check doxygen is installed 
+#check doxygen is installed
 find_program(DOXYGEN_EXECUTABLE NAMES doxygen
     PATH_SUFFIXES bin
     DOC "Doxygen documentation generator"
@@ -72,10 +72,10 @@ clean_doc_output(${DOCS_BUILD_DIR})
 clean_doc_output(${DOXYGEN_BUILD_DIR})
 
 set(SPHINX_BINARY_BUILD_DIR "${DOCS_BUILD_DIR}/sphinx/_build")
- 
+
 # Sphinx cache with pickled ReST documents
 set(SPHINX_CACHE_DIR "${DOCS_BUILD_DIR}/sphinx/_doctrees")
- 
+
 # HTML output directory
 set(SPHINX_DEFAULT_HTML_DIR "${DOCS_BUILD_DIR}/sphinx/html")
 
@@ -116,11 +116,11 @@ set(SPHINX_HTML_DIR "${SPHINX_DEFAULT_HTML_DIR}" CACHE PATH "Path to sphinx html
 
 # Sphinx pre-build steps --------------------
 
-# Prebuild Sphinx 
+# Prebuild Sphinx
 add_custom_target(prebuild_sphinx
-    DEPENDS 
-        copysrc_to_builddir  
-        clip_designreadme 
+    DEPENDS
+        copysrc_to_builddir
+        clip_designreadme
         copyover_mainreadme
         copyover_dockerreadme
         copyover_adddocs
@@ -155,11 +155,11 @@ add_custom_target(copyover_adddocs
 clean_doc_output(${DOCS_BUILD_DIR}/src/addDocs.md)
 
 # cut the top 2-36 lines as they are a ToC that does not
-# build correctly in the website 
+# build correctly in the website
 add_custom_target(clip_designreadme
     COMMAND sed -i 2,36d ${DOCS_BUILD_DIR}/src/DesignOverview.md
     COMMENT "Clipping first 36 lines of DesignOverview.md."
-    DEPENDS copysrc_to_builddir 
+    DEPENDS copysrc_to_builddir
 )
 mark_as_doc(prebuild_sphinx)
 
@@ -169,11 +169,11 @@ mark_as_doc(prebuild_sphinx)
 
 #build the entire sphinx html documentation
 add_custom_target(build_sphinx
-    COMMAND ${SPHINX_EXECUTABLE} ${DOCS_BUILD_DIR}/src ${SPHINX_HTML_DIR} 
+    COMMAND ${SPHINX_EXECUTABLE} ${DOCS_BUILD_DIR}/src ${SPHINX_HTML_DIR}
                 -b html
                 -c ${DOCS_BUILD_DIR}/src
                 -d "${SPHINX_CACHE_DIR}"
-                -D breathe_projects.proj=${DOXYGEN_OUTPUT}/xml 
+                -D breathe_projects.proj=${DOXYGEN_OUTPUT}/xml
                 -D breathe_default_project=proj
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     DEPENDS prebuild_doxygen prebuild_sphinx

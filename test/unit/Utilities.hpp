@@ -157,10 +157,6 @@ namespace rocRoller
                float                      beta,
                bool                       transA = false,
                bool                       transB = true);
-
-    void MultFactor(std::vector<float>& data, float factor, int M, int N, int macM, int macN);
-
-    void MultFactor(std::vector<__half>& data, float factor, int M, int N, int macM, int macN);
 }
 
 /*

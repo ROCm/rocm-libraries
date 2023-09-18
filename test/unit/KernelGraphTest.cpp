@@ -2801,40 +2801,6 @@ namespace KernelGraphTest
         }
     }
 
-    TEST_F(KernelGraphTest, GEMMWithScratch)
-    {
-        auto example = rocRollerTest::Graphs::GEMM<float>();
-
-        example.setTileSize(128, 256, 8);
-        example.setMFMA(32, 32, 2, 1);
-        example.setUseLDS(true, true, true);
-
-        auto kgraph = example.getKernelGraph();
-        auto params = example.getCommandParameters();
-
-        setKernelOptions({.enableScratch = true});
-
-        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
-        auto lowerLinearTransform      = std::make_shared<LowerLinear>(m_context);
-        auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
-        auto lowerTensorContractionTransform
-            = std::make_shared<LowerTensorContraction>(params, m_context);
-
-        kgraph = kgraph.transform(updateParametersTransform);
-        kgraph = kgraph.transform(lowerLinearTransform);
-        kgraph = kgraph.transform(lowerTileTransform);
-        kgraph = kgraph.transform(lowerTensorContractionTransform);
-
-        auto scratchCoordinatePredicate = [&](int tag) -> bool {
-            auto maybeMacroTile = kgraph.coordinates.get<MacroTile>(tag);
-            if(maybeMacroTile)
-                return maybeMacroTile->layoutType == LayoutType::SCRATCH;
-            return false;
-        };
-
-        EXPECT_FALSE(empty(kgraph.coordinates.findElements(scratchCoordinatePredicate)));
-    }
-
     TEST_F(KernelGraphTest, LDSNoDeallocateInHotLoop)
     {
         using GD = Graph::Direction;

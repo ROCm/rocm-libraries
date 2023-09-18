@@ -60,23 +60,23 @@ namespace rocRoller
         }
 
         /**
-             * @brief Build unrolled offset expression.
-             *
-             * Offsets inside unrolled loops look like:
-             *
-             *    offset = offset + unroll-iteration * stride
-             *
-             * where the additional piece is a local/independent
-             * expression.
-             *
-             * When requesting an Offset register, this routines looks
-             * nearby for Stride expressions connected to Unroll
-             * coordinates, and returns the
-             *
-             *     + unroll-iteration * stride
-             *
-             * part of the offset above.
-             */
+         * @brief Build unrolled offset expression.
+         *
+         * Offsets inside unrolled loops look like:
+         *
+         *    offset = offset + unroll-iteration * stride
+         *
+         * where the additional piece is a local/independent
+         * expression.
+         *
+         * When requesting an Offset register, this routines looks
+         * nearby for Stride expressions connected to Unroll
+         * coordinates, and returns the
+         *
+         *     + unroll-iteration * stride
+         *
+         * part of the offset above.
+         */
         ExpressionPtr LoadStoreTileGenerator::getOffsetExpr(int                offsetTag,
                                                             Transformer const& coords)
         {
@@ -279,7 +279,7 @@ namespace rocRoller
             auto scope    = m_context->getScopeManager();
             uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
 
-            coords.setCoordinate(increment, L(0u));
+            // Set the zero-coordinates to zero
             for(int idx = 0;; ++idx)
             {
                 auto zeroTag = m_graph->mapper.get(
@@ -289,14 +289,34 @@ namespace rocRoller
                 coords.setCoordinate(zeroTag, L(0u));
             }
 
+            // Set the increment coordinate to zero if it doesn't
+            // already have a value
+            bool initializeIncrement = true;
+            try
+            {
+                // TODO Design a way to look for valid path without resorting to try/catch
+                if(ci.forward)
+                    coords.forward({target});
+                else
+                    coords.reverse({target});
+                initializeIncrement = false;
+            }
+            catch(...)
+            {
+            }
+
+            if(initializeIncrement)
+            {
+                coords.setCoordinate(increment, L(0u));
+            }
+
+            // Compute an offset address if we don't have an
+            // associated base address to inherit from
             if(base < 0)
             {
-                // no base coordinate to copy offset from, so need
-                // to explicity compute our own offset
-
                 auto offsetReg
                     = tagger->getRegister(offset, Register::Type::Vector, ci.offsetType, 1);
-                offsetReg->setName(concatenate("offset", tag));
+                offsetReg->setName(concatenate("Offset", tag));
                 scope->addRegister(offset);
 
                 auto indexExpr
@@ -311,6 +331,7 @@ namespace rocRoller
                 m_baseOffsets.insert_or_assign(offset, base);
             }
 
+            // Compute a stride
             if(stride > 0)
             {
                 auto indexExpr = ci.forward ? coords.forwardStride(increment, L(1), {target})[0]
@@ -324,6 +345,7 @@ namespace rocRoller
                 scope->addRegister(stride);
             }
 
+            // Create a buffer descriptor
             if(buffer > 0)
             {
                 auto user = m_graph->coordinates.get<User>(target);
@@ -334,7 +356,7 @@ namespace rocRoller
 
                     auto bufferReg = tagger->getRegister(
                         buffer, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
-                    bufferReg->setName(concatenate("buffer", tag));
+                    bufferReg->setName(concatenate("Buffer", buffer));
                     if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
                     {
                         Register::ValuePtr basePointer;

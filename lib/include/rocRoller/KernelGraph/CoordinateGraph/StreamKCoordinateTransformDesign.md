@@ -8,7 +8,7 @@ For this document, we will assume the following:
 | MacroTiles in N  |  12 |
 | Total MacroTiles | 120 |
 | K loop iterations| 512 |
-| Workgroups/CUs   |  32 |
+| Workgroups       |  32 |
 
 ## Precondition
 
@@ -62,10 +62,10 @@ all of the M/N/K tiles.
 ## Stream-K
 
 The flattened M/N/K global tile-space will be distributed evenly among
-the CUs.
+the workgroups (WGs).
 
-Each CU needs to iterate over its portion of the flattened global
-tile-space.
+Each workgroup (WG) needs to iterate over its portion of the flattened
+global tile-space.
 
 To facilitate accumulation initialization and prefetching etc, we use
 two loops to accomplish this: an outer local-tile loop and an inner
@@ -81,14 +81,14 @@ tile loop advances, it will be advancing to a new M/N tile.
 
 The local combined index
 
-    cuTile = forTileIdx + forKIdx
+    wgTile = forTileIdx + forKIdx
 
-is the current CUs local tile in its portion of the global tile-space.
+is the current WGs local tile in its portion of the global tile-space.
 Then
 
-    tile = tilesPerCU * cu + cuTile
+    tile = tilesPerWG * wg + wgTile
 
-is the global tile that the CU is processing.  Given the global tile,
+is the global tile that the WG is processing.  Given the global tile,
 the M/N/K tile coordinates are
 
     m = (tile / numTilesK) / numTilesN;
@@ -112,8 +112,8 @@ graph TD
   L1(["Linear(size=61440) (global M/N/K tiles) (For Tile)"])
 
   SK["Tile"]
-  L3(["Linear(size=1920) (local M/N/K tiles for this CU) (Tiles per CU)"])
-  WG(["CU (Size=32)"])
+  L3(["Linear(size=1920) (local M/N/K tiles for this WG) (Tiles per WG)"])
+  WG(["WG (Size=32)"])
 
   MTAN0 --0--> Flatten
   MTBN1 --1--> Flatten
@@ -142,22 +142,22 @@ The control graph would implement code roughly equivalent to:
 
 ```C++
     auto totalTiles = numTilesM * numTilesN * numTilesK;
-    auto tilesPerCU = (totalTiles + numCUs - 1) / numCUs;
+    auto tilesPerWG = (totalTiles + numWGs - 1) / numWGs;
 
-    for(uint cu = 0; cu < numCUs; cu++)
+    for(uint wg = 0; wg < numWGs; wg++)
     {
         uint forTileIdx, forKIdx;
 
         forKIdx = 0;
         for(forTileIdx = 0;
-            (forTileIdx < tilesPerCU)
-            && ((tilesPerCU * cu + forTileIdx) < totalTiles);
+            (forTileIdx < tilesPerWG)
+            && ((tilesPerWG * wg + forTileIdx) < totalTiles);
             forTileIdx += forKIdx)
         {
             uint tile;
             uint m, n, k;
 
-            tile = tilesPerCU * cu + forTileIdx;
+            tile = tilesPerWG * wg + forTileIdx;
 
             m = (tile / numTilesK) / numTilesN;
             n = (tile / numTilesK) % numTilesN;
@@ -169,12 +169,12 @@ The control graph would implement code roughly equivalent to:
 
             auto startMN = tile / numTilesK;
             for(forKIdx = 0;
-                (((tilesPerCU * cu + forTileIdx + forKIdx) / numTilesK) == startMN)
-                && (tilesPerCU * cu + forTileIdx + forKIdx < totalTiles)
-                && (forTileIdx + forKIdx < tilesPerCU);
+                (((tilesPerWG * wg + forTileIdx + forKIdx) / numTilesK) == startMN)
+                && (tilesPerWG * wg + forTileIdx + forKIdx < totalTiles)
+                && (forTileIdx + forKIdx < tilesPerWG);
                 forKIdx += 1)
             {
-                tile = tilesPerCU * cu + forTileIdx + forKIdx;
+                tile = tilesPerWG * wg + forTileIdx + forKIdx;
 
                 m = (tile / numTilesK) / numTilesN;
                 n = (tile / numTilesK) % numTilesN;
@@ -193,16 +193,19 @@ The control graph would implement code roughly equivalent to:
 
             if(receivePartialTile)
             {
-               while(flag == 0);
+                while(flag == 0);
 
-               // load partial tile from buffer
-               // accumulate into my tile from for-K loop
+                // load partial tile from buffer
+                // accumulate into my tile from for-K loop
             }
 
-            // load C
-            // multiply my tile by alpha
-            // my tile += beta * C
-            // store into D
+            if(!sendPartialTile)
+            {
+                // load C
+                // multiply my tile by alpha
+                // my tile += beta * C
+                // store into D
+            }
         }
     }
 

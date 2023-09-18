@@ -71,9 +71,9 @@ namespace AddStreamKTest
 
         rocRoller::KernelGraph::KernelGraph kgraph;
 
-        long int numTileM = 10;
-        long int numTileN = 12;
-        uint     numTileK = 8;
+        uint numTileM = 57;
+        uint numTileN = 57;
+        uint numTileK = 57;
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
@@ -92,7 +92,7 @@ namespace AddStreamKTest
         // global result
         auto kernel = kgraph.control.addElement(Kernel());
         auto [forKCoord, forKOp]
-            = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP, DataType::Int64);
+            = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
 
         auto user = kgraph.coordinates.addElement(User("result"));
 
@@ -260,9 +260,9 @@ namespace AddStreamKTest
     {
         rocRoller::KernelGraph::KernelGraph kgraph;
 
-        long int numTileM = 10;
-        long int numTileN = 12;
-        uint     numTileK = 512;
+        uint numTileM = 10;
+        uint numTileN = 12;
+        uint numTileK = 512;
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
@@ -283,7 +283,7 @@ namespace AddStreamKTest
         // global result
         auto kernel = kgraph.control.addElement(Kernel());
         auto [forKCoord, forKOp]
-            = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP, DataType::Int64);
+            = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
 
         auto in  = kgraph.coordinates.addElement(User("in"));
         auto out = kgraph.coordinates.addElement(User("out"));

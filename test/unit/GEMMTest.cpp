@@ -34,8 +34,6 @@ namespace GEMMDriverTest
         int   k     = 128;
         float alpha = 2.0f;
         float beta  = 0.5f;
-        float factor
-            = 1.0f; // This is used for testing scratch/fixup.  It can be removed after StreamK is implemented.
 
         // output macro tile size
         int macM = 64;
@@ -78,13 +76,11 @@ namespace GEMMDriverTest
         bool packMultipleElementsInto1VGPR = true;
 
         bool loopOverTiles = false;
-        bool enableScratch = false;
         bool streamK       = false;
     };
 
     struct GEMMTestGPU : public CurrentGPUContextFixture
     {
-
         template <typename T>
         void basicGEMM(ContextPtr&        m_context,
                        const GEMMProblem& gemm,
@@ -100,12 +96,11 @@ namespace GEMMDriverTest
             uint numCUs = deviceProperties.multiProcessorCount;
 
             // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
-            int   M      = gemm.m;
-            int   N      = gemm.n;
-            int   K      = gemm.k;
-            float alpha  = gemm.alpha;
-            float beta   = gemm.beta;
-            float factor = gemm.factor;
+            int   M     = gemm.m;
+            int   N     = gemm.n;
+            int   K     = gemm.k;
+            float alpha = gemm.alpha;
+            float beta  = gemm.beta;
 
             AssertFatal(M % gemm.macM == 0, "MacroTile size mismatch (M)");
             AssertFatal(N % gemm.macN == 0, "MacroTile size mismatch (N)");
@@ -285,29 +280,6 @@ namespace GEMMDriverTest
             kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
             kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
 
-            if(gemm.enableScratch)
-            {
-                REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
-
-                AssertFatal(
-                    numWorkgroupY == 1,
-                    "Current scratch space implementation assumes that the kernel is launched "
-                    "with numWorkgroupY == 1");
-
-                hipDeviceProp_t deviceProperties;
-                ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-
-                unsigned int numCUs = deviceProperties.multiProcessorCount;
-
-                command->allocateArgument(
-                    VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                    DataDirection::ReadWrite,
-                    rocRoller::SCRATCH);
-
-                kernelOptions->enableScratch   = true;
-                kernelOptions->numScratchTiles = std::min(numCUs, numWorkgroupX * numWorkgroupY);
-            }
-
             if(gemm.loopOverTiles > 0)
             {
                 kernelOptions->loopOverOutputTilesDimensions = {0, 1};
@@ -318,12 +290,19 @@ namespace GEMMDriverTest
 
             if(gemm.streamK)
             {
+                REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
+
+                AssertFatal(
+                    numWorkgroupY == 1,
+                    "Current scratch space implementation assumes that the kernel is launched "
+                    "with numWorkgroupY == 1");
+
+                kernelOptions->numScratchTiles = std::min(numCUs, numWorkgroupX * numWorkgroupY);
+
                 kernelOptions->loopOverOutputTilesDimensions = {0, 1};
                 kernelOptions->loopOverOutputTilesCoordSizes
                     = {static_cast<uint>(M / gemm.macM), static_cast<uint>(N / gemm.macN)};
                 kernelOptions->streamK = true;
-
-                runtimeArgs.append("numCUs", numCUs);
             }
 
             auto params = std::make_shared<CommandParameters>();
@@ -372,13 +351,22 @@ namespace GEMMDriverTest
                 {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
                  static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
 
+            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                                      DataDirection::ReadWrite,
+                                      rocRoller::SCRATCH);
+
             CommandKernel commandKernel(
                 command, testKernelName(), params, postParams, kernelOptions);
 
             // Create scratch space
             auto scratchSpaceRequired = commandKernel.scratchSpaceRequired();
             auto deviceScratch        = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
-            runtimeArgs.append("S", static_cast<void*>(deviceScratch.get()));
+            runtimeArgs.append(rocRoller::SCRATCH, static_cast<void*>(deviceScratch.get()));
+
+            if(gemm.streamK)
+            {
+                runtimeArgs.append("numWGs", numCUs);
+            }
 
             commandKernel.launchKernel(runtimeArgs.runtimeArguments());
             m_context = commandKernel.getContext();
@@ -403,11 +391,6 @@ namespace GEMMDriverTest
                              gemm.transA == "T",
                              gemm.transB == "T");
 
-            if(factor > 1.0f && gemm.enableScratch)
-            {
-                rocRoller::MultFactor(h_result, factor, M, N, gemm.macM, gemm.macN);
-            }
-
             if(debuggable)
             {
                 for(size_t i = 0; i < M; i++)
@@ -429,25 +412,6 @@ namespace GEMMDriverTest
             double rnorm = relativeNorm(d_result, h_result);
 
             ASSERT_LT(rnorm, acceptableError);
-
-            // Check that scratch flags have all been set
-            if(gemm.enableScratch)
-            {
-                std::vector<unsigned int> hostFlags(kernelOptions->numScratchTiles, 0);
-                // Flags come after partial tiles in scratch memory
-                ASSERT_THAT(hipMemcpy(hostFlags.data(),
-                                      deviceScratch.get()
-                                          + gemm.macM * gemm.macN * kernelOptions->numScratchTiles
-                                                * sizeof(T),
-                                      kernelOptions->numScratchTiles * sizeof(unsigned int),
-                                      hipMemcpyDeviceToHost),
-                            HasHipSuccess(0));
-
-                for(int i = 0; i < hostFlags.size(); i++)
-                {
-                    EXPECT_EQ(hostFlags[i], 1u) << i;
-                }
-            }
         }
     };
 
@@ -518,14 +482,8 @@ namespace GEMMDriverTest
 
         GEMMProblem gemm;
 
-        // TODO For now, make sure that number of M*N tiles is a
-        // multiple of the number of CUs.  This means: Stream-K does
-        // an integer number of output tiles; and, the global tile
-        // space divided by the number of CUs is a multiple of the
-        // number of K tiles, so no communication necessary.
-
         gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * numCUs / 2;
+        gemm.n = gemm.macN * numCUs / 2 + gemm.macN * 2;
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, numCUs);
 
@@ -549,27 +507,6 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.storeLDSD     = false;
         gemm.loopOverTiles = true;
-        basicGEMM<float>(m_context, gemm, 1.e-6);
-    }
-
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMEnableScratch)
-    {
-        GEMMProblem gemm;
-        gemm.n             = gemm.macN;
-        gemm.enableScratch = true;
-        gemm.beta          = 0.0f;
-        gemm.factor        = 2.0f;
-        basicGEMM<float>(m_context, gemm, 1.e-6);
-    }
-
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMEnableScratchFixup)
-    {
-        GEMMProblem gemm;
-        gemm.n             = gemm.macN;
-        gemm.enableScratch = true;
-        gemm.alpha         = 1.0f;
-        gemm.beta          = 0.0f;
-        gemm.factor        = 2.0f;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 

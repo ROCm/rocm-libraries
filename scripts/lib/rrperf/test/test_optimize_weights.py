@@ -6,6 +6,8 @@ import pathlib
 import pytest
 import yaml
 
+from types import SimpleNamespace as NS
+
 
 @pytest.mark.slow
 def test_run_optimize(tmp_path_factory):
@@ -56,7 +58,7 @@ def test_run_optimize(tmp_path_factory):
         assert "weights" in d
 
 
-def mocked_run(cmd, env, cwd, **kwargs):
+def mocked_run(cmd, **kwargs):
     test_yaml = """
 ---
 client:          GEMMv00
@@ -75,11 +77,11 @@ correct:         true
         if arg.startswith("--yaml"):
             yaml_file = pathlib.Path(arg.split("=")[1])
     yaml_file.write_text(test_yaml)
-    return 1
+    return NS(returncode=0, stdout=test_yaml.encode("ascii"))
 
 
 def test_mocked_integration(tmp_path_factory, mocker):
-    mocker.patch("subprocess.call", new=mocked_run)
+    mocker.patch("subprocess.run", new=mocked_run)
     output_dir = tmp_path_factory.mktemp("test_optimize_weights")
     run_1_dir = output_dir / "run_1"
     run_2_dir = output_dir / "run_2"
