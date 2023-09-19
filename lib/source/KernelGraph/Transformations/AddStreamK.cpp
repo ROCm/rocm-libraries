@@ -165,8 +165,8 @@ namespace rocRoller
         }
 
         /**
-	 * Scratch tile info.
-	 */
+         * Scratch tile info.
+         */
         struct ScratchInfo
         {
             int store; //< Source internal tile for store operation

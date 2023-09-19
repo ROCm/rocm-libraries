@@ -40,7 +40,7 @@ namespace rocRoller
          *
          * @param topLoop Which loop to insert the local tile-loop
          * above.
-	 *
+         *
          * @param accmulatorLoop Which accumulation loop to stream.
          *
          * @param numWGs How many workgroups will be launched.
