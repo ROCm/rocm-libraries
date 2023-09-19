@@ -24,7 +24,6 @@ namespace rocRoller
             promoteDataType(dst, lhs, rhs));
     }
 
-    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> ModuloGenerator<Register::Type::Scalar, DataType::Int32>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
@@ -93,7 +92,6 @@ namespace rocRoller
         co_yield(Instruction::Unlock("End of Modulo"));
     }
 
-    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> ModuloGenerator<Register::Type::Vector, DataType::Int32>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
@@ -165,7 +163,6 @@ namespace rocRoller
         co_yield(Instruction::Unlock("End of Modulo"));
     }
 
-    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> ModuloGenerator<Register::Type::Scalar, DataType::Int64>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
@@ -514,7 +511,6 @@ namespace rocRoller
         co_yield(Instruction::Unlock("End of Modulo64(SCC)"));
     }
 
-    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> ModuloGenerator<Register::Type::Vector, DataType::Int64>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)

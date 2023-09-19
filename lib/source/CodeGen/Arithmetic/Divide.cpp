@@ -24,7 +24,6 @@ namespace rocRoller
             promoteDataType(dst, lhs, rhs));
     }
 
-    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Scalar, DataType::Int32>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
@@ -94,7 +93,6 @@ namespace rocRoller
         co_yield_(Instruction::Unlock("End of Division"));
     }
 
-    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Vector, DataType::Int32>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
@@ -172,7 +170,6 @@ namespace rocRoller
         co_yield_(Instruction::Unlock("End of Division"));
     }
 
-    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Scalar, DataType::Int64>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
@@ -526,7 +523,6 @@ namespace rocRoller
         co_yield(Instruction::Unlock("End of Divide64(SCC)"));
     }
 
-    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Vector, DataType::Int64>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)

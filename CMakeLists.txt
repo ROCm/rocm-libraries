@@ -63,7 +63,6 @@ FetchContent_Declare(
   INSTALL_COMMAND ""
 )
 
-FetchContent_GetProperties(asio)
 if(NOT libdivide_POPULATED)
   FetchContent_Populate(libdivide)
 endif()
