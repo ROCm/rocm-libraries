@@ -6,18 +6,7 @@ root: index
 subtrees:
 - caption: Setup
   entries:
-  - file: setup/requirements
-  - file: setup/cmake_options
   - file: setup/installing
 - caption: API
   entries:
   - file: cpp_api
-- caption: Releases
-  entries:
-  - file: releases/versioning
-  - file: releases/releases
-- caption: Contributing
-  entries:
-  - file: contributing/contributing
-  - file: contributing/submitting_a_pr
-  - file: contributing/release_process
