@@ -42,9 +42,12 @@ namespace CopyGeneratorTest
         ar->allocateNow();
         auto sr = std::make_shared<Register::Value>(
             m_context, Register::Type::Scalar, DataType::Int32, 1);
+        auto dsr = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int64, 1);
         sr->allocateNow();
         auto ir      = Register::Value::Label("LabelRegister");
         auto literal = Register::Value::Literal(20);
+        auto zero    = Register::Value::Literal(0L);
 
         EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(sr, vr)); }, FatalError);
         EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(ir, vr)); }, FatalError);
@@ -58,6 +61,8 @@ namespace CopyGeneratorTest
         m_context->schedule(m_context->copier()->copy(vr, sr));
         m_context->schedule(m_context->copier()->copy(vr, literal));
         m_context->schedule(m_context->copier()->copy(ar, vr));
+        m_context->schedule(m_context->copier()->copy(sr, zero));
+        m_context->schedule(m_context->copier()->copy(dsr, zero));
 
         m_context->schedule(m_context->copier()->conditionalCopy(sr, sr));
         m_context->schedule(m_context->copier()->conditionalCopy(sr, literal));
@@ -71,6 +76,8 @@ namespace CopyGeneratorTest
             v_mov_b32 v0, s0
             v_mov_b32 v0, 20
             v_accvgpr_write a0, v0
+            s_mov_b32 s0, 0
+            s_mov_b64 s[2:3], 0
             s_cmov_b32 s0, s0
             s_cmov_b32 s0, 20
             )";
@@ -115,7 +122,7 @@ namespace CopyGeneratorTest
         EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));
     }
 
-    TEST_F(CopyGeneratorTest, TestFill)
+    TEST_F(CopyGeneratorTest, TestFillInt32)
     {
         int  n   = 8;
         auto sr0 = std::make_shared<Register::Value>(
@@ -145,6 +152,44 @@ namespace CopyGeneratorTest
         {
             expectedOutput += "v_accvgpr_write a[" + std::to_string(i) + ":" + std::to_string(i + 1)
                               + "], 13\n";
+        }
+
+        EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));
+    }
+
+    TEST_F(CopyGeneratorTest, TestFillInt64)
+    {
+        int  n   = 8;
+        auto sr0 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int64, n);
+        auto vr0 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int64, n);
+        auto ar0 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Accumulator, DataType::Int64, n);
+
+        m_context->schedule(m_context->copier()->fill(sr0, Register::Value::Literal(11L)));
+        m_context->schedule(
+            m_context->copier()->fill(vr0, Register::Value::Literal((13L << 32) + 12)));
+        m_context->schedule(m_context->copier()->fill(ar0, Register::Value::Literal(14L)));
+
+        std::string expectedOutput = "";
+
+        for(int i = 0; i < n * 2; i += 2)
+        {
+            expectedOutput
+                += "s_mov_b64 s[" + std::to_string(i) + ":" + std::to_string(i + 1) + "], 11\n";
+        }
+
+        for(int i = 0; i < n * 2; i += 2)
+        {
+            expectedOutput += "v_mov_b32 v" + std::to_string(i) + ", 12\n";
+            expectedOutput += "v_mov_b32 v" + std::to_string(i + 1) + ", 13\n";
+        }
+
+        for(int i = 0; i < n * 2; i += 2)
+        {
+            expectedOutput += "v_accvgpr_write a[" + std::to_string(i) + ":" + std::to_string(i + 1)
+                              + "], 14\n";
         }
 
         EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));

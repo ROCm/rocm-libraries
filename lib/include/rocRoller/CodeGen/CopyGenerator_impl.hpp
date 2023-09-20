@@ -11,6 +11,7 @@
 #include "../Context.hpp"
 #include "../InstructionValues/Register.hpp"
 #include "../Utilities/Error.hpp"
+#include "Arithmetic/Utility.hpp"
 
 namespace rocRoller
 {
@@ -59,21 +60,36 @@ namespace rocRoller
                                                       Register::ValuePtr src,
                                                       std::string        comment) const
     {
+
         auto context = m_context.lock();
         // Check for invalid copies
         if(dest->regType() == Register::Type::Scalar
            && (src->regType() == Register::Type::Vector
                || src->regType() == Register::Type::Accumulator))
         {
-            throw FatalError("Can not copy vector register into scalar register");
+            Throw<FatalError>("Can not copy vector register into scalar register");
         }
 
         if(src->regType() == Register::Type::Literal && dest->regType() == Register::Type::Vector)
         {
-            // TODO this assumes 32bit
-            for(size_t k = 0; k < dest->registerCount(); ++k)
+            if(dest->variableType().getElementSize() == 4)
             {
-                co_yield_(Instruction("v_mov_b32", {dest->subset({k})}, {src}, {}, comment));
+                for(size_t k = 0; k < dest->registerCount(); ++k)
+                {
+                    co_yield_(Instruction("v_mov_b32", {dest->subset({k})}, {src}, {}, comment));
+                }
+            }
+            else
+            {
+                for(size_t k = 0; k < dest->registerCount() / 2; ++k)
+                {
+                    Register::ValuePtr left, right;
+                    Arithmetic::get2LiteralDwords(left, right, src);
+                    co_yield_(
+                        Instruction("v_mov_b32", {dest->subset({2 * k})}, {left}, {}, comment));
+                    co_yield_(Instruction(
+                        "v_mov_b32", {dest->subset({2 * k + 1})}, {right}, {}, comment));
+                }
             }
         }
         else if(src->regType() == Register::Type::Literal
@@ -91,7 +107,7 @@ namespace rocRoller
                 }
                 else
                 {
-                    Throw<FatalError>("Unsuported copy scalar datasize");
+                    Throw<FatalError>("Unsupported copy scalar datasize");
                 }
             }
         }

@@ -1,4 +1,5 @@
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 
 namespace rocRoller
@@ -11,33 +12,6 @@ namespace rocRoller
             m_context, Register::Type::Vector, tmp->variableType(), 1);
 
         co_yield m_context->copier()->copy(val, tmp, "");
-    }
-
-    // ----------------------------------------------
-    // get2Dwords
-    // Represent a single Register::Value as two Register::Values each the size of a single DWord
-
-    void get2LiteralDwords(Register::ValuePtr& lsd,
-                           Register::ValuePtr& msd,
-                           Register::ValuePtr  input)
-    {
-        assert(input->regType() == Register::Type::Literal);
-        int64_t value = std::visit(
-            [](auto v) {
-                using T = std::decay_t<decltype(v)>;
-                if constexpr(std::is_pointer_v<T>)
-                {
-                    return reinterpret_cast<int64_t>(v);
-                }
-                else
-                {
-                    return static_cast<int64_t>(v);
-                }
-            },
-            input->getLiteralValue());
-
-        lsd = Register::Value::Literal(static_cast<uint32_t>(value));
-        msd = Register::Value::Literal(static_cast<uint32_t>(value >> 32));
     }
 
     Generator<Instruction> ArithmeticGenerator::signExtendDWord(Register::ValuePtr dst,
@@ -54,7 +28,7 @@ namespace rocRoller
     {
         if(input->regType() == Register::Type::Literal)
         {
-            get2LiteralDwords(lsd, msd, input);
+            Arithmetic::get2LiteralDwords(lsd, msd, input);
             co_return;
         }
 
@@ -111,7 +85,7 @@ namespace rocRoller
     {
         if(input->regType() == Register::Type::Literal)
         {
-            get2LiteralDwords(lsd, msd, input);
+            Arithmetic::get2LiteralDwords(lsd, msd, input);
             co_return;
         }
 

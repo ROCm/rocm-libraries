@@ -268,6 +268,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/ShiftL.cpp
  lib/source/CodeGen/Arithmetic/ShiftLAdd.cpp
  lib/source/CodeGen/Arithmetic/Subtract.cpp
+ lib/source/CodeGen/Arithmetic/Utility.cpp
  lib/source/CodeGen/Buffer.cpp
  lib/source/CodeGen/Instruction.cpp
  lib/source/CodeGen/InstructionRef.cpp
