@@ -111,10 +111,18 @@ namespace rocRoller
                 co_return;
             }
 
-            if(varType == DataType::UInt32)
+            if(varType == DataType::UInt32
+               || (varType == DataType::Raw32 && input->valueCount() == 1))
             {
                 lsd = input->subset({0});
                 msd = Register::Value::Literal(0);
+                co_return;
+            }
+
+            if(varType == DataType::Raw32 && input->valueCount() >= 2)
+            {
+                lsd = input->subset({0});
+                msd = input->subset({1});
                 co_return;
             }
 
