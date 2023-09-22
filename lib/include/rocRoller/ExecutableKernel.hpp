@@ -4,6 +4,7 @@
 
 #include "GPUArchitecture/GPUArchitectureTarget.hpp"
 #include "KernelArguments.hpp"
+#include "Utilities/HIPTimer.hpp"
 
 namespace rocRoller
 {
@@ -82,8 +83,13 @@ namespace rocRoller
          *
          * @param args The arguments to the Kernel
          * @param invocation Other information needed to launch the kernel.
+         * @param timer HIPTimer that will record how long the kernel took to execute
+         * @param iteration Iteration number within the timer
          */
-        void executeKernel();
+        void executeKernel(const KernelArguments&    args,
+                           const KernelInvocation&   invocation,
+                           std::shared_ptr<HIPTimer> timer,
+                           int                       iteration);
 
     private:
         struct HIPData;

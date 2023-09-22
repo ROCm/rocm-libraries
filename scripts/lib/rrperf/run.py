@@ -32,26 +32,34 @@ def first_problem_from_suite(suite: str):
     raise RuntimeError(f"Suite {suite} has no problems.")
 
 
+def try_getting_commit(repo):
+    if repo is not None:
+        try:
+            return rrperf.git.short_hash(repo)
+        except Exception:
+            pass
+    return None
+
+
+def get_commit(rundir: str = None, build_dir: Path = None) -> str:
+    commit = try_getting_commit(build_dir)
+    if commit is None:
+        commit = try_getting_commit(rundir)
+    if commit is None:
+        commit = try_getting_commit(".")
+    if commit is None:
+        commit = try_getting_commit(Path(__file__).resolve().parent)
+    if commit is None:
+        commit = "NO_COMMIT"
+    return commit
+
+
 def get_work_dir(rundir: str = None, build_dir: Path = None) -> Path:
     """Return a new work directory path."""
 
     date = datetime.date.today().strftime("%Y-%m-%d")
     root = "."
-    commit = None
-    if build_dir is not None:
-        try:
-            commit = rrperf.git.short_hash(build_dir)
-        except Exception:
-            pass
-
-    if commit is None and rundir is not None:
-        try:
-            commit = rrperf.git.short_hash(rundir)
-        except Exception:
-            pass
-
-    if commit is None:
-        commit = rrperf.git.short_hash(root)
+    commit = get_commit(rundir, build_dir)
 
     if rundir is not None:
         root = Path(rundir)
@@ -259,7 +267,11 @@ def run_cli(
 
     # pts.create_git_info(str(wrkdir / "git-commit.txt"))
     git_commit = rundir / "git-commit.txt"
-    git_commit.write_text(rrperf.git.full_hash(build_dir) + "\n")
+    try:
+        hash = rrperf.git.full_hash(build_dir)
+        git_commit.write_text(f"{hash}\n")
+    except Exception:
+        git_commit.write_text("NO_COMMIT\n")
     # pts.create_specs_info(str(wrkdir / "machine-specs.txt"))
     machine_specs = rundir / "machine-specs.txt"
     machine_specs.write_text(str(rrperf.specs.get_machine_specs(0, rocm_smi)) + "\n")

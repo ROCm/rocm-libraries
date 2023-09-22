@@ -20,24 +20,24 @@ namespace rocRoller
             BenchmarkResults result;
             result.runParams = runParams;
 
-            // Warmup runs
-            for(int i = 0; i < runParams.numWarmUp; ++i)
-            {
-                m_kernel->launchKernel(runtimeArgs.runtimeArguments());
-            }
-
             // Benchmark runs
             for(int outer = 0; outer < runParams.numOuter; ++outer)
             {
-                HIP_TIMER(t_kernel, "BENCH");
-                HIP_TIC(t_kernel);
-                for(int inner = 0; inner < runParams.numInner; ++inner)
+                // Warmup runs
+                for(int i = 0; i < runParams.numWarmUp; ++i)
                 {
                     m_kernel->launchKernel(runtimeArgs.runtimeArguments());
                 }
-                HIP_TOC(t_kernel);
+                HIP_TIMER(t_kernel, "GEMM", runParams.numInner);
+                for(int inner = 0; inner < runParams.numInner; ++inner)
+                {
+                    m_kernel->launchKernel(runtimeArgs.runtimeArguments(), t_kernel, inner);
+                }
                 HIP_SYNC(t_kernel);
-                result.kernelExecute.push_back(t_kernel.nanoseconds());
+                t_kernel->sleep(50);
+                auto nanoseconds = t_kernel->allNanoseconds();
+                result.kernelExecute.insert(
+                    result.kernelExecute.end(), nanoseconds.begin(), nanoseconds.end());
             }
 
             double totalTime = 0;

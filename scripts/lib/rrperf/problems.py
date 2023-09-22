@@ -108,9 +108,9 @@ class GEMMSolution:
 class GEMM(GEMMProblem, GEMMSolution):
     """GEMM base problem description."""
 
-    numWarmUp: int = 2
-    numOuter: int = 10
-    numInner: int = 1
+    numWarmUp: int = 1
+    numOuter: int = 1
+    numInner: int = 10
 
     visualize: bool = False
 

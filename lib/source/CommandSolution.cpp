@@ -341,6 +341,13 @@ namespace rocRoller
 
     void CommandKernel::launchKernel(RuntimeArguments const& args)
     {
+        launchKernel(args, nullptr, 0);
+    }
+
+    void CommandKernel::launchKernel(RuntimeArguments const&   args,
+                                     std::shared_ptr<HIPTimer> timer,
+                                     int                       iteration)
+    {
         TIMER(t, "CommandKernel::launchKernel");
 
         AssertFatal(m_context);
@@ -352,7 +359,7 @@ namespace rocRoller
         auto kargs = getKernelArguments(args);
         auto inv   = getKernelInvocation(args);
 
-        m_executableKernel->executeKernel(kargs, inv);
+        m_executableKernel->executeKernel(kargs, inv, timer, iteration);
     }
 
     void CommandKernel::loadKernelFromAssembly(const std::string& fileName,

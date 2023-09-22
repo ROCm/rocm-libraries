@@ -6,6 +6,7 @@
 #include "ExecutableKernel_fwd.hpp"
 #include "KernelArguments.hpp"
 #include "Operations/Command_fwd.hpp"
+#include "Utilities/HIPTimer.hpp"
 
 namespace rocRoller
 {
@@ -134,9 +135,22 @@ namespace rocRoller
         void loadKernelFromAssembly(std::string const& fileName, std::string const& kernelName);
 
         /**
-         * Determines launch bounds and arguments, and launches the kernel.
-         */
+         * @brief Determines launch bounds and arguments, and launches the kernel.
+         *
+         * @param args The runtime arguments being passed to the kernel
+        */
         void launchKernel(RuntimeArguments const& args);
+
+        /**
+         * @brief Determines launch bounds and arguments, and launches the kernel.
+         *
+         * @param args The runtime arguments being passed to the kernel
+         * @param timer HIPTimer that will record how long the kernel took to execute
+         * @param iteration Iteration number within the timer
+        */
+        void launchKernel(RuntimeArguments const&   args,
+                          std::shared_ptr<HIPTimer> timer,
+                          int                       iteration);
 
         KernelGraph::KernelGraph getKernelGraph() const;
 

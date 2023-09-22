@@ -162,23 +162,20 @@ def summary_statistics(perf_runs):
     for token in common:
         A = ref.results[token]
         ka = np.asarray(A.kernelExecute)
-        ka_median = statistics.median(ka)
-        ka_mean = statistics.mean(ka)
+        ka_median = statistics.median(ka) if len(ka) > 0 else 0
+        ka_mean = statistics.mean(ka) if len(ka) > 0 else 0
 
         for run in runs:
             B = run.results[token]
             kb = np.asarray(B.kernelExecute)
 
-            kb_median = statistics.median(kb)
-            kb_mean = statistics.mean(kb)
+            kb_median = statistics.median(kb) if len(kb) > 0 else 0
+            kb_mean = statistics.mean(kb) if len(kb) > 0 else 0
 
             try:
                 _, p, _, _ = scipy.stats.median_test(ka, kb)
-            except ValueError as e:
-                if "All values are below the grand median" in str(e):
-                    p = 1.0
-                else:
-                    raise e
+            except Exception:
+                p = 1.0
             stats[run][token] = A.token, ComparisonResult(
                 mean=[ka_mean, kb_mean],
                 median=[ka_median, kb_median],
@@ -344,8 +341,10 @@ def html_overview_table(html_file, summary, problems):
             token, comparison = summary[run][result]
             A, B = comparison.results
             relative_diff = (
-                comparison.median[1] - comparison.median[0]
-            ) / comparison.median[0]
+                (comparison.median[1] - comparison.median[0]) / comparison.median[0]
+                if comparison.median[0] != 0
+                else 0
+            )
             link_target = (
                 problems.index(comparison.problem)
                 if comparison.problem in problems
@@ -468,16 +467,14 @@ def html_summary(  # noqa: C901
 
                 A = run.results[token]
                 ka = np.asarray(A.kernelExecute)
-                if "numInner" in A.__dict__.values():
-                    ka = ka / A.numInner
 
-                median = statistics.median(ka)
+                median = statistics.median(ka) if len(ka) > 0 else 0
                 if normalizer is None:
                     normalizer = median
-
-                ka = ka / normalizer
-                median = median / normalizer
-                min = np.min(ka)
+                if normalizer > 0:
+                    ka = ka / normalizer
+                    median = median / normalizer
+                min = np.min(ka) if len(ka) > 0 else 0
                 runs[token].timestamp.append(run.timestamp)
                 runs[token].commit.append(run.commit)
                 runs[token].median.append(median)

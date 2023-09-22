@@ -80,6 +80,14 @@ namespace rocRoller
     void ExecutableKernel::executeKernel(const KernelArguments&  args,
                                          const KernelInvocation& invocation)
     {
+        executeKernel(args, invocation, nullptr, 0);
+    }
+
+    void ExecutableKernel::executeKernel(const KernelArguments&    args,
+                                         const KernelInvocation&   invocation,
+                                         std::shared_ptr<HIPTimer> timer,
+                                         int                       iteration)
+    {
         // TODO: Include this at a particular logging level.
         if(args.log())
         {
@@ -102,6 +110,9 @@ namespace rocRoller
                                    &argsSize,
                                    HIP_LAUNCH_PARAM_END};
 
+        if(timer)
+            HIP_TIC(timer, iteration);
+
         HIP_CHECK(hipExtModuleLaunchKernel(m_hipData->function,
                                            invocation.workitemCount[0],
                                            invocation.workitemCount[1],
@@ -110,11 +121,14 @@ namespace rocRoller
                                            invocation.workgroupSize[1],
                                            invocation.workgroupSize[2],
                                            invocation.sharedMemBytes,
-                                           0, // stream
+                                           timer ? timer->stream() : 0, // stream
                                            nullptr,
                                            (void**)&hipLaunchParams,
                                            nullptr, // event
                                            nullptr // event
                                            ));
+
+        if(timer)
+            HIP_TOC(timer, iteration);
     }
 }

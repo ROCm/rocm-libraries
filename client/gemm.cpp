@@ -8,9 +8,10 @@
 
 #include "../../test/unit/Utilities.hpp"
 
+#include "include/DataParallelGEMMSolution.hpp"
 #include "include/GEMMParameters.hpp"
-#include "include/GEMMSolution.hpp"
 #include "include/Parser.hpp"
+#include "include/TensileGEMMSolution.hpp"
 
 using namespace rocRoller;
 
@@ -86,16 +87,6 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
                                 bool                                          checkResult,
                                 bool                                          doVisualize)
 {
-
-    Client::GEMMClient::DataParallelGEMMSolution<A, B, C, D> gemmKernel(solutionParams);
-
-    // TODO: Make this optional.
-    {
-        auto          kernelName = solutionParams.generateKernelName();
-        std::ofstream outfile(kernelName + ".yaml");
-        outfile << toYAML(gemmKernel.getKernel()->getKernelGraph());
-    }
-
     // Host Data
     RandomGenerator random(31415u);
     std::vector<A>  h_A = random.vector<A>(
@@ -106,9 +97,42 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
         solutionParams.problemParams.m * solutionParams.problemParams.n, -1.0, 1.0);
     std::vector<D> h_D(solutionParams.problemParams.m * solutionParams.problemParams.n, 0.0);
 
-    auto result = gemmKernel.benchmark(runParams, checkResult, doVisualize, h_A, h_B, h_C, h_D);
+    if(solutionParams.scheduler == "TENSILE_ASM")
+    {
+        Client::GEMMClient::Result result;
+        auto                       versionString = GPUArchitectureLibrary::getInstance()
+                                 ->GetDefaultHipDeviceArch()
+                                 .target()
+                                 .getVersionString();
+        if(versionString == "gfx90a")
+        {
+            Client::GEMMClient::TensileGEMMSolution<A, B, C, D> gemmKernel(solutionParams);
+            result = gemmKernel.benchmark(runParams, checkResult, doVisualize, h_A, h_B, h_C, h_D);
+        }
+        else
+        {
+            std::cout << "Not running TENSILE_ASM for " << versionString << std::endl;
+            result.solutionParams             = solutionParams;
+            result.benchmarkResults.runParams = runParams;
+        }
 
-    return result;
+        return result;
+    }
+    else
+    {
+        Client::GEMMClient::DataParallelGEMMSolution<A, B, C, D> gemmKernel(solutionParams);
+
+        // TODO: Make this optional.
+        {
+            auto          kernelName = solutionParams.generateKernelName();
+            std::ofstream outfile(kernelName + ".yaml");
+            outfile << toYAML(gemmKernel.getKernel()->getKernelGraph());
+        }
+
+        auto result = gemmKernel.benchmark(runParams, checkResult, doVisualize, h_A, h_B, h_C, h_D);
+
+        return result;
+    }
 }
 
 int main(int argc, const char* argv[])

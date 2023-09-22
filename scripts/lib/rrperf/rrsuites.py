@@ -367,6 +367,27 @@ def guidepost_1():
     yield GEMMRun(
         M=7680,
         N=8448,
+        K=8448,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        trans_A="N",
+        trans_B="T",
+        visualize=False,
+        scheduler="Priority",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=2,
+        **fp16,
+    )
+
+
+def guidepost_2():
+    yield GEMMRun(
+        M=7680,
+        N=8448,
         K=8192,
         mac_m=128,
         mac_n=256,
@@ -379,7 +400,49 @@ def guidepost_1():
         scheduler="Priority",
         prefetch=True,
         prefetchInFlight=2,
-        prefetchLDSFactor=1,
+        prefetchLDSFactor=2,
+        **fp16,
+    )
+
+
+def tensile_asm_guidepost_1():
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8448,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        trans_A="N",
+        trans_B="T",
+        visualize=False,
+        scheduler="TENSILE_ASM",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=2,
+        **fp16,
+    )
+
+
+def tensile_asm_guidepost_2():
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        trans_A="N",
+        trans_B="T",
+        visualize=False,
+        scheduler="TENSILE_ASM",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=2,
         **fp16,
     )
 
@@ -411,6 +474,8 @@ def tensile_sgemm_guidepost():
 def tensile_benchmarks():
     yield from tensile_guidepost()
     yield from tensile_sgemm_guidepost()
+    yield from tensile_asm_guidepost_1()
+    yield from tensile_asm_guidepost_2()
 
 
 def codegen():
@@ -424,6 +489,13 @@ def all():
     yield from hgemm()
     yield from codegen()
     yield from tensile_benchmarks()
+
+
+def hgemm_guideposts():
+    yield from guidepost_1()
+    yield from guidepost_2()
+    yield from tensile_asm_guidepost_1()
+    yield from tensile_asm_guidepost_2()
 
 
 def priority_problems():

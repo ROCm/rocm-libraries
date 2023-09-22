@@ -18,6 +18,7 @@ if(BUILD_CLIENT)
     gemm.cpp
     GEMMParameters.cpp
     BenchmarkSolution.cpp
+    TensileGEMMSolution.cpp
     visualize.cpp
 
     ../test/unit/Utilities.cpp
@@ -116,6 +117,8 @@ if(BUILD_CLIENT)
     set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
 
+configure_file("./tensile_asm/Cijk_Ailk_Bjlk_HHS_BH_MT128x256x16_MI32x32x8x1_SE_K1.s"
+               "${CMAKE_BINARY_DIR}/tensile_asm/Cijk_Ailk_Bjlk_HHS_BH_MT128x256x16_MI32x32x8x1_SE_K1.s")
 
   add_custom_target(all_clients)
   add_dependencies(all_clients gemm codegen_stress)

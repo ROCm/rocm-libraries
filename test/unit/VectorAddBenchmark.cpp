@@ -50,10 +50,8 @@ namespace VectorAddBenchmark
         auto runtimeArgs
             = vectorAdd.getRuntimeArguments(nx, d_alpha.get(), d_a.get(), d_b.get(), d_c.get());
 
-        HIP_TIMER(t_kernel, "VectorAddKernel_Graph");
-        HIP_TIC(t_kernel);
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-        HIP_TOC(t_kernel);
+        HIP_TIMER(t_kernel, "VectorAddKernel_Graph", 1);
+        commandKernel.launchKernel(runtimeArgs.runtimeArguments(), t_kernel, 0);
         HIP_SYNC(t_kernel);
 
         ASSERT_THAT(hipMemcpy(r.data(), d_c.get(), nx * sizeof(int), hipMemcpyDefault),
@@ -63,7 +61,7 @@ namespace VectorAddBenchmark
         double rnorm = relativeNorm(r, vectorAdd.referenceSolution(alpha, a, b));
 
         ASSERT_LT(rnorm, 1.e-12);
-        EXPECT_GT(t_kernel.elapsed(), std::chrono::steady_clock::duration(0));
+        EXPECT_GT(t_kernel->elapsed(), std::chrono::steady_clock::duration(0));
 
         std::cout << TimerPool::summary() << std::endl;
         std::cout << TimerPool::CSV() << std::endl;
