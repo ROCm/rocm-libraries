@@ -125,12 +125,12 @@ class PerformanceRun:
                 except Exception as e:
                     print('Error loading results in "{}": {}'.format(path, e))
                 for element in result:
-                    if element.token in results:
+                    if element.run_invariant_token in results:
                         # TODO: Handle result files that have multiple results in
                         # a single yaml file.
-                        results[element.token] = element
+                        results[element.run_invariant_token] = element
                     else:
-                        results[element.token] = element
+                        results[element.run_invariant_token] = element
             spec = rrperf.specs.load_machine_specs(wrkdir / "machine-specs.txt")
             timestamp = PerformanceRun.get_timestamp(wrkdir)
             commit = PerformanceRun.get_commit(wrkdir)
@@ -176,7 +176,7 @@ def summary_statistics(perf_runs):
                 _, p, _, _ = scipy.stats.median_test(ka, kb)
             except Exception:
                 p = 1.0
-            stats[run][token] = A.token, ComparisonResult(
+            stats[run][token] = A.run_invariant_token, ComparisonResult(
                 mean=[ka_mean, kb_mean],
                 median=[ka_median, kb_median],
                 moods_pval=p,
@@ -205,7 +205,9 @@ def summary_as_df(summary, ResultType):
                     "pval": comparison.moods_pval,
                     "reldiff": 100
                     * (comparison.median[1] - comparison.median[0])
-                    / comparison.median[0],
+                    / comparison.median[0]
+                    if comparison.median[0] != 0
+                    else 0.0,
                 }
             )
             rows.append(row)
@@ -219,11 +221,16 @@ def significant_changes(summary, threshold=0.05):
             token, comparison = summary[run][result]
             A, B = comparison.results
             percent = (
-                (comparison.median[1] - comparison.median[0]) * 100.0
-            ) / comparison.median[0]
+                ((comparison.median[1] - comparison.median[0]) * 100.0)
+                / comparison.median[0]
+                if comparison.median[0] != 0
+                else 0.0
+            )
             if comparison.moods_pval < threshold:
                 sign = "+" if percent < 0 else "-"
-                result_diffs[A.problem_token(priority_problems()) + A.token] = (
+                result_diffs[
+                    A.problem_token(priority_problems()) + A.run_invariant_token
+                ] = (
                     f"{sign} {(abs(percent)):6.2f}% "
                     f"| p={comparison.moods_pval:.4e} "
                     f"| {A.problem_token(priority_problems())} "
@@ -262,8 +269,11 @@ def markdown_summary(md, perf_runs):
             token, comparison = summary[run][result]
             A, B = comparison.results
             percent = (
-                (comparison.median[1] - comparison.median[0]) * 100.0
-            ) / comparison.median[0]
+                ((comparison.median[1] - comparison.median[0]) * 100.0)
+                / comparison.median[0]
+                if comparison.median[0] != 0
+                else 0.0
+            )
             row_str = [
                 f"{token}",
                 f"{(percent):.2f}%",
@@ -343,7 +353,7 @@ def html_overview_table(html_file, summary, problems):
             relative_diff = (
                 (comparison.median[1] - comparison.median[0]) / comparison.median[0]
                 if comparison.median[0] != 0
-                else 0
+                else 0.0
             )
             link_target = (
                 problems.index(comparison.problem)

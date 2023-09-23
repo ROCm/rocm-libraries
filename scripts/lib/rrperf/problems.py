@@ -120,6 +120,12 @@ class GEMM(GEMMProblem, GEMMSolution):
         convert_class_params(GEMM, self)
 
     @property
+    def run_invariant_token(self):
+        return repr(GEMMProblem(**field_dict(GEMMProblem, self))) + repr(
+            GEMMSolution(**field_dict(GEMMSolution, self))
+        )
+
+    @property
     def token(self):
         return repr(GEMM(**field_dict(GEMM, self)))
 
@@ -249,6 +255,10 @@ class CodeGen:
 
     numWarmUp: int = 2
     numRuns: int = 10
+
+    @property
+    def run_invariant_token(self):
+        return self.problem_token(None)
 
     @property
     def token(self):
