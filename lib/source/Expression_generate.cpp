@@ -18,6 +18,70 @@ namespace rocRoller
 {
     namespace Expression
     {
+        struct ExpressionHasDFTagVisitor
+        {
+            template <CTernary Expr>
+            bool operator()(Expr const& expr) const
+            {
+                return call(expr.lhs) || call(expr.r1hs) || call(expr.r2hs);
+            }
+
+            template <CBinary Expr>
+            bool operator()(Expr const& expr) const
+            {
+                return call(expr.lhs) || call(expr.rhs);
+            }
+
+            template <CUnary Expr>
+            bool operator()(Expr const& expr) const
+            {
+                return call(expr.arg);
+            }
+
+            template <typename T>
+            bool operator()(T const& expr) const
+            {
+                return false;
+            }
+
+            bool operator()(DataFlowTag const& expr) const
+            {
+                return true;
+            }
+
+            bool call(Expression const& expr) const
+            {
+                return std::visit(*this, expr);
+            }
+
+            bool call(ExpressionPtr expr) const
+            {
+                if(!expr)
+                    return false;
+
+                return call(*expr);
+            }
+        };
+
+        /**
+         * @brief Returns true if an expression contains a DataFlowTag.
+         *
+         * @param expr
+         * @return true
+         * @return false
+         */
+        bool expressionHasDFTag(ExpressionPtr const& expr)
+        {
+            auto visitor = ExpressionHasDFTagVisitor();
+            return visitor.call(expr);
+        }
+
+        bool expressionHasDFTag(Expression const& expr)
+        {
+            auto visitor = ExpressionHasDFTagVisitor();
+            return visitor.call(expr);
+        }
+
         struct CodeGeneratorVisitor
         {
             CodeGeneratorVisitor(ContextPtr& context)
@@ -176,47 +240,39 @@ namespace rocRoller
             }
 
             /*
-             * Generate code for a "deferred" binary operation.
-             *
-             * These are typically from element operations in Assign nodes where the result variable
-             * type is `DataType::None`.  That is, we have deferred determining the output type (and
-             * size) to code-gen time.
+             * Generate code for arithemtic binary operation.
              *
              * We need to support, for example,
              * 1. scalar * scalar
              * 2. scalar * vector
              * 3. vector * vector (element-wise product)
              */
-            template <CBinary Operation>
-            Generator<Instruction> generateDeferredBinary(Register::ValuePtr& dest,
-                                                          Operation const&    expr,
-                                                          Register::ValuePtr  lhs,
-                                                          Register::ValuePtr  rhs)
+            template <typename T>
+            requires(CBinary<T>&& CArithmetic<T>) Generator<Instruction> generateArithmeticBinary(
+                Register::ValuePtr& dest,
+                T const&            expr,
+                Register::ValuePtr& lhs,
+                Register::ValuePtr& rhs,
+                ResultType&         resType)
             {
-                auto const lhsInfo = DataTypeInfo::Get(lhs->variableType());
-                auto const rhsInfo = DataTypeInfo::Get(rhs->variableType());
 
-                auto regType = promoteRegisterTypes({lhs, rhs});
-                auto varType = promoteVariableTypes({lhs, rhs});
-
-                auto const destInfo = DataTypeInfo::Get(varType);
+                auto const lhsInfo  = DataTypeInfo::Get(lhs->variableType());
+                auto const rhsInfo  = DataTypeInfo::Get(rhs->variableType());
+                auto const destInfo = DataTypeInfo::Get(resType.varType);
 
                 int valueCount = resultValueCount(dest, {lhs, rhs});
 
                 // TODO: Should this be pushed to arithmetic generators?
                 // If any sources were AGPRs, copy to VGPRs first.
-                if(valueCount > 1 && regType == Register::Type::Accumulator)
+                if(valueCount > 1 && resType.regType == Register::Type::Accumulator)
                 {
-                    regType = Register::Type::Vector;
-                    co_yield m_context->copier()->ensureType(lhs, lhs, regType);
-                    co_yield m_context->copier()->ensureType(rhs, rhs, regType);
+                    resType.regType = Register::Type::Vector;
+                    co_yield m_context->copier()->ensureType(lhs, lhs, resType.regType);
+                    co_yield m_context->copier()->ensureType(rhs, rhs, resType.regType);
                 }
 
-                if(!dest)
-                {
-                    dest = resultPlaceholder(
-                        {regType, varType}, true, valueCount / destInfo.packing);
-                }
+                if(dest == nullptr)
+                    dest = resultPlaceholder(resType, true, valueCount / destInfo.packing);
 
                 if(lhsInfo.packing != rhsInfo.packing)
                 {
@@ -234,12 +290,12 @@ namespace rocRoller
                         if(lhsInfo.packing < rhsInfo.packing)
                         {
                             co_yield generateConvertOp(
-                                varType.dataType, result, rhs->element({i / packingRatio}));
+                                resType.varType.dataType, result, rhs->element({i / packingRatio}));
                         }
                         else
                         {
                             co_yield generateConvertOp(
-                                varType.dataType, result, lhs->element({i / packingRatio}));
+                                resType.varType.dataType, result, lhs->element({i / packingRatio}));
                         }
 
                         for(size_t j = 0; j < packingRatio; j++)
@@ -255,41 +311,74 @@ namespace rocRoller
                                 rhsVal = rhs->valueCount() == 1 ? rhs : rhs->element({i + j});
                             }
 
-                            co_yield generateOp<Operation>(result->element({j}), lhsVal, rhsVal);
+                            co_yield generateOp<T>(result->element({j}), lhsVal, rhsVal);
                         }
                     }
                 }
                 else
                 {
-                    AssertFatal(destInfo.isIntegral || lhs->variableType() == varType
-                                    || rhs->variableType() == varType,
+                    AssertFatal(destInfo.isIntegral || lhs->variableType() == resType.varType
+                                    || rhs->variableType() == resType.varType,
                                 "Only one floating point argument can be converted");
                     for(size_t k = 0; k < dest->valueCount(); ++k)
                     {
-                        auto lhsVal = lhs->valueCount() == 1 ? lhs : lhs->element({k});
-                        if(!destInfo.isIntegral && lhs->variableType() != varType)
+                        auto lhsVal = lhs->regType() == Register::Type::Literal
+                                              || lhs->regType() == Register::Type::Special
+                                              || lhs->valueCount() == 1
+                                          ? lhs
+                                          : lhs->element({k});
+                        if(!destInfo.isIntegral && lhs->variableType() != resType.varType)
                         {
                             co_yield generateConvertOp(
-                                varType.dataType, dest->element({k}), lhsVal);
+                                resType.varType.dataType, dest->element({k}), lhsVal);
                             lhsVal = dest->element({k});
                         }
 
-                        auto rhsVal = rhs->valueCount() == 1 ? rhs : rhs->element({k});
-                        if(!destInfo.isIntegral && rhs->variableType() != varType)
+                        auto rhsVal = rhs->regType() == Register::Type::Literal
+                                              || rhs->regType() == Register::Type::Special
+                                              || rhs->valueCount() == 1
+                                          ? rhs
+                                          : rhs->element({k});
+                        if(!destInfo.isIntegral && rhs->variableType() != resType.varType)
                         {
                             co_yield generateConvertOp(
-                                varType.dataType, dest->element({k}), rhsVal);
+                                resType.varType.dataType, dest->element({k}), rhsVal);
                             rhsVal = dest->element({k});
                         }
 
-                        co_yield generateOp<Operation>(dest->element({k}), lhsVal, rhsVal);
+                        co_yield generateOp<T>(dest->element({k}), lhsVal, rhsVal);
                     }
                 }
             }
 
-            template <CBinary Operation>
-            requires CKernelExecuteTime<Operation> Generator<Instruction>
-            operator()(Register::ValuePtr& dest, Operation const& expr)
+            template <typename T>
+            requires(CKernelExecuteTime<T>&& CBinary<T>&& CArithmetic<T>) Generator<Instruction>
+            operator()(Register::ValuePtr& dest, T const& expr)
+            {
+                bool                            schedulerLocked = false;
+                std::vector<Register::ValuePtr> results;
+                std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.rhs};
+
+                AssertFatal(
+                    !expressionHasDFTag(expr),
+                    "expr is not expected to have a DataFlowTag : check DataFlowTagPropagation");
+
+                auto resType = resultType(expr);
+                AssertFatal(resType.varType != DataType::None,
+                            "expr w/o DataFlowTag(s) doesn't have deferred datatype");
+
+                co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
+
+                co_yield generateArithmeticBinary(dest, expr, results[0], results[1], resType);
+
+                if(schedulerLocked)
+                    co_yield Instruction::Unlock("Expression temporary in special register");
+            }
+
+            template <typename T>
+            requires(CKernelExecuteTime<T>&& CBinary<T> && (CLogical<T> || CComparison<T>))
+                Generator<Instruction>
+            operator()(Register::ValuePtr& dest, T const& expr)
             {
                 bool                            schedulerLocked = false;
                 std::vector<Register::ValuePtr> results;
@@ -297,20 +386,12 @@ namespace rocRoller
 
                 co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
 
-                auto resType  = resultType(expr);
-                auto deferred = resType.varType == DataType::None;
+                auto resType = resultType(expr);
 
-                if(deferred)
-                {
-                    co_yield generateDeferredBinary(dest, expr, results[0], results[1]);
-                }
-                else
-                {
-                    if(dest == nullptr)
-                        dest = resultPlaceholder(resType);
+                if(dest == nullptr)
+                    dest = resultPlaceholder(resType);
 
-                    co_yield generateOp<Operation>(dest, results[0], results[1]);
-                }
+                co_yield generateOp<T>(dest, results[0], results[1]);
 
                 if(schedulerLocked)
                     co_yield Instruction::Unlock("Expression temporary in special register");
@@ -542,11 +623,6 @@ namespace rocRoller
                 co_yield m_context->argLoader()->getValue(expr->name, dest);
             }
 
-            Generator<Instruction> operator()(CommandArgumentPtr const& expr)
-            {
-                Throw<FatalError>("CommandArgument present in expression.", ShowValue(expr));
-            }
-
             Generator<Instruction> operator()(Register::ValuePtr&         dest,
                                               CommandArgumentValue const& expr)
             {
@@ -556,22 +632,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, DataFlowTag const& expr)
             {
-                if(m_context->registerTagManager()->hasExpression(expr.tag))
-                {
-                    auto [tagExpr, tagDT]
-                        = m_context->registerTagManager()->getExpression(expr.tag);
-                    co_yield call(dest, tagExpr);
-                }
-                else
-                {
-                    AssertFatal(m_context->registerTagManager()->hasRegister(expr.tag));
-                    auto tagReg = m_context->registerTagManager()->getRegister(expr.tag);
-
-                    if(dest == nullptr)
-                        dest = tagReg;
-                    else
-                        co_yield m_context->copier()->copy(dest, tagReg);
-                }
+                Throw<FatalError>("DataFlowTag present in the expression.", ShowValue(expr));
             }
 
             Generator<Instruction> call(Register::ValuePtr& dest, Expression const& expr)
@@ -622,6 +683,10 @@ namespace rocRoller
             generate(Register::ValuePtr& dest, ExpressionPtr expr, ContextPtr context)
         {
             co_yield Instruction::Comment(toString(expr));
+
+            // resolve DataFlowTags and evaluate exprs with translate time source operands
+            expr = dataFlowTagPropagation(expr, context);
+            expr = simplify(expr);
 
             CodeGeneratorVisitor v{context};
 

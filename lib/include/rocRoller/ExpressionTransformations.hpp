@@ -53,6 +53,15 @@ namespace rocRoller
         ExpressionPtr fuseAssociative(ExpressionPtr expr);
 
         /**
+         * Resolve all DataFlowTags in the given expression.
+         * Each DataFlowTag is transformed into either an expression or a register value.
+         *
+         * @param expr Input expression
+         * @return ExpressionPtr Transformed expression
+         */
+        ExpressionPtr dataFlowTagPropagation(ExpressionPtr expr, ContextPtr context);
+
+        /**
          * Helper (lambda/transducer) for applying all fast arithmetic transformations.
          *
          * Usage:

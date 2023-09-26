@@ -273,7 +273,7 @@ namespace rocRoller
                 if(rv != nullptr)
                     return rv;
 
-                return std::make_shared<Expression>(Expr({lhs, rhs}));
+                return std::make_shared<Expression>(Expr({lhs, rhs, expr.comment}));
             }
 
             template <CTernary Expr>

@@ -79,7 +79,7 @@ namespace rocRoller
                 // TODO: Consider moving numBytes into input of this function.
                 if(offsetInBytes)
                     co_yield Expression::generate(
-                        dst, m_fastArith(expr * numBytes) + offsetInBytes, m_context);
+                        dst, m_fastArith(expr * numBytes + offsetInBytes), m_context);
                 else
                     co_yield Expression::generate(dst, m_fastArith(expr * numBytes), m_context);
             }

@@ -401,18 +401,15 @@ namespace rocRoller
          * Create send-tile block, which is roughly:
          *
          *     WaitZero()
+         *     fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
          *     if receiveTileExpr:
          *       if WG + 1 < numScratch:
          *         do:
          *           LoadSGPR(flag)
          *         while flag == 0
          *         partiallyAccumulatedTile = LoadTiled()
-         *         fullyAccumulatedTile = Assign(partiallyAccumulatedTile + localPartiallyAccumulatedTile)
+         *         fullyAccumulatedTile = Assign(fullyAccumulatedTile + partiallyAccumulatedTile)
          *         WaitZero()
-         *       else:
-         *         fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
-         *     else:
-         *       fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
          *
          * Note this also update all subsequent references to
          * localPartiallyAccumulatedTile to fullyAccumulatedTile.
@@ -466,38 +463,32 @@ namespace rocRoller
             auto doWhileTag = graph.control.addElement(
                 DoWhileOp{(DF(flagRegister) == zero), "Global sync spin loop"});
 
-            // Add fixup
-            auto fullyAccumulatedTileTag = graph.coordinates.addElement(MacroTile());
-            replaceMacroTile(
-                graph, usesAccumulatorTile, accumulatorTileTag, fullyAccumulatedTileTag);
-
+            // Copy AGPRs to VGPRs before adding fixup
             auto accumulatorTile = graph.coordinates.get<MacroTile>(accumulatorTileTag);
             uint numRegisters
                 = accumulatorTile->elements() / product(context->kernel()->workgroupSize());
+            auto fullyAccumulatedTileTag = graph.coordinates.addElement(MacroTile());
+            auto copyAssignTag           = copyAssign(
+                graph, accumulatorTileTag, fullyAccumulatedTileTag, dataType, numRegisters);
+
+            replaceMacroTile(
+                graph, usesAccumulatorTile, accumulatorTileTag, fullyAccumulatedTileTag);
 
             auto fixupTag = addFixup(graph,
-                                     accumulatorTileTag,
+                                     fullyAccumulatedTileTag,
                                      scratchTileTag,
                                      fullyAccumulatedTileTag,
                                      dataType,
                                      numRegisters);
 
-            // Copy AGPRs to VGPRs
-            auto copyElseReceiveTag = copyAssign(
-                graph, accumulatorTileTag, fullyAccumulatedTileTag, dataType, numRegisters);
-
-            auto copyElseBoundsTag = copyAssign(
-                graph, accumulatorTileTag, fullyAccumulatedTileTag, dataType, numRegisters);
-
             // Add to control
             auto preWaitZeroTag  = graph.control.addElement(WaitZero());
             auto postWaitZeroTag = graph.control.addElement(WaitZero());
 
-            graph.control.addElement(Sequence(), {preWaitZeroTag}, {receiveTileTag});
+            graph.control.chain<Sequence>(preWaitZeroTag, copyAssignTag, receiveTileTag);
+
             graph.control.addElement(Body(), {receiveTileTag}, {boundsCheckTag});
-            graph.control.addElement(Else(), {receiveTileTag}, {copyElseReceiveTag});
             graph.control.addElement(Body(), {boundsCheckTag}, {doWhileTag});
-            graph.control.addElement(Else(), {boundsCheckTag}, {copyElseBoundsTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
             graph.control.chain<Sequence>(doWhileTag, loadTileTag, fixupTag, postWaitZeroTag);

@@ -234,6 +234,7 @@ set(rocroller_src
  lib/source/Scheduler.cpp
  lib/source/Timer.cpp
 
+ lib/source/ExpressionTransformations/DataFlowTagPropagation.cpp
  lib/source/ExpressionTransformations/FastArithmetic.cpp
  lib/source/ExpressionTransformations/FastDivision.cpp
  lib/source/ExpressionTransformations/FastMultiplication.cpp

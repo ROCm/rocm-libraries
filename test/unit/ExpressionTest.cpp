@@ -465,6 +465,79 @@ namespace ExpressionTest
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
     }
 
+    TEST_F(ExpressionTest, ReuseInputVGPRsAsOutputVGPRsInArithmetic)
+    {
+        int M       = 16;
+        int N       = 16;
+        int K       = 4;
+        int batches = 1;
+
+        auto A_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
+        auto B_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
+
+        A_tile->sizes = {M, K};
+        A_tile->vgpr  = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, M * K / 64);
+        A_tile->vgpr->allocateNow();
+
+        B_tile->sizes = {K, N};
+        B_tile->vgpr  = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, K * N / 64);
+        B_tile->vgpr->allocateNow();
+
+        auto accumD = std::make_shared<Register::Value>(
+            m_context, Register::Type::Accumulator, DataType::Float, M * N * batches / 64);
+        accumD->allocateNow();
+
+        auto A = std::make_shared<Expression::Expression>(A_tile);
+        auto B = std::make_shared<Expression::Expression>(B_tile);
+        auto D = accumD->expression();
+
+        auto expr = std::make_shared<Expression::Expression>(Expression::MatrixMultiply(A, B, D));
+
+        m_context->schedule(
+            Expression::generate(accumD, expr, m_context)); //Test using input D as dest.
+
+        EXPECT_EQ(accumD->regType(), Register::Type::Accumulator);
+        EXPECT_EQ(accumD->valueCount(), 4);
+
+        auto vecD = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, M * N * batches / 64);
+        m_context->schedule(Expression::generate(vecD, D, m_context));
+
+        auto mulByScalarExpr = Expression::literal(2.0f) * vecD->expression();
+        m_context->schedule(Expression::generate(vecD, mulByScalarExpr, m_context));
+
+        auto vecC = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, M * N * batches / 64);
+        vecC->allocateNow();
+
+        auto AddExpr = vecC->expression() + vecD->expression();
+        m_context->schedule(Expression::generate(vecD, AddExpr, m_context));
+
+        auto result = R"(
+            v_mfma_f32_16x16x4f32 a[0:3], v0, v1, a[0:3]
+
+            s_nop 10
+            v_accvgpr_read v2, a0
+            v_accvgpr_read v3, a1
+            v_accvgpr_read v4, a2
+            v_accvgpr_read v5, a3
+
+            v_mul_f32 v2, 2.00000, v2
+            v_mul_f32 v3, 2.00000, v3
+            v_mul_f32 v4, 2.00000, v4
+            v_mul_f32 v5, 2.00000, v5
+
+            v_add_f32 v2, v6, v2
+            v_add_f32 v3, v7, v3
+            v_add_f32 v4, v8, v4
+            v_add_f32 v5, v9, v5
+        )";
+
+        EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
+    }
+
     TEST_F(ExpressionTest, ResultType)
     {
         auto vgprInt32
