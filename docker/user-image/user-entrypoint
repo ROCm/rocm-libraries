@@ -33,6 +33,14 @@ else
     echo "$_USER    ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers
 fi
 
+if [[ -z "${_RENDER_GID}" ]]; then
+    echo "RENDER GID not passed in, skipping config."
+else
+    echo "Configuring render group."
+    sudo groupadd --gid ${_RENDER_GID} render
+    sudo usermod -a -G render ${_USER}
+fi
+
 if [[ -z "${_GIT_EMAIL}" ]]; then
     echo "Git email not passed in, skipping config."
 else

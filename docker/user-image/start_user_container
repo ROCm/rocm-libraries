@@ -22,6 +22,7 @@
 ################################################################################
 
 from __future__ import print_function
+import grp
 import os
 import subprocess
 import argparse
@@ -61,6 +62,14 @@ def parseArgs():
 def buildImage(dockerfile, name, context="./", *args):
     printAndRun(['docker', 'build', '-t', name, '-f', dockerfile] + list(args) + [context])
 
+def get_render_group():
+    render_group = None
+    try:
+        render_group = grp.getgrnam("render").gr_gid
+    except:
+        pass
+    return render_group
+
 def main():
     final_output = ""
     args = parseArgs()
@@ -69,6 +78,10 @@ def main():
         args.docker_gpu_args = ['--device=/dev/kfd', '--device=/dev/dri', '--security-opt', 'seccomp=unconfined', '--net', 'host']
 
     env_args = ['-e', '_USER='+ args.user, '-e', '_UID='+args.uid, '-e', '_GIT_USER='+args.git_user, '-e', '_GIT_EMAIL='+args.git_email]
+
+    render_group = get_render_group()
+    if render_group is not None:
+        env_args.extend(['-e', '_RENDER_GID=' + str(render_group)])
 
     if not args.git_user or not args.git_email:
         final_output += "WARNING: Git configuration was not detectable, use 'git config' to set user.name and user.email to have them automatically passed in.\n"
