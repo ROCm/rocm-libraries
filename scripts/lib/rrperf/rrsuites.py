@@ -405,6 +405,50 @@ def guidepost_2():
     )
 
 
+def guidepost_no_store_LDS_1():
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8448,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        trans_A="N",
+        trans_B="T",
+        storeLDS_D=False,
+        visualize=False,
+        scheduler="Priority",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=0,
+        **fp16,
+    )
+
+
+def guidepost_no_store_LDS_2():
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        trans_A="N",
+        trans_B="T",
+        storeLDS_D=False,
+        visualize=False,
+        scheduler="Priority",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=0,
+        **fp16,
+    )
+
+
 def tensile_asm_guidepost_1():
     yield GEMMRun(
         M=7680,
@@ -487,6 +531,8 @@ def codegen():
 def all():
     yield from sgemm()
     yield from hgemm()
+    yield from guidepost_no_store_LDS_1()
+    yield from guidepost_no_store_LDS_2()
     yield from codegen()
     yield from tensile_benchmarks()
 

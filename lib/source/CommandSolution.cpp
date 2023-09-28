@@ -277,6 +277,11 @@ namespace rocRoller
         if(m_context->kernelOptions().fuseLoops)
         {
             transforms.push_back(std::make_shared<KernelGraph::FuseLoops>());
+            //Only relevant for DataParallel algorithms.
+            if(!m_context->kernelOptions().streamK)
+            {
+                transforms.push_back(std::make_shared<KernelGraph::Sequentialize>());
+            }
         }
         transforms.push_back(std::make_shared<KernelGraph::AddLDS>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
