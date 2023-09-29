@@ -289,6 +289,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocate>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context->kernel()));
         if(m_postParameters)
         {

@@ -18,5 +18,6 @@
 #include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderMemory.hpp>
 #include <rocRoller/KernelGraph/Transforms/Sequentialize.hpp>
+#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>
 #include <rocRoller/KernelGraph/Transforms/UpdateParameters.hpp>

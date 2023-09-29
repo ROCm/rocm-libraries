@@ -321,6 +321,7 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/LowerTile.cpp
  lib/source/KernelGraph/Transformations/OrderMemory.cpp
  lib/source/KernelGraph/Transformations/Sequentialize.cpp
+ lib/source/KernelGraph/Transformations/Simplify.cpp
  lib/source/KernelGraph/Transformations/UnrollLoops.cpp
  lib/source/KernelGraph/Transformations/UpdateParameters.cpp
 
@@ -468,6 +469,7 @@ set(
   test/unit/InstructionTest.cpp
   test/unit/KernelArgumentsTest.cpp
   test/unit/KernelGraphTest.cpp
+  test/unit/KernelGraphTest/Simplify.cpp
   test/unit/KernelIndexTest.cpp
   test/unit/KernelOptionsTest.cpp
   test/unit/KernelTest.cpp
