@@ -75,6 +75,11 @@ namespace rocRoller
                 reverseStride(int, Expression::ExpressionPtr, std::vector<int> const&) const;
 
             /**
+	     * True if we can reach the target.
+	     */
+            bool hasPath(std::vector<int> const&, bool forward) const;
+
+            /**
              * Implicitly set indexes for all Workgroup and Workitem dimensions in the graph.
              */
             void fillExecutionCoordinates();

@@ -102,6 +102,18 @@ namespace rocRoller
             m_indexes.erase(tag);
         }
 
+        bool Transformer::hasPath(std::vector<int> const& dsts, bool forward) const
+        {
+            std::vector<int> srcs;
+            for(auto const& kv : m_indexes)
+            {
+                srcs.push_back(kv.first);
+            }
+            if(forward)
+                return m_graph->hasPath<Graph::Direction::Downstream>(srcs, dsts);
+            return m_graph->hasPath<Graph::Direction::Upstream>(dsts, srcs);
+        }
+
         std::vector<ExpressionPtr> Transformer::forward(std::vector<int> const& dsts) const
         {
             std::vector<ExpressionPtr> indexes;

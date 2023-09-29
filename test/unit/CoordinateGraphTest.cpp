@@ -1062,6 +1062,49 @@ namespace rocRollerTest
         EXPECT_EQ(std::get<int>(Expression::evaluate(WaveAj.stride)), 1);
     }
 
+    TEST_F(CoordinateGraphTest, HasPath)
+    {
+        // one tile per wavefront
+        auto ct = CoordinateGraph();
+
+        auto wavefront_size = Expression::literal(64u);
+        auto unit           = Expression::literal(1u);
+
+        auto size   = Expression::literal(1024u);
+        auto stride = Expression::literal(2u);
+
+        auto u  = ct.addElement(User());
+        auto i  = ct.addElement(SubDimension(0, size, stride));
+        auto j  = ct.addElement(SubDimension(1, size, stride));
+        auto wg = ct.addElement(Workgroup(2));
+        auto wf = ct.addElement(Wavefront(0, wavefront_size, unit));
+
+        ct.addElement(Split(), {u}, {i, j});
+        ct.addElement(Tile(), {i}, {wg, wf});
+
+        EXPECT_TRUE(ct.hasPath<Graph::Direction::Upstream>({u}, {wg, wf, j}));
+        EXPECT_FALSE(ct.hasPath<Graph::Direction::Upstream>({u}, {wg, j}));
+        EXPECT_FALSE(ct.hasPath<Graph::Direction::Upstream>({u}, {wg, wf}));
+        EXPECT_FALSE(ct.hasPath<Graph::Direction::Upstream>({u}, {wf, j}));
+
+        EXPECT_TRUE(ct.hasPath<Graph::Direction::Downstream>({u}, {i, j}));
+        EXPECT_TRUE(ct.hasPath<Graph::Direction::Downstream>({u}, {wg}));
+        EXPECT_TRUE(ct.hasPath<Graph::Direction::Downstream>({i}, {wg}));
+        EXPECT_TRUE(ct.hasPath<Graph::Direction::Downstream>({i}, {wf}));
+        EXPECT_TRUE(ct.hasPath<Graph::Direction::Downstream>({i}, {wg, wf}));
+        EXPECT_FALSE(ct.hasPath<Graph::Direction::Downstream>({wg, wf}, {j}));
+
+        auto coords = Transformer(std::make_shared<CoordinateGraph>(ct));
+
+        coords.setCoordinate(wg, Expression::literal(0));
+        coords.setCoordinate(wf, Expression::literal(1));
+        EXPECT_FALSE(coords.hasPath({u}, false));
+
+        coords.setCoordinate(j, Expression::literal(8));
+        EXPECT_TRUE(coords.hasPath({u}, false));
+        EXPECT_FALSE(coords.hasPath({i}, true));
+    }
+
     class ARCH_CoordinateGraphTest : public GPUContextFixture
     {
     };

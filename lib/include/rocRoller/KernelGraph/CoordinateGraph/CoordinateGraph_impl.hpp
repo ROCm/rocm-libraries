@@ -104,6 +104,30 @@ namespace rocRoller
             return results;
         }
 
+        template <Graph::Direction Dir>
+        inline bool CoordinateGraph::hasPath(std::vector<int> const& srcs,
+                                             std::vector<int> const& dsts)
+        {
+            bool constexpr forward = Dir == Graph::Direction::Downstream;
+
+            auto const& starts = forward ? srcs : dsts;
+            auto const& ends   = forward ? dsts : srcs;
+
+            auto edgeSelector = [this](int element) {
+                return getEdgeType(element) == EdgeType::CoordinateTransform;
+            };
+
+            auto partial = path<Dir>(starts, ends, edgeSelector).template to<std::unordered_set>();
+
+            for(auto end : ends)
+            {
+                if(!partial.contains(end))
+                    return false;
+            }
+
+            return true;
+        }
+
         inline EdgeType CoordinateGraph::getEdgeType(int index)
         {
             Element const& elem = getElement(index);

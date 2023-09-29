@@ -119,6 +119,9 @@ namespace rocRoller
                          Visitor&                               visitor,
                          Expression::ExpressionTransducer       transducer);
 
+            template <Graph::Direction Dir>
+            bool hasPath(std::vector<int> const& srcs, std::vector<int> const& dsts);
+
             /**
              * @brief Get a node/edge from the coordinate graph.
              *

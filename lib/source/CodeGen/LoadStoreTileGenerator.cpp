@@ -291,20 +291,7 @@ namespace rocRoller
 
             // Set the increment coordinate to zero if it doesn't
             // already have a value
-            bool initializeIncrement = true;
-            try
-            {
-                // TODO Design a way to look for valid path without resorting to try/catch
-                if(ci.forward)
-                    coords.forward({target});
-                else
-                    coords.reverse({target});
-                initializeIncrement = false;
-            }
-            catch(...)
-            {
-            }
-
+            bool initializeIncrement = !coords.hasPath({target}, ci.forward);
             if(initializeIncrement)
             {
                 coords.setCoordinate(increment, L(0u));
