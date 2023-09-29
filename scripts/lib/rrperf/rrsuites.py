@@ -515,6 +515,65 @@ def tensile_sgemm_guidepost():
     )
 
 
+def streamk():
+    # SGEMM
+    yield GEMMRun(
+        M=3072,
+        N=4096,
+        K=4096,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        trans_A="N",
+        trans_B="T",
+        visualize=False,
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=2,
+        streamK=True,
+        **fp32,
+    )
+    # HGEMM
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8448,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        trans_A="N",
+        trans_B="T",
+        visualize=False,
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=2,
+        streamK=True,
+        **fp16,
+    )
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        trans_A="N",
+        trans_B="T",
+        visualize=False,
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=2,
+        streamK=True,
+        **fp16,
+    )
+
+
 def tensile_benchmarks():
     yield from tensile_guidepost()
     yield from tensile_sgemm_guidepost()
@@ -535,6 +594,7 @@ def all():
     yield from guidepost_no_store_LDS_2()
     yield from codegen()
     yield from tensile_benchmarks()
+    yield from streamk()
 
 
 def hgemm_guideposts():

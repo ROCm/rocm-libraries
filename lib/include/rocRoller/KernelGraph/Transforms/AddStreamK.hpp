@@ -103,6 +103,8 @@ namespace rocRoller
             int m_accumulatorTile; /// Coordinate dimension of tile into which the K loop accumulated
             int m_topLoopOp; /// Control node of the top loop.
 
+            VariableType m_accumulatorVarType; /// DataType of accumulator tile
+
             std::unordered_set<int> m_usesAccumulatorTile; /// Set of control nodes, after
                 /// the accumulator loop, that used the accumulator
                 /// tile.

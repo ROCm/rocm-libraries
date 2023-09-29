@@ -21,7 +21,11 @@ namespace rocRoller
                 {
                     m_solutionParams = solutionParams;
                     this->m_command  = makeCommand();
-                    this->m_kernel   = std::make_shared<CommandKernel>(makeKernel());
+
+                    this->m_kernel = std::make_shared<CommandKernel>(
+                        makeKernel(makeKernelOptions(),
+                                   m_solutionParams.problemParams.m / m_solutionParams.macM,
+                                   m_solutionParams.problemParams.n / m_solutionParams.macN));
                 }
 
                 Result benchmark(Client::RunParameters const& runParams,
@@ -66,7 +70,8 @@ namespace rocRoller
                     return result;
                 }
 
-            private:
+            protected:
+                DataParallelGEMMSolution() {}
                 SolutionParameters m_solutionParams;
 
                 CommandPtr makeCommand()
@@ -160,7 +165,44 @@ namespace rocRoller
                     return command;
                 }
 
-                CommandKernel makeKernel()
+                std::shared_ptr<KernelOptions> makeKernelOptions()
+                {
+                    auto kernelOptions     = std::make_shared<KernelOptions>();
+                    kernelOptions->unrollX = m_solutionParams.unrollX;
+                    kernelOptions->unrollY = m_solutionParams.unrollY;
+
+                    if(m_solutionParams.prefetch)
+                    {
+                        kernelOptions->unrollK           = 2;
+                        kernelOptions->prefetch          = true;
+                        kernelOptions->prefetchInFlight  = m_solutionParams.prefetchInFlight;
+                        kernelOptions->prefetchLDSFactor = m_solutionParams.prefetchLDSFactor;
+
+                        if(m_solutionParams.prefetchLDSFactor != 0)
+                        {
+                            kernelOptions->prefetchMixMemOps = true;
+                        }
+                    }
+                    else
+                    {
+                        kernelOptions->prefetch = false;
+                    }
+
+                    if(m_solutionParams.matchMemoryAccess)
+                    {
+                        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A]
+                            = m_solutionParams.problemParams.transA == TransposeType::T;
+                        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B]
+                            = m_solutionParams.problemParams.transB == TransposeType::T;
+                    }
+
+                    kernelOptions->setNextFreeVGPRToMax = false;
+                    return kernelOptions;
+                }
+
+                CommandKernel makeKernel(std::shared_ptr<KernelOptions> kernelOptions,
+                                         uint                           num_workgroup_x,
+                                         uint                           num_workgroup_y)
                 {
                     AssertFatal(m_solutionParams.problemParams.m % m_solutionParams.macM == 0,
                                 "MacroTile size mismatch (M)");
@@ -212,20 +254,6 @@ namespace rocRoller
                                 ShowValue(wave_n),
                                 ShowValue(wavetile_per_wavefront_n));
 
-                    uint workgroup_size_x
-                        = m_solutionParams.workgroupSizeX * m_solutionParams.workgroupSizeY;
-                    uint workgroup_size_y = 1;
-
-                    // one macro tile per workgroup
-                    uint num_workgroup_x = m_solutionParams.problemParams.m / m_solutionParams.macM;
-                    uint num_workgroup_y = m_solutionParams.problemParams.n / m_solutionParams.macN;
-
-                    auto NX = std::make_shared<Expression::Expression>(num_workgroup_x
-                                                                       * workgroup_size_x);
-                    auto NY = std::make_shared<Expression::Expression>(num_workgroup_y
-                                                                       * workgroup_size_y);
-                    auto NZ = std::make_shared<Expression::Expression>(1u);
-
                     auto params = std::make_shared<CommandParameters>();
                     params->setManualKernelDimension(2);
                     // TODO: Calculate these values internally based on workgroup sizes.
@@ -257,6 +285,7 @@ namespace rocRoller
                     if(!no_beta)
                     {
                         params->setDimensionInfo(18, mac_tile_C);
+                        params->setDimensionInfo(28, mac_tile_C);
                         params->setDimensionInfo(30, mac_tile_C);
                         params->setDimensionInfo(32, mac_tile_C);
                         params->setDimensionInfo(34, mac_tile_D);
@@ -265,6 +294,16 @@ namespace rocRoller
                     {
                         params->setDimensionInfo(15, mac_tile_D);
                     }
+
+                    uint workgroup_size_x
+                        = m_solutionParams.workgroupSizeX * m_solutionParams.workgroupSizeY;
+                    uint workgroup_size_y = 1;
+
+                    auto NX = std::make_shared<Expression::Expression>(num_workgroup_x
+                                                                       * workgroup_size_x);
+                    auto NY = std::make_shared<Expression::Expression>(num_workgroup_y
+                                                                       * workgroup_size_y);
+                    auto NZ = std::make_shared<Expression::Expression>(1u);
 
                     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
                     params->setManualWorkitemCount({NX, NY, NZ});
@@ -282,37 +321,6 @@ namespace rocRoller
                                            / wavetile_per_wavefront_m),
                          static_cast<uint>(m_solutionParams.macN / wave_n
                                            / wavetile_per_wavefront_n)});
-
-                    auto kernelOptions     = std::make_shared<KernelOptions>();
-                    kernelOptions->unrollX = m_solutionParams.unrollX;
-                    kernelOptions->unrollY = m_solutionParams.unrollY;
-
-                    if(m_solutionParams.prefetch)
-                    {
-                        kernelOptions->unrollK           = 2;
-                        kernelOptions->prefetch          = true;
-                        kernelOptions->prefetchInFlight  = m_solutionParams.prefetchInFlight;
-                        kernelOptions->prefetchLDSFactor = m_solutionParams.prefetchLDSFactor;
-
-                        if(m_solutionParams.prefetchLDSFactor != 0)
-                        {
-                            kernelOptions->prefetchMixMemOps = true;
-                        }
-                    }
-                    else
-                    {
-                        kernelOptions->prefetch = false;
-                    }
-
-                    if(m_solutionParams.matchMemoryAccess)
-                    {
-                        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A]
-                            = m_solutionParams.problemParams.transA == TransposeType::T;
-                        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B]
-                            = m_solutionParams.problemParams.transB == TransposeType::T;
-                    }
-
-                    kernelOptions->setNextFreeVGPRToMax = false;
 
                     auto kernelName = m_solutionParams.generateKernelName();
 

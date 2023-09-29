@@ -41,6 +41,11 @@ namespace rocRoller
 
                 rv << "_" << scheduler;
 
+                if(streamK)
+                {
+                    rv << "_SK" << numWGs;
+                }
+
                 return rv.str();
             }
 

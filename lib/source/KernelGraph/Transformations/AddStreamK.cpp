@@ -523,30 +523,6 @@ namespace rocRoller
             return forLoop;
         }
 
-        /**
-         * Gets the dataType of a tile by looking for upstream load
-         * operations through DataFlow edges.
-         */
-        DataType getTileDataType(int tileTag, KernelGraph const& graph)
-        {
-            auto isDF
-                = [&graph](int tag) { return graph.coordinates.get<DataFlow>(tag).has_value(); };
-
-            for(auto coord : graph.coordinates.depthFirstVisit(tileTag, isDF, GD::Upstream))
-            {
-                for(auto c : graph.mapper.getCoordinateConnections(coord))
-                {
-                    auto l  = graph.control.get<LoadTiled>(c.control);
-                    auto ll = graph.control.get<LoadLDSTile>(c.control);
-                    if(l)
-                        return l->varType.dataType;
-                    if(ll)
-                        return ll->varType.dataType;
-                }
-            }
-            return DataType::None;
-        }
-
         //
         // AddStreamK methods
         //
@@ -657,6 +633,9 @@ namespace rocRoller
             }));
             if(maybeAccumulatorInit)
             {
+                auto init            = graph.control.get<Assign>(*maybeAccumulatorInit);
+                m_accumulatorVarType = resultVariableType(init->expression);
+
                 auto dst            = graph.mapper.get(*maybeAccumulatorInit, NaryArgument::DEST);
                 auto maybeAccumTile = graph.coordinates.get<MacroTile>(dst);
                 if(maybeAccumTile)
@@ -871,15 +850,13 @@ namespace rocRoller
                                            m_context);
                 auto flagsScratchTag = graph.coordinates.addElement(flagsScratch);
 
-                auto tileDataType = getTileDataType(m_accumulatorTile, graph);
-
                 // Create scratch space for partially accumulated tiles
                 std::vector<DeferredConnection> storeConnections, loadConnections;
                 scratchTileInfo = loadStoreMacroTileSCRATCH(graph,
                                                             storeConnections,
                                                             loadConnections,
                                                             m_accumulatorTile,
-                                                            numTilesVarType,
+                                                            m_accumulatorVarType,
                                                             m_context);
 
                 // Add send
@@ -890,7 +867,7 @@ namespace rocRoller
                                     sendTileExpr,
                                     storeConnections,
                                     flagsScratchTag,
-                                    tileDataType,
+                                    m_accumulatorVarType.dataType,
                                     numTilesVarType,
                                     m_context);
 
@@ -906,7 +883,7 @@ namespace rocRoller
                                           flagsScratchTag,
                                           m_accumulatorTile,
                                           m_usesAccumulatorTile,
-                                          tileDataType,
+                                          m_accumulatorVarType.dataType,
                                           m_context);
 
                 postAccumulationCond

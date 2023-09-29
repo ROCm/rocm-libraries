@@ -11,6 +11,7 @@
 #include "include/DataParallelGEMMSolution.hpp"
 #include "include/GEMMParameters.hpp"
 #include "include/Parser.hpp"
+#include "include/StreamKGEMMSolution.hpp"
 #include "include/TensileGEMMSolution.hpp"
 
 using namespace rocRoller;
@@ -62,6 +63,9 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "betaInFma", result.solutionParams.betaInFma);
         iot::mapRequired(io, "scheduler", result.solutionParams.scheduler);
 
+        iot::mapRequired(io, "streamK", result.solutionParams.streamK);
+        iot::mapRequired(io, "numWGs", result.solutionParams.numWGs);
+
         iot::mapRequired(io, "numWarmUp", result.benchmarkResults.runParams.numWarmUp);
         iot::mapRequired(io, "numOuter", result.benchmarkResults.runParams.numOuter);
         iot::mapRequired(io, "numInner", result.benchmarkResults.runParams.numInner);
@@ -112,6 +116,25 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
         else
         {
             std::cout << "Not running TENSILE_ASM for " << versionString << std::endl;
+            result.solutionParams             = solutionParams;
+            result.benchmarkResults.runParams = runParams;
+        }
+
+        return result;
+    }
+    else if(solutionParams.streamK)
+    {
+        Client::GEMMClient::Result result;
+        auto defaultDevice = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
+        if(defaultDevice.HasCapability(GPUCapability::ArchAccUnifiedRegs))
+        {
+            Client::GEMMClient::StreamKGEMMSolution<A, B, C, D> gemmKernel(solutionParams);
+            result = gemmKernel.benchmark(runParams, checkResult, doVisualize, h_A, h_B, h_C, h_D);
+        }
+        else
+        {
+            std::cout << "Not running StreamK for " << defaultDevice.target().getVersionString()
+                      << std::endl;
             result.solutionParams             = solutionParams;
             result.benchmarkResults.runParams = runParams;
         }
@@ -178,6 +201,8 @@ int main(int argc, const char* argv[])
               Arg({"prefetchInFlight"}, "Number of prefetches in flight at the same time"));
     po.addArg("prefetchLDSFactor",
               Arg({"prefetchLDSFactor"}, "Prefetch 1/prefetchLDSFactor of MacroTile from LDS"));
+    po.addArg("streamK", Arg({"streamK"}, "Enable StreamK Algorithm."));
+    po.addArg("numWGs", Arg({"numWGs"}, "Number of workgroups to use with StreamK Algorithm."));
 
     // Benchmarking options
     po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
@@ -226,6 +251,19 @@ int main(int argc, const char* argv[])
     solution.prefetch          = po.get("prefetch", false);
     solution.prefetchInFlight  = po.get("prefetchInFlight", 0);
     solution.prefetchLDSFactor = po.get("prefetchLDSFactor", 0);
+    solution.streamK           = po.get("streamK", false);
+    int defaultNumWGs          = 0;
+    if(solution.streamK)
+    {
+        hipDeviceProp_t deviceProperties;
+        AssertFatal(hipGetDeviceProperties(&deviceProperties, 0) == (hipError_t)HIP_SUCCESS);
+        defaultNumWGs = deviceProperties.multiProcessorCount;
+    }
+    solution.numWGs = po.get("numWGs", defaultNumWGs);
+    if(solution.numWGs == 0)
+    {
+        solution.numWGs = defaultNumWGs;
+    }
 
     Client::RunParameters runParams;
     runParams.numWarmUp = po.get("num_warmup", 3);

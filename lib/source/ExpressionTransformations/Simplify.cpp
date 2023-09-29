@@ -36,6 +36,15 @@ namespace rocRoller
             }
         };
 
+        template <typename T>
+        struct SimplifyByConstantLHS
+        {
+            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
+            {
+                return nullptr;
+            }
+        };
+
         template <>
         struct SimplifyByConstant<Add>
         {
@@ -61,6 +70,15 @@ namespace rocRoller
 
         private:
             ExpressionPtr m_lhs;
+        };
+
+        template <>
+        struct SimplifyByConstantLHS<Add>
+        {
+            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
+            {
+                return nullptr;
+            }
         };
 
         template <CShift ShiftType>
@@ -90,6 +108,15 @@ namespace rocRoller
             ExpressionPtr m_lhs;
         };
 
+        template <CShift ShiftType>
+        struct SimplifyByConstantLHS<ShiftType>
+        {
+            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
+            {
+                return nullptr;
+            }
+        };
+
         template <>
         struct SimplifyByConstant<BitwiseAnd>
         {
@@ -115,6 +142,15 @@ namespace rocRoller
 
         private:
             ExpressionPtr m_lhs;
+        };
+
+        template <>
+        struct SimplifyByConstantLHS<BitwiseAnd>
+        {
+            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
+            {
+                return nullptr;
+            }
         };
 
         template <>
@@ -147,6 +183,15 @@ namespace rocRoller
         };
 
         template <>
+        struct SimplifyByConstantLHS<LogicalAnd>
+        {
+            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
+            {
+                return nullptr;
+            }
+        };
+
+        template <>
         struct SimplifyByConstant<Multiply>
         {
             template <typename RHS>
@@ -173,6 +218,15 @@ namespace rocRoller
 
         private:
             ExpressionPtr m_lhs;
+        };
+
+        template <>
+        struct SimplifyByConstantLHS<Multiply>
+        {
+            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
+            {
+                return nullptr;
+            }
         };
 
         template <>
@@ -204,6 +258,34 @@ namespace rocRoller
         };
 
         template <>
+        struct SimplifyByConstantLHS<Divide>
+        {
+
+            template <typename LHS>
+            requires(CIntegral<LHS>) ExpressionPtr operator()(LHS lhs)
+            {
+                if(lhs == 0)
+                    return literal(0);
+                return nullptr;
+            }
+
+            template <typename LHS>
+            requires(!CIntegral<LHS>) ExpressionPtr operator()(LHS lhs)
+            {
+                return nullptr;
+            }
+
+            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
+            {
+                m_rhs = rhs;
+                return visit(*this, lhs);
+            }
+
+        private:
+            ExpressionPtr m_rhs;
+        };
+
+        template <>
         struct SimplifyByConstant<Modulo>
         {
 
@@ -229,6 +311,34 @@ namespace rocRoller
 
         private:
             ExpressionPtr m_lhs;
+        };
+
+        template <>
+        struct SimplifyByConstantLHS<Modulo>
+        {
+
+            template <typename LHS>
+            requires(CIntegral<LHS>) ExpressionPtr operator()(LHS lhs)
+            {
+                if(lhs == 0)
+                    return literal(0);
+                return nullptr;
+            }
+
+            template <typename LHS>
+            requires(!CIntegral<LHS>) ExpressionPtr operator()(LHS lhs)
+            {
+                return nullptr;
+            }
+
+            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
+            {
+                m_rhs = rhs;
+                return visit(*this, lhs);
+            }
+
+        private:
+            ExpressionPtr m_rhs;
         };
 
         struct SimplifyExpressionVisitor
@@ -268,6 +378,12 @@ namespace rocRoller
                 else if(eval_rhs)
                 {
                     rv = simplifier.call(lhs, evaluate(rhs));
+                }
+                else if(!CCommutativeBinary<Expr> && eval_lhs)
+                {
+                    auto simplifierLHS = SimplifyByConstantLHS<Expr>();
+
+                    rv = simplifierLHS.call(evaluate(lhs), rhs);
                 }
 
                 if(rv != nullptr)

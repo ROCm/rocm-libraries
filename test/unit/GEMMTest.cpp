@@ -502,6 +502,42 @@ namespace GEMMDriverTest
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
+    {
+        if(m_context->targetArchitecture().target().getVersionString() != "gfx90a")
+        {
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+        }
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        uint numCUs = deviceProperties.multiProcessorCount;
+
+        GEMMProblem gemm;
+
+        gemm.waveK = 8;
+        gemm.macK  = 16;
+
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * numCUs / 2 + gemm.macN * 2;
+
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, numCUs);
+
+        gemm.streamK = true;
+        gemm.k       = gemm.macK * 8;
+
+        // It works with prefetching too!!
+        gemm.unrollK          = 2;
+        gemm.prefetch         = true;
+        gemm.prefetchInFlight = 2;
+
+        gemm.loadLDSA  = true; // false doesn't work
+        gemm.loadLDSB  = true; // false doesn't work
+        gemm.storeLDSD = true; // true or false both work
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMMultipleOutputTiles)
     {
         GEMMProblem gemm;

@@ -21,6 +21,7 @@ namespace rocRoller
             class GEMMSolution : public BenchmarkSolution
             {
             protected:
+                GEMMSolution() {}
                 ProblemParameters m_problemParams;
 
             public:

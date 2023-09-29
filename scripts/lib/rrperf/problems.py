@@ -100,6 +100,9 @@ class GEMMSolution:
     prefetchInFlight: int = 2
     prefetchLDSFactor: int = 0
 
+    streamK: bool = False
+    numWGs: int = 0
+
     def __post_init__(self):
         convert_class_params(GEMMSolution, self)
 
@@ -235,6 +238,7 @@ class GEMMResult(GEMM, RRPerfResult):
             + "/"
             + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
+            "SK": TF(self.streamK) + "/" + self.numWGs,
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),

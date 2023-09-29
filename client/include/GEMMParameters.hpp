@@ -91,6 +91,9 @@ namespace rocRoller
                 std::string scheduler;
                 bool        matchMemoryAccess;
 
+                bool streamK = false;
+                int  numWGs  = 0;
+
                 std::string generateKernelName() const;
             };
 
