@@ -9,16 +9,17 @@ namespace rocRoller
                                Register::ValuePtr  input)
         {
             assert(input->regType() == Register::Type::Literal);
-            int64_t value = std::visit(
+            uint64_t value = std::visit(
                 [](auto v) {
                     using T = std::decay_t<decltype(v)>;
+                    AssertFatal((std::is_integral_v<T>));
                     if constexpr(std::is_pointer_v<T>)
                     {
-                        return reinterpret_cast<int64_t>(v);
+                        return reinterpret_cast<uint64_t>(v);
                     }
                     else
                     {
-                        return static_cast<int64_t>(v);
+                        return static_cast<uint64_t>(v);
                     }
                 },
                 input->getLiteralValue());

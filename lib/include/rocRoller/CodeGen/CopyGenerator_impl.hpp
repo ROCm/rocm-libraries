@@ -60,7 +60,6 @@ namespace rocRoller
                                                       Register::ValuePtr src,
                                                       std::string        comment) const
     {
-
         auto context = m_context.lock();
         // Check for invalid copies
         if(dest->regType() == Register::Type::Scalar
@@ -114,9 +113,25 @@ namespace rocRoller
         else if(src->regType() == Register::Type::Literal
                 && dest->regType() == Register::Type::Accumulator)
         {
-            for(size_t k = 0; k < dest->valueCount(); ++k)
+            if(dest->variableType().getElementSize() == 4)
             {
-                co_yield_(Instruction("v_accvgpr_write", {dest->element({k})}, {src}, {}, comment));
+                for(size_t k = 0; k < dest->registerCount(); ++k)
+                {
+                    co_yield_(
+                        Instruction("v_accvgpr_write", {dest->subset({k})}, {src}, {}, comment));
+                }
+            }
+            else
+            {
+                for(size_t k = 0; k < dest->registerCount() / 2; ++k)
+                {
+                    Register::ValuePtr left, right;
+                    Arithmetic::get2LiteralDwords(left, right, src);
+                    co_yield_(Instruction(
+                        "v_accvgpr_write", {dest->subset({2 * k})}, {left}, {}, comment));
+                    co_yield_(Instruction(
+                        "v_accvgpr_write", {dest->subset({2 * k + 1})}, {right}, {}, comment));
+                }
             }
         }
         else if(dest->regType() == Register::Type::Vector)

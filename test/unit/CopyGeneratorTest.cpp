@@ -34,38 +34,65 @@ namespace CopyGeneratorTest
     // Test if correct instructions are generated
     TEST_F(CopyGeneratorTest, Instruction)
     {
-        auto vr = std::make_shared<Register::Value>(
+        auto i32vr = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
-        vr->allocateNow();
-        auto ar = std::make_shared<Register::Value>(
+        i32vr->allocateNow();
+        auto i64vr = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int64, 1);
+
+        auto i32ar = std::make_shared<Register::Value>(
             m_context, Register::Type::Accumulator, DataType::Int32, 1);
-        ar->allocateNow();
-        auto sr = std::make_shared<Register::Value>(
+        i32ar->allocateNow();
+        auto i64ar = std::make_shared<Register::Value>(
+            m_context, Register::Type::Accumulator, DataType::Int64, 1);
+
+        auto i32sr = std::make_shared<Register::Value>(
             m_context, Register::Type::Scalar, DataType::Int32, 1);
-        auto dsr = std::make_shared<Register::Value>(
+        i32sr->allocateNow();
+        auto i64sr = std::make_shared<Register::Value>(
             m_context, Register::Type::Scalar, DataType::Int64, 1);
-        sr->allocateNow();
-        auto ir      = Register::Value::Label("LabelRegister");
-        auto literal = Register::Value::Literal(20);
-        auto zero    = Register::Value::Literal(0L);
 
-        EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(sr, vr)); }, FatalError);
-        EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(ir, vr)); }, FatalError);
-        EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(literal, vr)); }, FatalError);
+        auto    ir       = Register::Value::Label("LabelRegister");
+        auto    literal  = Register::Value::Literal(20);
+        auto    izero    = Register::Value::Literal(0L);
+        int32_t i32      = 2;
+        int64_t i64      = 2;
+        auto    i32two   = Register::Value::Literal(i32);
+        auto    i64two   = Register::Value::Literal(i64);
+        i32              = -2;
+        i64              = -2;
+        auto i32minustwo = Register::Value::Literal(i32);
+        auto i64minustwo = Register::Value::Literal(i64);
 
-        m_context->schedule(m_context->copier()->copy(sr, sr));
-        m_context->schedule(m_context->copier()->copy(sr, literal));
-        m_context->schedule(m_context->copier()->copy(vr, vr));
-        m_context->schedule(m_context->copier()->copy(ar, ar));
-        m_context->schedule(m_context->copier()->copy(vr, ar));
-        m_context->schedule(m_context->copier()->copy(vr, sr));
-        m_context->schedule(m_context->copier()->copy(vr, literal));
-        m_context->schedule(m_context->copier()->copy(ar, vr));
-        m_context->schedule(m_context->copier()->copy(sr, zero));
-        m_context->schedule(m_context->copier()->copy(dsr, zero));
+        EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(i32sr, i32vr)); }, FatalError);
+        EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(ir, i32vr)); }, FatalError);
+        EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(literal, i32vr)); },
+                     FatalError);
 
-        m_context->schedule(m_context->copier()->conditionalCopy(sr, sr));
-        m_context->schedule(m_context->copier()->conditionalCopy(sr, literal));
+        m_context->schedule(m_context->copier()->copy(i32sr, i32sr));
+        m_context->schedule(m_context->copier()->copy(i32sr, literal));
+        m_context->schedule(m_context->copier()->copy(i32vr, i32vr));
+        m_context->schedule(m_context->copier()->copy(i32ar, i32ar));
+        m_context->schedule(m_context->copier()->copy(i32vr, i32ar));
+        m_context->schedule(m_context->copier()->copy(i32vr, i32sr));
+        m_context->schedule(m_context->copier()->copy(i32vr, literal));
+        m_context->schedule(m_context->copier()->copy(i32ar, i32vr));
+
+        m_context->schedule(m_context->copier()->copy(i32vr, izero));
+        m_context->schedule(m_context->copier()->copy(i64vr, izero));
+        m_context->schedule(m_context->copier()->copy(i64vr, i32two));
+        m_context->schedule(m_context->copier()->copy(i64vr, i64two));
+        m_context->schedule(m_context->copier()->copy(i64vr, i32minustwo));
+        m_context->schedule(m_context->copier()->copy(i64vr, i64minustwo));
+
+        m_context->schedule(m_context->copier()->copy(i32ar, izero));
+        m_context->schedule(m_context->copier()->copy(i64ar, izero));
+
+        m_context->schedule(m_context->copier()->copy(i32sr, izero));
+        m_context->schedule(m_context->copier()->copy(i64sr, izero));
+
+        m_context->schedule(m_context->copier()->conditionalCopy(i32sr, i32sr));
+        m_context->schedule(m_context->copier()->conditionalCopy(i32sr, literal));
 
         std::string expectedOutput = R"(
             s_mov_b32 s0, s0
@@ -76,8 +103,28 @@ namespace CopyGeneratorTest
             v_mov_b32 v0, s0
             v_mov_b32 v0, 20
             v_accvgpr_write a0, v0
+
+            v_mov_b32 v0, 0
+            v_mov_b32 v2, 0
+            v_mov_b32 v3, 0
+            v_mov_b32 v2, 2
+            v_mov_b32 v3, 0
+            v_mov_b32 v2, 2
+            v_mov_b32 v3, 0
+            // -2 == 0x 1111 1111 1111 1111 1111 1111 1111 1110
+            v_mov_b32 v2, 4294967294
+            v_mov_b32 v3, 4294967295
+            // -2 == 0x 1111 1111 1111 1111 1111 1111 1111 1110
+            v_mov_b32 v2, 4294967294
+            v_mov_b32 v3, 4294967295
+
+            v_accvgpr_write a0, 0
+            v_accvgpr_write a1, 0
+            v_accvgpr_write a2, 0
+
             s_mov_b32 s0, 0
             s_mov_b64 s[2:3], 0
+
             s_cmov_b32 s0, s0
             s_cmov_b32 s0, 20
             )";
@@ -130,7 +177,7 @@ namespace CopyGeneratorTest
         auto vr0 = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, n);
         auto ar0 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Int64, n);
+            m_context, Register::Type::Accumulator, DataType::Int32, n);
 
         m_context->schedule(m_context->copier()->fill(sr0, Register::Value::Literal(11)));
         m_context->schedule(m_context->copier()->fill(vr0, Register::Value::Literal(12)));
@@ -148,10 +195,9 @@ namespace CopyGeneratorTest
             expectedOutput += "v_mov_b32 v" + std::to_string(i) + ", 12\n";
         }
 
-        for(int i = 0; i < n * 2; i += 2)
+        for(int i = 0; i < n; ++i)
         {
-            expectedOutput += "v_accvgpr_write a[" + std::to_string(i) + ":" + std::to_string(i + 1)
-                              + "], 13\n";
+            expectedOutput += "v_accvgpr_write a" + std::to_string(i) + ", 13\n";
         }
 
         EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));
@@ -170,7 +216,8 @@ namespace CopyGeneratorTest
         m_context->schedule(m_context->copier()->fill(sr0, Register::Value::Literal(11L)));
         m_context->schedule(
             m_context->copier()->fill(vr0, Register::Value::Literal((13L << 32) + 12)));
-        m_context->schedule(m_context->copier()->fill(ar0, Register::Value::Literal(14L)));
+        m_context->schedule(
+            m_context->copier()->fill(ar0, Register::Value::Literal((15L << 32) + 14)));
 
         std::string expectedOutput = "";
 
@@ -188,8 +235,8 @@ namespace CopyGeneratorTest
 
         for(int i = 0; i < n * 2; i += 2)
         {
-            expectedOutput += "v_accvgpr_write a[" + std::to_string(i) + ":" + std::to_string(i + 1)
-                              + "], 14\n";
+            expectedOutput += "v_accvgpr_write a" + std::to_string(i) + ", 14\n";
+            expectedOutput += "v_accvgpr_write a" + std::to_string(i + 1) + ", 15\n";
         }
 
         EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));
