@@ -157,6 +157,8 @@ namespace rocRoller
 
         inline std::string toString(SpecialType spec)
         {
+            AssertFatal(spec != SpecialType::Count,
+                        "SpecialType::Count not a valid type for a register!");
             switch(spec)
             {
             case SpecialType::SCC:
@@ -173,7 +175,7 @@ namespace rocRoller
             default:
                 break;
             }
-            throw std::runtime_error("Invalid SpecialType");
+            Throw<FatalError>("Invalid SpecialType: ", (int)spec);
         }
 
         inline std::ostream& operator<<(std::ostream& stream, SpecialType spec)
@@ -498,7 +500,13 @@ namespace rocRoller
             AssertFatal(m_regType == Type::Accumulator || m_regType == Type::Scalar
                             || m_regType == Type::Vector,
                         "gprString is only applicable for actual GPRs.");
-            assertCanUseAsOperand();
+
+            if(!canUseAsOperand())
+            {
+                os << TypePrefix(m_regType);
+                os << "**UNALLOCATED**";
+                return;
+            }
 
             auto prefix = TypePrefix(m_regType);
 

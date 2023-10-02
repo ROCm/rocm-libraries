@@ -156,12 +156,6 @@ namespace rocRollerTest
             auto v_b = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Half, 1);
 
-            auto v_a_float = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 1);
-
-            auto v_b_float = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 1);
-
             auto a    = v_a->expression();
             auto b    = v_b->expression();
             auto expr = Expression::convert<DataType::Half>(
@@ -171,8 +165,6 @@ namespace rocRollerTest
 
             co_yield v_a->allocate();
             co_yield v_b->allocate();
-            co_yield v_a_float->allocate();
-            co_yield v_b_float->allocate();
             co_yield a_ptr->allocate();
             co_yield v_result->allocate();
 
@@ -226,7 +218,9 @@ namespace rocRollerTest
                     HasHipSuccess(0));
 
         for(int i = 0; i < N; i++)
-            ASSERT_NEAR(result[i], a[i] + a[i] * b[i], 0.001);
+        {
+            ASSERT_NEAR(result[i], a[i] + a[i] * b[i], 0.001) << ShowValue(a[i]) << ShowValue(b[i]);
+        }
     }
 
     TEST_F(HalfPrecisionTest, GPU_ExecuteHalfPrecisionMultiplyAdd)

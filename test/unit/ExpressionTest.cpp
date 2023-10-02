@@ -222,6 +222,17 @@ namespace ExpressionTest
         EXPECT_TRUE(Expression::identical(nullptr, nullptr));
         EXPECT_FALSE(identical(nullptr, a));
         EXPECT_FALSE(identical(a, nullptr));
+
+        // Unallocated
+        auto rg = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+
+        // Unallocated
+        auto rh = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+
+        EXPECT_TRUE(Expression::identical(rg->expression(), rg->expression()));
+        EXPECT_FALSE(Expression::identical(rg->expression(), rh->expression()));
     }
 
     TEST_F(ExpressionTest, BasicInstructions)
@@ -355,15 +366,15 @@ namespace ExpressionTest
 
         std::string expected = R"(
             // {The Multiplication: Multiply(v1:I, {The Addition extra comment: Add(v0:I, v1:I)})}
-            // BEGIN: The Multiplication
             // BEGIN: The Addition extra comment
             // Allocated : 1 VGPR (Value: Int32): v2
             v_add_i32 v2, v0, v1
             // END: The Addition extra comment
+            // BEGIN: The Multiplication
             // Allocated : 1 VGPR (Value: Int32): v3
             v_mul_lo_u32 v3, v1, v2
-            // Freeing : 1 VGPR (Value: Int32): v2
             // END: The Multiplication
+            // Freeing : 1 VGPR (Value: Int32): v2
         )";
 
         EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
@@ -855,7 +866,7 @@ namespace ExpressionTest
         auto b = rb->expression();
 
         auto expr1 = a + b;
-        auto expr2 = b * expr1;
+        auto expr2 = b * a;
         auto expr3 = expr1 == expr2;
 
         Register::ValuePtr destReg;
@@ -863,9 +874,8 @@ namespace ExpressionTest
 
         auto result = R"(
             v_add_i32 v2, v0, v1
-            v_add_i32 v3, v0, v1
-            v_mul_lo_u32 v4, v1, v3
-            v_cmp_eq_i32 s[0:1], v2, v4
+            v_mul_lo_u32 v3, v1, v0
+            v_cmp_eq_i32 s[0:1], v2, v3
         )";
 
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));

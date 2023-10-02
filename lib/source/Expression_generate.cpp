@@ -9,6 +9,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MultiplyAdd.hpp>
+#include <rocRoller/CommonSubexpressionElim.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
@@ -659,7 +660,7 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> call(Register::ValuePtr& dest, ExpressionPtr const& expr)
+            Generator<Instruction> call(Register::ValuePtr& dest, ExpressionPtr expr)
             {
                 std::string comment = getComment(expr);
                 if(comment.length() > 0)
@@ -678,6 +679,67 @@ namespace rocRoller
         private:
             ContextPtr m_context;
         };
+
+        Generator<Instruction> generateFromTree(Register::ValuePtr&   dest,
+                                                ExpressionTree&       tree,
+                                                CodeGeneratorVisitor& visitor,
+                                                ContextPtr            context)
+        {
+            tree.back().reg = dest;
+
+            std::set<int> metDeps;
+            while(metDeps.size() < tree.size())
+            {
+                std::set<int> tmpMetDeps;
+
+                auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+                auto cost      = Settings::getInstance()->get(Settings::SchedulerCost);
+                auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, cost, context);
+                std::vector<Generator<Instruction>> schedulable;
+                for(int i = 0; i < tree.size(); i++)
+                {
+                    if(!metDeps.contains(i)
+                       && std::includes(metDeps.begin(),
+                                        metDeps.end(),
+                                        tree.at(i).deps.begin(),
+                                        tree.at(i).deps.end()))
+                    {
+                        if(!(tree.at(i).reg
+                             && tree.at(i).reg->regType() == Register::Type::Literal))
+                        {
+                            if(tree.at(i).expr
+                               && std::holds_alternative<Register::ValuePtr>(*tree.at(i).expr))
+                            {
+                                auto value = std::get<Register::ValuePtr>(*tree.at(i).expr);
+                                if(value->allocationState() != Register::AllocationState::Allocated)
+                                    co_yield value->allocate();
+                            }
+                            else
+                            {
+                                schedulable.push_back(
+                                    visitor.call(tree.at(i).reg, tree.at(i).expr));
+                            }
+                        }
+                        tmpMetDeps.insert(i);
+                    }
+                }
+
+                co_yield (*scheduler)(schedulable);
+
+                for(int i = 0; i < tree.size() - 1; i++)
+                {
+                    if(tmpMetDeps.contains(i))
+                    {
+                        tree.at(i).expr = nullptr;
+                        tree.at(i).reg  = nullptr;
+                    }
+                }
+
+                AssertFatal(!tmpMetDeps.empty(), ShowValue(tree.size()), ShowValue(metDeps.size()));
+                metDeps.insert(tmpMetDeps.begin(), tmpMetDeps.end());
+            }
+            dest = tree.back().reg;
+        }
 
         Generator<Instruction>
             generate(Register::ValuePtr& dest, ExpressionPtr expr, ContextPtr context)
@@ -699,7 +761,22 @@ namespace rocRoller
                     dest = v.resultPlaceholder(resType, false);
             }
 
-            co_yield v.call(dest, expr);
+            ExpressionTree tree;
+            tree = consolidateSubExpressions(expr, context);
+
+            if(tree.size() < 2
+               || (dest && dest->variableType() == DataType::Bool
+                   && getConsolidationCount(tree) == 0))
+            {
+                // Don't use CSE in this case
+
+                tree.resize(0);
+                co_yield v.call(dest, expr);
+            }
+            else
+            {
+                co_yield generateFromTree(dest, tree, v, context);
+            }
         }
     }
 }

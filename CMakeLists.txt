@@ -214,6 +214,7 @@ set(rocroller_src
  lib/source/AssemblyKernel_serialization.cpp
  lib/source/AssemblyKernel.cpp
  lib/source/CommandSolution.cpp
+ lib/source/CommonSubexpressionElim.cpp
  lib/source/Context.cpp
  lib/source/DataTypes.cpp
  lib/source/Error.cpp
@@ -447,6 +448,7 @@ set(
   test/unit/BranchGeneratorTest.cpp
   test/unit/BufferDescriptorTest.cpp
   test/unit/CommandTest.cpp
+  test/unit/CommonSubexpressionElimTest.cpp
   test/unit/ComponentTest.cpp
   test/unit/ControlGraphTest.cpp
   test/unit/CoordinateGraphTest.cpp

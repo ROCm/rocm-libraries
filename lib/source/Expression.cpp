@@ -222,7 +222,7 @@ namespace rocRoller
                 default:
                     break;
                 }
-                Throw<FatalError>("Invalid register types: ",
+                Throw<FatalError>("Invalid register types for comparison: ",
                                   ShowValue(lhsVal.regType),
                                   ShowValue(rhsVal.regType));
             }
@@ -257,8 +257,8 @@ namespace rocRoller
                 switch(inputRegType)
                 {
                 case Register::Type::Scalar:
-                    if(inputVarType == DataType::Bool32 || inputVarType == DataType::Raw32
-                       || inputVarType == DataType::UInt64)
+                    if(inputVarType == DataType::Bool || inputVarType == DataType::Bool32
+                       || inputVarType == DataType::Raw32 || inputVarType == DataType::UInt64)
                         return {Register::Type::Special, DataType::Bool};
                     break;
 
@@ -268,7 +268,7 @@ namespace rocRoller
                 default:
                     break;
                 }
-                Throw<FatalError>("Invalid register types: ",
+                Throw<FatalError>("Invalid register types for logical: ",
                                   ShowValue(lhsVal.regType),
                                   ShowValue(rhsVal.regType));
             }
@@ -423,7 +423,9 @@ namespace rocRoller
 
             bool operator()(Register::ValuePtr const& a, Register::ValuePtr const& b)
             {
-                return a->toString() == b->toString();
+                return a->regType() == b->regType() && a->variableType() == b->variableType()
+                       && a->registerCount() == b->registerCount()
+                       && a->allocation() == b->allocation();
             }
 
             bool operator()(DataFlowTag const& a, DataFlowTag const& b)
