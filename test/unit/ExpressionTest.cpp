@@ -504,10 +504,11 @@ namespace ExpressionTest
         auto B = std::make_shared<Expression::Expression>(B_tile);
         auto D = accumD->expression();
 
-        auto expr = std::make_shared<Expression::Expression>(Expression::MatrixMultiply(A, B, D));
+        auto mulABExpr
+            = std::make_shared<Expression::Expression>(Expression::MatrixMultiply(A, B, D));
 
         m_context->schedule(
-            Expression::generate(accumD, expr, m_context)); //Test using input D as dest.
+            Expression::generate(accumD, mulABExpr, m_context)); //Test using input D as dest.
 
         EXPECT_EQ(accumD->regType(), Register::Type::Accumulator);
         EXPECT_EQ(accumD->valueCount(), 4);
@@ -516,15 +517,15 @@ namespace ExpressionTest
             m_context, Register::Type::Vector, DataType::Float, M * N * batches / 64);
         m_context->schedule(Expression::generate(vecD, D, m_context));
 
-        auto mulByScalarExpr = Expression::literal(2.0f) * vecD->expression();
-        m_context->schedule(Expression::generate(vecD, mulByScalarExpr, m_context));
+        auto scaleDExpr = Expression::literal(2.0f) * vecD->expression();
+        m_context->schedule(Expression::generate(vecD, scaleDExpr, m_context));
 
         auto vecC = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Float, M * N * batches / 64);
         vecC->allocateNow();
 
-        auto AddExpr = vecC->expression() + vecD->expression();
-        m_context->schedule(Expression::generate(vecD, AddExpr, m_context));
+        auto addCDExpr = vecC->expression() + vecD->expression();
+        m_context->schedule(Expression::generate(vecD, addCDExpr, m_context));
 
         auto result = R"(
             v_mfma_f32_16x16x4f32 a[0:3], v0, v1, a[0:3]
@@ -547,6 +548,207 @@ namespace ExpressionTest
         )";
 
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
+    }
+
+    TEST_F(ExpressionTest, ReuseInputVGPRsAsOutputVGPRsInArithmeticF16)
+    {
+        int M       = 32;
+        int N       = 32;
+        int K       = 8;
+        int batches = 1;
+
+        auto A_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
+        auto B_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
+
+        A_tile->sizes = {M, K};
+        A_tile->vgpr  = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Halfx2, M * K / 64 / 2);
+        A_tile->vgpr->allocateNow();
+
+        B_tile->sizes = {K, N};
+        B_tile->vgpr  = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Halfx2, K * N / 64 / 2);
+        B_tile->vgpr->allocateNow();
+
+        auto accumD = std::make_shared<Register::Value>(
+            m_context, Register::Type::Accumulator, DataType::Float, M * N * batches / 64);
+        accumD->allocateNow();
+
+        auto A = std::make_shared<Expression::Expression>(A_tile);
+        auto B = std::make_shared<Expression::Expression>(B_tile);
+        auto D = accumD->expression();
+
+        auto mulABExpr
+            = std::make_shared<Expression::Expression>(Expression::MatrixMultiply(A, B, D));
+
+        m_context->schedule(
+            Expression::generate(accumD, mulABExpr, m_context)); //Test using input D as dest.
+
+        EXPECT_EQ(accumD->regType(), Register::Type::Accumulator);
+        EXPECT_EQ(accumD->valueCount(), 16);
+
+        auto vecD = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, M * N * batches / 64);
+
+        auto vecC = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Half, M * N * batches / 64);
+        vecC->allocateNow();
+
+        auto scaleDExpr = Expression::literal(2.0, DataType::Half) * vecD->expression();
+        auto addCDExpr  = vecC->expression() + vecD->expression();
+
+        m_context->schedule(Expression::generate(vecD, D, m_context));
+        m_context->schedule(Expression::generate(vecD, scaleDExpr, m_context));
+        m_context->schedule(Expression::generate(vecD, addCDExpr, m_context));
+
+        auto X = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Halfx2, M * K / 64 / 2);
+        X->allocateNow();
+
+        auto Y = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Half, M * K / 64);
+        Y->allocateNow();
+
+        auto addXYExpr = X->expression() + Y->expression();
+        m_context->schedule(Expression::generate(Y, addXYExpr, m_context));
+
+        // TODO If operand being converted is a literal, do one conversion only.
+        auto result = R"(
+            // A is in v[0:1], B is in v[2:3], C is in v[4:19], D is in a[0:15]
+
+            // Result R will end up in v[20:35].  Steps are:
+            // R <- D
+            // R <- alpha * R
+            // R <- R + C
+
+            v_mfma_f32_32x32x8f16 a[0:15], v[0:1], v[2:3], a[0:15]
+
+            s_nop 0xf
+            s_nop 2
+            v_accvgpr_read v20, a0
+            v_accvgpr_read v21, a1
+            v_accvgpr_read v22, a2
+            v_accvgpr_read v23, a3
+            v_accvgpr_read v24, a4
+            v_accvgpr_read v25, a5
+            v_accvgpr_read v26, a6
+            v_accvgpr_read v27, a7
+            v_accvgpr_read v28, a8
+            v_accvgpr_read v29, a9
+            v_accvgpr_read v30, a10
+            v_accvgpr_read v31, a11
+            v_accvgpr_read v32, a12
+            v_accvgpr_read v33, a13
+            v_accvgpr_read v34, a14
+            v_accvgpr_read v35, a15
+
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v20, v36, v20
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v21, v36, v21
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v22, v36, v22
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v23, v36, v23
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v24, v36, v24
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v25, v36, v25
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v26, v36, v26
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v27, v36, v27
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v28, v36, v28
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v29, v36, v29
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v30, v36, v30
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v31, v36, v31
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v32, v36, v32
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v33, v36, v33
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v34, v36, v34
+            v_cvt_f32_f16 v36, 2.00000
+            v_mul_f32 v35, v36, v35
+
+            v_cvt_f32_f16 v36, v4
+            v_add_f32 v20, v36, v20
+            v_cvt_f32_f16 v36, v5
+            v_add_f32 v21, v36, v21
+            v_cvt_f32_f16 v36, v6
+            v_add_f32 v22, v36, v22
+            v_cvt_f32_f16 v36, v7
+            v_add_f32 v23, v36, v23
+            v_cvt_f32_f16 v36, v8
+            v_add_f32 v24, v36, v24
+            v_cvt_f32_f16 v36, v9
+            v_add_f32 v25, v36, v25
+            v_cvt_f32_f16 v36, v10
+            v_add_f32 v26, v36, v26
+            v_cvt_f32_f16 v36, v11
+            v_add_f32 v27, v36, v27
+            v_cvt_f32_f16 v36, v12
+            v_add_f32 v28, v36, v28
+            v_cvt_f32_f16 v36, v13
+            v_add_f32 v29, v36, v29
+            v_cvt_f32_f16 v36, v14
+            v_add_f32 v30, v36, v30
+            v_cvt_f32_f16 v36, v15
+            v_add_f32 v31, v36, v31
+            v_cvt_f32_f16 v36, v16
+            v_add_f32 v32, v36, v32
+            v_cvt_f32_f16 v36, v17
+            v_add_f32 v33, v36, v33
+            v_cvt_f32_f16 v36, v18
+            v_add_f32 v34, v36, v34
+            v_cvt_f32_f16 v36, v19
+            v_add_f32 v35, v36, v35
+
+            // X is v[36:37]:2xH and Y is v[38:41]:H (and Z is same as Y)
+            // Then Y <- X + Y will be: Add(v[36:37]:2xH, v[38:41]:H)
+            v_mov_b32 v42, 65535
+            v_and_b32 v43, v42, v36
+            v_lshrrev_b32 v44, 16, v36
+            v_add_f16 v38, v43, v38
+            v_add_f16 v39, v44, v39
+            v_mov_b32 v42, 65535
+            v_and_b32 v43, v42, v37
+            v_lshrrev_b32 v44, 16, v37
+            v_add_f16 v40, v43, v40
+            v_add_f16 v41, v44, v41
+        )";
+
+        EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
+    }
+
+    TEST_F(ExpressionTest, ReuseInputVGPRsAsOutputVGPRsInArithmeticF16SmallerPacking)
+    {
+        int M = 32;
+        int K = 8;
+
+        auto X = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Halfx2, M * K / 64 / 2);
+        X->allocateNow();
+
+        auto Y = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Half, M * K / 64);
+        Y->allocateNow();
+
+        // Since we are asking the result to be stored into X, we
+        // currently get a failure.
+
+        // TODO See the "Destination/result packing mismatch" assertion
+        // in Expression_generate.cpp.
+        auto addXYExpr = X->expression() + Y->expression();
+        EXPECT_THROW(m_context->schedule(Expression::generate(X, addXYExpr, m_context)),
+                     FatalError);
+
+        // The above should be possible: Y should be packed, and then
+        // the v_pk_add_f16 instructions called.
     }
 
     TEST_F(ExpressionTest, ResultType)

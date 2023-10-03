@@ -273,7 +273,29 @@ namespace rocRoller
                 }
 
                 if(dest == nullptr)
+                {
                     dest = resultPlaceholder(resType, true, valueCount / destInfo.packing);
+                }
+                else
+                {
+                    // TODO Destination/result packing mismatch
+                    //
+                    // This was added to catch the case where:
+                    // - a destination register was given
+                    // - the packing of "lhs OP rhs" would be
+                    //   different then the packing of the destination
+                    //   register
+                    //
+                    // This should be possible.  See the
+                    //
+                    //   ReuseInputVGPRsAsOutputVGPRsInArithmeticF16SmallerPacking
+                    //
+                    // test in ExpressionTest.cpp.
+
+                    auto resPack = DataTypeInfo::Get(resType.varType).packing;
+                    auto dstPack = DataTypeInfo::Get(dest->variableType()).packing;
+                    AssertFatal(dstPack <= resPack, "Destination/result packing mismatch.");
+                }
 
                 if(lhsInfo.packing != rhsInfo.packing)
                 {
@@ -283,32 +305,36 @@ namespace rocRoller
                     int packingRatio = std::max(lhsInfo.packing, rhsInfo.packing)
                                        / std::min(lhsInfo.packing, rhsInfo.packing);
 
+                    auto conversion = resultPlaceholder(resType, true, packingRatio);
+
                     for(size_t i = 0; i < valueCount; i += packingRatio)
                     {
-                        auto result = dest->element({i, i + packingRatio - 1});
-
                         Register::ValuePtr lhsVal, rhsVal;
                         if(lhsInfo.packing < rhsInfo.packing)
                         {
-                            co_yield generateConvertOp(
-                                resType.varType.dataType, result, rhs->element({i / packingRatio}));
+                            co_yield generateConvertOp(resType.varType.dataType,
+                                                       conversion,
+                                                       rhs->element({i / packingRatio}));
                         }
                         else
                         {
-                            co_yield generateConvertOp(
-                                resType.varType.dataType, result, lhs->element({i / packingRatio}));
+                            co_yield generateConvertOp(resType.varType.dataType,
+                                                       conversion,
+                                                       lhs->element({i / packingRatio}));
                         }
+
+                        auto result = dest->element({i, i + packingRatio - 1});
 
                         for(size_t j = 0; j < packingRatio; j++)
                         {
                             if(lhsInfo.packing < rhsInfo.packing)
                             {
                                 lhsVal = lhs->valueCount() == 1 ? lhs : lhs->element({i + j});
-                                rhsVal = result->element({j});
+                                rhsVal = conversion->element({j});
                             }
                             else
                             {
-                                lhsVal = result->element({j});
+                                lhsVal = conversion->element({j});
                                 rhsVal = rhs->valueCount() == 1 ? rhs : rhs->element({i + j});
                             }
 
@@ -321,6 +347,9 @@ namespace rocRoller
                     AssertFatal(destInfo.isIntegral || lhs->variableType() == resType.varType
                                     || rhs->variableType() == resType.varType,
                                 "Only one floating point argument can be converted");
+
+                    auto conversion = resultPlaceholder(resType, true, 1);
+
                     for(size_t k = 0; k < dest->valueCount(); ++k)
                     {
                         auto lhsVal = lhs->regType() == Register::Type::Literal
@@ -331,8 +360,8 @@ namespace rocRoller
                         if(!destInfo.isIntegral && lhs->variableType() != resType.varType)
                         {
                             co_yield generateConvertOp(
-                                resType.varType.dataType, dest->element({k}), lhsVal);
-                            lhsVal = dest->element({k});
+                                resType.varType.dataType, conversion, lhsVal);
+                            lhsVal = conversion;
                         }
 
                         auto rhsVal = rhs->regType() == Register::Type::Literal
@@ -343,8 +372,8 @@ namespace rocRoller
                         if(!destInfo.isIntegral && rhs->variableType() != resType.varType)
                         {
                             co_yield generateConvertOp(
-                                resType.varType.dataType, dest->element({k}), rhsVal);
-                            rhsVal = dest->element({k});
+                                resType.varType.dataType, conversion, rhsVal);
+                            rhsVal = conversion;
                         }
 
                         co_yield generateOp<T>(dest->element({k}), lhsVal, rhsVal);
