@@ -54,6 +54,16 @@ namespace rocRoller
 
         using EvaluationTimes = EnumBitset<EvaluationTime>;
 
+        enum class AlgebraicProperty : int
+        {
+            Commutative = 0,
+            Associative,
+            Count
+        };
+        std::string toString(AlgebraicProperty t);
+
+        using AlgebraicProperties = EnumBitset<AlgebraicProperty>;
+
         enum class Category : int
         {
             Arithmetic = 0,
@@ -81,146 +91,134 @@ namespace rocRoller
 
         struct Add : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = true;
-            constexpr static inline bool Commutative = true;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
+                                                                   AlgebraicProperty::Commutative};
         };
 
         struct Subtract : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = false;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{};
         };
 
         struct Multiply : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = true;
-            constexpr static inline bool Commutative = true;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
+                                                                   AlgebraicProperty::Commutative};
         };
 
         struct MultiplyHigh : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = true;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Commutative};
         };
 
         struct Divide : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = false;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{};
         };
 
         struct Modulo : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = false;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{};
         };
 
         struct ShiftL : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = false;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{};
         };
 
         struct LogicalShiftR : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = false;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{};
         };
 
         struct ArithmeticShiftR : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = false;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{};
         };
 
         struct BitwiseAnd : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = true;
-            constexpr static inline bool Commutative = true;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
+                                                                   AlgebraicProperty::Commutative};
         };
 
         struct BitwiseOr : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = true;
-            constexpr static inline bool Commutative = true;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
+                                                                   AlgebraicProperty::Commutative};
         };
 
         struct BitwiseXor : Binary
         {
-            constexpr static inline auto Type        = Category::Arithmetic;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = true;
-            constexpr static inline bool Commutative = true;
+            constexpr static inline auto                Type      = Category::Arithmetic;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
+                                                                   AlgebraicProperty::Commutative};
         };
 
         struct GreaterThan : Binary
         {
-            constexpr static inline auto Type        = Category::Comparison;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = false;
+            constexpr static inline auto                Type      = Category::Comparison;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{};
         };
 
         struct GreaterThanEqual : Binary
         {
-            constexpr static inline auto Type        = Category::Comparison;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = false;
+            constexpr static inline auto                Type      = Category::Comparison;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{};
         };
 
         struct LessThan : Binary
         {
-            constexpr static inline auto Type        = Category::Comparison;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = false;
+            constexpr static inline auto                Type      = Category::Comparison;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{};
         };
 
         struct LessThanEqual : Binary
         {
-            constexpr static inline auto Type        = Category::Comparison;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = false;
+            constexpr static inline auto                Type      = Category::Comparison;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{};
         };
 
         struct Equal : Binary
         {
-            constexpr static inline auto Type        = Category::Comparison;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = false;
-            constexpr static inline bool Commutative = true;
+            constexpr static inline auto                Type      = Category::Comparison;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Commutative};
         };
 
         struct LogicalAnd : Binary
         {
-            constexpr static inline auto Type        = Category::Logical;
-            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
-            constexpr static inline bool Associative = true;
-            constexpr static inline bool Commutative = true;
+            constexpr static inline auto                Type      = Category::Logical;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
+                                                                   AlgebraicProperty::Commutative};
         };
 
         struct Ternary
@@ -465,13 +463,13 @@ namespace rocRoller
         template <typename T>
         concept CAssociativeBinary = requires
         {
-            requires CBinary<T> && T::Associative;
+            requires CBinary<T> && T::Properties[AlgebraicProperty::Associative] == true;
         };
 
         template <typename T>
         concept CCommutativeBinary = requires
         {
-            requires CBinary<T> && T::Commutative;
+            requires CBinary<T> && T::Properties[AlgebraicProperty::Commutative] == true;
         };
 
         static_assert(CBinary<Add>);
@@ -584,8 +582,18 @@ namespace rocRoller
 
         /**
          * True when two expressions are identical.
+         *
+         * NOTE: Never considers commutativity or associativity.
          */
         bool identical(ExpressionPtr const&, ExpressionPtr const&);
+
+        /**
+         * True when two expressions are equivalent.
+         * Optionally considers algebraic properties like commutativity.
+         */
+        bool equivalent(ExpressionPtr const&,
+                        ExpressionPtr const&,
+                        AlgebraicProperties = AlgebraicProperties::All());
 
         /**
          * Comment accessors.

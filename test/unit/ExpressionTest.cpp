@@ -205,13 +205,20 @@ namespace ExpressionTest
         EXPECT_FALSE(identical(expr1, expr3));
         EXPECT_FALSE(identical(ap + b, expr3));
 
+        EXPECT_TRUE(equivalent(expr1, expr2));
+        EXPECT_FALSE(equivalent(expr1, expr3));
+        EXPECT_FALSE(equivalent(ap + b, expr3));
+
         auto expr4 = c + d;
         auto expr5 = c + d + zero;
 
         EXPECT_FALSE(identical(expr1, expr4));
-
         EXPECT_FALSE(identical(expr4, expr5));
         EXPECT_TRUE(identical(expr4, simplify(expr5)));
+
+        EXPECT_FALSE(equivalent(expr1, expr4));
+        EXPECT_FALSE(equivalent(expr4, expr5));
+        EXPECT_TRUE(equivalent(expr4, simplify(expr5)));
 
         auto expr6 = e / f % d;
         auto expr7 = a + f;
@@ -223,6 +230,28 @@ namespace ExpressionTest
         EXPECT_FALSE(identical(nullptr, a));
         EXPECT_FALSE(identical(a, nullptr));
 
+        EXPECT_FALSE(equivalent(expr6, expr7));
+        EXPECT_FALSE(equivalent(e, f));
+
+        EXPECT_TRUE(Expression::equivalent(nullptr, nullptr));
+        EXPECT_FALSE(equivalent(nullptr, a));
+        EXPECT_FALSE(equivalent(a, nullptr));
+
+        // Commutative tests
+        EXPECT_FALSE(identical(a + b, b + a));
+        EXPECT_FALSE(identical(a - b, b - a));
+
+        EXPECT_TRUE(equivalent(a + b, b + a));
+        EXPECT_FALSE(equivalent(a - b, b - a));
+        EXPECT_TRUE(equivalent(a * b, b * a));
+        EXPECT_FALSE(equivalent(a / b, b / a));
+        EXPECT_FALSE(equivalent(a % b, b % a));
+        EXPECT_FALSE(equivalent(a << b, b << a));
+        EXPECT_FALSE(equivalent(a >> b, b >> a));
+        EXPECT_TRUE(equivalent(a & b, b & a));
+        EXPECT_TRUE(equivalent(a | b, b | a));
+        EXPECT_TRUE(equivalent(a ^ b, b ^ a));
+
         // Unallocated
         auto rg = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
@@ -233,6 +262,9 @@ namespace ExpressionTest
 
         EXPECT_TRUE(Expression::identical(rg->expression(), rg->expression()));
         EXPECT_FALSE(Expression::identical(rg->expression(), rh->expression()));
+
+        EXPECT_TRUE(Expression::equivalent(rg->expression(), rg->expression()));
+        EXPECT_FALSE(Expression::equivalent(rg->expression(), rh->expression()));
     }
 
     TEST_F(ExpressionTest, BasicInstructions)

@@ -33,6 +33,21 @@ namespace rocRoller
             Throw<FatalError>("Invalid EvaluationTime");
         }
 
+        std::string toString(AlgebraicProperty t)
+        {
+            switch(t)
+            {
+            case AlgebraicProperty::Commutative:
+                return "Commutative";
+            case AlgebraicProperty::Associative:
+                return "Associative";
+            case AlgebraicProperty::Count:
+            default:
+                break;
+            }
+            Throw<FatalError>("Invalid EvaluationTime");
+        }
+
         /*
          * to string
          */
@@ -423,9 +438,7 @@ namespace rocRoller
 
             bool operator()(Register::ValuePtr const& a, Register::ValuePtr const& b)
             {
-                return a->regType() == b->regType() && a->variableType() == b->variableType()
-                       && a->registerCount() == b->registerCount()
-                       && a->allocation() == b->allocation();
+                return a->sameAs(b);
             }
 
             bool operator()(DataFlowTag const& a, DataFlowTag const& b)
@@ -462,6 +475,154 @@ namespace rocRoller
         bool identical(ExpressionPtr const& a, ExpressionPtr const& b)
         {
             auto visitor = ExpressionIdenticalVisitor();
+            return visitor.call(a, b);
+        }
+
+        struct ExpressionEquivalentVisitor
+        {
+            ExpressionEquivalentVisitor(AlgebraicProperties properties)
+                : m_properties(properties)
+            {
+            }
+
+            template <CTernary T>
+            bool operator()(T const& a, T const& b)
+            {
+                bool lhs  = false;
+                bool r1hs = false;
+                bool r2hs = false;
+
+                lhs = call(a.lhs, b.lhs);
+                if(a.lhs == nullptr && b.lhs == nullptr)
+                {
+                    lhs = true;
+                }
+
+                r1hs = call(a.r1hs, b.r1hs);
+                if(a.r1hs == nullptr && b.r1hs == nullptr)
+                {
+                    r1hs = true;
+                }
+
+                r2hs = call(a.r2hs, b.r2hs);
+
+                if(a.r2hs == nullptr && b.r2hs == nullptr)
+                {
+                    r2hs = true;
+                }
+                return lhs && r1hs && r2hs;
+            }
+
+            template <CBinary T>
+            bool operator()(T const& a, T const& b)
+            {
+                bool lhs = false;
+                bool rhs = false;
+
+                lhs = call(a.lhs, b.lhs);
+                if(a.lhs == nullptr && b.lhs == nullptr)
+                {
+                    lhs = true;
+                }
+
+                rhs = call(a.rhs, b.rhs);
+                if(a.rhs == nullptr && b.rhs == nullptr)
+                {
+                    rhs = true;
+                }
+
+                bool result = lhs && rhs;
+
+                // Test if equivalent if expression is commutative
+                if(!result && CCommutativeBinary<T> && m_properties[AlgebraicProperty::Commutative])
+                {
+                    lhs = call(a.lhs, b.rhs);
+                    if(a.lhs == nullptr && b.lhs == nullptr)
+                    {
+                        lhs = true;
+                    }
+
+                    rhs = call(a.rhs, b.lhs);
+                    if(a.rhs == nullptr && b.rhs == nullptr)
+                    {
+                        rhs = true;
+                    }
+
+                    result = lhs && rhs;
+                }
+
+                return result;
+            }
+
+            template <CUnary T>
+            bool operator()(T const& a, T const& b)
+            {
+                if(a.arg == nullptr && b.arg == nullptr)
+                {
+                    return true;
+                }
+                return call(a.arg, b.arg);
+            }
+
+            bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
+            {
+                return a == b;
+            }
+
+            bool operator()(CommandArgumentPtr const& a, CommandArgumentPtr const& b)
+            {
+                return (*a) == (*b);
+            }
+
+            bool operator()(AssemblyKernelArgumentPtr const& a, AssemblyKernelArgumentPtr const& b)
+            {
+                return (*a) == (*b);
+            }
+
+            bool operator()(Register::ValuePtr const& a, Register::ValuePtr const& b)
+            {
+                return a->sameAs(b);
+            }
+
+            bool operator()(DataFlowTag const& a, DataFlowTag const& b)
+            {
+                return a == b;
+            }
+
+            bool operator()(WaveTilePtr const& a, WaveTilePtr const& b)
+            {
+                return a == b;
+            }
+
+            // a & b are different operator/value classes
+            template <class T, class U>
+            bool operator()(T const& a, U const& b)
+            {
+                return false;
+            }
+
+            bool call(ExpressionPtr const& a, ExpressionPtr const& b)
+            {
+                if(a == nullptr)
+                {
+                    return b == nullptr;
+                }
+                else if(b == nullptr)
+                {
+                    return false;
+                }
+                return std::visit(*this, *a, *b);
+            }
+
+        private:
+            AlgebraicProperties const m_properties;
+        };
+
+        bool equivalent(ExpressionPtr const& a,
+                        ExpressionPtr const& b,
+                        AlgebraicProperties  properties)
+        {
+            auto visitor = ExpressionEquivalentVisitor(properties);
             return visitor.call(a, b);
         }
 

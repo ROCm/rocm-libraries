@@ -60,7 +60,7 @@ namespace rocRoller
 
             ExpressionPtr operator()(Register::ValuePtr const& value) const
             {
-                return identical(value->expression(), m_target->expression())
+                return equivalent(value->expression(), m_target->expression())
                            ? m_replacement->expression()
                            : value->expression();
             }
@@ -138,8 +138,9 @@ namespace rocRoller
 
             ExpressionPtr operator()(Register::ValuePtr const& value) const
             {
-                return identical(value->expression(), m_target->expression()) ? m_replacement
-                                                                              : value->expression();
+                return equivalent(value->expression(), m_target->expression())
+                           ? m_replacement
+                           : value->expression();
             }
 
             template <CValue Value>
@@ -508,20 +509,20 @@ namespace rocRoller
                     = std::find_if(tree.begin(),
                                    tree.end(),
                                    [sccExpr](auto origNode) {
-                                       return identical(origNode.reg->expression(), sccExpr);
+                                       return equivalent(origNode.reg->expression(), sccExpr);
                                    })
                       != tree.end();
 
                 // Loop through the RHS
                 for(auto rhsNodeIt = rhsTree.begin(); rhsNodeIt != rhsTree.end(); rhsNodeIt++)
                 {
-                    // Find a node that has a identical expression in the growing tree
+                    // Find a node that has an equivalent expression in the growing tree
                     auto it = std::find_if(tree.begin(), tree.end(), [&rhsNodeIt](auto origNode) {
-                        return identical(rhsNodeIt->expr, origNode.expr);
+                        return equivalent(rhsNodeIt->expr, origNode.expr);
                     });
 
-                    bool rhsIsSCC = identical(rhsNodeIt->reg->expression(),
-                                              m_context->getSCC()->expression());
+                    bool rhsIsSCC = equivalent(rhsNodeIt->reg->expression(),
+                                               m_context->getSCC()->expression());
 
                     if(it != tree.end())
                     {

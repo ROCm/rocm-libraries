@@ -283,6 +283,12 @@ namespace rocRoller
 
             ContextPtr context() const;
 
+            /**
+             * @brief Determine if the other register is the same as this one
+             *
+             */
+            bool sameAs(ValuePtr) const;
+
         private:
             /**
              * Implementation of toString() for general-purpose registers.
