@@ -265,6 +265,11 @@ namespace ExpressionTest
 
         EXPECT_TRUE(Expression::equivalent(rg->expression(), rg->expression()));
         EXPECT_FALSE(Expression::equivalent(rg->expression(), rh->expression()));
+
+        // Null
+        Expression::ExpressionPtr n = nullptr;
+        EXPECT_FALSE(Expression::equivalent(n + n, a + n));
+        EXPECT_FALSE(Expression::equivalent(n + n, n + a));
     }
 
     TEST_F(ExpressionTest, BasicInstructions)

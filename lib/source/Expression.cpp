@@ -537,13 +537,13 @@ namespace rocRoller
                 if(!result && CCommutativeBinary<T> && m_properties[AlgebraicProperty::Commutative])
                 {
                     lhs = call(a.lhs, b.rhs);
-                    if(a.lhs == nullptr && b.lhs == nullptr)
+                    if(a.lhs == nullptr && b.rhs == nullptr)
                     {
                         lhs = true;
                     }
 
                     rhs = call(a.rhs, b.lhs);
-                    if(a.rhs == nullptr && b.rhs == nullptr)
+                    if(a.rhs == nullptr && b.lhs == nullptr)
                     {
                         rhs = true;
                     }
