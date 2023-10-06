@@ -234,7 +234,6 @@ namespace MatrixMultiplyTest
         uint workgroup_size_x = 256;
         uint workgroup_size_y = 1;
 
-        // one macro tile per workgroup
         uint num_workgroup_x = M / mac_m;
         uint num_workgroup_y = N / mac_n;
 
@@ -359,7 +358,6 @@ namespace MatrixMultiplyTest
         uint workgroup_size_x = 256;
         uint workgroup_size_y = 1;
 
-        // one macro tile per workgroup
         uint num_workgroup_x = M / mac_m;
         uint num_workgroup_y = N / mac_n;
 

@@ -572,6 +572,25 @@ def streamk():
         streamK=True,
         **fp16,
     )
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=128,
+        mac_n=64,
+        mac_k=64,
+        workgroup_size_x=256,
+        workgroup_size_y=2,
+        trans_A="N",
+        trans_B="T",
+        visualize=False,
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=2,
+        streamK=True,
+        numWGs=220,
+        **fp16,
+    )
 
 
 def tensile_benchmarks():

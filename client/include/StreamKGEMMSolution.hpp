@@ -91,7 +91,6 @@ namespace rocRoller
                 {
                     auto kernelOptions = DataParallelGEMMSolution<A, B, C, D>::makeKernelOptions();
 
-                    // one macro tile per workgroup
                     uint num_workgroup_x = this->m_solutionParams.numWGs;
                     uint num_workgroup_y = 1;
 
@@ -102,8 +101,6 @@ namespace rocRoller
 
                     kernelOptions->numScratchTiles = std::min((uint)(this->m_solutionParams.numWGs),
                                                               num_workgroup_x * num_workgroup_y);
-
-                    std::cout << kernelOptions->numScratchTiles << std::endl;
 
                     kernelOptions->loopOverOutputTilesDimensions = {0, 1};
                     kernelOptions->loopOverOutputTilesCoordSizes
