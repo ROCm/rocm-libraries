@@ -247,6 +247,12 @@ if __name__ == "__main__":
         help="Filter comments out of assembly strings",
     )
 
+    parser.add_argument(
+        "--port",
+        help="Port to run the application on",
+        default="8050",
+    )
+
     args = parser.parse_args()
 
     registerHistories, instructions, line_numbers = read_liveness(args.filename)
@@ -302,42 +308,37 @@ if __name__ == "__main__":
         ],
     )
 
+    def get_hover_str(df: pd.DataFrame, index: int):
+        live_reg = df["Liveness"][index]
+        alloc_reg = df["Allocations"][index]
+        line_number = df["Line Number"][index]
+        max_reg = df["Max Allocated"][index]
+        return (
+            f"Line {line_number} (x={index}): "
+            + df["Instruction"][index]
+            + f"\nLiving reg: {live_reg}, Allocated reg: {alloc_reg}, "
+            + f"Max allocated reg ID: {max_reg - 1}"
+        )
 
-def get_hover_str(df: pd.DataFrame, index: int):
-    live_reg = df["Liveness"][index]
-    alloc_reg = df["Allocations"][index]
-    line_number = df["Line Number"][index]
-    max_reg = df["Max Allocated"][index]
-    return (
-        f"Line {line_number} (x={index}): "
-        + df["Instruction"][index]
-        + f"\nLiving reg: {live_reg}, Allocated reg: {alloc_reg}, "
-        + f"Max allocated reg ID: {max_reg - 1}"
-    )
+    @app.callback(Output("hover-data-v", "children"), Input("v reg", "hoverData"))
+    def display_hover_data_v(hoverData):
+        if hoverData is None:
+            return
+        i = hoverData["points"][0]["pointIndex"]
+        return get_hover_str(df_vgpr, i)
 
+    @app.callback(Output("hover-data-s", "children"), Input("s reg", "hoverData"))
+    def display_hover_data_s(hoverData):
+        if hoverData is None:
+            return
+        i = hoverData["points"][0]["pointIndex"]
+        return get_hover_str(df_sgpr, i)
 
-@app.callback(Output("hover-data-v", "children"), Input("v reg", "hoverData"))
-def display_hover_data_v(hoverData):
-    if hoverData is None:
-        return
-    i = hoverData["points"][0]["pointIndex"]
-    return get_hover_str(df_vgpr, i)
+    @app.callback(Output("hover-data-a", "children"), Input("a reg", "hoverData"))
+    def display_hover_data_a(hoverData):
+        if hoverData is None:
+            return
+        i = hoverData["points"][0]["pointIndex"]
+        return get_hover_str(df_accvgpr, i)
 
-
-@app.callback(Output("hover-data-s", "children"), Input("s reg", "hoverData"))
-def display_hover_data_s(hoverData):
-    if hoverData is None:
-        return
-    i = hoverData["points"][0]["pointIndex"]
-    return get_hover_str(df_sgpr, i)
-
-
-@app.callback(Output("hover-data-a", "children"), Input("a reg", "hoverData"))
-def display_hover_data_a(hoverData):
-    if hoverData is None:
-        return
-    i = hoverData["points"][0]["pointIndex"]
-    return get_hover_str(df_accvgpr, i)
-
-
-app.run_server()
+    app.run(port=args.port)
