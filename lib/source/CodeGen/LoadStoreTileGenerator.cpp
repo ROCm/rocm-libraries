@@ -710,12 +710,16 @@ namespace rocRoller
                                                                         LoadLDSTile const& load,
                                                                         Transformer        coords)
         {
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::loadMacroTileLDS()");
-            co_yield_(Instruction::Comment("GEN: loadMacroTileLDS"));
-
             auto [ldsTag, lds]   = m_graph->getDimension<LDS>(tag);
             auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::LoadStoreTileGenerator::loadMacroTileLDS: OP {} LDS {} MacroTile {}",
+                tag,
+                ldsTag,
+                tileTag);
+            co_yield_(Instruction::Comment(concatenate(
+                "GEN: loadMacroTileLDS OP ", tag, " LDS ", ldsTag, "MacroTile ", tileTag)));
 
             // Find the LDS allocation that contains the tile and store
             // the offset of the beginning of the allocation into ldsOffset.
@@ -741,15 +745,16 @@ namespace rocRoller
                                                                             LoadLDSTile const& load,
                                                                             Transformer coords)
         {
-            co_yield_(Instruction::Comment("GEN: loadMacroTileWAVELDS"));
-
             auto [ldsTag, lds]           = m_graph->getDimension<LDS>(tag);
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
 
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::loadMacroTileWAVELDS({}, {})",
-                ldsTag,
-                waveTileTag);
+            rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::"
+                                               "loadMacroTileWAVELDS: OP {} LDS {} WaveTile {}",
+                                               tag,
+                                               ldsTag,
+                                               waveTileTag);
+            co_yield_(Instruction::Comment(concatenate(
+                "GEN: loadMacroTileWAVELDS OP ", tag, " LDS ", ldsTag, " WaveTile ", waveTileTag)));
 
             // Find the LDS allocation that contains the tile and store
             // the offset of the beginning of the allocation into ldsOffset.
@@ -775,11 +780,14 @@ namespace rocRoller
                                                                          LoadTiled const& load,
                                                                          Transformer      coords)
         {
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::loadMacroTileWAVE({})", tag);
-            co_yield Instruction::Comment("GEN: loadMacroTileWAVE");
-
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::LoadStoreTileGenerator::loadMacroTileWAVE: OP {} WaveTile {}",
+                tag,
+                waveTileTag);
+            co_yield Instruction::Comment(
+                concatenate("GEN: loadMacroTileWAVE OP", tag, " WaveTile ", waveTileTag));
 
             uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
             uint wfs         = m_context->kernel()->wavefront_size();
@@ -800,11 +808,14 @@ namespace rocRoller
             int tag, LoadTiled const& load, Transformer coords)
 
         {
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::loadMacroTileWAVECIACCUM({})", tag);
-            co_yield Instruction::Comment("GEN: loadMacroTileWAVECIACCUM");
-
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::LoadStoreTileGenerator::loadMacroTileWAVECIACCUM: OP {} WaveTile {}",
+                tag,
+                waveTileTag);
+            co_yield Instruction::Comment(
+                concatenate("GEN: loadMacroTileWAVECIACCUM OP ", tag, " WaveTile ", waveTileTag));
 
             uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
             uint wfs         = m_context->kernel()->wavefront_size();
@@ -886,12 +897,16 @@ namespace rocRoller
                                                                          StoreLDSTile const& store,
                                                                          Transformer         coords)
         {
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::storeMacroTileLDS()");
-            co_yield Instruction::Comment("GEN: storeMacroTileLDS");
-
             auto [ldsTag, lds]   = m_graph->getDimension<LDS>(tag);
             auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::LoadStoreTileGenerator::storeMacroTileLDS: OP {} LDS {} MacroTile {}",
+                tag,
+                ldsTag,
+                tileTag);
+            co_yield Instruction::Comment(concatenate(
+                "GEN: storeMacroTileLDS OP ", tag, " LDS ", ldsTag, " MacroTile ", tileTag));
 
             // Temporary register(s) that is used to copy the data from global memory to
             // local memory.
@@ -937,10 +952,11 @@ namespace rocRoller
             auto [macTileTag, macTile] = m_graph->getDimension<MacroTile>(tag);
 
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::storeMacroTileVGPR({})", tag);
-            co_yield Instruction::Comment("GEN: storeMacroTileVGPR");
-
-            rocRoller::Log::getLogger()->debug(" tile {}", macTileTag);
+                "KernelGraph::LoadStoreTileGenerator::storeMacroTileVGPR: OP {} MacroTile {}",
+                tag,
+                macTileTag);
+            co_yield Instruction::Comment(
+                concatenate("GEN: storeMacroTileVGPR OP ", tag, " MacroTile ", macTileTag));
 
             macTileTag
                 = only(m_graph->coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<View>))
@@ -965,16 +981,28 @@ namespace rocRoller
         Generator<Instruction> LoadStoreTileGenerator::storeMacroTileWAVELDS(
             int tag, StoreLDSTile const& store, Transformer coords)
         {
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::storeMacroTileWAVELDS()");
-            co_yield Instruction::Comment("GEN: storeMacroTileWAVELDS");
-
             auto [ldsTag, lds]           = m_graph->getDimension<LDS>(tag);
             auto [macTileTag, macTile]   = m_graph->getDimension<MacroTile>(tag);
             auto macrotileNumElements    = product(macTile.sizes);
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
             uint waveTileNumElements     = waveTile.sizes[0] * waveTile.sizes[1];
             auto dataType                = store.dataType;
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::LoadStoreTileGenerator::storeMacroTileWAVELDS: OP {} LDS {} "
+                "MacroTile {} WaveTile {}",
+                tag,
+                ldsTag,
+                macTileTag,
+                waveTileTag);
+            co_yield Instruction::Comment(concatenate("GEN: storeMacroTileWAVELDS OP ",
+                                                      tag,
+                                                      " LDS ",
+                                                      ldsTag,
+                                                      " MacroTile ",
+                                                      macTileTag,
+                                                      " WaveTile ",
+                                                      waveTileTag));
 
             // Allocate LDS memory, and store the offset of the beginning of the allocation
             // into ldsOffset.
@@ -1012,12 +1040,20 @@ namespace rocRoller
                                                                           StoreTiled const& store,
                                                                           Transformer       coords)
         {
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::storeMacroTileWAVE()");
-            co_yield Instruction::Comment("GEN: storeMacroTileWAVE");
-
             auto [macTileTag, macTile]   = m_graph->getDimension<MacroTile>(tag);
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
+
+            rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::"
+                                               "storeMacroTileWAVE: OP {} MacroTile {} WaveTile {}",
+                                               tag,
+                                               macTileTag,
+                                               waveTileTag);
+            co_yield Instruction::Comment(concatenate("GEN: storeMacroTileWAVE OP ",
+                                                      tag,
+                                                      " MacroTile ",
+                                                      macTileTag,
+                                                      " WaveTile ",
+                                                      waveTileTag));
 
             uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
             uint wfs         = m_context->kernel()->wavefront_size();

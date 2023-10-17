@@ -52,14 +52,14 @@ namespace rocRoller
             return {dimK, forK};
         }
 
-        int getForLoop(int forLoopOp, KernelGraph const& kgraph)
+        std::pair<int, int> getForLoopCoords(int forLoopOp, KernelGraph const& kgraph)
         {
             namespace CG = rocRoller::KernelGraph::CoordinateGraph;
 
             auto range = kgraph.mapper.getConnections(forLoopOp)[0].coordinate;
             auto forLoop
                 = only(kgraph.coordinates.getOutputNodeIndices(range, CG::isEdge<CG::DataFlow>));
-            return *forLoop;
+            return {*forLoop, range};
         }
 
         std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>
@@ -99,9 +99,10 @@ namespace rocRoller
                     continue;
                 return {addExpr.lhs, addExpr.rhs};
             }
+
             // There should be a loopIncrement that satisfies the above conditions
             // if not then throw an error.
-            throw FatalError("No forLoopIncrement for supplied forLoop.");
+            Throw<FatalError>("No forLoopIncrement for supplied forLoop.");
         }
 
         int replaceWith(KernelGraph& graph, int op, int newOp, bool includeBody)
@@ -213,29 +214,55 @@ namespace rocRoller
 
         void purgeFor(KernelGraph& kgraph, int loop)
         {
-            // Purge loop dimension and iterator
-            for(auto const& c : kgraph.mapper.getConnections(loop))
+            // Get loop dimension and iterator first (before purging the operator)
+            auto [forLoop, forIncr] = getForLoopCoords(loop, kgraph);
+
+            // Purge the operator
+            purgeNodeAndChildren(kgraph, loop);
+
+            // If there is still a connection to the increment, a
+            // similar loop exists elsewhere in the graph.
+            if(!kgraph.mapper.getCoordinateConnections(forIncr).empty())
+                return;
+
+            //
+            // Purge loop dimension and all incoming/outgoing edge
+            //
+
+            // Build list of candidate edges to purge
+            std::vector<std::pair<int, Graph::Direction>> purgeCandidates;
             {
-                int iterator = c.coordinate;
-                // TODO THIS IS A FRAGILE WAY OF DETECTING "NO MORE REFERENCES"
-                if(kgraph.mapper.getCoordinateConnections(iterator).size() <= 3)
-                {
-                    auto dataflow = *only(
-                        kgraph.coordinates.getNeighbours<Graph::Direction::Downstream>(iterator));
-                    auto forLoop = *only(
-                        kgraph.coordinates.getNeighbours<Graph::Direction::Downstream>(dataflow));
-                    kgraph.coordinates.deleteElement(iterator);
-                    kgraph.mapper.purgeMappingsTo(iterator);
-                    kgraph.coordinates.deleteElement(dataflow);
-                    kgraph.mapper.purgeMappingsTo(dataflow);
-                    kgraph.coordinates.deleteElement(forLoop);
-                    kgraph.mapper.purgeMappingsTo(forLoop);
-                }
-                // XXX THIS LEAVES SOME DANGLING COORDS; IS THIS STILL TRUE?
+                auto location = kgraph.coordinates.getLocation(forLoop);
+                for(auto tag : location.incoming)
+                    purgeCandidates.push_back({tag, Graph::Direction::Upstream});
+                for(auto tag : location.outgoing)
+                    purgeCandidates.push_back({tag, Graph::Direction::Downstream});
             }
 
-            // Purge loop
-            purgeNodeAndChildren(kgraph, loop);
+            // Purge edges if they are DataFlow or PassThrough edges
+            for(auto [edgeTag, direction] : purgeCandidates)
+            {
+                auto maybePassThrough = kgraph.coordinates.get<PassThrough>(edgeTag);
+                auto maybeDataFlow    = kgraph.coordinates.get<DataFlow>(edgeTag);
+                if(maybePassThrough)
+                {
+                    // If it's a PassThrough edge, purge the coordinate
+                    auto coordTag = only(kgraph.coordinates.getNeighbours(edgeTag, direction));
+                    if(coordTag)
+                    {
+                        kgraph.coordinates.deleteElement(*coordTag);
+                        kgraph.mapper.purgeMappingsTo(*coordTag);
+                    }
+                }
+                if(maybePassThrough || maybeDataFlow)
+                    kgraph.coordinates.deleteElement(edgeTag);
+            }
+
+            kgraph.coordinates.deleteElement(forIncr);
+            kgraph.mapper.purgeMappingsTo(forIncr);
+
+            kgraph.coordinates.deleteElement(forLoop);
+            kgraph.mapper.purgeMappingsTo(forLoop);
         }
 
         void purgeNodeAndChildren(KernelGraph& kgraph, int node)

@@ -225,29 +225,37 @@ namespace rocRoller
             }
         }
 
-        WaveTile::WaveTile() = default;
-
-        WaveTile::WaveTile(int rank)
-            : BaseDimension()
-            , rank(rank)
-            , layout(LayoutType::None)
-        {
-        }
-
         /**
-             * Construct WaveTile dimension with fully specified sizes.
-             */
-        WaveTile::WaveTile(std::vector<int> const& sizes, LayoutType layout)
-            : BaseDimension(Expression::literal(product(sizes)), Expression::literal(1u))
-            , rank(sizes.size())
-            , sizes(sizes)
-            , layout(layout)
+         * Construct WaveTile dimension with fully specified sizes.
+         */
+        WaveTile::WaveTile(MacroTile const& macTile)
         {
+            auto m = macTile.subTileSizes[0];
+            auto n = macTile.subTileSizes[1];
+            auto k = macTile.subTileSizes[2];
+
+            if(macTile.layoutType == LayoutType::MATRIX_A)
+            {
+                sizes = {m, k};
+            }
+            if(macTile.layoutType == LayoutType::MATRIX_B)
+            {
+                sizes = {k, n};
+            }
+            if(macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
+            {
+                sizes = {m, n};
+            }
+
+            rank   = 2;
+            size   = Expression::literal(product(sizes));
+            stride = Expression::literal(1u);
+            layout = macTile.layoutType;
         }
 
         WaveTileNumber WaveTile::tileNumber(int sdim) const
         {
-            return WaveTileNumber(sdim, Expression::literal(1u), Expression::literal(1u));
+            return WaveTileNumber(sdim, Expression::literal(-1), Expression::literal(1u));
         }
 
         WaveTileIndex WaveTile::tileIndex(int sdim) const
@@ -262,6 +270,11 @@ namespace rocRoller
             return WaveTileIndex(sdim,
                                  Expression::literal(static_cast<uint>(sizes.at(sdim))),
                                  Expression::literal(stride));
+        }
+
+        int WaveTile::elements() const
+        {
+            return product(sizes);
         }
 
         ElementNumber::ElementNumber() = default;

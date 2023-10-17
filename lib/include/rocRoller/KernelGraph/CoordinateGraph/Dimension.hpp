@@ -442,24 +442,17 @@ namespace rocRoller
         {
             int rank = 0;
 
-            std::vector<int>   sizes;
+            std::vector<int> sizes;
+
             LayoutType         layout = LayoutType::None;
             Register::ValuePtr vgpr; // TODO: Does this belong here?  Move to "getVGPR"?
 
-            /**
-             * Construct WaveTile dimension with deferred rank and size.
-             */
-            WaveTile();
-
-            /**
-             * Construct WaveTile dimension with deferred size and layout
-             */
-            WaveTile(int const rank);
+            WaveTile() = default;
 
             /**
              * Construct WaveTile dimension with fully specified sizes.
              */
-            WaveTile(std::vector<int> const& sizes, LayoutType layout);
+            WaveTile(MacroTile const&);
 
             std::string name() const override;
 

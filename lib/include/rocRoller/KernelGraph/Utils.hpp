@@ -37,6 +37,9 @@ namespace rocRoller
          */
         void purgeNodeAndChildren(KernelGraph& kgraph, int node);
 
+        template <std::ranges::forward_range Range = std::initializer_list<int>>
+        void purgeNodes(KernelGraph& kgraph, Range nodes);
+
         bool isHardwareCoordinate(int tag, KernelGraph const& kgraph);
         bool isLoopishCoordinate(int tag, KernelGraph const& kgraph);
         bool isStorageCoordinate(int tag, KernelGraph const& kgraph);
@@ -138,13 +141,14 @@ namespace rocRoller
                                                  std::shared_ptr<AssemblyKernel>);
 
         /**
-         * @brief Get ForLoop dimension assciated with ForLoopOp.
+         * @brief Get ForLoop and increment (Linear) dimensions
+         * assciated with ForLoopOp.
          */
-        int getForLoop(int forLoopOp, KernelGraph const& kgraph);
+        std::pair<int, int> getForLoopCoords(int forLoopOp, KernelGraph const& kgraph);
 
         template <CForwardRangeOf<int> Range>
         std::optional<int>
-            getForLoop(std::optional<int> forLoopOp, KernelGraph const& kgraph, Range within);
+            getForLoopCoord(std::optional<int> forLoopOp, KernelGraph const& kgraph, Range within);
 
         /**
          * @brief Get a pair of expressions representing a for loop increment

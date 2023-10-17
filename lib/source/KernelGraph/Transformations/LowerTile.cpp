@@ -133,19 +133,9 @@ namespace rocRoller
             AssertFatal(macTile.subTileSizes.size() == 4, "Invalid tile specification.");
 
             auto m = macTile.subTileSizes[0];
-            auto n = macTile.subTileSizes[1];
-            auto k = macTile.subTileSizes[2];
-
-            std::vector<int> tileSize;
-            if(macTile.layoutType == LayoutType::MATRIX_A)
-                tileSize = {m, k};
-            if(macTile.layoutType == LayoutType::MATRIX_B)
-                tileSize = {k, n};
-            if(macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
-                tileSize = {m, n};
 
             auto workitem    = graph.coordinates.addElement(Workitem(0));
-            auto waveTile    = WaveTile(tileSize, macTile.layoutType);
+            auto waveTile    = WaveTile(macTile);
             auto waveTileTag = graph.coordinates.addElement(waveTile);
 
             graph.coordinates.addElement(PassThrough(), {waveTileTag}, {macTileTag});
@@ -167,7 +157,7 @@ namespace rocRoller
             auto waveY = graph.coordinates.addElement(Wavefront(1));
             auto wave  = graph.coordinates.addElement(Wavefront(-1));
 
-            uint numElements = product(tileSize);
+            uint numElements = waveTile.elements();
             uint wfs         = static_cast<uint>(wavefrontSize);
             uint numVgpr     = numElements / wfs;
 
@@ -181,25 +171,14 @@ namespace rocRoller
 
             connections.push_back(DC<VGPR>(vgpr));
 
-            int jammedWavetileX = -1;
-            if(jammedTiles[0] >= 1)
-            {
-                jammedWavetileX = graph.coordinates.addElement(
-                    JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
-                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
-            }
-            int jammedWavetileY = -1;
-            if(jammedTiles[1] >= 1)
-            {
-                jammedWavetileY = graph.coordinates.addElement(
-                    JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
-                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
-            }
-
             switch(waveTile.layout)
             {
             case LayoutType::MATRIX_A:
             {
+                auto jammedWavetileX = graph.coordinates.addElement(
+                    JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
+                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
+
                 auto blockNumber = graph.coordinates.addElement(
                     Adhoc("BlockNumber", literal(static_cast<uint>(wfs / m)), nullptr));
                 auto blockIndex = graph.coordinates.addElement(
@@ -210,15 +189,16 @@ namespace rocRoller
                 graph.coordinates.addElement(Tile(), {iWaveY}, {blockNumber, vgpr});
                 graph.coordinates.addElement(PassThrough(), {iWaveX}, {blockIndex});
 
-                if(jammedTiles[0] > 1)
-                    graph.coordinates.addElement(Tile(), {nWaveX}, {waveX, jammedWavetileX});
-                else
-                    graph.coordinates.addElement(PassThrough(), {nWaveX}, {waveX});
+                graph.coordinates.addElement(Tile(), {nWaveX}, {waveX, jammedWavetileX});
             }
             break;
 
             case LayoutType::MATRIX_B:
             {
+                auto jammedWavetileY = graph.coordinates.addElement(
+                    JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
+                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
+
                 auto blockNumber = graph.coordinates.addElement(
                     Adhoc("BlockNumber", literal(static_cast<uint>(wfs / m)), nullptr));
                 auto blockIndex = graph.coordinates.addElement(
@@ -229,10 +209,7 @@ namespace rocRoller
                 graph.coordinates.addElement(Tile(), {iWaveX}, {blockNumber, vgpr});
                 graph.coordinates.addElement(PassThrough(), {iWaveY}, {blockIndex});
 
-                if(jammedTiles[1] > 1)
-                    graph.coordinates.addElement(Tile(), {nWaveY}, {waveY, jammedWavetileY});
-                else
-                    graph.coordinates.addElement(PassThrough(), {nWaveY}, {waveY});
+                graph.coordinates.addElement(Tile(), {nWaveY}, {waveY, jammedWavetileY});
             }
             break;
 
@@ -245,6 +222,14 @@ namespace rocRoller
 
                 auto nRowBlocks = literal(waveTile.sizes[0] / mts);
                 auto nColBlocks = literal(waveTile.sizes[1] / mts);
+
+                auto jammedWavetileX = graph.coordinates.addElement(
+                    JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
+                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
+
+                auto jammedWavetileY = graph.coordinates.addElement(
+                    JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
+                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
 
                 auto nVblk = graph.coordinates.addElement(
                     VGPRBlockNumber(literal(numVgpr / mts), unitStride));
@@ -273,15 +258,9 @@ namespace rocRoller
                 graph.coordinates.addElement(Flatten(), {nVblk, iVblk}, {vgpr});
                 graph.coordinates.addElement(Flatten(), {nLblk, iLblk}, {lane});
 
-                if(jammedTiles[0] > 1)
-                    graph.coordinates.addElement(Tile(), {nWaveX}, {waveX, jammedWavetileX});
-                else
-                    graph.coordinates.addElement(PassThrough(), {nWaveX}, {waveX});
+                graph.coordinates.addElement(Tile(), {nWaveX}, {waveX, jammedWavetileX});
 
-                if(jammedTiles[1] > 1)
-                    graph.coordinates.addElement(Tile(), {nWaveY}, {waveY, jammedWavetileY});
-                else
-                    graph.coordinates.addElement(PassThrough(), {nWaveY}, {waveY});
+                graph.coordinates.addElement(Tile(), {nWaveY}, {waveY, jammedWavetileY});
             }
             break;
 
@@ -489,7 +468,7 @@ namespace rocRoller
                         "Store must be from accumulator.");
 
             auto workitem    = graph.coordinates.addElement(Workitem(0));
-            auto waveTile    = WaveTile(macTile.subTileSizes, LayoutType::MATRIX_ACCUMULATOR);
+            auto waveTile    = WaveTile(macTile);
             auto waveTileTag = graph.coordinates.addElement(waveTile);
 
             graph.coordinates.addElement(PassThrough(), {waveTileTag}, {macTileTag});
@@ -547,29 +526,30 @@ namespace rocRoller
             graph.coordinates.addElement(Flatten(), {nVblk, nLblk}, {block});
             graph.coordinates.addElement(Tile(), {block}, {rowBlock, colBlock});
 
-            int jammedWavetileX = -1;
-            if(jammedTiles[0] >= 1)
+            if(jammedTiles[0] > 0)
             {
-                jammedWavetileX = graph.coordinates.addElement(
+                auto jammedWavetileX = graph.coordinates.addElement(
                     JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
+                graph.coordinates.addElement(Flatten(), {waveX, jammedWavetileX}, {nWaveX});
             }
-            int jammedWavetileY = -1;
-            if(jammedTiles[1] >= 1)
+            else
             {
-                jammedWavetileY = graph.coordinates.addElement(
-                    JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
-                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
+                graph.coordinates.addElement(PassThrough(), {waveX}, {nWaveX});
             }
 
-            if(jammedTiles[0] > 1)
-                graph.coordinates.addElement(Flatten(), {waveX, jammedWavetileX}, {nWaveX});
-            else
-                graph.coordinates.addElement(PassThrough(), {waveX}, {nWaveX});
             if(jammedTiles[1] > 1)
+            {
+                auto jammedWavetileY = graph.coordinates.addElement(
+                    JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
+                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
+
                 graph.coordinates.addElement(Flatten(), {waveY, jammedWavetileY}, {nWaveY});
+            }
             else
+            {
                 graph.coordinates.addElement(PassThrough(), {waveY}, {nWaveY});
+            }
 
             graph.coordinates.addElement(Flatten(), {rowBlock, iVblk}, {iWaveX});
             graph.coordinates.addElement(Flatten(), {colBlock, iLblk}, {iWaveY});

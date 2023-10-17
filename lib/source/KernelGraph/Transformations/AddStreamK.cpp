@@ -619,7 +619,7 @@ namespace rocRoller
                     Expression::Convert<DataType::UInt32>{expr});
             };
 
-            m_accumulatorCoord = getForLoop(m_accumulatorLoopOp, graph);
+            m_accumulatorCoord = getForLoopCoords(m_accumulatorLoopOp, graph).first;
             Log::debug("  accumulator loop coord: {}", m_accumulatorCoord);
 
             // Find accumulator tile: look above accumulator-loop for an assign statement

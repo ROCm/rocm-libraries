@@ -636,7 +636,7 @@ namespace rocRoller::KernelGraph
         int baseUpdate = -1;
 
         auto maybeForLoop      = findContainingOperation<ForLoopOp>(op, graph);
-        auto maybeForLoopCoord = getForLoop(maybeForLoop, graph, required);
+        auto maybeForLoopCoord = getForLoopCoord(maybeForLoop, graph, required);
         if(maybeForLoop && maybeForLoopCoord && uniformForLoop(maybeForLoop, graph))
         {
             int forLoop = *maybeForLoopCoord;

@@ -1041,7 +1041,8 @@ namespace rocRollerTest
         // one tile per wavefront
         auto ct = CoordinateGraph();
 
-        auto WaveA = WaveTile({32u, 2u}, LayoutType::MATRIX_A);
+        auto MacA  = MacroTile({32u, 32u, 32u, 32u}, LayoutType::MATRIX_A, {32u, 0u, 2u, 0u});
+        auto WaveA = WaveTile(MacA);
 
         auto WaveAI = WaveA.tileNumber(0);
         auto WaveAJ = WaveA.tileNumber(1);

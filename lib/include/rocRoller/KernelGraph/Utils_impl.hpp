@@ -5,9 +5,30 @@
 
 namespace rocRoller::KernelGraph
 {
+    template <std::ranges::forward_range Range>
+    void purgeNodes(KernelGraph& kgraph, Range nodes)
+    {
+        for(int tag : nodes)
+        {
+            for(auto reap :
+                kgraph.control.getNeighbours<Graph::Direction::Upstream>(tag).to<std::vector>())
+            {
+                kgraph.control.deleteElement(reap);
+            }
+            for(auto reap :
+                kgraph.control.getNeighbours<Graph::Direction::Downstream>(tag).to<std::vector>())
+            {
+                kgraph.control.deleteElement(reap);
+            }
+
+            kgraph.control.deleteElement(tag);
+            kgraph.mapper.purge(tag);
+        }
+    }
+
     template <CForwardRangeOf<int> Range>
     std::optional<int>
-        getForLoop(std::optional<int> forLoopOp, KernelGraph const& kgraph, Range within)
+        getForLoopCoord(std::optional<int> forLoopOp, KernelGraph const& kgraph, Range within)
     {
         if(!forLoopOp)
             return {};

@@ -228,7 +228,7 @@ namespace rocRoller
             if(maybeForLoop)
             {
                 operation = *maybeForLoop;
-                auto f    = getForLoop(*maybeForLoop, k);
+                auto f    = getForLoopCoords(*maybeForLoop, k).first;
                 if(forLoopCoordinates.contains(f))
                 {
                     forLoopCoord = f;
@@ -361,7 +361,7 @@ namespace rocRoller
                     if(fl->loopName != rocRoller::KLOOP)
                         continue;
 
-                    auto forLoopCoord     = getForLoop(*maybeForLoop, kgraph);
+                    auto forLoopCoord     = getForLoopCoords(*maybeForLoop, kgraph).first;
                     auto maybeUnrollCoord = findUnrollNeighbour(kgraph, forLoopCoord);
                     if(forLoopCoordinates.contains(forLoopCoord) && maybeUnrollCoord)
                     {
@@ -682,7 +682,7 @@ namespace rocRoller
 
             AssertFatal(isOperation<ForLoopOp>(graph.control.getElement(forLoop)));
 
-            auto forLoopCoord = getForLoop(forLoop, graph);
+            auto forLoopCoord = getForLoopCoords(forLoop, graph).first;
             auto unrollCoord  = *findUnrollNeighbour(graph, forLoopCoord);
 
             //
@@ -1083,7 +1083,7 @@ namespace rocRoller
                 auto bodies
                     = k.control.getOutputNodeIndices<Body>(forLoop).to<std::unordered_set>();
 
-                auto forLoopCoord     = getForLoop(forLoop, k);
+                auto forLoopCoord     = getForLoopCoords(forLoop, k).first;
                 auto maybeUnrollCoord = findUnrollNeighbour(k, forLoopCoord);
                 AssertFatal(maybeUnrollCoord, "Prefetch with no unroll coordinate.");
                 auto unrollCoord = *maybeUnrollCoord;
@@ -1209,7 +1209,7 @@ namespace rocRoller
 
             for(auto [forLoop, numUnroll] : m_prefetchLoops)
             {
-                auto forLoopCoord     = getForLoop(forLoop, k);
+                auto forLoopCoord     = getForLoopCoords(forLoop, k).first;
                 auto maybeUnrollCoord = findUnrollNeighbour(k, forLoopCoord);
                 AssertFatal(maybeUnrollCoord, "Prefetch with no unroll coordinate.");
                 auto prefetchUnrollCoord = *maybeUnrollCoord;
