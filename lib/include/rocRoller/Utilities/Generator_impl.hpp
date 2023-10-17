@@ -70,10 +70,20 @@ namespace rocRoller
     template <std::movable T>
     void Generator<T>::promise_type::check_exception() const
     {
-        std::exception_ptr exc = nullptr;
-        std::swap(exc, m_exception);
-        if(exc)
+        // NOTE: A thread-safe version of this would be similar to
+        //     std::exception_ptr exc = nullptr;
+        //     std::swap(exc, m_exception);
+        //     if(exc)
+        //       std::rethrow_exception(exc);
+        //
+        // Thread-safety is not necessary (RR generates within a single thread); and
+        // conditionally swapping improves performance.
+        if(m_exception)
+        {
+            std::exception_ptr exc = nullptr;
+            std::swap(exc, m_exception);
             std::rethrow_exception(exc);
+        }
     }
 
     template <std::movable T>
