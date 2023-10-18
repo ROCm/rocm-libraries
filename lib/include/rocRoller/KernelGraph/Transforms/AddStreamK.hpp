@@ -7,6 +7,13 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+
+        /**
+         * @brief The AddStreamK transformation doesn't work when loading through LDS.
+         *
+         */
+        ConstraintStatus NoLoadLDS(const KernelGraph& k);
+
         /**
          * @brief Flatten tile space and stream accumulation tiles.
          *
@@ -59,6 +66,11 @@ namespace rocRoller
 
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override;
+
+            inline std::vector<GraphConstraint> preConstraints() const override
+            {
+                return {&NoLoadLDS};
+            }
 
         private:
             int addTileSpaceCT(KernelGraph&              graph,

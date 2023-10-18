@@ -71,6 +71,28 @@ namespace rocRoller
 
         using GD = rocRoller::Graph::Direction;
 
+        ConstraintStatus NoLoadLDS(const KernelGraph& k)
+        {
+            ConstraintStatus retval;
+
+            // Look for any loads of Matrix A or Matrix B that aren't using LDS
+            for(auto const& loadTag : k.control.getNodes<LoadTiled>())
+            {
+                auto [tileTag, tile] = k.getDimension<MacroTile>(loadTag);
+
+                if((tile.layoutType == LayoutType::MATRIX_A
+                    || tile.layoutType == LayoutType::MATRIX_B)
+                   && tile.memoryType == MemoryType::WAVE)
+                {
+                    return {false,
+                            "The StreamK transformation does not work when data is not loaded "
+                            "through LDS"};
+                }
+            }
+
+            return retval;
+        }
+
         //
         // Helpers
         //
