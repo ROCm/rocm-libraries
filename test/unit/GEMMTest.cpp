@@ -495,9 +495,9 @@ namespace GEMMDriverTest
         gemm.prefetch         = true;
         gemm.prefetchInFlight = 2;
 
-        gemm.loadLDSA  = true; // false doesn't work
-        gemm.loadLDSB  = true; // false doesn't work
-        gemm.storeLDSD = true; // true or false both work
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = true;
 
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
@@ -531,47 +531,19 @@ namespace GEMMDriverTest
         gemm.prefetch         = true;
         gemm.prefetchInFlight = 2;
 
-        gemm.loadLDSA  = true; // false doesn't work
-        gemm.loadLDSB  = true; // false doesn't work
-        gemm.storeLDSD = true; // true or false both work
-
-        basicGEMM<Half>(m_context, gemm, 2.e-5);
-    }
-
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16StreamKNoLDS)
-    {
-        if(m_context->targetArchitecture().target().getVersionString() != "gfx90a")
+        for(auto loadLDSA : {false, true})
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+            gemm.loadLDSA = loadLDSA;
+            for(auto loadLDSB : {false, true})
+            {
+                gemm.loadLDSB = loadLDSB;
+                for(auto storeLDSD : {false, true})
+                {
+                    gemm.storeLDSD = storeLDSD;
+                    basicGEMM<Half>(m_context, gemm, 2.e-5);
+                }
+            }
         }
-
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        uint numCUs = deviceProperties.multiProcessorCount;
-
-        GEMMProblem gemm;
-
-        gemm.waveK = 8;
-        gemm.macK  = 16;
-
-        gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * numCUs / 2 + gemm.macN * 2;
-
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, numCUs);
-
-        gemm.streamK = true;
-        gemm.k       = gemm.macK * 8;
-
-        // It works with prefetching too!!
-        gemm.unrollK          = 2;
-        gemm.prefetch         = true;
-        gemm.prefetchInFlight = 2;
-
-        gemm.loadLDSA  = false; // false doesn't work
-        gemm.loadLDSB  = false; // false doesn't work
-        gemm.storeLDSD = true; // true or false both work
-
-        EXPECT_THROW(basicGEMM<Half>(m_context, gemm, 2.e-5), FatalError);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMMultipleOutputTiles)

@@ -345,20 +345,21 @@ namespace rocRoller
                 auto element = kgraph.coordinates.getElement(tag);
                 auto edge    = std::get<CT::Edge>(element);
 
-                bool isCT   = std::holds_alternative<CT::CoordinateTransformEdge>(edge);
-                bool follow = true;
+                bool isCT = std::holds_alternative<CT::CoordinateTransformEdge>(edge);
+                bool allReachableNeighoursLoopOrStorage = true;
                 for(auto neighbour : kgraph.coordinates.getNeighbours(tag, opposite(direction)))
                 {
-                    if(neighbour == target)
-                        continue;
                     if(!reachable.contains(neighbour))
                         continue;
-                    if(isLoopishCoordinate(neighbour, kgraph))
-                        follow = false;
-                    if(isStorageCoordinate(neighbour, kgraph))
-                        follow = false;
+
+                    if(neighbour == target
+                       || !(isLoopishCoordinate(neighbour, kgraph)
+                            || isStorageCoordinate(neighbour, kgraph)))
+                    {
+                        allReachableNeighoursLoopOrStorage = false;
+                    }
                 }
-                return isCT && follow;
+                return isCT && !allReachableNeighoursLoopOrStorage;
             };
 
             // From the target coordinate, walk the graph but stop at loop
