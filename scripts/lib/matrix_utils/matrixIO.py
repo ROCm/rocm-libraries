@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import msgpack
 import os
+from PIL import Image
 
 
 def loadMatrix(fname):
@@ -23,3 +24,18 @@ def showMatrix(fname, cmap="plasma", aspect="auto", **kwargs):
     colormap = ax.matshow(data, aspect=aspect, cmap=cmap, **kwargs)
     fig.colorbar(colormap)
     return fig
+
+
+def writeNumpyToImage(data, m, n, image_file, empty=-1, **kwargs):
+    imgData = np.zeros([m, n, 3], dtype=np.uint8)
+    max = np.max(data)
+    for i in range(m):
+        for j in range(n):
+            index = i * n + j
+            if data[index] == empty:
+                imgData[i, j] = [0, 0, 255]
+            else:
+                imgData[i, j] = [int((data[index] / max) * 255), 255, 0]
+    with Image.fromarray(imgData) as img:
+        img.save(image_file, **kwargs)
+    print(f"Wrote {image_file}")
