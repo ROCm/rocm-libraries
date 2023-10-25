@@ -83,12 +83,12 @@ function newInstance(id: string = "", path: string) {
   return CurrentInstance;
 }
 
-let default_file_path = ""
+let default_file_path = "kernels/sample.s";
 if (window.location.hash.substring(1) != "") {
-  console.log("Loading graph: ", window.location.hash.substring(1))
-  default_file_path = window.location.hash.substring(1)
+  default_file_path = window.location.hash.substring(1);
+  console.log("Loading graph: ", default_file_path);
 } else {
-  throw Error("No path provided in URL, try appending #path/to/kernel.s, e.g. #kernels/sample.s")
+  console.log("No path provided in URL, try appending #path/to/kernel.s, loading sample " + default_file_path);
 }
 export let CurrentInstance: Instance = _newInstance("sample", default_file_path);
 export let cy = CurrentInstance.cy;
