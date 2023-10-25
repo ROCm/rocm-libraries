@@ -197,6 +197,7 @@ namespace rocRoller
             , m_varType(variableType)
         {
             AssertFatal(ctx != nullptr);
+            AssertFatal(count > 0, "Invalid register count ", ShowValue(count));
 
             auto const info   = DataTypeInfo::Get(variableType);
             m_allocationCoord = std::vector<int>(

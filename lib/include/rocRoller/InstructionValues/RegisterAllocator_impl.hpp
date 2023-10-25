@@ -126,6 +126,8 @@ namespace rocRoller
         inline std::vector<int> Allocator::findFree(int                      count,
                                                     AllocationOptions const& options) const
         {
+            AssertFatal(count > 0, "Invalid register count for findFree", ShowValue(count));
+
             switch(m_scheme)
             {
             case AllocatorScheme::FirstFit:
@@ -172,7 +174,8 @@ namespace rocRoller
         inline std::vector<int>
             Allocator::findFreePerfectFit(int count, AllocationOptions const& options) const
         {
-            AssertFatal(count >= 0, "Negative count");
+            AssertFatal(
+                count > 0, "Invalid register count for findFreePerfectFit", ShowValue(count));
 
             std::vector<int> rv;
             rv.reserve(count);
