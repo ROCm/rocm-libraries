@@ -151,15 +151,33 @@ namespace rocRoller
                         }
                         command->addOperation(std::make_shared<Operations::Operation>(execute));
 
-                        command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Store_Tiled(TypeInfo<D>::Var.dataType, 2, 8))); // D
+                        if(m_solutionParams.storeLDSD)
+                        {
+                            command->addOperation(
+                                std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
+                                    TypeInfo<D>::Var.dataType, 2, 8, {(size_t)1}))); // D
+                        }
+                        else
+                        {
+                            command->addOperation(std::make_shared<Operations::Operation>(
+                                Operations::T_Store_Tiled(TypeInfo<D>::Var.dataType, 2, 8))); // D
+                        }
                     }
                     else
                     {
                         command->addOperation(std::make_shared<Operations::Operation>(
                             Operations::T_Mul(2, 0, 1))); // A * B
-                        command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Store_Tiled(TypeInfo<D>::Var.dataType, 2, 2))); // D
+                        if(m_solutionParams.storeLDSD)
+                        {
+                            command->addOperation(
+                                std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
+                                    TypeInfo<D>::Var.dataType, 2, 2, {(size_t)1}))); // D
+                        }
+                        else
+                        {
+                            command->addOperation(std::make_shared<Operations::Operation>(
+                                Operations::T_Store_Tiled(TypeInfo<D>::Var.dataType, 2, 2))); // D
+                        }
                     }
 
                     return command;

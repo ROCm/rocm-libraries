@@ -329,6 +329,7 @@ namespace rocRoller
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B
+                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
                    || macTile.layoutType == LayoutType::SCRATCH)
                 {
                     graph.coordinates.addElement(Flatten(), {nThrX, nThrY}, {workitemX});
@@ -354,6 +355,7 @@ namespace rocRoller
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B
+                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
                    || macTile.layoutType == LayoutType::SCRATCH)
                 {
                     graph.coordinates.addElement(Flatten(), {nThrY, nThrX}, {workitemX});
@@ -367,52 +369,6 @@ namespace rocRoller
                     graph.coordinates.addElement(PassThrough(), {nThrY}, {workitemY});
                 }
             }
-
-            connections.push_back(DC<ElementNumber>(elementNumberX, 0));
-            connections.push_back(DC<ElementNumber>(elementNumberY, 1));
-
-            graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
-            graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
-        }
-
-        /**
-         * @brief Add coordinate-transforms for loading a
-         * MATRIX_ACCUMULATOR tile from row/column coordinates iMacX
-         * and iMacY.
-         *
-         * Required (deferred) connections are appended to
-         * `connections`.
-         */
-        void addLoadAccumulatorTileCT(KernelGraph&                       graph,
-                                      std::vector<DeferredConnection>&   connections,
-                                      int                                macTileTag,
-                                      int                                iMacX,
-                                      int                                iMacY,
-                                      std::array<unsigned int, 3> const& workgroupSizes)
-        {
-            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
-            auto thrTile = ThreadTile(macTile);
-
-            auto nThrX
-                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thrTile.sizes.at(0))));
-            auto nThrY
-                = graph.coordinates.addElement(ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
-            auto iThrX
-                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thrTile.wsizes.at(0))));
-            auto iThrY
-                = graph.coordinates.addElement(ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
-
-            auto workitemX
-                = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
-
-            auto elementNumberX
-                = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
-            auto elementNumberY
-                = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
-
-            graph.coordinates.addElement(Flatten(), {nThrY, iThrX}, {workitemX});
-            graph.coordinates.addElement(PassThrough(), {nThrX}, {elementNumberX});
-            graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
             connections.push_back(DC<ElementNumber>(elementNumberX, 0));
             connections.push_back(DC<ElementNumber>(elementNumberY, 1));
@@ -601,6 +557,7 @@ namespace rocRoller
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B
+                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
                    || macTile.layoutType == LayoutType::SCRATCH)
                 {
                     graph.coordinates.addElement(Tile(), {workitemX}, {nThrX, nThrY});
@@ -629,6 +586,7 @@ namespace rocRoller
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B
+                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
                    || macTile.layoutType == LayoutType::SCRATCH)
                 {
                     graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, nThrX});
@@ -642,48 +600,6 @@ namespace rocRoller
                     graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
                 }
             }
-
-            graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
-            graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
-        }
-
-        /**
-         * @brief Store version of addLoadAccumulatorTileCT.
-         */
-        void addStoreAccumulatorTileCT(KernelGraph&                       graph,
-                                       std::vector<DeferredConnection>&   connections,
-                                       int                                macTileTag,
-                                       int                                iMacX,
-                                       int                                iMacY,
-                                       std::array<unsigned int, 3> const& workgroupSizes)
-        {
-            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
-
-            auto thrTile = ThreadTile(macTile);
-
-            auto nThrX
-                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thrTile.sizes.at(0))));
-            auto nThrY
-                = graph.coordinates.addElement(ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
-            auto iThrX
-                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thrTile.wsizes.at(0))));
-            auto iThrY
-                = graph.coordinates.addElement(ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
-
-            auto workitemX
-                = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
-
-            auto elementNumberX
-                = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
-            auto elementNumberY
-                = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
-
-            connections.push_back(DC<ElementNumber>(elementNumberX, 0));
-            connections.push_back(DC<ElementNumber>(elementNumberY, 1));
-
-            graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, iThrX});
-            graph.coordinates.addElement(PassThrough(), {elementNumberX}, {nThrX});
-            graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
 
             graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
             graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
@@ -1056,18 +972,22 @@ namespace rocRoller
                     LDSDC<LDS>(ldsTag, Connections::LDSLoadStore::STORE_INTO_LDS));
             }
 
-            graph.coordinates.addElement(Flatten(), {iMacXStoreLDS, iMacYStoreLDS}, {ldsTag});
+            graph.coordinates.addElement(Flatten(), {iMacYStoreLDS, iMacXStoreLDS}, {ldsTag});
+
+            auto useSwappedAccess
+                = context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
 
             // Load from LDS to VGPRs
             {
                 std::vector<DeferredConnection> ldsConnections;
 
-                addLoadAccumulatorTileCT(graph,
-                                         ldsConnections,
-                                         internalMacTileTag,
-                                         iMacXLoadLDS,
-                                         iMacYLoadLDS,
-                                         workgroupSizes);
+                addLoadThreadTileCT(graph,
+                                    ldsConnections,
+                                    internalMacTileTag,
+                                    iMacXLoadLDS,
+                                    iMacYLoadLDS,
+                                    workgroupSizes,
+                                    useSwappedAccess);
 
                 addLDSDirection(
                     connections, ldsConnections, Connections::LDSLoadStore::LOAD_FROM_LDS);
@@ -1077,7 +997,7 @@ namespace rocRoller
                 connections.push_back(LDSDC<LDS>(ldsTag, Connections::LDSLoadStore::LOAD_FROM_LDS));
             }
 
-            graph.coordinates.addElement(Tile(), {ldsTag}, {iMacXLoadLDS, iMacYLoadLDS});
+            graph.coordinates.addElement(Tile(), {ldsTag}, {iMacYLoadLDS, iMacXLoadLDS});
 
             // Store from VGPRs to global
             {
@@ -1086,8 +1006,13 @@ namespace rocRoller
                 auto [nMacX, iMacX, nMacY, iMacY]
                     = addStoreMacroTileCT(graph, connections, internalMacTileTag, sdim);
 
-                addStoreAccumulatorTileCT(
-                    graph, ldsConnections, internalMacTileTag, iMacX, iMacY, workgroupSizes);
+                addStoreThreadTileCT(graph,
+                                     ldsConnections,
+                                     internalMacTileTag,
+                                     iMacX,
+                                     iMacY,
+                                     workgroupSizes,
+                                     useSwappedAccess);
 
                 addLDSDirection(connections,
                                 ldsConnections,

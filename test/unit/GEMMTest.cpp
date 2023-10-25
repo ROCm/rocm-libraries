@@ -215,8 +215,16 @@ namespace GEMMDriverTest
 
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Store_Tiled(dataType, 2, 8))); // D
+            if(gemm.storeLDSD)
+            {
+                command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+                    rocRoller::Operations::T_Store_Tiled(dataType, 2, 8, oneStridesN))); // D
+            }
+            else
+            {
+                command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+                    rocRoller::Operations::T_Store_Tiled(dataType, 2, 8))); // D
+            }
 
             KernelArguments runtimeArgs;
 
@@ -841,7 +849,9 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 2);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 10);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 4);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 4);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X1UnrollK)
@@ -870,7 +880,9 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 4);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 12);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 4);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 4);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1X2)
@@ -896,7 +908,9 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 2);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 10);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 4);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 4);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1X2UnrollK)
@@ -924,7 +938,9 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 8);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 16);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 4);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 4);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1x8)

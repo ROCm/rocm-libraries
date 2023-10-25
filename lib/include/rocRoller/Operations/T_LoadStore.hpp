@@ -138,6 +138,10 @@ namespace rocRoller
         public:
             T_Store_Tiled();
             T_Store_Tiled(DataType dataType, int dims, int dest);
+            T_Store_Tiled(DataType                   dataType,
+                          int                        dims,
+                          int                        dest,
+                          std::vector<size_t> const& literalStrides);
             T_Store_Tiled(const std::initializer_list<unsigned>&,
                           void* const,
                           const unsigned,
@@ -145,6 +149,11 @@ namespace rocRoller
             std::string toString() const;
             std::string toString(const unsigned char*) const;
             void        allocateArguments();
+
+            std::vector<size_t> literalStrides() const;
+
+        private:
+            std::vector<size_t> m_literalStrides;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Store_Tiled const& val);

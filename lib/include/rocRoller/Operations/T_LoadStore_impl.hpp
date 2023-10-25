@@ -292,6 +292,17 @@ namespace rocRoller
         {
         }
 
+        inline T_Store_Tiled::T_Store_Tiled(DataType                   dataType,
+                                            int                        dims,
+                                            int                        dest,
+                                            std::vector<size_t> const& literalStrides)
+            : Load_Store_Operation(dataType, dims, dest)
+            , m_literalStrides(literalStrides)
+        {
+            AssertFatal(literalStrides.size() <= dims,
+                        "Cannot specify more literal strides than dimensions.");
+        }
+
         inline T_Store_Tiled::T_Store_Tiled(const std::initializer_list<unsigned>& args,
                                             void* const,
                                             const unsigned dims,
@@ -314,6 +325,11 @@ namespace rocRoller
                 m_strides = ptr->allocateArgumentVector(
                     DataType::Int64, m_dims, DataDirection::ReadOnly, base + "_stride");
             }
+        }
+
+        inline std::vector<size_t> T_Store_Tiled::literalStrides() const
+        {
+            return m_literalStrides;
         }
 
         inline std::string T_Store_Tiled::toString() const

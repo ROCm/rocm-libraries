@@ -727,8 +727,10 @@ namespace rocRoller
 
             auto ldsOffset = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
 
-            auto const m = tile.subTileSizes[0];
-            auto const n = tile.subTileSizes[1];
+            auto [elemXTag, elemX] = m_graph->getDimension<ElementNumber>(tag, 0);
+            auto [elemYTag, elemY] = m_graph->getDimension<ElementNumber>(tag, 1);
+            auto const m           = getUnsignedInt(evaluate(elemX.size));
+            auto const n           = getUnsignedInt(evaluate(elemY.size));
 
             co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(
                 MemoryInstructions::MemoryKind::Local,
@@ -964,8 +966,10 @@ namespace rocRoller
 
             auto vgpr = m_context->registerTagManager()->getRegister(macTileTag);
 
-            auto const m = macTile.subTileSizes[0];
-            auto const n = macTile.subTileSizes[1];
+            auto [elemXTag, elemX] = m_graph->getDimension<ElementNumber>(tag, 0);
+            auto [elemYTag, elemY] = m_graph->getDimension<ElementNumber>(tag, 1);
+            auto const m           = getUnsignedInt(evaluate(elemX.size));
+            auto const n           = getUnsignedInt(evaluate(elemY.size));
 
             co_yield moveTile<MemoryInstructions::MemoryDirection::Store>(
                 MemoryInstructions::MemoryKind::Buffer,

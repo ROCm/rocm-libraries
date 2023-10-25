@@ -307,10 +307,20 @@ namespace rocRoller
                             ShowValue(tstore.getTag()));
 
                 std::vector<int> dims;
-                auto             strides = tstore.strides();
+                auto const       strides        = tstore.strides();
+                auto const       literalStrides = tstore.literalStrides();
                 for(size_t i = 0; i < strides.size(); ++i)
                 {
-                    auto strideExpr = std::make_shared<Expression::Expression>(strides[i]);
+                    std::shared_ptr<Expression::Expression> strideExpr;
+                    if(literalStrides.size() > i && literalStrides[i] > 0)
+                    {
+                        strideExpr = Expression::literal(literalStrides[i]);
+                    }
+                    else
+                    {
+                        strideExpr = std::make_shared<Expression::Expression>(strides[i]);
+                    }
+
                     auto dim = m_graph.coordinates.addElement(SubDimension(i, nullptr, strideExpr));
                     dims.push_back(dim);
                 }
