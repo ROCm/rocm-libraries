@@ -83,11 +83,16 @@ HIPCUB_DEVICE __forceinline__ void AsmThreadStore(void * ptr, T val)
     HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_store_dwordx2, v, wait_cmd); \
     HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_store_dwordx2, v, wait_cmd);
 
-#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "sc0 sc1", ""); // TODO: gfx942 validation
+#if defined(__gfx940__) || defined(__gfx941__)
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "sc0 sc1", "");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "sc0 sc1", "");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "sc0 sc1", "vmcnt");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "sc0 sc1", "vmcnt");
+#elif defined(__gfx942__)
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "sc0", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "sc0 nt", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "sc0", "vmcnt");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "sc0", "vmcnt");
 #else
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "glc", "");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "glc slc", "");
