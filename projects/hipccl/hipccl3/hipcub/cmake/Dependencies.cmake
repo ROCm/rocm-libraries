@@ -126,7 +126,7 @@ if(USER_BUILD_BENCHMARK)
     FetchContent_Declare(
       googlebench
       GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v1.6.1
+      GIT_TAG        v1.8.0
     )
     FetchContent_MakeAvailable(googlebench)
     if(NOT TARGET benchmark::benchmark)
@@ -136,29 +136,6 @@ if(USER_BUILD_BENCHMARK)
     find_package(benchmark CONFIG REQUIRED)
   endif()
 endif(USER_BUILD_BENCHMARK)
-
-if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-  find_package(ROCM 0.7.3 CONFIG QUIET PATHS "${ROCM_ROOT}")
-endif()
-if(NOT ROCM_FOUND)
-  message(STATUS "ROCm CMake not found. Fetching...")
-  # We don't really want to consume the build and test targets of ROCm CMake.
-  # CMake 3.18 allows omitting them, even though there's a CMakeLists.txt in source root.
-  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
-    set(SOURCE_SUBDIR_ARG SOURCE_SUBDIR "DISABLE ADDING TO BUILD")
-  else()
-    set(SOURCE_SUBDIR_ARG)
-  endif()
-  FetchContent_Declare(
-    rocm-cmake
-    URL  https://github.com/RadeonOpenCompute/rocm-cmake/archive/refs/tags/rocm-5.2.0.tar.gz
-    ${SOURCE_SUBDIR_ARG}
-  )
-  FetchContent_MakeAvailable(rocm-cmake)
-  find_package(ROCM CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
-else()
-  find_package(ROCM 0.7.3 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
-endif()
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
@@ -256,12 +233,3 @@ else()
   unset(BUILD_SHARED_LIBS CACHE )
 endif()
 set(ROCM_WARN_TOOLCHAIN_VAR ${USER_ROCM_WARN_TOOLCHAIN_VAR} CACHE BOOL "")
-
-include(ROCMSetupVersion)
-include(ROCMCreatePackage)
-include(ROCMInstallTargets)
-include(ROCMPackageConfigHelpers)
-include(ROCMInstallSymlinks)
-include(ROCMHeaderWrapper)
-include(ROCMCheckTargetIds)
-include(ROCMClients)
