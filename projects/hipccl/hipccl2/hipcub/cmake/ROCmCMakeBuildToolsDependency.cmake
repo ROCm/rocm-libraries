@@ -32,6 +32,7 @@ if(NOT ROCM_FOUND)
   else()
     set(SOURCE_SUBDIR_ARG)
   endif()
+  include(FetchContent)
   FetchContent_Declare(
     rocm-cmake
     URL  https://github.com/RadeonOpenCompute/rocm-cmake/archive/refs/tags/rocm-5.2.0.tar.gz
