@@ -367,6 +367,10 @@ amdhsa.kernels:
 
         CommandKernel commandKernel(m_context);
 
+        // Check for kernel's name
+        ASSERT_STREQ(hipKernelNameRef(commandKernel.getHipFunction()),
+                     "GPU_KernelTestWholeKernel_kernel");
+
         auto         ptr  = make_shared_device<float>();
         float        val  = 6.0f;
         unsigned int size = 1;

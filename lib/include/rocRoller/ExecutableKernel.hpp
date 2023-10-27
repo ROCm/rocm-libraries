@@ -91,6 +91,11 @@ namespace rocRoller
                            std::shared_ptr<HIPTimer> timer,
                            int                       iteration);
 
+        /**
+         * @brief Returns the hipFunction for the kernel
+        */
+        hipFunction_t getHipFunction() const;
+
     private:
         struct HIPData;
 

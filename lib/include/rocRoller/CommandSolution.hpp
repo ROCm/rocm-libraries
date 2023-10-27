@@ -177,6 +177,11 @@ namespace rocRoller
          */
         size_t scratchSpaceRequired() const;
 
+        /**
+         * @brief Returns the hipFunction for the kernel
+        */
+        hipFunction_t getHipFunction() const;
+
     private:
         CommandPtr m_command;
 

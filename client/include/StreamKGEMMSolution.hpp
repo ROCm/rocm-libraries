@@ -122,6 +122,27 @@ namespace rocRoller
                         = DataParallelGEMMSolution<A, B, C, D>::makeArgs(m_dA, m_dB, m_dC, m_dD);
 
                     runtimeArgs.append(rocRoller::SCRATCH, static_cast<void*>(m_dScratch.get()));
+
+                    // Determine the number of CUs on the device
+                    hipDeviceProp_t deviceProperties;
+                    AssertFatal(hipGetDeviceProperties(&deviceProperties, 0)
+                                == (hipError_t)HIP_SUCCESS);
+                    auto numCUs = deviceProperties.multiProcessorCount;
+
+                    // Determine the occupancy for the kernel
+                    int occupancy;
+                    AssertFatal(hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
+                                    &occupancy,
+                                    this->m_kernel->getHipFunction(),
+                                    this->m_solutionParams.workgroupSizeX
+                                        * this->m_solutionParams.workgroupSizeY,
+                                    0)
+                                == (hipError_t)HIP_SUCCESS);
+
+                    AssertFatal(this->m_solutionParams.numWGs <= numCUs * occupancy,
+                                "StreamK kernel requires that the number of workgroups is not "
+                                "greater than the number of compute units * occupancy.");
+
                     runtimeArgs.append("numWGs", this->m_solutionParams.numWGs);
 
                     bool logArgs = Log::getLogger()->should_log(spdlog::level::debug);

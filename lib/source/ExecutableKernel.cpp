@@ -41,6 +41,11 @@ namespace rocRoller
     {
     }
 
+    hipFunction_t ExecutableKernel::getHipFunction() const
+    {
+        return m_hipData->function;
+    }
+
     void ExecutableKernel::loadKernel(std::string const&           instructions,
                                       const GPUArchitectureTarget& target,
                                       std::string const&           kernelName)
@@ -49,11 +54,14 @@ namespace rocRoller
         std::vector<char> kernelObject
             = assembler.assembleMachineCode(instructions, target, kernelName);
 
-        HIP_CHECK(hipModuleLoadData(&(m_hipData->hipModule), kernelObject.data()));
-        HIP_CHECK(
-            hipModuleGetFunction(&(m_hipData->function), m_hipData->hipModule, kernelName.c_str()));
-        m_kernelLoaded = true;
-        m_kernelName   = kernelName;
+        if(instructions.size())
+        {
+            HIP_CHECK(hipModuleLoadData(&(m_hipData->hipModule), kernelObject.data()));
+            HIP_CHECK(hipModuleGetFunction(
+                &(m_hipData->function), m_hipData->hipModule, kernelName.c_str()));
+            m_kernelLoaded = true;
+            m_kernelName   = kernelName;
+        }
     }
 
     void ExecutableKernel::loadKernelFromFile(std::string const&           fileName,

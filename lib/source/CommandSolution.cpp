@@ -136,6 +136,7 @@ namespace rocRoller
     CommandKernel::CommandKernel(ContextPtr context)
         : m_context(context)
     {
+        m_executableKernel = m_context->instructions()->getExecutableKernel();
     }
 
     CommandKernel::CommandKernel(CommandPtr command, std::string name)
@@ -175,6 +176,11 @@ namespace rocRoller
     KernelGraph::KernelGraph CommandKernel::getKernelGraph() const
     {
         return m_kernelGraph;
+    }
+
+    hipFunction_t CommandKernel::getHipFunction() const
+    {
+        return m_executableKernel->getHipFunction();
     }
 
     std::string CommandKernel::getInstructions() const
@@ -359,9 +365,6 @@ namespace rocRoller
 
         AssertFatal(m_context);
         AssertFatal(m_context->kernel());
-
-        if(!m_executableKernel)
-            m_executableKernel = m_context->instructions()->getExecutableKernel();
 
         auto kargs = getKernelArguments(args);
         auto inv   = getKernelInvocation(args);
