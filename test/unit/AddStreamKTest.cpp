@@ -29,7 +29,72 @@ using namespace rocRoller::KernelGraph::ControlGraph;
 namespace AddStreamKTest
 {
 
-    class AddStreamKTestGPU : public CurrentGPUContextFixture
+    void computeReference(std::function<void(uint, uint, uint, uint)> f,
+                          uint                                        numTileM,
+                          uint                                        numTileN,
+                          uint                                        numTileK,
+                          uint                                        numWGs,
+                          uint                                        numTilesSK,
+                          uint                                        numTilesDP)
+    {
+        std::map<std::tuple<uint, uint, uint>, uint> coverage;
+
+        auto numSKTilesPerWG = (numTilesSK + numWGs - 1) / numWGs;
+        auto numDPTilesPerWG = numTilesDP / numWGs;
+
+        for(uint wg = 0; wg < numWGs; wg++)
+        {
+            uint forTileIdx, forKIdx;
+
+            forKIdx = 0;
+            for(forTileIdx = 0; (forTileIdx < numSKTilesPerWG)
+                                && ((numSKTilesPerWG * wg + forTileIdx) < numTilesSK);
+                forTileIdx += forKIdx)
+            {
+                uint tile = numSKTilesPerWG * wg + forTileIdx;
+
+                auto nextNonAccum = ((tile) / numTileK + 1) * numTileK;
+                auto lastTile     = std::min(nextNonAccum, numTilesSK);
+                for(forKIdx = 0; (numSKTilesPerWG * wg + forTileIdx + forKIdx < lastTile)
+                                 && (forTileIdx + forKIdx < numSKTilesPerWG);
+                    forKIdx += 1)
+                {
+                    uint tile = numSKTilesPerWG * wg + forTileIdx + forKIdx;
+
+                    uint m = (tile / numTileK) / numTileN;
+                    uint n = (tile / numTileK) % numTileN;
+                    uint k = tile % numTileK;
+
+                    coverage[{m, n, k}]++;
+                    f(m, n, k, wg);
+                    //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
+                }
+            }
+
+            for(forTileIdx = 0; forTileIdx < numDPTilesPerWG; forTileIdx += forKIdx)
+            {
+                for(forKIdx = 0; forKIdx < numTileK; forKIdx += 1)
+                {
+                    uint tile = numTilesSK + numDPTilesPerWG * wg + forTileIdx + forKIdx;
+
+                    uint m = (tile / numTileK) / numTileN;
+                    uint n = (tile / numTileK) % numTileN;
+                    uint k = tile % numTileK;
+
+                    coverage[{m, n, k}]++;
+                    f(m, n, k, wg);
+                    //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
+                }
+            }
+        }
+
+        for(uint m = 0; m < numTileM; ++m)
+            for(uint n = 0; n < numTileN; ++n)
+                for(uint k = 0; k < numTileK; ++k)
+                    ASSERT_EQ((coverage[{m, n, k}]), 1);
+    }
+
+    struct AddStreamKTestGPU : public GPUContextFixtureParam<bool>
     {
     };
 
@@ -66,8 +131,9 @@ namespace AddStreamKTest
     // Result will be: an M * N * K length array representing the
     // flattened tile-space.  The {m, n, k} entry in the array will be
     // the number of the WG that processed it.
-    TEST_F(AddStreamKTestGPU, GPU_BasicStreamKStore)
+    TEST_P(AddStreamKTestGPU, GPU_BasicStreamKStore)
     {
+        bool twoTile = std::get<1>(GetParam());
 
         rocRoller::KernelGraph::KernelGraph kgraph;
 
@@ -133,6 +199,7 @@ namespace AddStreamKTest
         auto addStreamK = std::make_shared<AddStreamK>(std::vector<int>{0, 1},
                                                        rocRoller::KLOOP,
                                                        rocRoller::KLOOP,
+                                                       twoTile,
                                                        Expression::literal(numWGs),
                                                        m_context);
         kgraph          = kgraph.transform(addStreamK);
@@ -151,13 +218,38 @@ namespace AddStreamKTest
         {
             auto deviceResult = make_shared_device<int>(numTileM * numTileN * numTileK);
 
+            uint numTilesSK, numTilesDP;
+            if(twoTile)
+            {
+
+                numTilesSK = numTileK * ((numTileM * numTileN) % numWGs + numWGs);
+                numTilesDP = numTileM * numTileN * numTileK - numTilesSK;
+            }
+            else
+            {
+                numTilesSK = numTileM * numTileN * numTileK;
+                numTilesDP = 0;
+            }
+
             KernelArguments kargs(false);
             kargs.append("result", deviceResult.get());
             kargs.append("numWGs", numWGs);
             kargs.append("numTiles0", numTileM);
             kargs.append("numTiles1", numTileN);
             kargs.append("numTilesAcc", numTileK);
-            kargs.append("numTilesPerWG", (numTileM * numTileN * numTileK + numWGs - 1) / numWGs);
+            if(twoTile)
+            {
+                kargs.append("numSKTiles", numTilesSK);
+                kargs.append("numSKTilesPerWG", (numTilesSK + numWGs - 1u) / numWGs);
+                kargs.append("numDPTiles", numTilesDP);
+                kargs.append("numDPTilesPerWG", (numTilesDP + numWGs - 1u) / numWGs);
+            }
+            else
+            {
+                kargs.append("numSKTiles", numTileM * numTileN * numTileK);
+                kargs.append("numSKTilesPerWG",
+                             (numTileM * numTileN * numTileK + numWGs - 1) / numWGs);
+            }
 
             KernelInvocation kinv;
             kinv.workitemCount = {numWGs, 1, 1};
@@ -175,42 +267,16 @@ namespace AddStreamKTest
 
             // Compute reference...
             std::vector<int> referenceResult(numTileM * numTileN * numTileK);
-            {
-                auto totalTiles = numTileM * numTileN * numTileK;
-                auto tilesPerWG = (totalTiles + numWGs - 1) / numWGs;
-
-                for(uint wg = 0; wg < numWGs; wg++)
-                {
-                    uint forTileIdx, forKIdx;
-
-                    forKIdx = 0;
-                    for(forTileIdx = 0;
-                        (forTileIdx < tilesPerWG) && ((tilesPerWG * wg + forTileIdx) < totalTiles);
-                        forTileIdx += forKIdx)
-                    {
-                        uint tile;
-
-                        tile = tilesPerWG * wg + forTileIdx;
-
-                        auto startMN = tile / numTileK;
-                        for(forKIdx = 0;
-                            (((tilesPerWG * wg + forTileIdx + forKIdx) / numTileK) == startMN)
-                            && (tilesPerWG * wg + forTileIdx + forKIdx < totalTiles)
-                            && (forTileIdx + forKIdx < tilesPerWG);
-                            forKIdx += 1)
-                        {
-                            tile = tilesPerWG * wg + forTileIdx + forKIdx;
-
-                            uint m, n, k;
-                            m = (tile / numTileK) / numTileN;
-                            n = (tile / numTileK) % numTileN;
-                            k = tile % numTileK;
-
-                            referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
-                        }
-                    }
-                }
-            }
+            computeReference(
+                [&](uint m, uint n, uint k, uint wg) {
+                    referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
+                },
+                numTileM,
+                numTileN,
+                numTileK,
+                numWGs,
+                numTilesSK,
+                numTilesDP);
 
             EXPECT_EQ(hostResult, referenceResult);
         }
@@ -256,8 +322,15 @@ namespace AddStreamKTest
     // Result will be: a numCU length array.  The n'th WG will sum
     // the input values in it's local tile-space and store the result
     // in the n'th entry of the output array.
-    TEST_F(AddStreamKTestGPU, GPU_BasicStreamKLoad)
+    TEST_P(AddStreamKTestGPU, GPU_BasicStreamKLoad)
     {
+        bool twoTile = std::get<1>(GetParam());
+        if(twoTile)
+        {
+            // TODO: Re-work this to accumulate all K so that twoTile works.
+            GTEST_SKIP();
+        }
+
         rocRoller::KernelGraph::KernelGraph kgraph;
 
         uint numTileM = 10;
@@ -340,6 +413,7 @@ namespace AddStreamKTest
         auto addStreamK = std::make_shared<AddStreamK>(std::vector<int>{0, 1},
                                                        rocRoller::KLOOP,
                                                        rocRoller::KLOOP,
+                                                       false,
                                                        Expression::literal(numWGs),
                                                        m_context);
         kgraph          = kgraph.transform(addStreamK);
@@ -368,7 +442,8 @@ namespace AddStreamKTest
             kargs.append("numTiles0", numTileM);
             kargs.append("numTiles1", numTileN);
             kargs.append("numTilesAcc", numTileK);
-            kargs.append("numTilesPerWG", (numTileM * numTileN * numTileK + numWGs - 1) / numWGs);
+            kargs.append("numSKTiles", numTileM * numTileN * numTileK);
+            kargs.append("numSKTilesPerWG", (numTileM * numTileN * numTileK + numWGs - 1) / numWGs);
 
             KernelInvocation kinv;
             kinv.workitemCount = {numWGs, 1, 1};
@@ -431,5 +506,9 @@ namespace AddStreamKTest
             EXPECT_GT(assembledKernel.size(), 0);
         }
     }
+
+    INSTANTIATE_TEST_SUITE_P(AddStreamKTestGPU,
+                             AddStreamKTestGPU,
+                             ::testing::Combine(currentGPUISA(), ::testing::Values(true, false)));
 
 }

@@ -22,9 +22,17 @@ namespace rocRoller
                 ControlEdge                               edgeType;
             };
 
-            void                        stageMultiplyConverts(KernelGraph const& graph);
-            void                        commit(KernelGraph& graph);
-            std::pair<int, ControlEdge> findFirstSharedParent(KernelGraph const& graph, int coord);
+            struct SharedParents
+            {
+                // Map from an operation to it's parent and argument type
+                std::map<int, std::pair<int, NaryArgument>> sharedParent;
+                // Map from a parent to it's edge type
+                std::map<int, ControlEdge> edgeType;
+            };
+
+            void          stageMultiplyConverts(KernelGraph const& graph);
+            void          commit(KernelGraph& graph);
+            SharedParents findSharedParents(KernelGraph const& graph, int coord);
 
             std::map<int, std::vector<std::pair<int, NaryArgument>>> m_multiplyArgs;
             std::map<int, int>                                       m_loadMap;
@@ -42,74 +50,64 @@ namespace rocRoller
          * @param coord
          * @return std::pair<int, ControlEdge>
          */
-        std::pair<int, ControlEdge>
-            AddConvertOperations::findFirstSharedParent(KernelGraph const& graph, int coord)
+        AddConvertOperations::SharedParents
+            AddConvertOperations::findSharedParents(KernelGraph const& graph, int coord)
         {
-            auto nodes = m_multiplyArgs[coord];
-            AssertFatal(nodes.size() > 0, "No nodes provided");
+            SharedParents rv;
 
-            int         selectedTag = 0;
-            ControlEdge edgeType;
-
-            auto parentNodes
-                = graph.control.getInputNodeIndices<Sequence>(nodes[0].first).to<std::vector>();
-
-            for(auto const& parent : parentNodes)
+            for(auto [opTag, arg] : m_multiplyArgs[coord])
             {
-                // Look for loads of coord
-                if(isOperation<LoadTiled>(graph.control.getElement(parent))
-                   || isOperation<LoadLDSTile>(graph.control.getElement(parent))
-                   || isOperation<SetCoordinate>(graph.control.getElement(parent)))
-                {
-                    if(m_loadMap[parent] == coord)
-                    {
-                        selectedTag = parent;
-                        break;
-                    }
-                }
-                // Sometimes Multiply could be connected to a NOP (Due to prefetching)
-                else if(isOperation<NOP>(graph.control.getElement(parent)))
-                {
-                    selectedTag = parent;
-                }
-            }
+                int selectedTag = 0;
 
-            if(selectedTag)
-                edgeType = Sequence();
-            else
-            {
                 auto parentNodes
-                    = graph.control.getInputNodeIndices<Body>(nodes[0].first).to<std::vector>();
+                    = graph.control.getInputNodeIndices<Sequence>(opTag).to<std::vector>();
 
                 for(auto const& parent : parentNodes)
                 {
-                    // Sometimes Multiply could be connected to a ForLoop (Due to prefetching)
-                    if(isOperation<ForLoopOp>(graph.control.getElement(parent)))
+                    // Look for loads of coord
+                    if(isOperation<LoadTiled>(graph.control.getElement(parent))
+                       || isOperation<LoadLDSTile>(graph.control.getElement(parent))
+                       || isOperation<SetCoordinate>(graph.control.getElement(parent)))
+                    {
+                        if(m_loadMap[parent] == coord)
+                        {
+                            selectedTag = parent;
+                            break;
+                        }
+                    }
+                    // Sometimes Multiply could be connected to a NOP (Due to prefetching)
+                    else if(isOperation<NOP>(graph.control.getElement(parent)))
                     {
                         selectedTag = parent;
                     }
                 }
 
                 if(selectedTag)
-                    edgeType = Body();
+                    rv.edgeType[selectedTag] = Sequence();
+                else
+                {
+                    auto parentNodes
+                        = graph.control.getInputNodeIndices<Body>(opTag).to<std::vector>();
+
+                    for(auto const& parent : parentNodes)
+                    {
+                        // Sometimes Multiply could be connected to a ForLoop (Due to prefetching)
+                        if(isOperation<ForLoopOp>(graph.control.getElement(parent)))
+                        {
+                            selectedTag = parent;
+                        }
+                    }
+
+                    if(selectedTag)
+                        rv.edgeType[selectedTag] = Body();
+                }
+
+                AssertFatal(selectedTag > 0, "No valid parent found.");
+
+                rv.sharedParent[opTag] = {selectedTag, arg};
             }
 
-            AssertFatal(selectedTag > 0, "No valid parent found.");
-
-            for(int i = 1; i < nodes.size(); i++)
-            {
-                auto parentNodes
-                    = graph.control
-                          .getInputNodeIndices(nodes[i].first,
-                                               [&edgeType](ControlEdge const& a) {
-                                                   return a.index() == edgeType.index();
-                                               })
-                          .to<std::set>();
-                AssertFatal(parentNodes.count(selectedTag) > 0,
-                            "Selected tag is not parent of all nodes");
-            }
-
-            return {selectedTag, edgeType};
+            return rv;
         }
 
         void AddConvertOperations::stageMultiplyConverts(KernelGraph const& graph)
@@ -142,9 +140,19 @@ namespace rocRoller
                 if(m_storageDataType[storage] != DataType::Half)
                     continue;
 
-                auto [sharedNode, edgeType] = findFirstSharedParent(graph, storage);
-                m_locations.emplace_back(
-                    ConvertLocation{storage, multiplies, sharedNode, edgeType});
+                auto sharedParents = findSharedParents(graph, storage);
+                for(auto [parent, edgeType] : sharedParents.edgeType)
+                {
+                    std::vector<std::pair<int, NaryArgument>> uses;
+                    for(auto const& kv : sharedParents.sharedParent)
+                    {
+                        auto opTag              = kv.first;
+                        auto [selectedTag, arg] = kv.second;
+                        if(selectedTag == parent)
+                            uses.push_back({opTag, arg});
+                    }
+                    m_locations.emplace_back(ConvertLocation{storage, uses, parent, edgeType});
+                }
             }
         }
 

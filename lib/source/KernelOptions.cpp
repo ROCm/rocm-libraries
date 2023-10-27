@@ -29,6 +29,7 @@ namespace rocRoller
         os << "  prefetchMixMemOps:\t\t\t" << input.prefetchMixMemOps << std::endl;
         os << "  setNextFreeVGPRToMax:\t" << input.setNextFreeVGPRToMax << std::endl;
         os << "  streamK:\n" << input.streamK << std::endl;
+        os << "  streamKTwoTile:\n" << input.streamKTwoTile << std::endl;
         os << "  transposeMemoryAccess:\n" << input.transposeMemoryAccess << std::endl;
         os << "  assertWaitCntState:\t\t" << input.assertWaitCntState << std::endl;
         os << "  packMultipleElementsInto1VGPR:\t\t" << input.packMultipleElementsInto1VGPR

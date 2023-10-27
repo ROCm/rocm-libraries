@@ -55,6 +55,29 @@ namespace rocRoller
                 return {result};
             }
 
+            std::vector<Expression::ExpressionPtr> operator()(Sunder const& e)
+            {
+                AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
+                AssertFatal(srcs.size() > 1, ShowValue(srcs.size()));
+
+                int index = getUnsignedInt(evaluate(indexes.back()));
+                AssertFatal(index >= 0 && index < (srcs.size() - 1));
+
+                Expression::ExpressionPtr offset = nullptr;
+
+                for(int i = 0; i < index; i++)
+                {
+                    auto mySize = getSize(srcs[i]);
+                    offset      = offset ? offset + mySize : mySize;
+                }
+
+                auto result = indexes[index];
+                if(offset != nullptr)
+                    result = result + offset;
+
+                return {result};
+            }
+
             std::vector<Expression::ExpressionPtr> operator()(Tile const& e)
             {
                 AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
@@ -264,6 +287,33 @@ namespace rocRoller
                 }
                 deltas.emplace(dstTags[0], delta);
                 return {index};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(Sunder const& e)
+            {
+                AssertFatal(srcs.size() > 1 && srcs.size() == indexes.size(),
+                            ShowValue(srcs.size()),
+                            ShowValue(indexes.size()));
+                AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
+
+                int index = getUnsignedInt(evaluate(indexes.back()));
+                AssertFatal(index >= 0 && index < (srcs.size() - 1));
+
+                Expression::ExpressionPtr offset = nullptr;
+
+                for(int i = 0; i < index; i++)
+                {
+                    auto mySize = getSize(srcs[i]);
+                    offset      = offset ? offset + mySize : mySize;
+                }
+
+                auto result = indexes[index];
+                if(offset != nullptr)
+                    result = result + offset;
+
+                auto delta = getDelta(srcTags[index]);
+                deltas.emplace(dstTags[0], delta);
+                return {result};
             }
 
             std::vector<Expression::ExpressionPtr> operator()(Tile const& e)

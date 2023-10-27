@@ -54,6 +54,7 @@ namespace rocRoller
             AddStreamK(std::vector<int> const&   dims,
                        std::string const&        topLoop,
                        std::string const&        accumulatorLoop,
+                       bool                      twoTile,
                        Expression::ExpressionPtr numWGs,
                        ContextPtr                context);
 
@@ -61,15 +62,6 @@ namespace rocRoller
             std::string name() const override;
 
         private:
-            int addTileSpaceCT(KernelGraph&              graph,
-                               bool                      forward,
-                               Expression::ExpressionPtr numTotalTiles,
-                               Expression::ExpressionPtr numTilesPerWG);
-
-            void stage(KernelGraph const& graph);
-            void setupArguments();
-            void commit(KernelGraph& graph);
-
             ContextPtr m_context;
 
             /**
@@ -88,26 +80,19 @@ namespace rocRoller
              */
             std::string m_accumulatorLoop;
 
-            // Kernel arguments
-            std::vector<Expression::ExpressionPtr> m_numTiles, m_numTileArgExprs;
-            Expression::ExpressionPtr              m_numWGs, m_numTilesPerWG;
+            /**
+             * Use two-tile SK + DP variant?
+             */
+            bool m_twoTile;
 
-            // Staged MacroTileNumber coordinates
-            //
-            // Mapping: dimension -> set of MacroTileNumber coordinates
-            std::map<int, std::unordered_set<int>> m_tileNumberCoords;
-
-            // Internal
-            int m_accumulatorCoord; /// Coordinate dimension of the K loop.
-            int m_accumulatorLoopOp; /// Control node of the accumulator loop.
-            int m_accumulatorTile; /// Coordinate dimension of tile into which the K loop accumulated
-            int m_topLoopOp; /// Control node of the top loop.
-
-            VariableType m_accumulatorVarType; /// DataType of accumulator tile
-
-            std::unordered_set<int> m_usesAccumulatorTile; /// Set of control nodes, after
-                /// the accumulator loop, that used the accumulator
-                /// tile.
+            /**
+             * Number of Workgroups.
+             *
+             * An Expression that either:
+             * 1. Pulls a value from a CommandArgument
+             * 2. Is a literal (for testing)
+             */
+            Expression::ExpressionPtr m_numWGs;
         };
     }
 }

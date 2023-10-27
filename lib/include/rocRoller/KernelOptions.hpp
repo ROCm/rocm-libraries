@@ -46,7 +46,8 @@ namespace rocRoller
         int  prefetchLDSFactor = 0;
         bool prefetchMixMemOps = false;
 
-        bool streamK = false;
+        bool streamK        = false;
+        bool streamKTwoTile = false;
 
         std::vector<int>  loopOverOutputTilesDimensions = {};
         std::string       loopOverOutputTilesTopLoop    = XLOOP;

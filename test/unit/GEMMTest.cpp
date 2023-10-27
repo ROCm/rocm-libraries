@@ -75,8 +75,9 @@ namespace GEMMDriverTest
 
         bool packMultipleElementsInto1VGPR = true;
 
-        bool loopOverTiles = false;
-        bool streamK       = false;
+        bool loopOverTiles  = false;
+        bool streamK        = false;
+        bool streamKTwoTile = false;
     };
 
     struct GEMMTestGPU : public CurrentGPUContextFixture
@@ -86,7 +87,8 @@ namespace GEMMDriverTest
                        const GEMMProblem& gemm,
                        double             acceptableError,
                        bool               debuggable  = false,
-                       bool               setIdentity = false)
+                       bool               setIdentity = false,
+                       int                numIters    = 1)
 
         {
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -310,7 +312,8 @@ namespace GEMMDriverTest
                 kernelOptions->loopOverOutputTilesDimensions = {0, 1};
                 kernelOptions->loopOverOutputTilesCoordSizes
                     = {static_cast<uint>(M / gemm.macM), static_cast<uint>(N / gemm.macN)};
-                kernelOptions->streamK = true;
+                kernelOptions->streamK        = true;
+                kernelOptions->streamKTwoTile = gemm.streamKTwoTile;
             }
 
             auto params = std::make_shared<CommandParameters>();
@@ -376,15 +379,6 @@ namespace GEMMDriverTest
                 runtimeArgs.append("numWGs", numCUs);
             }
 
-            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-            m_context = commandKernel.getContext();
-
-            // Device result
-            std::vector<T> d_result(M * N, 0.0);
-            ASSERT_THAT(
-                hipMemcpy(d_result.data(), deviceD.get(), M * N * sizeof(T), hipMemcpyDeviceToHost),
-                HasHipSuccess(0));
-
             // Host result
             std::vector<T> h_result(M * N, 0.0);
             rocRoller::CPUMM(h_result,
@@ -399,27 +393,43 @@ namespace GEMMDriverTest
                              gemm.transA == "T",
                              gemm.transB == "T");
 
-            if(debuggable)
+            // Device result
+            std::vector<T> d_result(M * N);
+
+            for(int i = 0; i < numIters; ++i)
             {
-                for(size_t i = 0; i < M; i++)
+                ASSERT_THAT(hipMemset(deviceD.get(), 0, M * N * sizeof(T)), HasHipSuccess(0));
+
+                commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+                m_context = commandKernel.getContext();
+
+                ASSERT_THAT(
+                    hipMemcpy(
+                        d_result.data(), deviceD.get(), M * N * sizeof(T), hipMemcpyDeviceToHost),
+                    HasHipSuccess(0));
+
+                double rnorm = relativeNorm(d_result, h_result);
+                if(debuggable && rnorm > acceptableError)
                 {
-                    for(size_t j = 0; j < N; j++)
+                    for(size_t i = 0; i < M; i++)
                     {
-                        auto a = d_result[i * N + j];
-                        auto b = h_result[i * N + j];
-                        if((a - b) * (a - b) / (b * b) > 10.0 * acceptableError)
+                        for(size_t j = 0; j < N; j++)
                         {
-                            std::cout << std::setw(8) << i << std::setw(8) << j << std::setw(16)
-                                      << std::scientific << a << std::setw(16) << std::scientific
-                                      << b << std::setw(16) << std::scientific << a - b
-                                      << std::endl;
+                            auto a = d_result[i * N + j];
+                            auto b = h_result[i * N + j];
+                            if((a - b) * (a - b) / (b * b) > 10.0 * acceptableError)
+                            {
+                                std::cout << std::setw(8) << i << std::setw(8) << j << std::setw(16)
+                                          << std::scientific << a << std::setw(16)
+                                          << std::scientific << b << std::setw(16)
+                                          << std::scientific << a - b << std::endl;
+                            }
                         }
                     }
                 }
-            }
-            double rnorm = relativeNorm(d_result, h_result);
 
-            ASSERT_LT(rnorm, acceptableError);
+                ASSERT_LT(rnorm, acceptableError) << "Iteration: " << i;
+            }
         }
     };
 
@@ -507,7 +517,11 @@ namespace GEMMDriverTest
         gemm.loadLDSB  = true;
         gemm.storeLDSD = true;
 
-        basicGEMM<float>(m_context, gemm, 1.e-6);
+        for(auto twoTile : {true, false})
+        {
+            gemm.streamKTwoTile = twoTile;
+            basicGEMM<float>(m_context, gemm, 1.e-6);
+        }
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
@@ -539,16 +553,20 @@ namespace GEMMDriverTest
         gemm.prefetch         = true;
         gemm.prefetchInFlight = 2;
 
-        for(auto loadLDSA : {false, true})
+        for(auto twoTile : {true, false})
         {
-            gemm.loadLDSA = loadLDSA;
-            for(auto loadLDSB : {false, true})
+            gemm.streamKTwoTile = twoTile;
+            for(auto loadLDSA : {false, true})
             {
-                gemm.loadLDSB = loadLDSB;
-                for(auto storeLDSD : {false, true})
+                gemm.loadLDSA = loadLDSA;
+                for(auto loadLDSB : {false, true})
                 {
-                    gemm.storeLDSD = storeLDSD;
-                    basicGEMM<Half>(m_context, gemm, 2.e-5);
+                    gemm.loadLDSB = loadLDSB;
+                    for(auto storeLDSD : {false, true})
+                    {
+                        gemm.storeLDSD = storeLDSD;
+                        basicGEMM<Half>(m_context, gemm, 2.e-5);
+                    }
                 }
             }
         }

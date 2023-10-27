@@ -249,6 +249,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::LowerTile>(m_preParameters, m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_preParameters, m_context));
+        transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
         if(m_context->kernelOptions().streamK)
         {
             auto numCUsArg
@@ -259,6 +260,7 @@ namespace rocRoller
                 m_context->kernelOptions().loopOverOutputTilesDimensions,
                 rocRoller::XLOOP,
                 rocRoller::KLOOP,
+                m_context->kernelOptions().streamKTwoTile,
                 numCUsExpr,
                 m_context));
         }
@@ -272,7 +274,6 @@ namespace rocRoller
                 m_context));
         }
         transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>());
-        transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
         transforms.push_back(std::make_shared<KernelGraph::UnrollLoops>(m_context));
         if(m_context->kernelOptions().fuseLoops)
         {

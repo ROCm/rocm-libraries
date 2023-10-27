@@ -276,7 +276,11 @@ graph LR
 
 2-Tile stream-k will require an additional coordinate transform edge: `Sunder`.
 
-This transform will cause the output (upstream) dimension to spread its size unevenly between the first N-1 of its subdimensions. Its value will be taken from one of the input (downstream) dimensions.  The last downstream dimension will be an index which determines which of the dimensions to take.
+This transform will cause the output (upstream) dimension to spread
+its size unevenly between the first N-1 of its subdimensions. Its
+value will be taken from one of the input (downstream) dimensions.
+The last downstream dimension will be an index which determines which
+of the dimensions to take.
 
 The `ReverseEdgeVisitor` implementation will be something like:
 
@@ -305,6 +309,9 @@ std::vector<Expression::ExpressionPtr> operator()(Sunder const& e)
 }
 ```
 
+The `Sunder` edge will unevenly split the global M/N/K tile space into
+two partitions: stream-k (SK) and data-parallel (DP):
+
 ```mermaid
 graph TD
 
@@ -331,29 +338,144 @@ style Sl0 stroke:#3f3
 style Sl1 stroke:#3f3
 ```
 
-### Notes:
- - The stream-k and data-parallel sections will be in the body node of a SetCoordinate node that sets **(x)** to 0 and 1, respectively.
-   - Currently, the not-chosen subdimensions will also need to be set, likely to some kind of error expression.
-   - We may want to refactor the `CoordinateEdgeVisitor` to walk the graph itself at some point. This would allow for short-circuit logic that doesn't need a value for the not-taken dimensions.
- - The stream-k portion can use the same exact graph configuration as above, but for a smaller number of tiles.
-    - The stream-k portion should be `(WorkgroupCount + (TotalMacroTiles % WorkgroupCount)) * KIters`. In this case: `(32 + 120 % 32) * 512 = 28672`.
-    - The data-parallel portion will take the remainder (`61440 - 28672 = 32768`) which should be a multiple of `WorkgroupCount * KIters`.
- - The data-parallel portion can simply tile itself between the K loop, the workgroup, and the tile loop:
+## General 2-tile StreamK
 
-    ```mermaid
-    graph TD
+The basic StreamK algorithm reduces granularity loss quite well.
+However, there may be some inefficiencies in how global memory is
+traverse compared to the basic data-parallel algorithm.  The two-tile
+StreamK algorithm has two sections: a streaming "SK" section and a
+data-parallel "DP" section.
 
-    Sl1(["Data-parallel portion (size=32768)"])
-    style Sl1 stroke:#3f3
+We want to: maximize cache locality and minimize granularity loss
+(quantization inefficiency).  This generally points us to:
 
-    Sl1 --> Tile
+1. Make the DP section as large as possible; and
+2. Give the SK section some tiles to reduce granularity loss
+   (quantization inefficiency).
 
-    Tile --0--> ForK
-    Tile --1--> WG
-    Tile --2--> ForTile
+In the data-parallel partition, we want each WG to process whole
+output tiles so that: synchronization between WGs is not necessary,
+and cache locality may be improved.  Processing whole output tiles
+implies that each WG must process a multiple of K tiles (this would be
+similar to a persistent-kernel data-parallel decomposition, where each
+WG would process multiple output tiles).  The number of global tiles
+processed in the data-parallel partition must therefore be aligned
+with, and be a multiple of: WG * K.
 
-    ForK(["For K(size=512)"])
-    WG(["Workgroup (size=32)"])
-    ForTile(["For Tile(size=2)"])
-   ```
-   Although we may want to coordinate the order of the Workgroup and ForTile dimensions with any reordering of the tiles as above.
+To minimize granularity loss (quantization inefficiency) over the WGs
+in the streaming partition, we want each WG to process at least one
+output tile, but no more than two.
+
+In the data-parallel section, each WG will process
+
+    N_DP = (((M * N * K) // (WG * K) - 1) * WG * K
+
+tiles; where // is "floor division".  Note:
+
+1. This a multiple of WG * K (no synchronization); and
+2. The "- 1" pushes enough tiles over to the streaming partition to
+   minimize granulatity loss (quantization inefficiency) over the WGs.
+
+Simplifying, we obtain
+
+    N_DP = ((M * N * K) // (WG * K) - 1) * WG * K
+         = ((M * N) // WG - 1) * WG * K
+
+This means that
+
+    N_SK = M * N * K - N_DP
+         = K * (M * N - ((M * N) // WG - 1) * WG)
+         = K * (M * N - ((M * N) // WG * WG - WG))
+         = K * (M * N - (M * N) // WG * WG + WG)
+         = K * ((M * N) % WG + WG)
+
+tiles will be processed in the streaming partition.
+
+If the total number of tiles is a multiple of WG * K, then we push all
+tiles to the DP section, and hence
+
+    if (M * N * K) % (WG * K) == 0:
+       N_DP = M * N * K
+       N_SK = 0
+
+With the following definitions:
+
+```C++
+auto numTilesM  = M / macM;
+auto numTilesN  = N / macN;
+auto numTilesK  = K / macK;
+auto numTilesDP = ((numTilesM * numTilesN) / numWGs - 1) * numWGs * numTilesK;
+auto numTilesSK = numTilesK * ((numTilesM * numTilesN) % numWGs + numWGs);
+AssertFatal(numTilesDP + numTilesSK == numTilesM * numTilesN * numTilesK);
+
+auto numSKTilesPerWG = (numTilesSK + numWGs - 1) / numWGs;
+auto numDPTilesPerWG = numTilesDP / numWGs;
+```
+
+We want to create a coordinate transform to compute the global tile number:
+```C++
+// In the SK section:
+int tile = numSKTilesPerWG * wg + forTileIdx + forKIdx;
+
+// In the DP section:
+int tile = numTilesSK + numDPTilesPerWG * wg + forTileIdx + forKIdx;
+
+// In both sections:
+int m = (tile / numTilesK) / numTilesN;
+int n = (tile / numTilesK) % numTilesN;
+int k = tile % numTilesK;
+```
+
+This is accomplished by the following CT:
+```mermaid
+graph TD
+
+ForTile(["forTileIdx: ForLoop(stride=1)"])
+ForAccum(["forAccumIdx: ForLoop(stride=1)"])
+SKTilesByWG(["Linear(size=numSKTilesPerWG)"])
+DPTilesByWG(["Linear(size=numDPTilesPerWG)"])
+SKTile(["MacroTileNumber(size=numTilesSK)"])
+DPTile(["MacroTileNumber(size=numTilesDP)"])
+SKWG(["wg: Workgroup"])
+DPWG(["wg: Workgroup"])
+GlobalTile(["MacroTileNumber(size=numTilesM x numTilesN x numTilesK)"])
+TileM(["M: MacroTileNumber(size=numTilesM)"])
+TileN(["N: MacroTileNumber(size=numTilesN)"])
+TileK(["K: MacroTileNumber(size=numTilesK)"])
+
+FlattenMNK["Flatten"]
+TileM --> FlattenMNK
+TileN --> FlattenMNK
+TileK --> FlattenMNK
+
+FlattenMNK --> GlobalTile
+
+Sunder["Sunder"]
+SunderSelector(["SK/DP selector"])
+
+GlobalTile --> Sunder
+Sunder --> SKTile
+Sunder --> DPTile
+Sunder --> SunderSelector
+
+TileSK["Tile"]
+SKTile --> TileSK
+TileSK --> SKWG
+TileSK --> SKTilesByWG
+
+SplitSK["Split"]
+SKTilesByWG --> SplitSK
+SplitSK --> ForTile
+SplitSK --> ForAccum
+
+TileDP["Tile"]
+DPTile --> TileDP
+TileDP --> DPWG
+TileDP --> DPTilesByWG
+
+SplitDP["Split"]
+DPTilesByWG --> SplitDP
+SplitDP --> ForTile
+SplitDP --> ForAccum
+
+```
