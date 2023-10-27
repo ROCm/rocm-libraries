@@ -183,12 +183,24 @@ namespace rocRoller
         co_yield get2DwordsScalar(l0, l1, lhs);
         co_yield get2DwordsScalar(r0, r1, rhs);
 
-        auto s_0 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
-        auto s_5 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
-        auto s_6 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto s_0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto s_5
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto s_6
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         auto v_7 = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
         auto v_8 = std::make_shared<Register::Value>(
@@ -215,10 +227,18 @@ namespace rocRoller
             m_context, Register::Type::Vector, DataType::Int32, 1);
         auto v_21 = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
-        auto s_22 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
-        auto s_23 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto s_22
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto s_23
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
 
         auto label_24 = m_context->labelAllocator()->label("BB0_2");
         auto label_25 = m_context->labelAllocator()->label("BB0_3");
@@ -537,12 +557,24 @@ namespace rocRoller
             m_context, Register::Type::Vector, DataType::Int32, 1);
         auto v_3 = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
-        auto v_4 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Int32, 2);
-        auto s_5 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
-        auto s_6 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto v_4
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto s_5
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto s_6
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         auto v_7 = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
         auto v_8 = std::make_shared<Register::Value>(
@@ -569,8 +601,12 @@ namespace rocRoller
             m_context, Register::Type::Vector, DataType::Int32, 1);
         auto v_19 = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
-        auto s_20 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto s_20
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
 
         auto label_21 = m_context->labelAllocator()->label("BB0_2");
         auto label_22 = m_context->labelAllocator()->label("BB0_4");

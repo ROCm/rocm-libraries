@@ -260,8 +260,16 @@ namespace rocRoller
              && (dest->variableType() == src->variableType())
              && (dest->valueCount() == src->valueCount())))
         {
-            dest = Register::Value::Placeholder(
-                src->context(), t, src->variableType(), src->valueCount());
+            auto contiguousChunkWidth = src->allocation()->options().contiguousChunkWidth;
+            if(contiguousChunkWidth < CeilDivide<int>(src->variableType().getElementSize(), 4))
+            {
+                contiguousChunkWidth = Register::VALUE_CONTIGUOUS;
+            }
+            dest = Register::Value::Placeholder(src->context(),
+                                                t,
+                                                src->variableType(),
+                                                src->valueCount(),
+                                                {.contiguousChunkWidth = contiguousChunkWidth});
         }
         co_yield copy(dest, src);
     }

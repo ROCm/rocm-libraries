@@ -159,8 +159,12 @@ namespace FastMultiplicationTest
             co_yield m_context->argLoader()->getValue("result", s_result);
             co_yield m_context->argLoader()->getValue("a", s_a);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Raw32,
+                                               2,
+                                               Register::AllocationOptions::FullyContiguous());
 
             auto v_c = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
@@ -246,8 +250,11 @@ namespace FastMultiplicationTest
             auto v_result = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int64, 1);
 
-            auto v_c = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_c = Register::Value::Placeholder(m_context,
+                                                    Register::Type::Vector,
+                                                    DataType::Raw32,
+                                                    2,
+                                                    Register::AllocationOptions::FullyContiguous());
 
             co_yield v_result->allocate();
 

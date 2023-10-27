@@ -299,8 +299,11 @@ namespace FastDivisionTest
                 co_yield m_context->argLoader()->getValue(a_arg->name(), s_a);
                 co_yield m_context->argLoader()->getValue(b_arg->name(), s_b);
 
-                auto v_result = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+                auto v_result
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {dataTypeResult, PointerType::PointerGlobal},
+                                                   1);
 
                 auto v_c = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, dataTypeResult, 1);
@@ -484,8 +487,12 @@ namespace FastDivisionTest
                 co_yield m_context->argLoader()->getValue("result", s_result);
                 co_yield m_context->argLoader()->getValue("a", s_a);
 
-                auto v_result = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+                auto v_result
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::Raw32,
+                                                   2,
+                                                   Register::AllocationOptions::FullyContiguous());
 
                 auto v_c
                     = Register::Value::Placeholder(m_context, Register::Type::Vector, dataTypeA, 1);

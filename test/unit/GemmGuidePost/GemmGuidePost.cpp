@@ -784,12 +784,24 @@ namespace rocRollerTest
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
-        auto placeholderV = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Raw32, 220);
-        auto placeholderA = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Raw32, 32);
-        auto placeholderS = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Raw32, 59);
+        auto placeholderV
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Raw32,
+                                                220,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto placeholderA
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Raw32,
+                                                32,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto placeholderS
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Raw32,
+                                                59,
+                                                Register::AllocationOptions::FullyContiguous());
         auto placeholderLDS = Register::Value::AllocateLDS(m_context, DataType::Raw32, 7168);
         auto kb             = [&]() -> Generator<Instruction> {
             co_yield placeholderV->allocate();
@@ -1276,12 +1288,24 @@ namespace rocRollerTest
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
-        auto placeholderV = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Raw32, numVGPR);
-        auto placeholderA = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Raw32, numACCGPR);
-        auto placeholderS = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Raw32, numSGPR);
+        auto placeholderV
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Raw32,
+                                                numVGPR,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto placeholderA
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Raw32,
+                                                numACCGPR,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto placeholderS
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Raw32,
+                                                numSGPR,
+                                                Register::AllocationOptions::FullyContiguous());
         auto placeholderLDS = Register::Value::AllocateLDS(m_context, DataType::Raw32, sizeLDS / 4);
         auto kb             = [&]() -> Generator<Instruction> {
             co_yield placeholderV->allocate();
@@ -1708,12 +1732,24 @@ namespace rocRollerTest
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
-        auto placeholderV = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Raw32, numVGPR);
-        auto placeholderA = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Raw32, numACCGPR);
-        auto placeholderS = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Raw32, numSGPR);
+        auto placeholderV
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Raw32,
+                                                numVGPR,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto placeholderA
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Raw32,
+                                                numACCGPR,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto placeholderS
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Raw32,
+                                                numSGPR,
+                                                Register::AllocationOptions::FullyContiguous());
         auto placeholderLDS = Register::Value::AllocateLDS(m_context, DataType::Raw32, sizeLDS / 4);
         auto kb             = [&]() -> Generator<Instruction> {
             co_yield placeholderV->allocate();

@@ -335,11 +335,14 @@ namespace rocRoller
             return v;
         }
 
-        inline ValuePtr
-            Value::Placeholder(ContextPtr ctx, Type regType, VariableType variableType, int count)
+        inline ValuePtr Value::Placeholder(ContextPtr        ctx,
+                                           Type              regType,
+                                           VariableType      variableType,
+                                           int               count,
+                                           AllocationOptions allocOptions)
         {
             AssertFatal(ctx != nullptr);
-            return std::make_shared<Value>(ctx, regType, variableType, count, AllocationOptions{});
+            return std::make_shared<Value>(ctx, regType, variableType, count, allocOptions);
         }
 
         inline AllocationState Value::allocationState() const
@@ -428,12 +431,13 @@ namespace rocRoller
 
         inline ValuePtr Value::placeholder() const
         {
-            return Placeholder(m_context.lock(), m_regType, m_varType, valueCount());
+            return Placeholder(
+                m_context.lock(), m_regType, m_varType, valueCount(), m_allocation->options());
         }
 
-        inline ValuePtr Value::placeholder(Type regType) const
+        inline ValuePtr Value::placeholder(Type regType, AllocationOptions allocOptions) const
         {
-            return Placeholder(m_context.lock(), regType, m_varType, valueCount());
+            return Placeholder(m_context.lock(), regType, m_varType, valueCount(), allocOptions);
         }
 
         inline Type Value::regType() const
@@ -755,13 +759,33 @@ namespace rocRoller
         {
             AssertFatal(context != nullptr);
 
-            if(m_options.alignment <= 0)
+            setRegisterCount();
+            if(options.contiguousChunkWidth == Register::FULLY_CONTIGUOUS)
             {
-                m_options.alignment
-                    = variableType.registerAlignment(regType, count, context->targetArchitecture());
+                m_options.contiguousChunkWidth = m_registerCount;
+            }
+            else if(options.contiguousChunkWidth == Register::VALUE_CONTIGUOUS)
+            {
+                m_options.contiguousChunkWidth = CeilDivide<int>(variableType.getElementSize(), 4);
             }
 
-            setRegisterCount();
+            if(options.alignment <= 0)
+            {
+                m_options.alignment = m_variableType.registerAlignment(
+                    m_regType, m_options.contiguousChunkWidth, context->targetArchitecture());
+            }
+
+            if(options.contiguousChunkWidth != Register::MANUAL)
+            {
+                AssertFatal(m_options.alignment <= m_options.contiguousChunkWidth,
+                            ShowValue(m_options));
+            }
+            else
+            {
+                m_options.contiguousChunkWidth = 1;
+            }
+
+            AssertFatal(m_options.contiguousChunkWidth > 0, ShowValue(m_options));
         }
 
         inline Allocation::~Allocation()
@@ -843,6 +867,11 @@ namespace rocRoller
             rv->setName(m_name);
 
             return rv;
+        }
+
+        inline AllocationOptions AllocationOptions::FullyContiguous()
+        {
+            return {.contiguousChunkWidth = Register::FULLY_CONTIGUOUS};
         }
 
         inline std::string toString(AllocationOptions const& opts)

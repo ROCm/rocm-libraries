@@ -38,18 +38,30 @@ namespace rocRollerTest
     {
         rocRoller::Scheduling::InstructionStatus peeked;
 
-        auto src1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto src1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         src1->allocateNow();
 
         auto src2 = src1->subset({1});
 
-        auto dst1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Float, 2);
+        auto dst1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst1->allocateNow();
 
-        auto dst2 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Float, 2);
+        auto dst2
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst2->allocateNow();
 
         auto dst3 = dst1->subset({1});
@@ -93,24 +105,44 @@ namespace rocRollerTest
     {
         rocRoller::Scheduling::InstructionStatus peeked;
 
-        auto src1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto src1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         src1->allocateNow();
 
-        auto dst1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Float, 2);
+        auto dst1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst1->allocateNow();
 
-        auto dst2 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Float, 2);
+        auto dst2
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst2->allocateNow();
 
-        auto dst3 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Float, 2);
+        auto dst3
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst3->allocateNow();
 
-        auto dst4 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Float, 2);
+        auto dst4
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst4->allocateNow();
 
         auto zero = Register::Value::Literal(0);
@@ -157,20 +189,36 @@ namespace rocRollerTest
     {
         rocRoller::Scheduling::InstructionStatus peeked;
 
-        auto src1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto src1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         src1->allocateNow();
 
-        auto dst1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst1->allocateNow();
 
-        auto dst2 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst2
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst2->allocateNow();
 
-        auto dst3 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst3
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst3->allocateNow();
 
         auto dst4 = dst1->subset({0});
@@ -254,26 +302,46 @@ namespace rocRollerTest
     {
         rocRoller::Scheduling::InstructionStatus peeked;
 
-        auto src1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto src1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         src1->allocateNow();
 
-        auto dst1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst1->allocateNow();
 
-        auto dst2 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst2
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst2->allocateNow();
 
-        auto dst3 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst3
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst3->allocateNow();
 
         auto dst4 = dst1->subset({0});
 
-        auto dst5 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst5
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst5->allocateNow();
 
         auto zero = Register::Value::Literal(0);
@@ -328,24 +396,44 @@ namespace rocRollerTest
         rocRoller::Scheduling::InstructionStatus peeked;
         auto                                     expectedWaitLengths = peeked.waitLengths;
 
-        auto src1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto src1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         src1->allocateNow();
 
-        auto dst1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst1->allocateNow();
 
-        auto dst2 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst2
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst2->allocateNow();
 
-        auto dst3 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst3
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst3->allocateNow();
 
-        auto dst4 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst4
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst4->allocateNow();
 
         auto zero = Register::Value::Literal(0);
@@ -478,20 +566,36 @@ namespace rocRollerTest
     {
         rocRoller::Scheduling::InstructionStatus peeked;
 
-        auto src1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto src1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         src1->allocateNow();
 
-        auto dst1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst1->allocateNow();
 
-        auto dst2 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst2
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst2->allocateNow();
 
-        auto dst3 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst3
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst3->allocateNow();
 
         auto dst4 = dst1->subset({0});
@@ -547,20 +651,36 @@ namespace rocRollerTest
     {
         rocRoller::Scheduling::InstructionStatus peeked;
 
-        auto src1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto src1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         src1->allocateNow();
 
-        auto dst1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst1->allocateNow();
 
-        auto dst2 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst2
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst2->allocateNow();
 
-        auto dst3 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst3
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst3->allocateNow();
 
         auto dst4 = dst1->subset({0});
@@ -667,22 +787,38 @@ namespace rocRollerTest
         auto [waitBeforeBarrier, logLevel] = GetParam();
         auto const& arch                   = m_context->targetArchitecture();
 
-        auto src1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        auto src1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         src1->allocateNow();
 
         auto src2 = src1->subset({1});
 
-        auto dst1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst1->allocateNow();
 
-        auto dst2 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst2
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst2->allocateNow();
 
-        auto dst3 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 2);
+        auto dst3
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                2,
+                                                Register::AllocationOptions::FullyContiguous());
         dst3->allocateNow();
 
         auto dst4 = dst1->subset({0});

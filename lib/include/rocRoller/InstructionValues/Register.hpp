@@ -18,7 +18,6 @@
 
 namespace rocRoller
 {
-
     /**
      * @brief
      *
@@ -26,14 +25,28 @@ namespace rocRoller
      */
     namespace Register
     {
+        enum
+        {
+            /// Contiguity equal to element count
+            FULLY_CONTIGUOUS = -3,
+
+            /// Suffucient contiguity to fit the datatype
+            VALUE_CONTIGUOUS = -2,
+
+            /// Won't be using allocator
+            /// (e.g. taking allocation from elsewhere or assigning particular register numbers)
+            MANUAL = -1,
+        };
         struct AllocationOptions
         {
-            /// Width of chunks to be used. 0 means fully contiguous.
-            int contiguousChunkWidth = 0;
+            /// In units of registers
+            int contiguousChunkWidth = VALUE_CONTIGUOUS;
 
             /// Allocation x must have (x % alignment) == alignmentPhase. -1 means to use default for register type.
             int alignment      = -1;
             int alignmentPhase = 0;
+
+            static AllocationOptions FullyContiguous();
         };
 
         struct RegisterId
@@ -113,8 +126,11 @@ namespace rocRoller
             /**
              * Placeholder value to be filled in later.
              */
-            static ValuePtr
-                Placeholder(ContextPtr ctx, Type regType, VariableType varType, int count);
+            static ValuePtr Placeholder(ContextPtr        ctx,
+                                        Type              regType,
+                                        VariableType      varType,
+                                        int               count,
+                                        AllocationOptions allocOptions = {});
 
             static ValuePtr WavefrontPlaceholder(ContextPtr context);
 
@@ -160,7 +176,7 @@ namespace rocRoller
              * Returns a new unallocated Value with the specified register type but
              * the same other properties.
              */
-            ValuePtr placeholder(Type regType) const;
+            ValuePtr placeholder(Type regType, AllocationOptions allocOptions) const;
 
             Type         regType() const;
             VariableType variableType() const;

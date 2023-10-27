@@ -80,7 +80,8 @@ namespace rocRoller
         result = Register::Value::Placeholder(toPack->context(),
                                               toPack->regType(),
                                               DataType::Halfx2,
-                                              toPack->valueCount() / valuesPerWord);
+                                              toPack->valueCount() / valuesPerWord,
+                                              Register::AllocationOptions::FullyContiguous());
         for(int i = 0; i < result->registerCount(); i++)
         {
             co_yield m_context.lock()->copier()->pack(result->element({i}),

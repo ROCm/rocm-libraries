@@ -102,7 +102,11 @@ namespace rocRoller
                         return m_context->getSCC();
                     else
                         return Register::Value::Placeholder(
-                            m_context, Register::Type::Scalar, resType.varType, valueCount);
+                            m_context,
+                            Register::Type::Scalar,
+                            resType.varType,
+                            valueCount,
+                            Register::AllocationOptions::FullyContiguous());
                 }
                 else if(resType.regType == Register::Type::Scalar
                         && resType.varType == DataType::Bool32)
@@ -110,8 +114,11 @@ namespace rocRoller
                     return Register::Value::WavefrontPlaceholder(m_context);
                 }
 
-                return Register::Value::Placeholder(
-                    m_context, resType.regType, resType.varType, valueCount);
+                return Register::Value::Placeholder(m_context,
+                                                    resType.regType,
+                                                    resType.varType,
+                                                    valueCount,
+                                                    Register::AllocationOptions::FullyContiguous());
             }
 
             int resultValueCount(Register::ValuePtr const&              dest,
@@ -609,7 +616,11 @@ namespace rocRoller
                     auto const accRegCount = M * N * B / m_context->kernel()->wavefront_size();
 
                     dest = Register::Value::Placeholder(
-                        m_context, Register::Type::Accumulator, accType, accRegCount);
+                        m_context,
+                        Register::Type::Accumulator,
+                        accType,
+                        accRegCount,
+                        Register::AllocationOptions::FullyContiguous());
                 }
 
                 auto mm = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(

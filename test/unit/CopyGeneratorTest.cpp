@@ -134,19 +134,35 @@ namespace CopyGeneratorTest
 
     TEST_F(CopyGeneratorTest, IteratedCopy)
     {
-        int  n   = 8;
-        auto vr0 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Int32, n);
+        int  n = 8;
+        auto vr0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Int32,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
         vr0->allocateNow();
-        auto vr1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Int32, n);
+        auto vr1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Int32,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
         vr1->allocateNow();
 
-        auto ar0 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Int64, n);
+        auto ar0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Int64,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
         ar0->allocateNow();
-        auto ar1 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Int64, n);
+        auto ar1
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Int64,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
         ar1->allocateNow();
 
         m_context->schedule(m_context->copier()->copy(vr1, vr0));
@@ -171,13 +187,25 @@ namespace CopyGeneratorTest
 
     TEST_F(CopyGeneratorTest, TestFillInt32)
     {
-        int  n   = 8;
-        auto sr0 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, n);
-        auto vr0 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Int32, n);
-        auto ar0 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Int32, n);
+        int  n = 8;
+        auto sr0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int32,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto vr0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Int32,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto ar0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Int32,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
 
         m_context->schedule(m_context->copier()->fill(sr0, Register::Value::Literal(11)));
         m_context->schedule(m_context->copier()->fill(vr0, Register::Value::Literal(12)));
@@ -205,13 +233,25 @@ namespace CopyGeneratorTest
 
     TEST_F(CopyGeneratorTest, TestFillInt64)
     {
-        int  n   = 8;
-        auto sr0 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int64, n);
-        auto vr0 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Int64, n);
-        auto ar0 = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Int64, n);
+        int  n = 8;
+        auto sr0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int64,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto vr0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Int64,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto ar0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Int64,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
 
         m_context->schedule(m_context->copier()->fill(sr0, Register::Value::Literal(11L)));
         m_context->schedule(
@@ -244,8 +284,11 @@ namespace CopyGeneratorTest
 
     TEST_F(CopyGeneratorTest, EnsureType)
     {
-        auto vr = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Int32, 4);
+        auto vr = std::make_shared<Register::Value>(m_context,
+                                                    Register::Type::Vector,
+                                                    DataType::Int32,
+                                                    4,
+                                                    Register::AllocationOptions::FullyContiguous());
         vr->allocateNow();
         Register::ValuePtr dummy = nullptr;
 
@@ -330,12 +373,18 @@ namespace CopyGeneratorTest
         m_context->schedule(k->prolog());
 
         Register::ValuePtr output_mem, input_mem;
-        auto               v_value
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Float, 4);
-        auto v_addr
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Raw32, 2);
-        auto v_tmp
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Float, 4);
+        auto               v_value = Register::Value::Placeholder(m_context,
+                                                    Register::Type::Vector,
+                                                    DataType::Float,
+                                                    4,
+                                                    Register::AllocationOptions::FullyContiguous());
+        auto               v_addr  = Register::Value::Placeholder(
+            m_context, Register::Type::Vector, {DataType::Float, PointerType::PointerGlobal}, 1);
+        auto v_tmp = Register::Value::Placeholder(m_context,
+                                                  Register::Type::Vector,
+                                                  DataType::Float,
+                                                  4,
+                                                  Register::AllocationOptions::FullyContiguous());
 
         auto init = [&]() -> Generator<Instruction> {
             co_yield m_context->argLoader()->getValue("output", output_mem);

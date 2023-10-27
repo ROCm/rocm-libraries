@@ -78,8 +78,11 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("b", s_b);
             co_yield m_context->argLoader()->getValue("shift", s_shift);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Int32, PointerType::PointerGlobal},
+                                               1);
 
             auto v_a = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
@@ -93,8 +96,10 @@ namespace ArithmeticTest
             auto v_shift = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::UInt32, 1);
 
-            auto s_c = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::Raw32, 2);
+            auto s_c = Register::Value::Placeholder(m_context,
+                                                    Register::Type::Scalar,
+                                                    {DataType::Int32, PointerType::PointerGlobal},
+                                                    1);
 
             co_yield v_a->allocate();
             co_yield v_b->allocate();
@@ -366,8 +371,11 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("b", s_b);
             co_yield m_context->argLoader()->getValue("shift", s_shift);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Int32, PointerType::PointerGlobal},
+                                               1);
 
             auto s_c = Register::Value::Placeholder(
                 m_context, Register::Type::Scalar, DataType::Int32, 1);
@@ -696,8 +704,11 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("b", s_b);
             co_yield m_context->argLoader()->getValue("shift", s_sh);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Int64, PointerType::PointerGlobal},
+                                               1);
 
             auto v_a = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int64, 1);
@@ -711,8 +722,10 @@ namespace ArithmeticTest
             auto v_shift = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::UInt64, 1);
 
-            auto s_c = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::Raw32, 2);
+            auto s_c = Register::Value::Placeholder(m_context,
+                                                    Register::Type::Scalar,
+                                                    {DataType::Int64, PointerType::PointerGlobal},
+                                                    1);
 
             co_yield v_a->allocate();
             co_yield v_b->allocate();
@@ -980,8 +993,11 @@ namespace ArithmeticTest
             auto v_c = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int64, 1);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Int64, PointerType::PointerGlobal},
+                                               1);
 
             auto s_c = Register::Value::Placeholder(
                 m_context, Register::Type::Scalar, DataType::Int64, 1);
@@ -1253,11 +1269,17 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("b", s_b);
             co_yield m_context->argLoader()->getValue("c", s_c);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Float, PointerType::PointerGlobal},
+                                               1);
 
-            auto v_cond_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_cond_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Float, PointerType::PointerGlobal},
+                                               1);
 
             auto v_a = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Float, 1);
@@ -1271,8 +1293,10 @@ namespace ArithmeticTest
             auto v_r = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Float, 1);
 
-            auto s_r = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::Raw32, 2);
+            auto s_r = Register::Value::Placeholder(m_context,
+                                                    Register::Type::Scalar,
+                                                    {DataType::Float, PointerType::PointerGlobal},
+                                                    1);
 
             co_yield v_a->allocate();
             co_yield v_b->allocate();
@@ -1453,23 +1477,36 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("b", s_b);
             co_yield m_context->argLoader()->getValue("c", s_c);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Int64, PointerType::PointerGlobal},
+                                               1);
 
-            auto vbPtr = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto vbPtr = Register::Value::Placeholder(m_context,
+                                                      Register::Type::Vector,
+                                                      {DataType::Int64, PointerType::PointerGlobal},
+                                                      1);
 
-            auto vcPtr = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto vcPtr = Register::Value::Placeholder(m_context,
+                                                      Register::Type::Vector,
+                                                      {DataType::Int64, PointerType::PointerGlobal},
+                                                      1);
 
             auto v_b = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Halfx2, 1);
 
-            auto v_c = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 2);
+            auto v_c = Register::Value::Placeholder(m_context,
+                                                    Register::Type::Vector,
+                                                    DataType::Float,
+                                                    2,
+                                                    Register::AllocationOptions::FullyContiguous());
 
-            auto v_r = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 2);
+            auto v_r = Register::Value::Placeholder(m_context,
+                                                    Register::Type::Vector,
+                                                    DataType::Float,
+                                                    2,
+                                                    Register::AllocationOptions::FullyContiguous());
 
             co_yield vbPtr->allocate();
             co_yield vcPtr->allocate();
@@ -1641,11 +1678,17 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Double, PointerType::PointerGlobal},
+                                               1);
 
-            auto v_cond_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_cond_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Double, PointerType::PointerGlobal},
+                                               1);
 
             auto v_a = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Double, 1);
@@ -1656,8 +1699,10 @@ namespace ArithmeticTest
             auto v_c = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Double, 1);
 
-            auto s_c = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::Raw32, 2);
+            auto s_c = Register::Value::Placeholder(m_context,
+                                                    Register::Type::Scalar,
+                                                    {DataType::Double, PointerType::PointerGlobal},
+                                                    1);
 
             co_yield v_a->allocate();
             co_yield v_b->allocate();

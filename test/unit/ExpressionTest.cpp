@@ -473,17 +473,28 @@ namespace ExpressionTest
         auto B_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
 
         A_tile->sizes = {M, K};
-        A_tile->vgpr  = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, M * K / 64);
+        A_tile->vgpr
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                M * K / 64,
+                                                Register::AllocationOptions::FullyContiguous());
         A_tile->vgpr->allocateNow();
 
         B_tile->sizes = {K, N};
-        B_tile->vgpr  = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, K * N / 64);
+        B_tile->vgpr
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                K * N / 64,
+                                                Register::AllocationOptions::FullyContiguous());
         B_tile->vgpr->allocateNow();
 
-        auto ic = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Float, M * N * batches / 64);
+        auto ic = std::make_shared<Register::Value>(m_context,
+                                                    Register::Type::Accumulator,
+                                                    DataType::Float,
+                                                    M * N * batches / 64,
+                                                    Register::AllocationOptions::FullyContiguous());
         ic->allocateNow();
 
         auto A = std::make_shared<Expression::Expression>(A_tile);
@@ -524,17 +535,29 @@ namespace ExpressionTest
         auto B_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
 
         A_tile->sizes = {M, K};
-        A_tile->vgpr  = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, M * K / 64);
+        A_tile->vgpr
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                M * K / 64,
+                                                Register::AllocationOptions::FullyContiguous());
         A_tile->vgpr->allocateNow();
 
         B_tile->sizes = {K, N};
-        B_tile->vgpr  = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, K * N / 64);
+        B_tile->vgpr
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                K * N / 64,
+                                                Register::AllocationOptions::FullyContiguous());
         B_tile->vgpr->allocateNow();
 
-        auto accumD = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Float, M * N * batches / 64);
+        auto accumD
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Float,
+                                                M * N * batches / 64,
+                                                Register::AllocationOptions::FullyContiguous());
         accumD->allocateNow();
 
         auto A = std::make_shared<Expression::Expression>(A_tile);
@@ -550,15 +573,23 @@ namespace ExpressionTest
         EXPECT_EQ(accumD->regType(), Register::Type::Accumulator);
         EXPECT_EQ(accumD->valueCount(), 4);
 
-        auto vecD = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, M * N * batches / 64);
+        auto vecD
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                M * N * batches / 64,
+                                                Register::AllocationOptions::FullyContiguous());
         m_context->schedule(Expression::generate(vecD, D, m_context));
 
         auto scaleDExpr = Expression::literal(2.0f) * vecD->expression();
         m_context->schedule(Expression::generate(vecD, scaleDExpr, m_context));
 
-        auto vecC = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, M * N * batches / 64);
+        auto vecC
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                M * N * batches / 64,
+                                                Register::AllocationOptions::FullyContiguous());
         vecC->allocateNow();
 
         auto addCDExpr = vecC->expression() + vecD->expression();
@@ -598,17 +629,29 @@ namespace ExpressionTest
         auto B_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
 
         A_tile->sizes = {M, K};
-        A_tile->vgpr  = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Halfx2, M * K / 64 / 2);
+        A_tile->vgpr
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Halfx2,
+                                                M * K / 64 / 2,
+                                                Register::AllocationOptions::FullyContiguous());
         A_tile->vgpr->allocateNow();
 
         B_tile->sizes = {K, N};
-        B_tile->vgpr  = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Halfx2, K * N / 64 / 2);
+        B_tile->vgpr
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Halfx2,
+                                                K * N / 64 / 2,
+                                                Register::AllocationOptions::FullyContiguous());
         B_tile->vgpr->allocateNow();
 
-        auto accumD = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Float, M * N * batches / 64);
+        auto accumD
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Float,
+                                                M * N * batches / 64,
+                                                Register::AllocationOptions::FullyContiguous());
         accumD->allocateNow();
 
         auto A = std::make_shared<Expression::Expression>(A_tile);
@@ -624,11 +667,19 @@ namespace ExpressionTest
         EXPECT_EQ(accumD->regType(), Register::Type::Accumulator);
         EXPECT_EQ(accumD->valueCount(), 16);
 
-        auto vecD = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, M * N * batches / 64);
+        auto vecD
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Float,
+                                                M * N * batches / 64,
+                                                Register::AllocationOptions::FullyContiguous());
 
-        auto vecC = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Half, M * N * batches / 64);
+        auto vecC
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Half,
+                                                M * N * batches / 64,
+                                                Register::AllocationOptions::FullyContiguous());
         vecC->allocateNow();
 
         auto scaleDExpr = Expression::literal(2.0, DataType::Half) * vecD->expression();
@@ -638,12 +689,18 @@ namespace ExpressionTest
         m_context->schedule(Expression::generate(vecD, scaleDExpr, m_context));
         m_context->schedule(Expression::generate(vecD, addCDExpr, m_context));
 
-        auto X = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Halfx2, M * K / 64 / 2);
+        auto X = std::make_shared<Register::Value>(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::Halfx2,
+                                                   M * K / 64 / 2,
+                                                   Register::AllocationOptions::FullyContiguous());
         X->allocateNow();
 
-        auto Y = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Half, M * K / 64);
+        auto Y = std::make_shared<Register::Value>(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::Half,
+                                                   M * K / 64,
+                                                   Register::AllocationOptions::FullyContiguous());
         Y->allocateNow();
 
         auto addXYExpr = X->expression() + Y->expression();
@@ -1368,22 +1425,25 @@ namespace ExpressionTest
 
     TEST_F(ExpressionTest, GenerateDF)
     {
+        Register::AllocationOptions allocOptions{.contiguousChunkWidth
+                                                 = Register::FULLY_CONTIGUOUS};
+
         auto ra = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 4);
+            m_context, Register::Type::Vector, DataType::Float, 4, allocOptions);
         ra->allocateNow();
         auto dfa = std::make_shared<Expression::Expression>(
             Expression::DataFlowTag{1, Register::Type::Vector, DataType::None});
         m_context->registerTagManager()->addRegister(1, ra);
 
         auto rb = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 4);
+            m_context, Register::Type::Vector, DataType::Float, 4, allocOptions);
         rb->allocateNow();
         auto dfb = std::make_shared<Expression::Expression>(
             Expression::DataFlowTag{2, Register::Type::Vector, DataType::None});
         m_context->registerTagManager()->addRegister(2, rb);
 
         auto rc = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, 4);
+            m_context, Register::Type::Vector, DataType::Float, 4, allocOptions);
         rc->allocateNow();
         auto dfc = std::make_shared<Expression::Expression>(
             Expression::DataFlowTag{3, Register::Type::Vector, DataType::None});
@@ -1609,7 +1669,7 @@ namespace ExpressionTest
                 co_yield m_context->argLoader()->getValue("b", s_b);
 
                 auto v_result = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+                    m_context, Register::Type::Vector, {rDType, PointerType::PointerGlobal}, 1);
 
                 co_yield v_a->allocate();
                 co_yield v_b->allocate();
@@ -1704,7 +1764,7 @@ namespace ExpressionTest
                 co_yield m_context->argLoader()->getValue("c", s_c);
 
                 auto v_result_ptr = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+                    m_context, Register::Type::Vector, {rDType, PointerType::PointerGlobal}, 1);
 
                 co_yield v_a->allocate();
                 co_yield v_b->allocate();
@@ -1990,8 +2050,11 @@ namespace ExpressionTest
             auto a = s_a->expression();
             auto b = s_b->expression();
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Int32, PointerType::PointerGlobal},
+                                               1);
 
             auto v_c = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);

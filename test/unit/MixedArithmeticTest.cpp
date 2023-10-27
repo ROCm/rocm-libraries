@@ -297,7 +297,7 @@ namespace MixedArithmeticTest
         if(type != Register::Type::Scalar)
         {
             Register::ValuePtr tmp = reg;
-            reg                    = tmp->placeholder(type);
+            reg                    = tmp->placeholder(type, {});
 
             co_yield reg->allocate();
 

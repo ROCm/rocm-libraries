@@ -56,7 +56,11 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(allocator->currentlyFree(), 10);
 
         auto alloc0 = std::make_shared<Register::Allocation>(
-            m_context, Register::Type::Scalar, DataType::Float);
+            m_context,
+            Register::Type::Scalar,
+            DataType::Float,
+            1,
+            Register::AllocationOptions::FullyContiguous());
 
         EXPECT_EQ(-1, allocator->maxUsed());
         EXPECT_EQ(0, allocator->useCount());
@@ -77,7 +81,11 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(1, idx2);
 
         auto alloc1 = std::make_shared<Register::Allocation>(
-            m_context, Register::Type::Scalar, DataType::Float, 3);
+            m_context,
+            Register::Type::Scalar,
+            DataType::Float,
+            3,
+            Register::AllocationOptions::FullyContiguous());
 
         EXPECT_EQ((std::vector{1, 2, 3}),
                   allocator->findFree(alloc1->registerCount(), alloc1->options()));
@@ -106,7 +114,10 @@ namespace RegisterAllocatorTest
 
         allocator->allocate(alloc2);
 
-        EXPECT_EQ((std::vector{0, 4, 5}), alloc2->registerIndices());
+        auto indices = alloc2->registerIndices();
+        std::sort(indices.begin(), indices.end());
+
+        EXPECT_EQ((std::vector{0, 4, 5}), indices);
         EXPECT_EQ(false, allocator->isFree(0));
         EXPECT_EQ(false, allocator->isFree(4));
         EXPECT_EQ(false, allocator->isFree(5));
@@ -160,7 +171,7 @@ namespace RegisterAllocatorTest
 
         allocator->allocate(alloc1);
 
-        EXPECT_EQ((std::vector{1, 2, 3}), alloc1->registerIndices());
+        EXPECT_EQ((std::vector{3, 2, 1}), alloc1->registerIndices());
         EXPECT_EQ(false, allocator->isFree(1));
         EXPECT_EQ(false, allocator->isFree(2));
         EXPECT_EQ(false, allocator->isFree(3));
@@ -183,7 +194,7 @@ namespace RegisterAllocatorTest
 
         allocator->allocate(alloc2);
 
-        EXPECT_EQ((std::vector{0, 4, 5}), alloc2->registerIndices());
+        EXPECT_EQ((std::vector{5, 4, 0}), alloc2->registerIndices());
         EXPECT_EQ(false, allocator->isFree(0));
         EXPECT_EQ(false, allocator->isFree(4));
         EXPECT_EQ(false, allocator->isFree(5));
@@ -275,7 +286,11 @@ namespace RegisterAllocatorTest
 
         {
             auto allocFit = std::make_shared<Register::Allocation>(
-                m_context, Register::Type::Scalar, DataType::Float, 2);
+                m_context,
+                Register::Type::Scalar,
+                DataType::Float,
+                2,
+                Register::AllocationOptions::FullyContiguous());
             allocator->allocate(allocFit);
 
             //[OOOO,XXXX,XXXX,OOOO]
@@ -323,6 +338,7 @@ namespace RegisterAllocatorTest
         }
 
         //[XOOO,OOOO,XXXX,OOOO]
+
         EXPECT_EQ(false, allocator->isFree(0));
         EXPECT_EQ(true, allocator->isFree(1));
         EXPECT_EQ(true, allocator->isFree(2));
@@ -341,7 +357,8 @@ namespace RegisterAllocatorTest
 
         {
             Register::AllocationOptions opt;
-            opt.alignment = 2;
+            opt.alignment            = 2;
+            opt.contiguousChunkWidth = Register::FULLY_CONTIGUOUS;
 
             auto allocEnd = std::make_shared<Register::Allocation>(
                 m_context, Register::Type::Scalar, DataType::Float, 2, opt);
@@ -360,11 +377,41 @@ namespace RegisterAllocatorTest
         }
     }
 
+    TEST_F(RegisterAllocatorTest, MinContiguity)
+    {
+        auto test_scheme = [&](Register::AllocatorScheme scheme) {
+            {
+                auto allocator
+                    = std::make_shared<Register::Allocator>(Register::Type::Scalar, 16, scheme);
+                Register::AllocationOptions opt{.contiguousChunkWidth = 2, .alignment = 2};
+
+                auto alloc0 = std::make_shared<Register::Allocation>(
+                    m_context, Register::Type::Scalar, DataType::Float, 6, opt);
+                allocator->allocate(alloc0);
+
+                EXPECT_EQ((std::vector{4, 5, 2, 3, 0, 1}), alloc0->registerIndices());
+            }
+            {
+                auto allocator
+                    = std::make_shared<Register::Allocator>(Register::Type::Scalar, 16, scheme);
+                Register::AllocationOptions opt{.contiguousChunkWidth = 1, .alignment = 1};
+
+                auto alloc0 = std::make_shared<Register::Allocation>(
+                    m_context, Register::Type::Scalar, DataType::Float, 6, opt);
+                allocator->allocate(alloc0);
+
+                EXPECT_EQ((std::vector{5, 4, 3, 2, 1, 0}), alloc0->registerIndices());
+            }
+        };
+
+        test_scheme(Register::AllocatorScheme::PerfectFit);
+        test_scheme(Register::AllocatorScheme::FirstFit);
+    }
+
     TEST_F(RegisterAllocatorTest, Contiguity)
     {
         auto allocator = std::make_shared<Register::Allocator>(
             Register::Type::Scalar, 16, Register::AllocatorScheme::PerfectFit);
-        Register::AllocationOptions defaultOpt;
 
         EXPECT_EQ(-1, allocator->maxUsed());
         EXPECT_EQ(0, allocator->useCount());
@@ -372,8 +419,8 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(allocator->size(), 16);
         EXPECT_EQ(allocator->currentlyFree(), 16);
 
-        EXPECT_EQ(allocator->findContiguousRange(0, 1, defaultOpt).first, 0);
-        EXPECT_EQ(allocator->findContiguousRange(0, 1, defaultOpt).second, 16);
+        EXPECT_EQ(allocator->findContiguousRange(0, 1, {.contiguousChunkWidth = 1}).first, 0);
+        EXPECT_EQ(allocator->findContiguousRange(0, 1, {.contiguousChunkWidth = 1}).second, 16);
 
         auto alloc0 = std::make_shared<Register::Allocation>(
             m_context, Register::Type::Scalar, DataType::Float, 2);
@@ -477,13 +524,17 @@ namespace RegisterAllocatorTest
         //[OOXX,OXOX,OOXX,OOOO]
 
         {
-            EXPECT_EQ(allocator->findContiguousRange(0, 4, defaultOpt).first, 12);
-            EXPECT_EQ(allocator->findContiguousRange(0, 4, defaultOpt).second, 4);
+            EXPECT_EQ(allocator->findContiguousRange(0, 4, {.contiguousChunkWidth = 4}).first, 12);
+            EXPECT_EQ(allocator->findContiguousRange(0, 4, {.contiguousChunkWidth = 4}).second, 4);
             std::vector<int> freeReg = {12, 13, 14, 15};
-            EXPECT_EQ(allocator->findFree(4, defaultOpt), freeReg);
+            EXPECT_EQ(allocator->findFree(4, {.contiguousChunkWidth = 4}), freeReg);
 
             auto allocContig = std::make_shared<Register::Allocation>(
-                m_context, Register::Type::Scalar, DataType::Float, 4);
+                m_context,
+                Register::Type::Scalar,
+                DataType::Float,
+                4,
+                Register::AllocationOptions::FullyContiguous());
             allocator->allocate(allocContig);
 
             //[OOXX,OXOX,OOXX,XXXX]
@@ -524,8 +575,10 @@ namespace RegisterAllocatorTest
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
 
-            auto s_c = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::Raw32, 2);
+            auto s_c = Register::Value::Placeholder(m_context,
+                                                    Register::Type::Scalar,
+                                                    {DataType::Int32, PointerType::PointerGlobal},
+                                                    1);
 
             auto v_a = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);

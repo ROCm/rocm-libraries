@@ -60,14 +60,26 @@ namespace rocRollerTest
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Raw32,
+                                               2,
+                                               Register::AllocationOptions::FullyContiguous());
 
-            auto a_ptr = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto a_ptr
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Raw32,
+                                               2,
+                                               Register::AllocationOptions::FullyContiguous());
 
-            auto b_ptr = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto b_ptr
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Raw32,
+                                               2,
+                                               Register::AllocationOptions::FullyContiguous());
 
             auto v_a = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Halfx2, 1);
@@ -141,14 +153,26 @@ namespace rocRollerTest
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Raw32,
+                                               2,
+                                               Register::AllocationOptions::FullyContiguous());
 
-            auto a_ptr = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto a_ptr
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Raw32,
+                                               2,
+                                               Register::AllocationOptions::FullyContiguous());
 
-            auto b_ptr = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto b_ptr
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Raw32,
+                                               2,
+                                               Register::AllocationOptions::FullyContiguous());
 
             auto v_a = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Half, 1);
@@ -274,14 +298,26 @@ namespace rocRollerTest
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Raw32,
+                                               2,
+                                               Register::AllocationOptions::FullyContiguous());
 
-            auto a_ptr = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto a_ptr
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Raw32,
+                                               2,
+                                               Register::AllocationOptions::FullyContiguous());
 
-            auto b_ptr = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto b_ptr
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Raw32,
+                                               2,
+                                               Register::AllocationOptions::FullyContiguous());
 
             auto v_a = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Halfx2, 1);

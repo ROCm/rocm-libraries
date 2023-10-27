@@ -54,6 +54,8 @@ TEST_F(RegisterTest, Promote)
 
 TEST_F(RegisterTest, RegisterToString)
 {
+    auto allocOptions = Register::AllocationOptions::FullyContiguous();
+
     auto r
         = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Float, 1);
     r->allocateNow();
@@ -66,7 +68,8 @@ TEST_F(RegisterTest, RegisterToString)
     EXPECT_EQ("v0", r->subset({0})->toString());
     EXPECT_EQ("v1", r->subset({1})->toString());
 
-    r = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Double, 4);
+    r = std::make_shared<Register::Value>(
+        m_context, Register::Type::Vector, DataType::Double, 4, allocOptions);
     r->allocateNow();
     EXPECT_EQ("v[0:7]", r->toString());
     EXPECT_EQ("v4", r->subset({4})->toString());
@@ -77,14 +80,15 @@ TEST_F(RegisterTest, RegisterToString)
     EXPECT_ANY_THROW(r->subset({22}));
     EXPECT_ANY_THROW(r->element({22}));
 
-    r = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, DataType::Float, 2);
+    r = std::make_shared<Register::Value>(
+        m_context, Register::Type::Scalar, DataType::Float, 2, allocOptions);
     r->allocateNow();
 
     EXPECT_EQ("s[0:1]", r->toString());
     r.reset();
 
     auto a = std::make_shared<Register::Allocation>(
-        m_context, Register::Type::Accumulator, DataType::Float, 2);
+        m_context, Register::Type::Accumulator, DataType::Float, 2, allocOptions);
 
     auto             allocator      = m_context->allocator(Register::Type::Vector);
     std::vector<int> whichRegisters = {0, 4};

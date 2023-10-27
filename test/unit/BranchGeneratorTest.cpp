@@ -65,8 +65,11 @@ namespace rocRollerTest
             auto scc = m_context->getSCC();
             auto vcc = m_context->getVCC();
 
-            auto s0 = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::UInt32, wavefront_size / 32);
+            auto s0 = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Scalar,
+                                                   DataType::UInt32,
+                                                   wavefront_size / 32,
+                                                   Register::AllocationOptions::FullyContiguous());
             co_yield s0->allocate();
 
             co_yield m_context->brancher()->branch(l0);

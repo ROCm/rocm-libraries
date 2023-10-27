@@ -506,11 +506,25 @@ namespace rocRoller
                 if(!deferred)
                 {
                     rocRoller::Log::getLogger()->debug("  immediate: count {}", assign.valueCount);
-                    dest = m_context->registerTagManager()->getRegister(
-                        dimTag,
-                        assign.regType,
-                        resultVariableType(assign.expression),
-                        assign.valueCount);
+                    if(assign.regType == Register::Type::Accumulator)
+                    {
+                        // ACCVGPR should always be contiguous
+                        dest = m_context->registerTagManager()->getRegister(
+                            dimTag,
+                            assign.regType,
+                            resultVariableType(assign.expression),
+                            assign.valueCount,
+                            Register::AllocationOptions{.contiguousChunkWidth
+                                                        = static_cast<int>(assign.valueCount)});
+                    }
+                    else
+                    {
+                        dest = m_context->registerTagManager()->getRegister(
+                            dimTag,
+                            assign.regType,
+                            resultVariableType(assign.expression),
+                            assign.valueCount);
+                    }
                     if(dest->name().empty())
                         dest->setName(concatenate("DataFlowTag", dimTag));
                 }
@@ -737,7 +751,13 @@ namespace rocRoller
                     tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
 
                 auto D = m_context->registerTagManager()->getRegister(
-                    DTag, Register::Type::Accumulator, DataType::Float, num_agpr);
+                    DTag,
+                    Register::Type::Accumulator,
+                    DataType::Float,
+                    num_agpr,
+                    Register::AllocationOptions{.contiguousChunkWidth = 16});
+
+                AssertFatal(D->allocation()->options().contiguousChunkWidth >= 16, "Should be 16");
 
                 waveA.vgpr = m_context->registerTagManager()->getRegister(macATag);
                 waveB.vgpr = m_context->registerTagManager()->getRegister(macBTag);

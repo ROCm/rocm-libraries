@@ -15,7 +15,11 @@ namespace rocRoller
                 count = 2;
             }
 
-            return Placeholder(context, Type::Scalar, DataType::Raw32, count);
+            return Placeholder(context,
+                               Type::Scalar,
+                               DataType::Raw32,
+                               count,
+                               Register::AllocationOptions::FullyContiguous());
         }
 
         bool Value::isVCC() const

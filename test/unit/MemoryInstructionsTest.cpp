@@ -63,8 +63,9 @@ namespace MemoryInstructionsTest
 
                 int                         size = (N % 4 == 0) ? N / 4 : N / 4 + 1;
                 Register::AllocationOptions options;
-                options.alignment = size;
-                auto s_a          = std::make_shared<Register::Value>(
+                options.alignment            = size;
+                options.contiguousChunkWidth = Register::FULLY_CONTIGUOUS;
+                auto s_a                     = std::make_shared<Register::Value>(
                     m_context, Register::Type::Scalar, DataType::Int32, size, options);
                 co_yield s_a->allocate();
 
@@ -177,14 +178,24 @@ namespace MemoryInstructionsTest
                 co_yield m_context->argLoader()->getValue("result", s_result);
                 co_yield m_context->argLoader()->getValue("a", s_a);
 
-                auto v_result = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+                auto v_result
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::Int32, PointerType::PointerGlobal},
+                                                   1);
 
-                auto v_ptr = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+                auto v_ptr
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::Int32, PointerType::PointerGlobal},
+                                                   1);
 
-                auto v_a = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Int32, N > 4 ? N / 4 : 1);
+                auto v_a
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::Int32,
+                                                   N > 4 ? N / 4 : 1,
+                                                   Register::AllocationOptions::FullyContiguous());
 
                 co_yield v_a->allocate();
                 co_yield v_ptr->allocate();
@@ -377,11 +388,18 @@ namespace MemoryInstructionsTest
                 Register::ValuePtr s_result;
                 co_yield m_context->argLoader()->getValue("result", s_result);
 
-                auto v_result = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+                auto v_result
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::Int32, PointerType::PointerGlobal},
+                                                   1);
 
-                auto v_a = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::UInt32, 4);
+                auto v_a
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::UInt32,
+                                                   4,
+                                                   Register::AllocationOptions::FullyContiguous());
 
                 co_yield v_a->allocate();
                 co_yield v_result->allocate();
@@ -503,8 +521,12 @@ namespace MemoryInstructionsTest
                 auto vgprSerial = m_context->kernel()->workitemIndex()[0];
 
                 int  size = (N % 4 == 0) ? N / 4 : N / 4 + 1;
-                auto v_a  = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Int32, size);
+                auto v_a
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::Int32,
+                                                   size,
+                                                   Register::AllocationOptions::FullyContiguous());
 
                 co_yield v_a->allocate();
 
@@ -602,11 +624,17 @@ namespace MemoryInstructionsTest
             Register::ValuePtr s_result;
             co_yield m_context->argLoader()->getValue("result", s_result);
 
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Int32, PointerType::PointerGlobal},
+                                               1);
 
-            auto v_a = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::UInt32, 4);
+            auto v_a = Register::Value::Placeholder(m_context,
+                                                    Register::Type::Vector,
+                                                    DataType::UInt32,
+                                                    4,
+                                                    Register::AllocationOptions::FullyContiguous());
 
             co_yield v_a->allocate();
             co_yield v_result->allocate();
@@ -753,14 +781,24 @@ namespace MemoryInstructionsTest
 
                 auto lds3 = Register::Value::AllocateLDS(m_context, DataType::Int32, 11);
 
-                auto v_result = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+                auto v_result
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::Int32, PointerType::PointerGlobal},
+                                                   1);
 
-                auto v_ptr = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+                auto v_ptr
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::Int32, PointerType::PointerGlobal},
+                                                   1);
 
-                auto v_a = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Int32, 11);
+                auto v_a
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::Int32,
+                                                   11,
+                                                   Register::AllocationOptions::FullyContiguous());
 
                 auto lds1_offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int32, 1);
@@ -921,8 +959,11 @@ namespace MemoryInstructionsTest
 
                 auto lds3 = Register::Value::AllocateLDS(m_context, DataType::Int32, workItemCount);
 
-                auto v_result = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+                auto v_result
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::Int32, PointerType::PointerGlobal},
+                                                   1);
 
                 auto v_a = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int32, 1);
@@ -1020,11 +1061,18 @@ namespace MemoryInstructionsTest
     TEST_P(MemoryInstructionsTest, MemoryKernelOptions)
     {
         auto v_addr_64bit
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Raw32, 2);
+            = Register::Value::Placeholder(m_context,
+                                           Register::Type::Vector,
+                                           DataType::Raw32,
+                                           2,
+                                           Register::AllocationOptions::FullyContiguous());
         auto v_addr_32bit
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Raw32, 1);
-        auto v_data
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 4);
+        auto        v_data = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::Int32,
+                                                   4,
+                                                   Register::AllocationOptions::FullyContiguous());
         std::string expected;
 
         auto setupRegisters = [&]() -> Generator<Instruction> {

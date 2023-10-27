@@ -4,6 +4,7 @@
 #include <memory>
 
 #include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 #include "RegisterTagManager.hpp"
@@ -30,12 +31,13 @@ namespace rocRoller
         return m_registers.at(tag);
     }
 
-    inline Register::ValuePtr RegisterTagManager::getRegister(int            tag,
-                                                              Register::Type regType,
-                                                              VariableType   varType,
-                                                              size_t         valueCount)
+    inline Register::ValuePtr
+        RegisterTagManager::getRegister(int                         tag,
+                                        Register::Type              regType,
+                                        VariableType                varType,
+                                        size_t                      valueCount,
+                                        Register::AllocationOptions allocOptions)
     {
-        AssertFatal(!hasExpression(tag), "Tag already associated with an expression");
         if(hasRegister(tag))
         {
             auto reg = m_registers.at(tag);
@@ -52,14 +54,34 @@ namespace rocRoller
             }
             return reg;
         }
-        auto r = Register::Value::Placeholder(m_context.lock(), regType, varType, valueCount);
-        m_registers.emplace(tag, r);
-        return m_registers.at(tag);
+        auto tmpl = Register::Value::Placeholder(
+            m_context.lock(), regType, varType, valueCount, allocOptions);
+        return getRegister(tag, tmpl);
     }
 
     inline Register::ValuePtr RegisterTagManager::getRegister(int tag, Register::ValuePtr tmpl)
     {
-        return getRegister(tag, tmpl->regType(), tmpl->variableType(), tmpl->valueCount());
+        AssertFatal(!hasExpression(tag), "Tag already associated with an expression");
+        if(hasRegister(tag))
+        {
+            auto reg = m_registers.at(tag);
+            if(tmpl->variableType() != DataType::None)
+            {
+                AssertFatal(reg->variableType() == tmpl->variableType(),
+                            ShowValue(tmpl->variableType()),
+                            ShowValue(reg->variableType()));
+                AssertFatal(reg->valueCount() == tmpl->valueCount(),
+                            ShowValue(tmpl->valueCount()),
+                            ShowValue(reg->valueCount()));
+                AssertFatal(reg->regType() == tmpl->regType(),
+                            ShowValue(tmpl->regType()),
+                            ShowValue(reg->regType()));
+            }
+            return reg;
+        }
+        auto r = tmpl->placeholder();
+        m_registers.emplace(tag, r);
+        return m_registers.at(tag);
     }
 
     inline void RegisterTagManager::addRegister(int tag, Register::ValuePtr value)

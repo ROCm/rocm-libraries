@@ -195,13 +195,13 @@ namespace rocRoller
             {
                 auto unrolledRowOffsetExpr
                     = m_fastArith(info.rowOffsetReg->expression() + rowOffsetExpr);
-                auto tmp = info.rowOffsetReg->placeholder(Register::Type::Vector);
+                auto tmp = info.rowOffsetReg->placeholder(Register::Type::Vector, {});
                 co_yield generate(tmp, unrolledRowOffsetExpr);
                 info.rowOffsetReg = tmp;
             }
             else if(preserveOffset)
             {
-                auto tmp = info.rowOffsetReg->placeholder(Register::Type::Vector);
+                auto tmp = info.rowOffsetReg->placeholder(Register::Type::Vector, {});
                 co_yield m_context->copier()->copy(tmp, info.rowOffsetReg);
                 info.rowOffsetReg = tmp;
             }
@@ -589,12 +589,20 @@ namespace rocRoller
                 if(dataType == DataType::Half && n > 1 && colStrideIsOne)
                 {
                     tmpl = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, DataType::Halfx2, m * n / 2);
+                        m_context,
+                        Register::Type::Vector,
+                        DataType::Halfx2,
+                        m * n / 2,
+                        Register::AllocationOptions::FullyContiguous());
                 }
                 else
                 {
                     tmpl = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, dataType, m * n);
+                        m_context,
+                        Register::Type::Vector,
+                        dataType,
+                        m * n,
+                        Register::AllocationOptions::FullyContiguous());
                 }
 
                 if(m_context->registerTagManager()->hasRegister(macTileTag))

@@ -30,10 +30,11 @@ protected:
     bool isLocalDevice() const;
 
     std::vector<rocRoller::Register::ValuePtr>
-        createRegisters(rocRoller::Register::Type const regType,
-                        rocRoller::DataType const       dataType,
-                        size_t const                    amount,
-                        int const                       regCount = 1);
+        createRegisters(rocRoller::Register::Type const        regType,
+                        rocRoller::DataType const              dataType,
+                        size_t const                           amount,
+                        int const                              regCount     = 1,
+                        rocRoller::Register::AllocationOptions allocOptions = {});
 
     rocRoller::KernelOptions m_kernelOptions;
 };

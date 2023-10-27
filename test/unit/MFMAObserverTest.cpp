@@ -62,7 +62,11 @@ namespace rocRollerTest
 
     TEST_F(MFMA90aObserverTest, NoWaitStates)
     {
-        auto s = createRegisters(Register::Type::Scalar, DataType::Float, 3, 2);
+        auto s = createRegisters(Register::Type::Scalar,
+                                 DataType::Float,
+                                 3,
+                                 2,
+                                 Register::AllocationOptions::FullyContiguous());
 
         auto zero = Register::Value::Literal(0);
 

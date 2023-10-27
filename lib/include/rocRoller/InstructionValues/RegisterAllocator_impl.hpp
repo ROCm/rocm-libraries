@@ -116,7 +116,11 @@ namespace rocRoller
                 AssertFatal(m_registers.at(index).lock() == firstAlloc);
 
             auto newAlloc = std::make_shared<Allocation>(
-                firstAlloc->m_context.lock(), m_regType, DataType::Raw32, registers.size());
+                firstAlloc->m_context.lock(),
+                m_regType,
+                DataType::Raw32,
+                registers.size(),
+                Register::AllocationOptions{.contiguousChunkWidth = Register::MANUAL});
 
             allocate(newAlloc, registers);
 
@@ -143,8 +147,11 @@ namespace rocRoller
                                                             AllocationOptions const& options) const
         {
             AssertFatal(count >= 0, "Negative count");
+            AssertFatal(options.alignment <= options.contiguousChunkWidth,
+                        "Not yet supported",
+                        ShowValue(options));
 
-            auto width = options.contiguousChunkWidth == 0 ? count : options.contiguousChunkWidth;
+            auto width = options.contiguousChunkWidth;
 
             std::vector<int> rv;
             rv.reserve(count);
@@ -160,7 +167,7 @@ namespace rocRoller
                 {
                     std::vector<int> indices(width);
                     std::iota(indices.begin(), indices.end(), idx);
-                    rv.insert(rv.end(), indices.begin(), indices.end());
+                    rv.insert(rv.begin(), indices.begin(), indices.end());
                 }
                 else
                 {
@@ -174,6 +181,9 @@ namespace rocRoller
         inline std::vector<int>
             Allocator::findFreePerfectFit(int count, AllocationOptions const& options) const
         {
+            AssertFatal(options.alignment <= options.contiguousChunkWidth,
+                        "Not yet supported",
+                        ShowValue(options));
             AssertFatal(
                 count > 0, "Invalid register count for findFreePerfectFit", ShowValue(count));
 
@@ -181,7 +191,7 @@ namespace rocRoller
             rv.reserve(count);
 
             // Width of chunks
-            auto width = options.contiguousChunkWidth == 0 ? count : options.contiguousChunkWidth;
+            auto width = options.contiguousChunkWidth;
 
             // Remaining number of registers left to handle
             int currentCount = count;
@@ -243,6 +253,8 @@ namespace rocRoller
                         int start = align(idx + blockSize - width, options);
 
                         // Check if chunk is outside of block, or if it runs up against the end of the total number of registers
+                        // The equal check in `start + width >= m_registers.size()`
+                        // is to avoid increasing register high-water mark by not allocating the last register
                         if(start + width > idx + blockSize || start + width >= m_registers.size())
                         {
                             // Should not use end of block, revert to using beginning
@@ -253,12 +265,13 @@ namespace rocRoller
                         }
 
                         std::iota(indices.begin(), indices.end(), start);
-                        rv.insert(rv.end(), indices.begin(), indices.end());
+                        rv.insert(rv.begin(), indices.begin(), indices.end());
 
                         // Update candidate
                         blockSize -= width;
 
                         found = true;
+
                         break;
                     }
                 }

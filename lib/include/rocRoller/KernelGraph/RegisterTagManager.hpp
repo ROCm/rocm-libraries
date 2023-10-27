@@ -7,6 +7,7 @@
 
 #include "Context_fwd.hpp"
 #include "DataTypes/DataTypes.hpp"
+#include "InstructionValues/Register.hpp"
 #include "InstructionValues/Register_fwd.hpp"
 #include "Operations/Command_fwd.hpp"
 
@@ -72,10 +73,11 @@ namespace rocRoller
          * @param ValueCount
          * @return Register::ValuePtr
          */
-        Register::ValuePtr getRegister(int            tag,
-                                       Register::Type regType,
-                                       VariableType   varType,
-                                       size_t         ValueCount = 1);
+        Register::ValuePtr getRegister(int                         tag,
+                                       Register::Type              regType,
+                                       VariableType                varType,
+                                       size_t                      ValueCount   = 1,
+                                       Register::AllocationOptions allocOptions = {});
 
         /**
          * @brief Get the Register::Value associated with the provided tag.

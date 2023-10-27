@@ -533,6 +533,11 @@ namespace rocRoller
                                 {newAddr, vgprs},
                                 {offsetModifier},
                                 concatenate("Store local data ", comment)));
+                AssertFatal((width <= vgprs->allocation()->options().contiguousChunkWidth),
+                            "Write needs more contiguity",
+                            ShowValue(width),
+                            ShowValue(m_wordSize),
+                            ShowValue(vgprs->allocation()->options().contiguousChunkWidth));
                 count += width;
             }
         }

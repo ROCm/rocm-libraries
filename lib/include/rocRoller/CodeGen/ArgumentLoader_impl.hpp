@@ -64,8 +64,11 @@ namespace rocRoller
 
         if(value == nullptr || value->registerCount() < totalRegisters)
         {
-            value = Register::Value::Placeholder(
-                m_context.lock(), Register::Type::Scalar, DataType::Raw32, totalRegisters);
+            value = Register::Value::Placeholder(m_context.lock(),
+                                                 Register::Type::Scalar,
+                                                 DataType::Raw32,
+                                                 totalRegisters,
+                                                 Register::AllocationOptions::FullyContiguous());
         }
 
         // This is still needed even with deferred `subset()` since we generate

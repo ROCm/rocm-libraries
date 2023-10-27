@@ -112,8 +112,10 @@ namespace rocRollerTest
             co_yield m_context->argLoader()->getValue("ptr" + std::to_string(n), s_ptr);
             co_yield m_context->argLoader()->getValue("val" + std::to_string(n), s_value);
 
-            auto v_ptr = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
+            auto v_ptr   = Register::Value::Placeholder(m_context,
+                                                      Register::Type::Vector,
+                                                      {DataType::Float, PointerType::PointerGlobal},
+                                                      1);
             auto v_value = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Float, 1);
             auto v_target = Register::Value::Placeholder(
@@ -252,8 +254,8 @@ namespace rocRollerTest
 
         auto r_value
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
-        auto r_ptr
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Raw32, 2);
+        auto r_ptr = Register::Value::Placeholder(
+            m_context, Register::Type::Vector, {DataType::Int32, PointerType::PointerGlobal}, 1);
 
         auto scalar_overflow = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_ptr, s_value;
@@ -368,8 +370,8 @@ namespace rocRollerTest
         m_context->schedule(k->prolog());
 
         Register::ValuePtr s_result, s_a, s_b;
-        auto               v_result
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Raw32, 2);
+        auto               v_result = Register::Value::Placeholder(
+            m_context, Register::Type::Vector, {DataType::Int64, PointerType::PointerGlobal}, 1);
         auto v_a
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int64, 1);
         auto v_b
@@ -480,8 +482,8 @@ namespace rocRollerTest
 
         auto v_value
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
-        auto v_ptr
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Raw32, 2);
+        auto v_ptr = Register::Value::Placeholder(
+            m_context, Register::Type::Vector, {DataType::Int32, PointerType::PointerGlobal}, 1);
 
         auto set_vcc = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_ptr, s_value;

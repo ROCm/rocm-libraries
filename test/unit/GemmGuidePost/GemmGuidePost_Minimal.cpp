@@ -46,8 +46,12 @@ Generator<Instruction> rocRollerTest::SGEMM_Minimal_Program(rocRoller::ContextPt
         = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
     auto vgprSerial = m_context->kernel()->workitemIndex()[0];
 
-    auto accDestination = std::make_shared<Register::Value>(
-        m_context, Register::Type::Accumulator, DataType::Float, 16);
+    auto accDestination
+        = std::make_shared<Register::Value>(m_context,
+                                            Register::Type::Accumulator,
+                                            DataType::Float,
+                                            16,
+                                            Register::AllocationOptions::FullyContiguous());
 
     auto sgprWorkGroup0 = m_context->kernel()->workgroupIndex()[0];
     auto sgprWorkGroup1 = m_context->kernel()->workgroupIndex()[1];
@@ -477,7 +481,7 @@ auto vtemp3 = std::make_shared<Register::Value>(m_context, Register::Type::Vecto
 auto vtemp4 = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
 auto vtemp5 = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
 auto vtemp6 = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
-auto vDestination = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 16);
+auto vDestination = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 16, Register::AllocationOptions::FullyContiguous());
 co_yield Instruction::Comment(" computeStoreVgprs ");
 co_yield generateOp<Expression::LogicalShiftR>(vtemp1, vgprSerial, Register::Value::Literal(6)); //" vtemp1 = v[vgprSerial] / 64"
 co_yield generateOp<Expression::LogicalShiftR>(vtemp6, vtemp1, Register::Value::Literal(1)); //" vtemp6 = vtemp1 / 2"
