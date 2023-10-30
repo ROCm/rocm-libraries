@@ -441,12 +441,12 @@ DPWG(["wg: Workgroup"])
 GlobalTile(["MacroTileNumber(size=numTilesM x numTilesN x numTilesK)"])
 TileM(["M: MacroTileNumber(size=numTilesM)"])
 TileN(["N: MacroTileNumber(size=numTilesN)"])
-TileK(["K: MacroTileNumber(size=numTilesK)"])
+TileK(["Linear(size=numTilesK)"])
 
 FlattenMNK["Flatten"]
-TileM --> FlattenMNK
-TileN --> FlattenMNK
-TileK --> FlattenMNK
+TileM -- 0 --> FlattenMNK
+TileN -- 1 --> FlattenMNK
+TileK -- 2 --> FlattenMNK
 
 FlattenMNK --> GlobalTile
 

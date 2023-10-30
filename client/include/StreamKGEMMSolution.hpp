@@ -103,12 +103,7 @@ namespace rocRoller
                                                               num_workgroup_x * num_workgroup_y);
 
                     kernelOptions->loopOverOutputTilesDimensions = {0, 1};
-                    kernelOptions->loopOverOutputTilesCoordSizes
-                        = {static_cast<uint>(this->m_solutionParams.problemParams.m
-                                             / this->m_solutionParams.macM),
-                           static_cast<uint>(this->m_solutionParams.problemParams.n
-                                             / this->m_solutionParams.macN)};
-                    kernelOptions->streamK = true;
+                    kernelOptions->streamK                       = true;
                     return kernelOptions;
                 }
 

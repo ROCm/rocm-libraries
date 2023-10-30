@@ -310,10 +310,8 @@ namespace GEMMDriverTest
                 kernelOptions->numScratchTiles = std::min(numCUs, numWorkgroupX * numWorkgroupY);
 
                 kernelOptions->loopOverOutputTilesDimensions = {0, 1};
-                kernelOptions->loopOverOutputTilesCoordSizes
-                    = {static_cast<uint>(M / gemm.macM), static_cast<uint>(N / gemm.macN)};
-                kernelOptions->streamK        = true;
-                kernelOptions->streamKTwoTile = gemm.streamKTwoTile;
+                kernelOptions->streamK                       = true;
+                kernelOptions->streamKTwoTile                = gemm.streamKTwoTile;
             }
 
             auto params = std::make_shared<CommandParameters>();
@@ -396,7 +394,7 @@ namespace GEMMDriverTest
             // Device result
             std::vector<T> d_result(M * N);
 
-            for(int i = 0; i < numIters; ++i)
+            for(int iteration = 0; iteration < numIters; ++iteration)
             {
                 ASSERT_THAT(hipMemset(deviceD.get(), 0, M * N * sizeof(T)), HasHipSuccess(0));
 
@@ -428,7 +426,7 @@ namespace GEMMDriverTest
                     }
                 }
 
-                ASSERT_LT(rnorm, acceptableError) << "Iteration: " << i;
+                ASSERT_LT(rnorm, acceptableError) << "Iteration: " << iteration;
             }
         }
     };
