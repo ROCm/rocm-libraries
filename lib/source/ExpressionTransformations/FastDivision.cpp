@@ -69,7 +69,8 @@ namespace rocRoller
             auto rhsType = resultVariableType(rhs);
             auto lhsType = resultVariableType(lhs);
 
-            if(!(rhsType == DataType::Int32 || rhsType == DataType::Int64))
+            if(!(rhsType == DataType::Int32 || rhsType == DataType::Int64
+                 || rhsType == DataType::UInt32))
             {
                 // Unhandled case
                 return nullptr;
@@ -77,7 +78,7 @@ namespace rocRoller
 
             auto numerator   = lhs;
             auto denominator = rhs;
-            auto dataType    = DataType::Int32;
+            auto dataType    = rhsType;
 
             if(DataTypeInfo::Get(rhsType).elementSize > 4
                || DataTypeInfo::Get(lhsType).elementSize > 4)
@@ -90,48 +91,60 @@ namespace rocRoller
             auto k = context->kernel();
 
             // Create unique names for the new arguments
-            auto magicNumStr   = concatenate("magic_num_", k->arguments().size());
+            auto magicExprStr  = concatenate("magic_num_", k->arguments().size());
             auto magicShiftStr = concatenate("magic_shifts_", k->arguments().size());
             auto magicSignStr  = concatenate("magic_sign_", k->arguments().size());
 
             // Add the new arguments to the AssemblyKernel
             k->addArgument(
-                {magicNumStr, dataType, DataDirection::ReadOnly, magicMultiple(denominator)});
+                {magicExprStr, dataType, DataDirection::ReadOnly, magicMultiple(denominator)});
             k->addArgument({magicShiftStr,
                             DataType::Int32,
                             DataDirection::ReadOnly,
                             magicShifts(denominator)});
-            k->addArgument(
-                {magicSignStr, dataType, DataDirection::ReadOnly, magicSign(denominator)});
 
             // Create expressions of the new arguments
             auto magicExpr = std::make_shared<Expression>(
-                std::make_shared<AssemblyKernelArgument>(k->findArgument(magicNumStr)));
+                std::make_shared<AssemblyKernelArgument>(k->findArgument(magicExprStr)));
             auto numShiftsExpr = std::make_shared<Expression>(
                 std::make_shared<AssemblyKernelArgument>(k->findArgument(magicShiftStr)));
-            auto signExpr = std::make_shared<Expression>(
-                std::make_shared<AssemblyKernelArgument>(k->findArgument(magicSignStr)));
 
-            // Create expression that performs division using the new arguments
+            if(dataType == DataType::UInt32)
+            {
+                auto q   = multiplyHigh(numerator, magicExpr);
+                auto t   = (arithmeticShiftR(numerator - q, literal(1))) + q;
+                auto ret = arithmeticShiftR(t, numShiftsExpr);
+                return ret;
+            }
+            else
+            {
+                k->addArgument(
+                    {magicSignStr, dataType, DataDirection::ReadOnly, magicSign(denominator)});
+                auto signExpr = std::make_shared<Expression>(
+                    std::make_shared<AssemblyKernelArgument>(k->findArgument(magicSignStr)));
 
-            auto numBytes = DataTypeInfo::Get(dataType).elementSize;
+                // Create expression that performs division using the new arguments
 
-            auto q       = multiplyHigh(numerator, magicExpr) + numerator;
-            auto signOfQ = arithmeticShiftR(q, literal(numBytes * 8 - 1));
+                auto numBytes = DataTypeInfo::Get(dataType).elementSize;
 
-            // auto magicIsPow2 = -(magicExpr == literal(0, dataType));
+                auto q       = multiplyHigh(numerator, magicExpr) + numerator;
+                auto signOfQ = arithmeticShiftR(q, literal(numBytes * 8 - 1));
 
-            auto magicIsPow2 = logicalShiftR((-magicExpr) | magicExpr, literal(numBytes * 8 - 1))
-                               - literal(1, dataType); // 0 if != 0, -1 if equal to 0
+                // auto magicIsPow2 = -(magicExpr == literal(0, dataType));
 
-            auto handleSignOfLHS
-                = q + (signOfQ & ((literal(1, dataType) << numShiftsExpr) + magicIsPow2));
+                auto magicIsPow2
+                    = logicalShiftR((-magicExpr) | magicExpr, literal(numBytes * 8 - 1))
+                      - literal(1, dataType); // 0 if != 0, -1 if equal to 0
 
-            auto shiftedQ = arithmeticShiftR(handleSignOfLHS, numShiftsExpr);
+                auto handleSignOfLHS
+                    = q + (signOfQ & ((literal(1, dataType) << numShiftsExpr) + magicIsPow2));
 
-            auto result = (shiftedQ ^ signExpr) - signExpr;
+                auto shiftedQ = arithmeticShiftR(handleSignOfLHS, numShiftsExpr);
 
-            return result;
+                auto result = (shiftedQ ^ signExpr) - signExpr;
+
+                return result;
+            }
         }
 
         template <typename T>
@@ -423,7 +436,8 @@ namespace rocRoller
 
                 auto rhsType = resultVariableType(rhs);
                 if(rhsEvalTimes[EvaluationTime::KernelLaunch]
-                   && (rhsType == DataType::Int32 || rhsType == DataType::Int64))
+                   && (rhsType == DataType::Int32 || rhsType == DataType::Int64
+                       || rhsType == DataType::UInt32))
                 {
                     auto div = magicNumberDivision(lhs, rhs, m_context);
                     if(div)
@@ -451,7 +465,8 @@ namespace rocRoller
                 auto rhsType = resultVariableType(rhs);
 
                 if(rhsEvalTimes[EvaluationTime::KernelLaunch]
-                   && (rhsType == DataType::Int32 || rhsType == DataType::Int64))
+                   && (rhsType == DataType::Int32 || rhsType == DataType::Int64
+                       || rhsType == DataType::UInt32))
                 {
                     auto div = magicNumberDivision(lhs, rhs, m_context);
                     if(div)

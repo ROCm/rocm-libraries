@@ -546,6 +546,7 @@ namespace GPUArchitectureGenerator
                  "s_cmp_lt_u32",
                  "s_lshl_b32",
                  "s_lshl_b64",
+                 "s_lshr_b32",
                  "s_lshr_b64",
                  "s_mov_b32",
                  "s_mov_b64",

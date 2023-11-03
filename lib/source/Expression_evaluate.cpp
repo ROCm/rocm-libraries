@@ -384,6 +384,16 @@ namespace rocRoller
         struct OperationEvaluatorVisitor<MagicMultiple>
             : public UnaryEvaluatorVisitor<MagicMultiple>
         {
+            uint32_t evaluate(uint32_t const& arg) const
+            {
+                assertNonNullPointer(arg);
+                AssertFatal(arg != 1, "Fast division not supported for denominator == 1");
+
+                auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
+
+                return magic.magic;
+            }
+
             int32_t evaluate(int32_t const& arg) const
             {
                 assertNonNullPointer(arg);
@@ -427,6 +437,16 @@ namespace rocRoller
         template <>
         struct OperationEvaluatorVisitor<MagicShifts> : public UnaryEvaluatorVisitor<MagicShifts>
         {
+            int evaluate(uint32_t const& arg) const
+            {
+                assertNonNullPointer(arg);
+                AssertFatal(arg != 1, "Fast division not supported for denominator == 1");
+
+                auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
+
+                return magic.more & libdivide::LIBDIVIDE_32_SHIFT_MASK;
+            }
+
             int evaluate(int32_t const& arg) const
             {
                 assertNonNullPointer(arg);
@@ -449,7 +469,7 @@ namespace rocRoller
         template <>
         struct OperationEvaluatorVisitor<MagicSign> : public UnaryEvaluatorVisitor<MagicSign>
         {
-            int evaluate(int32_t const& arg) const
+            int32_t evaluate(int32_t const& arg) const
             {
                 assertNonNullPointer(arg);
 

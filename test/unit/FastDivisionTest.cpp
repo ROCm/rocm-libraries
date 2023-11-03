@@ -103,7 +103,9 @@ namespace FastDivisionTest
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(
             Expression::toString(expr_fast),
-            "Divide(CommandArgument(user_Int32_Value_0), CommandArgument(user_UInt32_Value_2))");
+            "ArithmeticShiftR(Add(ArithmeticShiftR(Subtract(CommandArgument(user_Int32_Value_0), "
+            "MultiplyHigh(CommandArgument(user_Int32_Value_0), magic_num_3)), 1i), "
+            "MultiplyHigh(CommandArgument(user_Int32_Value_0), magic_num_3)), magic_shifts_3)");
     }
 
     TEST_F(FastDivisionTest, ModuloByConstantExpressions)
@@ -186,9 +188,12 @@ namespace FastDivisionTest
 
         expr      = a % b_unsigned;
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        EXPECT_EQ(
-            Expression::toString(expr_fast),
-            "Modulo(CommandArgument(user_Int32_Value_0), CommandArgument(user_UInt32_Value_2))");
+        EXPECT_EQ(Expression::toString(expr_fast),
+                  "Subtract(CommandArgument(user_Int32_Value_0), "
+                  "Multiply(ArithmeticShiftR(Add(ArithmeticShiftR(Subtract(CommandArgument(user_"
+                  "Int32_Value_0), MultiplyHigh(CommandArgument(user_Int32_Value_0), "
+                  "magic_num_3)), 1i), MultiplyHigh(CommandArgument(user_Int32_Value_0), "
+                  "magic_num_3)), magic_shifts_3), CommandArgument(user_UInt32_Value_2)))");
     }
 
     class FastDivisionTestCurrentGPU : public CurrentGPUContextFixture
@@ -332,12 +337,6 @@ namespace FastDivisionTest
 
             for(A a : numerators)
             {
-                if(dataTypeA == DataType::UInt32 && a > std::numeric_limits<int32_t>::max())
-                {
-                    // FIXME: Tests fail on large unsigned integers between max int32 and max uint32
-                    continue;
-                }
-
                 for(B b : denominators)
                 {
                     if(b == 0)
@@ -348,28 +347,38 @@ namespace FastDivisionTest
                     runtimeArgs.append("a", a);
                     runtimeArgs.append("b", b);
 
-                    commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-
-                    R result;
-                    ASSERT_THAT(
-                        hipMemcpy(
-                            &result, d_result.get(), infoResult.elementSize, hipMemcpyDefault),
-                        HasHipSuccess(0));
-
-                    if(isModulo)
+                    if(dataTypeB == DataType::UInt32 && b == 1)
                     {
-                        EXPECT_EQ(result, a % b) << ShowValue(a) << ShowValue(dataTypeA)
-                                                 << ShowValue(b) << ShowValue(dataTypeB);
+                        EXPECT_THROW(commandKernel.launchKernel(runtimeArgs.runtimeArguments()),
+                                     FatalError);
                     }
                     else
                     {
-                        auto bLibDivide = libdivide::libdivide_s64_branchfree_gen(b);
-                        EXPECT_EQ(result, libdivide::libdivide_s64_branchfree_do(a, &bLibDivide))
-                            << ShowValue(a) << ShowValue(dataTypeA) << ShowValue(b)
-                            << ShowValue(dataTypeB);
+                        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-                        // Sanity check
-                        EXPECT_EQ(a / b, libdivide::libdivide_s64_branchfree_do(a, &bLibDivide));
+                        R result;
+                        ASSERT_THAT(
+                            hipMemcpy(
+                                &result, d_result.get(), infoResult.elementSize, hipMemcpyDefault),
+                            HasHipSuccess(0));
+
+                        if(isModulo)
+                        {
+                            EXPECT_EQ(result, a % b) << ShowValue(a) << ShowValue(dataTypeA)
+                                                     << ShowValue(b) << ShowValue(dataTypeB);
+                        }
+                        else
+                        {
+                            auto bLibDivide = libdivide::libdivide_s64_branchfree_gen(b);
+                            EXPECT_EQ(result,
+                                      libdivide::libdivide_s64_branchfree_do(a, &bLibDivide))
+                                << ShowValue(a) << ShowValue(dataTypeA) << ShowValue(b)
+                                << ShowValue(dataTypeB);
+
+                            // Sanity check
+                            EXPECT_EQ(a / b,
+                                      libdivide::libdivide_s64_branchfree_do(a, &bLibDivide));
+                        }
                     }
                 }
             }

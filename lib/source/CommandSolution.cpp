@@ -101,7 +101,9 @@ namespace rocRoller
                 throw std::runtime_error(concatenate("Evaluated argument type ",
                                                      variableType(value),
                                                      " doesn't match expected type ",
-                                                     arg.variableType));
+                                                     arg.variableType,
+                                                     " for argument ",
+                                                     arg.name));
             }
 
             rv.append(arg.name, value);

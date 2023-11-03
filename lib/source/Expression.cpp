@@ -166,7 +166,16 @@ namespace rocRoller
 
                 auto regType = Register::PromoteType(lhsVal.regType, rhsVal.regType);
 
-                auto varType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
+                VariableType varType;
+
+                if constexpr(std::same_as<T, ArithmeticShiftR>)
+                {
+                    varType = lhsVal.varType;
+                }
+                else
+                {
+                    varType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
+                }
 
                 return {regType, varType};
             }
