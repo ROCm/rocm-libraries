@@ -65,6 +65,7 @@ struct rocRoller::Serialization::
 
         iot::mapRequired(io, "streamK", result.solutionParams.streamK);
         iot::mapRequired(io, "numWGs", result.solutionParams.numWGs);
+        iot::mapRequired(io, "streamKTwoTile", result.solutionParams.streamKTwoTile);
 
         iot::mapRequired(io, "numWarmUp", result.benchmarkResults.runParams.numWarmUp);
         iot::mapRequired(io, "numOuter", result.benchmarkResults.runParams.numOuter);
@@ -203,6 +204,7 @@ int main(int argc, const char* argv[])
               Arg({"prefetchLDSFactor"}, "Prefetch 1/prefetchLDSFactor of MacroTile from LDS"));
     po.addArg("streamK", Arg({"streamK"}, "Enable StreamK Algorithm."));
     po.addArg("numWGs", Arg({"numWGs"}, "Number of workgroups to use with StreamK Algorithm."));
+    po.addArg("streamKTwoTile", Arg({"streamKTwoTile"}, "Enable streamKTwoTile Algorithm."));
 
     // Benchmarking options
     po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
@@ -264,6 +266,8 @@ int main(int argc, const char* argv[])
     {
         solution.numWGs = defaultNumWGs;
     }
+    solution.streamKTwoTile = po.get("streamKTwoTile", false);
+    AssertFatal(!solution.streamKTwoTile || solution.streamK);
 
     Client::RunParameters runParams;
     runParams.numWarmUp = po.get("num_warmup", 3);

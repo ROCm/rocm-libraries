@@ -43,7 +43,12 @@ namespace rocRoller
 
                 if(streamK)
                 {
-                    rv << "_SK" << numWGs;
+                    rv << "_SK";
+                    if(streamKTwoTile)
+                    {
+                        rv << "2T";
+                    }
+                    rv << numWGs;
                 }
 
                 return rv.str();

@@ -102,6 +102,7 @@ class GEMMSolution:
 
     streamK: bool = False
     numWGs: int = 0
+    streamKTwoTile: bool = False
 
     def __post_init__(self):
         convert_class_params(GEMMSolution, self)
@@ -239,6 +240,7 @@ class GEMMResult(GEMM, RRPerfResult):
             + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
             "SK": TF(self.streamK) + "/" + self.numWGs,
+            "2TSK": TF(self.streamKTwoTile),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),

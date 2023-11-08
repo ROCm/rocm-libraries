@@ -104,6 +104,7 @@ namespace rocRoller
 
                     kernelOptions->loopOverOutputTilesDimensions = {0, 1};
                     kernelOptions->streamK                       = true;
+                    kernelOptions->streamKTwoTile = this->m_solutionParams.streamKTwoTile;
                     return kernelOptions;
                 }
 
