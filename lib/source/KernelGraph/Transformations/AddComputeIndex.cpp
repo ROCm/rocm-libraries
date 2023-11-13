@@ -270,10 +270,10 @@ namespace rocRoller::KernelGraph
     }
 
     /**
-     * @brief Add ComputeIndexes for generic MATRIX from global.
+     * @brief Add ComputeIndexes for generic MATRIX to/from global.
      */
-    ComputeIndexChain
-        computeIndexElementMatrix(KernelGraph& graph, int loadstore, int source, bool forward)
+    ComputeIndexChain computeIndexElementMatrix(
+        KernelGraph& graph, int loadstore, int source, bool forward, std::unordered_set<int> zeros)
     {
         rocRoller::Log::getLogger()->debug(
             "KernelGraph::AddComputeIndex()::computeIndexElementMatrix({}, {}, {})",
@@ -334,8 +334,52 @@ namespace rocRoller::KernelGraph
 
         std::vector<int> ciOperations;
 
-        auto rowZeros = std::vector<int>{elemY};
-        auto colZeros = std::vector<int>{elemX};
+        auto unrollZeros = addZeros({elemX, elemY}, zeros);
+
+        auto [required, path] = findRequiredCoordinates(
+            source, forward ? Graph::Direction::Upstream : Graph::Direction::Downstream, graph);
+
+        auto unrolls = filterCoordinates<Unroll>(required, graph);
+        for(auto unroll : unrolls)
+        {
+            std::vector<int> neighbourNodes;
+            if(forward)
+                neighbourNodes = graph.coordinates.childNodes(unroll).to<std::vector>();
+            else
+                neighbourNodes = graph.coordinates.parentNodes(unroll).to<std::vector>();
+            for(auto neighbourNode : neighbourNodes)
+            {
+                if(path.contains(neighbourNode))
+                {
+                    int strideUnroll;
+                    if(forward)
+                    {
+                        strideUnroll
+                            = graph.coordinates.addElement(Stride(), {neighbourNode}, {source});
+                    }
+                    else
+                    {
+                        strideUnroll
+                            = graph.coordinates.addElement(Stride(), {source}, {neighbourNode});
+                    }
+                    ciOperations.push_back(makeComputeIndex(graph,
+                                                            source,
+                                                            neighbourNode,
+                                                            -1,
+                                                            -1,
+                                                            strideUnroll,
+                                                            -1,
+                                                            forward,
+                                                            dtype,
+                                                            unrollZeros,
+                                                            DataType::Int64,
+                                                            DataType::Int64));
+                }
+            }
+        }
+
+        auto rowZeros = addZeros({elemY}, zeros);
+        auto colZeros = addZeros({elemX}, zeros);
 
         ciOperations.push_back(makeComputeIndex(graph,
                                                 source,
@@ -844,7 +888,7 @@ namespace rocRoller::KernelGraph
         switch(chainType)
         {
         case STORE_ELEM:
-            return computeIndexElementMatrix(kgraph, tag, source, true);
+            return computeIndexElementMatrix(kgraph, tag, source, true, zeros);
         case STORE_WAVE_MATRIX_ACCUMULATOR:
             return computeIndexMatrixAccumulator(kgraph, tag, true, zeros);
         case LOAD_ELEM_MATRIX_A:
@@ -852,7 +896,7 @@ namespace rocRoller::KernelGraph
         case LOAD_ELEM_MATRIX_B:
             return computeIndexElementMatrixAB(kgraph, tag, 0, step);
         case LOAD_ELEM:
-            return computeIndexElementMatrix(kgraph, tag, source, false);
+            return computeIndexElementMatrix(kgraph, tag, source, false, zeros);
         case LOAD_WAVE_MATRIX_ACCUMULATOR:
             return computeIndexMatrixAccumulator(kgraph, tag, false, zeros);
         case LOAD_WAVE_MATRIX_A:

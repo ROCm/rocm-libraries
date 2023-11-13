@@ -296,7 +296,8 @@ namespace rocRoller
                         {m_solutionParams.macM, m_solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b},
-                        m_solutionParams.storeLDSD ? MemoryType::LDS : MemoryType::WAVE);
+                        m_solutionParams.storeLDSD ? MemoryType::JAMMED_WAVE_LDS
+                                                   : MemoryType::WAVE);
 
                     params->setDimensionInfo(4, mac_tile_A);
                     params->setDimensionInfo(11, mac_tile_B);

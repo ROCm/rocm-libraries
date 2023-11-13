@@ -68,7 +68,7 @@ namespace rocRoller
          *
          * @return std::vector<unsigned int>
          */
-        std::vector<unsigned int> getWaveTilesPerWorkgroup() const;
+        std::vector<unsigned int> getWaveTilesPerWavefront() const;
 
     private:
         std::map<int, KernelGraph::CoordinateGraph::Dimension>  m_dimInfo;
@@ -78,7 +78,7 @@ namespace rocRoller
 
         int m_kernelDimension = 0;
 
-        std::vector<unsigned int> m_waveTilesPerWorkgroup;
+        std::vector<unsigned int> m_waveTilesPerWavefront;
     };
 
     class CommandKernel

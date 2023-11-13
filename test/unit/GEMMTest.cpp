@@ -337,7 +337,7 @@ namespace GEMMDriverTest
                 {gemm.macM, gemm.macN},
                 LayoutType::MATRIX_ACCUMULATOR,
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                gemm.storeLDSD ? MemoryType::LDS : MemoryType::WAVE);
+                gemm.storeLDSD ? MemoryType::JAMMED_WAVE_LDS : MemoryType::WAVE);
 
             params->setDimensionInfo(4, macTileA);
             params->setDimensionInfo(11, macTileB);

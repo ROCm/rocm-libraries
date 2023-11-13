@@ -174,6 +174,8 @@ namespace rocRoller
             return "WAVE";
         case MemoryType::WAVE_LDS:
             return "WAVE_LDS";
+        case MemoryType::JAMMED_WAVE_LDS:
+            return "JAMMED_WAVE_LDS";
 
         case MemoryType::Count:;
         }

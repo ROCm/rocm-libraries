@@ -129,6 +129,7 @@ namespace rocRoller
         VGPR,
         WAVE,
         WAVE_LDS,
+        JAMMED_WAVE_LDS,
 
         Count,
         None = Count

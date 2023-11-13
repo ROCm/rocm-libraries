@@ -280,6 +280,18 @@ namespace rocRoller
                                ContextPtr   context);
 
         /**
+         * @brief Create an internal tile backed by a ThreadTile.  The
+         * internal tile is reduced in size according to numWaveTiles.
+         *
+         * Implemented in LowerTile.cpp.
+         */
+        int createInternalTile(KernelGraph&                     graph,
+                               VariableType                     varType,
+                               int                              macTileTag,
+                               std::vector<unsigned int> const& numWaveTiles,
+                               ContextPtr                       context);
+
+        /**
          * @brief Order all input pairs of memory nodes in graph.
          *
          * @param graph

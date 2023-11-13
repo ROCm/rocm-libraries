@@ -149,6 +149,8 @@ namespace rocRoller
 
             VariableType variableType;
             MemoryType   memoryType;
+
+            bool jammed;
         };
 
         bool operator<(LDSSpec const& a, LDSSpec const& b)
@@ -222,10 +224,12 @@ namespace rocRoller
             auto [required, path]    = findRequiredCoordinates(target, direction, k);
             auto forLoopCoordinates  = filterCoordinates<ForLoop>(required, k);
 
+            auto isJammed = macroTile.memoryType == MemoryType::JAMMED_WAVE_LDS;
+
             auto maybeForLoop = findContainingOperation<ForLoopOp>(opTag, k);
             int  forLoopCoord = -1;
-            int  operation;
-            if(maybeForLoop)
+            int  operation    = opTag;
+            if(!isJammed && maybeForLoop)
             {
                 operation = *maybeForLoop;
                 auto f    = getForLoopCoords(*maybeForLoop, k).first;
@@ -233,10 +237,6 @@ namespace rocRoller
                 {
                     forLoopCoord = f;
                 }
-            }
-            else
-            {
-                operation = opTag;
             }
 
             auto maybeUnroll      = findUnrollNeighbour(k, forLoopCoord);
@@ -261,7 +261,8 @@ namespace rocRoller
                     unrollCoordValue,
                     operation,
                     getVariableType(k, opTag),
-                    macroTile.memoryType};
+                    macroTile.memoryType,
+                    isJammed};
         }
 
         /**
@@ -290,7 +291,7 @@ namespace rocRoller
 
             void addLoadOperations(KernelGraph& graph);
             void addStoreOperations(KernelGraph& graph);
-            void addStoreOperations(KernelGraph& graph, int storetag, LDSSpec const& spec);
+            void addStoreOperation(KernelGraph& graph, int storetag, LDSSpec const& spec);
             void addLoadOperationsPrefetch(KernelGraph& graph, int forLoop, int numUnroll);
 
             void stageLoad(KernelGraph const&, int loadTag);
@@ -422,6 +423,9 @@ namespace rocRoller
             auto [userTag, user] = k.getDimension<User>(loadTag);
             auto [tileTag, tile] = k.getDimension<MacroTile>(loadTag);
 
+            if(tile.memoryType == MemoryType::JAMMED_WAVE_LDS)
+                Throw<FatalError>("JAMMED AddLDSVisitor::stageLoad");
+
             if(!(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS))
                 return;
 
@@ -453,7 +457,8 @@ namespace rocRoller
             auto [userTag, user] = k.getDimension<User>(storeTag);
             auto [tileTag, tile] = k.getDimension<MacroTile>(storeTag);
 
-            if(!(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS))
+            if(!(tile.memoryType == MemoryType::JAMMED_WAVE_LDS
+                 || tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS))
                 return;
 
             rocRoller::Log::getLogger()->debug(
@@ -606,7 +611,8 @@ namespace rocRoller
 
                 if(!updatedTiles.contains(macroTileTag))
                 {
-                    if(macroTile.memoryType == MemoryType::WAVE_LDS)
+                    if(macroTile.memoryType == MemoryType::WAVE_LDS
+                       || macroTile.memoryType == MemoryType::JAMMED_WAVE_LDS)
                         macroTile.memoryType = MemoryType::WAVE;
                     else
                         macroTile.memoryType = MemoryType::VGPR;
@@ -1003,8 +1009,7 @@ namespace rocRoller
             }
         }
 
-        void
-            AddLDSVisitor::addStoreOperations(KernelGraph& graph, int storeTag, LDSSpec const& spec)
+        void AddLDSVisitor::addStoreOperation(KernelGraph& graph, int storeTag, LDSSpec const& spec)
         {
             auto storeDBarrierRW = graph.control.addElement(Barrier());
             // Find all incoming edges into StoreLDSTile.
@@ -1022,12 +1027,12 @@ namespace rocRoller
             auto barrier = graph.control.addElement(Barrier());
             graph.control.addElement(Sequence(), {storeTag}, {barrier});
 
-            auto forLoop                  = spec.operation;
             auto loadMacroTileFromLDSNode = m_info[spec].ldsChain;
             auto storeMacroTileIntoGlobal = m_info[spec].globalChain;
 
-            graph.control.addElement(Sequence(), {forLoop}, {loadMacroTileFromLDSNode});
+            auto prevOperation = spec.jammed ? barrier : spec.operation;
 
+            graph.control.addElement(Sequence(), {prevOperation}, {loadMacroTileFromLDSNode});
             graph.control.addElement(
                 Sequence(), {loadMacroTileFromLDSNode}, {storeMacroTileIntoGlobal});
         }
@@ -1036,12 +1041,9 @@ namespace rocRoller
         {
             rocRoller::Log::getLogger()->debug("KernelGraph::AddLDSVisitor::addStoreOperations()");
 
-            for(auto spec : m_storeSpecs)
+            for(auto [storeTag, storeSpec] : m_stagedStores)
             {
-                for(auto [storeTag, storeSpec] : m_stagedStores)
-                {
-                    addStoreOperations(graph, storeTag, spec);
-                }
+                addStoreOperation(graph, storeTag, storeSpec);
             }
         }
 

@@ -276,13 +276,13 @@ namespace rocRoller
             }
 
             // Add loops to iterate over wavetiles within a wavefront
-            auto wavetilesPerWorkgroup = params->getWaveTilesPerWorkgroup();
-            AssertFatal(wavetilesPerWorkgroup.size() > 1);
+            auto wavetilesPerWavefront = params->getWaveTilesPerWavefront();
+            AssertFatal(wavetilesPerWavefront.size() > 1);
 
             auto [WaveTilesX, forWaveTilesX]
-                = rangeFor(graph, literal(wavetilesPerWorkgroup[0]), rocRoller::XLOOP);
+                = rangeFor(graph, literal(wavetilesPerWavefront[0]), rocRoller::XLOOP);
             auto [WaveTilesY, forWaveTilesY]
-                = rangeFor(graph, literal(wavetilesPerWorkgroup[1]), rocRoller::YLOOP);
+                = rangeFor(graph, literal(wavetilesPerWavefront[1]), rocRoller::YLOOP);
 
             graph.control.addElement(Body(), {info.kernel}, {forWaveTilesX});
             graph.control.addElement(Body(), {forWaveTilesX}, {forWaveTilesY});

@@ -13,7 +13,7 @@
 namespace rocRoller
 {
     CommandParameters::CommandParameters()
-        : m_waveTilesPerWorkgroup({1, 1})
+        : m_waveTilesPerWavefront({1, 1})
     {
     }
 
@@ -72,13 +72,13 @@ namespace rocRoller
 
     void CommandParameters::setWaveTilesPerWavefront(unsigned int x, unsigned int y)
     {
-        m_waveTilesPerWorkgroup[0] = x;
-        m_waveTilesPerWorkgroup[1] = y;
+        m_waveTilesPerWavefront[0] = x;
+        m_waveTilesPerWavefront[1] = y;
     }
 
-    std::vector<unsigned int> CommandParameters::getWaveTilesPerWorkgroup() const
+    std::vector<unsigned int> CommandParameters::getWaveTilesPerWavefront() const
     {
-        return m_waveTilesPerWorkgroup;
+        return m_waveTilesPerWavefront;
     }
 
     KernelArguments CommandKernel::getKernelArguments(RuntimeArguments const& args)
