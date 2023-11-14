@@ -58,7 +58,11 @@ public:
 };
 
 typedef ::testing::Types<
-    // Power of 2 BlockSize
+// Power of 2 BlockSize
+#if HIPCUB_IS_INT128_ENABLED
+    params<__int128_t, __int128_t, 64U, 1>,
+    params<__uint128_t, __uint128_t, 64U, 1>,
+#endif
     params<unsigned int, int, 64U, 1>,
     params<int, int, 128U, 1>,
     params<unsigned int, int, 256U, 1>,

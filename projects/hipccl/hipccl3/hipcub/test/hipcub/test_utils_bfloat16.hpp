@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,8 +40,8 @@ using bfloat16 = ::__nv_bfloat16;
 using native_bfloat16 = bfloat16_t;
 
 // Support bfloat16 operators on host side
-HIPCUB_HOST inline
-test_utils::bfloat16 native_to_bfloat16(const test_utils::native_bfloat16& x)
+HIPCUB_HOST_DEVICE inline test_utils::bfloat16
+    native_to_bfloat16(const test_utils::native_bfloat16& x)
 {
     return *reinterpret_cast<const test_utils::bfloat16 *>(&x);
 }

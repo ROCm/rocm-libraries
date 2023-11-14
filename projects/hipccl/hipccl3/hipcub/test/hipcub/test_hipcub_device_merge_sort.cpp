@@ -317,8 +317,6 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortKeys)
     }
 }
 
-// hipCUB currently provides the CUB 1.x interface, StableSortKeysCopy is part of CUB 2.x
-#ifdef __HIP_PLATFORM_AMD__
 TYPED_TEST(HipcubDeviceMergeSort, StableSortKeysCopy)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -402,7 +400,6 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortKeysCopy)
         }
     }
 }
-#endif
 
 TYPED_TEST(HipcubDeviceMergeSort, SortPairs)
 {
