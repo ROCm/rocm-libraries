@@ -34,6 +34,7 @@
 #include <type_traits>
 
 #include "../../config.hpp"
+#include "util_type.hpp"
 
 #include <rocprim/intrinsics/warp_shuffle.hpp>
 
@@ -241,6 +242,21 @@ unsigned int BFE(UnsignedBits source,
     static_assert(std::is_unsigned<UnsignedBits>::value, "UnsignedBits must be unsigned");
     return detail::unsigned_bit_extract(source, bit_start, num_bits);
 }
+
+#if HIPCUB_IS_INT128_ENABLED
+/**
+ * Bitfield-extract for 128-bit types.
+ */
+template<typename UnsignedBits>
+__device__ __forceinline__ unsigned int BFE(UnsignedBits source,
+                                            unsigned int bit_start,
+                                            unsigned int num_bits,
+                                            Int2Type<16> /*byte_len*/)
+{
+    const __uint128_t MASK = (__uint128_t{1} << num_bits) - 1;
+    return (source >> bit_start) & MASK;
+}
+#endif
 
 // Bitfield insert.
 // Inserts the \p num_bits least significant bits of \p y into \p x at bit-offset \p bit_start.

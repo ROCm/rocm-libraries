@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -141,15 +141,13 @@ inline void generate_input_data(std::vector<key_type> &keys_input,
             seed_value + seed_value_addition
         );
     }
-    
+
     offsets.clear();
-    unsigned segments_count = 0;
     size_t offset = 0;
     while(offset < size)
     {
         const size_t segment_length = segment_length_distribution(gen);
         offsets.push_back(offset);
-        ++segments_count;
         offset += segment_length;
     }
     offsets.push_back(size);

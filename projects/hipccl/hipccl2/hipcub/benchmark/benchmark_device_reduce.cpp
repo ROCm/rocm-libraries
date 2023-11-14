@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -119,7 +119,7 @@ template<typename T>
 struct Benchmark<T, hipcub::Sum> {
     static void run(benchmark::State& state, size_t size, const hipStream_t stream)
     {
-        run_benchmark<T, T>(state, size, stream, hipcub::DeviceReduce::Sum<T*, T*>);
+        run_benchmark<T, T>(state, size, stream, hipcub::DeviceReduce::Sum<T*, T*, int>);
     }
 };
 
@@ -127,7 +127,7 @@ template<typename T>
 struct Benchmark<T, hipcub::Min> {
     static void run(benchmark::State& state, size_t size, const hipStream_t stream)
     {
-        run_benchmark<T, T>(state, size, stream, hipcub::DeviceReduce::Min<T*, T*>);
+        run_benchmark<T, T>(state, size, stream, hipcub::DeviceReduce::Min<T*, T*, int>);
     }
 };
 
@@ -139,7 +139,10 @@ struct Benchmark<T, hipcub::ArgMin> {
 
     static void run(benchmark::State& state, size_t size, const hipStream_t stream)
     {
-        run_benchmark<T, KeyValue>(state, size, stream, hipcub::DeviceReduce::ArgMin<T*, KeyValue*>);
+        run_benchmark<T, KeyValue>(state,
+                                   size,
+                                   stream,
+                                   hipcub::DeviceReduce::ArgMin<T*, KeyValue*, int>);
     }
 };
 

@@ -336,8 +336,11 @@ inline auto get_random_data(size_t size, T min, T max, int seed_value)
 }
 
 template<class T, class S, class U>
-inline auto get_random_data(size_t size, S min, U max, int seed_value)
-    -> typename std::enable_if<!std::is_integral<T>::value && !is_custom_test_type<T>::value, std::vector<T>>::type
+inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
+    typename std::enable_if<!std::is_integral<T>::value && !is_custom_test_type<T>::value
+                                && !std::is_same<T, __int128_t>::value
+                                && !std::is_same<T, __uint128_t>::value,
+                            std::vector<T>>::type
 {
     std::default_random_engine gen(seed_value);
     using dis_type =
@@ -349,6 +352,34 @@ inline auto get_random_data(size_t size, S min, U max, int seed_value)
         data.end(),
         [&]() { return static_cast<T>(distribution(gen)); }
     );
+    return data;
+}
+
+template<class T, class S, class U>
+inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
+    typename std::enable_if<std::is_same<T, __int128_t>::value, std::vector<T>>::type
+{
+    std::default_random_engine             gen(seed_value);
+    std::uniform_int_distribution<int64_t> distribution(static_cast<int64_t>(min),
+                                                        static_cast<int64_t>(max));
+    std::vector<T>                         data(size);
+    std::generate(data.begin(),
+                  data.end(),
+                  [&]() { return static_cast<T>(distribution(gen)) * 2; });
+    return data;
+}
+
+template<class T, class S, class U>
+inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
+    typename std::enable_if<std::is_same<T, __uint128_t>::value, std::vector<T>>::type
+{
+    std::default_random_engine              gen(seed_value);
+    std::uniform_int_distribution<uint64_t> distribution(static_cast<uint64_t>(min),
+                                                         static_cast<uint64_t>(max));
+    std::vector<T>                          data(size);
+    std::generate(data.begin(),
+                  data.end(),
+                  [&]() { return static_cast<T>(distribution(gen)) * 2; });
     return data;
 }
 

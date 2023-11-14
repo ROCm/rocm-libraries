@@ -40,7 +40,8 @@
      #include <cuda_fp16.h>
  #endif
 
- #include <iosfwd>
+#include <cstring>
+#include <iosfwd>
 
 #ifdef __GNUC__
 // There's a ton of type-punning going on in this file.
@@ -181,7 +182,10 @@ struct half_t
                 f = (0xff << 23) | (sign << 31);    //  inf
             }
         }
-        return *reinterpret_cast<float const *>(&f);
+        static_assert(sizeof(float) == sizeof(std::uint32_t), "4-byte size check");
+        float ret{};
+        std::memcpy(&ret, &f, sizeof(float));
+        return ret;
     }
 
 

@@ -128,16 +128,18 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
     constexpr size_t ws64 = size_t(HIPCUB_WARP_SIZE_64);
 
     // Block size of warp size 32
-    constexpr size_t block_size_ws32 =
-        test_utils::is_power_of_two(logical_warp_size)
-            ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
-            : test_utils::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
+    constexpr size_t block_size_ws32
+        = test_utils::is_power_of_two(logical_warp_size)
+              ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
+              : test_utils::max<size_t>((ws32 / logical_warp_size) * logical_warp_size,
+                                        static_cast<size_t>(1));
 
     // Block size of warp size 64
-    constexpr size_t block_size_ws64 =
-        test_utils::is_power_of_two(logical_warp_size)
-            ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
-            : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
+    constexpr size_t block_size_ws64
+        = test_utils::is_power_of_two(logical_warp_size)
+              ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
+              : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
+                                        static_cast<size_t>(1));
 
     const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
@@ -273,16 +275,18 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
     constexpr size_t ws64 = size_t(HIPCUB_WARP_SIZE_64);
 
     // Block size of warp size 32
-    constexpr size_t block_size_ws32 =
-        test_utils::is_power_of_two(logical_warp_size)
-            ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
-            : test_utils::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
+    constexpr size_t block_size_ws32
+        = test_utils::is_power_of_two(logical_warp_size)
+              ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
+              : test_utils::max<size_t>((ws32 / logical_warp_size) * logical_warp_size,
+                                        static_cast<size_t>(1));
 
     // Block size of warp size 64
-    constexpr size_t block_size_ws64 =
-        test_utils::is_power_of_two(logical_warp_size)
-            ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
-            : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
+    constexpr size_t block_size_ws64
+        = test_utils::is_power_of_two(logical_warp_size)
+              ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
+              : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
+                                        static_cast<size_t>(1));
 
     const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
@@ -419,16 +423,18 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
     constexpr size_t ws64 = size_t(HIPCUB_WARP_SIZE_64);
 
     // Block size of warp size 32
-    constexpr size_t block_size_ws32 =
-        test_utils::is_power_of_two(logical_warp_size)
-            ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
-            : test_utils::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
+    constexpr size_t block_size_ws32
+        = test_utils::is_power_of_two(logical_warp_size)
+              ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
+              : test_utils::max<size_t>((ws32 / logical_warp_size) * logical_warp_size,
+                                        static_cast<size_t>(1));
 
     // Block size of warp size 64
-    constexpr size_t block_size_ws64 =
-        test_utils::is_power_of_two(logical_warp_size)
-            ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
-            : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
+    constexpr size_t block_size_ws64
+        = test_utils::is_power_of_two(logical_warp_size)
+              ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
+              : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
+                                        static_cast<size_t>(1));
 
     const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
@@ -612,16 +618,18 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
     constexpr size_t ws64 = size_t(HIPCUB_WARP_SIZE_64);
 
     // Block size of warp size 32
-    constexpr size_t block_size_ws32 =
-        test_utils::is_power_of_two(logical_warp_size)
-            ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
-            : test_utils::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
+    constexpr size_t block_size_ws32
+        = test_utils::is_power_of_two(logical_warp_size)
+              ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
+              : test_utils::max<size_t>((ws32 / logical_warp_size) * logical_warp_size,
+                                        static_cast<size_t>(1));
 
     // Block size of warp size 64
-    constexpr size_t block_size_ws64 =
-        test_utils::is_power_of_two(logical_warp_size)
-            ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
-            : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
+    constexpr size_t block_size_ws64
+        = test_utils::is_power_of_two(logical_warp_size)
+              ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
+              : test_utils::max<size_t>((ws64 / logical_warp_size) * logical_warp_size,
+                                        static_cast<size_t>(1));
 
     const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 

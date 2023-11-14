@@ -21,7 +21,9 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
-#include "test_utils_argminmax.hpp"
+
+// Thread operators fixes for extended float types
+#include "test_utils_thread_operators.hpp"
 
 // hipcub API
 #include "hipcub/device/device_segmented_reduce.hpp"

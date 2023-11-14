@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -48,6 +48,22 @@ BEGIN_HIPCUB_NAMESPACE
 using NullType = ::rocprim::empty_type;
 
 #endif
+
+#ifndef HIPCUB_IS_INT128_ENABLED
+    #if defined(__HIPCC_RTC__)
+        #if defined(__HIPCC_RTC_INT128__)
+            #define HIPCUB_IS_INT128_ENABLED 1
+        #endif // !defined(__HIPCC_RTC_INT128__)
+    #else // !defined(__HIPCC_RTC__)
+        #if HIP_VERSION >= 50400000
+            #if(HIPCUB_HOST_COMPILER == HIPCUB_HOST_COMPILER_GCC)                         \
+                || (HIPCUB_HOST_COMPILER == HIPCUB_HOST_COMPILER_CLANG) || defined(__ICC) \
+                || defined(__GNUC__) || defined(__clang__)
+                #define HIPCUB_IS_INT128_ENABLED 1
+            #endif // GCC || CLANG || ICC
+        #endif // VER >= 5.4
+    #endif // !defined(__HIPCC_RTC__)
+#endif // !defined(HIPCUB_IS_INT128_ENABLED)
 
 template<bool B, typename T, typename F> struct
 [[deprecated("[Since 1.16] If is deprecated use std::conditional instead.")]] If
@@ -624,6 +640,79 @@ template <> struct NumericTraits<unsigned short> :      BaseTraits<UNSIGNED_INTE
 template <> struct NumericTraits<unsigned int> :        BaseTraits<UNSIGNED_INTEGER, true, false, unsigned int, unsigned int> {};
 template <> struct NumericTraits<unsigned long> :       BaseTraits<UNSIGNED_INTEGER, true, false, unsigned long, unsigned long> {};
 template <> struct NumericTraits<unsigned long long> :  BaseTraits<UNSIGNED_INTEGER, true, false, unsigned long long, unsigned long long> {};
+
+    #if HIPCUB_IS_INT128_ENABLED
+template<>
+struct NumericTraits<__uint128_t>
+{
+    using T            = __uint128_t;
+    using UnsignedBits = __uint128_t;
+
+    static constexpr Category     CATEGORY   = UNSIGNED_INTEGER;
+    static constexpr UnsignedBits LOWEST_KEY = UnsignedBits(0);
+    static constexpr UnsignedBits MAX_KEY    = UnsignedBits(-1);
+
+    static constexpr bool PRIMITIVE = false;
+    static constexpr bool NULL_TYPE = false;
+
+    static __host__ __device__ __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
+    {
+        return key;
+    }
+
+    static __host__ __device__ __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
+    {
+        return key;
+    }
+
+    static __host__ __device__ __forceinline__ T Max()
+    {
+        return MAX_KEY;
+    }
+
+    static __host__ __device__ __forceinline__ T Lowest()
+    {
+        return LOWEST_KEY;
+    }
+};
+
+template<>
+struct NumericTraits<__int128_t>
+{
+    using T            = __int128_t;
+    using UnsignedBits = __uint128_t;
+
+    static constexpr Category     CATEGORY   = SIGNED_INTEGER;
+    static constexpr UnsignedBits HIGH_BIT   = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
+    static constexpr UnsignedBits LOWEST_KEY = HIGH_BIT;
+    static constexpr UnsignedBits MAX_KEY    = UnsignedBits(-1) ^ HIGH_BIT;
+
+    static constexpr bool PRIMITIVE = false;
+    static constexpr bool NULL_TYPE = false;
+
+    static __host__ __device__ __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
+    {
+        return key ^ HIGH_BIT;
+    };
+
+    static __host__ __device__ __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
+    {
+        return key ^ HIGH_BIT;
+    };
+
+    static __host__ __device__ __forceinline__ T Max()
+    {
+        UnsignedBits retval = MAX_KEY;
+        return reinterpret_cast<T&>(retval);
+    }
+
+    static __host__ __device__ __forceinline__ T Lowest()
+    {
+        UnsignedBits retval = LOWEST_KEY;
+        return reinterpret_cast<T&>(retval);
+    }
+};
+    #endif
 
 template <> struct NumericTraits<float> :               BaseTraits<FLOATING_POINT, true, false, unsigned int, float> {};
 template <> struct NumericTraits<double> :              BaseTraits<FLOATING_POINT, true, false, unsigned long long, double> {};

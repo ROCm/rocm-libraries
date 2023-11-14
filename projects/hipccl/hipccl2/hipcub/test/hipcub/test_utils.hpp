@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -184,18 +184,114 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
     return ++d_first;
 }
 
-template<class T>
-HIPCUB_HOST_DEVICE inline
-constexpr T max(const T& a, const T& b)
+template<class T, class U = T>
+HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type max(const T& t,
+                                                                              const U& u)
 {
-    return a < b ? b : a;
+    return t < u ? u : t;
+}
+
+HIPCUB_HOST_DEVICE inline test_utils::half max(const test_utils::half& a, const test_utils::half& b)
+{
+    return test_utils::half_maximum{}(a, b);
 }
 
 template<class T>
-HIPCUB_HOST_DEVICE inline
-constexpr T min(const T& a, const T& b)
+HIPCUB_HOST_DEVICE inline constexpr T max(const T& t, const test_utils::half& u)
 {
-    return a < b ? a : b;
+    return test_utils::max(t, static_cast<T>(u));
+}
+
+template<class T>
+HIPCUB_HOST_DEVICE inline constexpr T max(const test_utils::half& t, const T& u)
+{
+    return test_utils::max(static_cast<T>(t), u);
+}
+
+HIPCUB_HOST_DEVICE inline test_utils::bfloat16 max(const test_utils::bfloat16& a,
+                                                   const test_utils::bfloat16& b)
+{
+    return test_utils::bfloat16_maximum{}(a, b);
+}
+
+template<class T>
+HIPCUB_HOST_DEVICE inline constexpr T max(const T& t, const test_utils::bfloat16& u)
+{
+    return test_utils::max(t, static_cast<T>(u));
+}
+
+template<class T>
+HIPCUB_HOST_DEVICE inline constexpr T max(const test_utils::bfloat16& t, const T& u)
+{
+    return test_utils::max(static_cast<T>(t), u);
+}
+
+template<class T, class U>
+HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<test_utils::custom_test_type<T>,
+                                                              test_utils::custom_test_type<U>>::type
+    min(const test_utils::custom_test_type<T>& t, const test_utils::custom_test_type<U>& u)
+{
+    using common_type = typename std::common_type<test_utils::custom_test_type<T>,
+                                                  test_utils::custom_test_type<U>>::type;
+    const common_type common_t(t);
+    const common_type common_u(u);
+
+    return common_t < common_u ? common_t : common_u;
+}
+
+template<class T, class U = T>
+HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type min(const T& t,
+                                                                              const U& u)
+{
+    return t < u ? t : u;
+}
+
+template<class T>
+HIPCUB_HOST_DEVICE inline constexpr T min(const T& t, const test_utils::half& u)
+{
+    return test_utils::min(t, static_cast<T>(u));
+}
+
+template<class T>
+HIPCUB_HOST_DEVICE inline constexpr T min(const test_utils::half& t, const T& u)
+{
+    return test_utils::min(static_cast<T>(t), u);
+}
+
+HIPCUB_HOST_DEVICE inline test_utils::half min(const test_utils::half& a, const test_utils::half& b)
+{
+    return test_utils::half_minimum{}(a, b);
+}
+
+template<class T>
+HIPCUB_HOST_DEVICE inline constexpr T min(const T& t, const test_utils::bfloat16& u)
+{
+    return test_utils::min(t, static_cast<T>(u));
+}
+
+template<class T>
+HIPCUB_HOST_DEVICE inline constexpr T min(const test_utils::bfloat16& t, const T& u)
+{
+    return test_utils::min(static_cast<T>(t), u);
+}
+
+HIPCUB_HOST_DEVICE inline test_utils::bfloat16 min(const test_utils::bfloat16& a,
+                                                   const test_utils::bfloat16& b)
+{
+    return test_utils::bfloat16_minimum{}(a, b);
+}
+
+template<class T, class U>
+HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<test_utils::custom_test_type<T>,
+                                                              test_utils::custom_test_type<U>>::type
+    max(const test_utils::custom_test_type<T>& t, const test_utils::custom_test_type<U>& u)
+{
+    using common_type = typename std::common_type<test_utils::custom_test_type<T>,
+                                                  test_utils::custom_test_type<U>>::type;
+    const common_type common_t(t);
+    const common_type common_u(u);
+
+    return common_t < common_u ? common_u : common_t;
 }
 
 template<class T>

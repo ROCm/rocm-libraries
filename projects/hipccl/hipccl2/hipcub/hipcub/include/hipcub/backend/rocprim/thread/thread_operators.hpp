@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -34,25 +34,25 @@
 
 #include "../util_type.hpp"
 
+#include <rocprim/detail/match_result_type.hpp>
+
 BEGIN_HIPCUB_NAMESPACE
 
 struct Equality
 {
-    template<class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr bool operator()(const T& a, const T& b) const
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr bool operator()(T&& t, U&& u) const
     {
-        return a == b;
+        return std::forward<T>(t) == std::forward<U>(u);
     }
 };
 
 struct Inequality
 {
-    template<class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr bool operator()(const T& a, const T& b) const
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr bool operator()(T&& t, U&& u) const
     {
-        return a != b;
+        return std::forward<T>(t) != std::forward<U>(u);
     }
 };
 
@@ -64,61 +64,57 @@ struct InequalityWrapper
     HIPCUB_HOST_DEVICE inline
     InequalityWrapper(EqualityOp op) : op(op) {}
 
-    template<class T>
-    HIPCUB_HOST_DEVICE inline
-    bool operator()(const T &a, const T &b)
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline bool operator()(T&& t, U&& u)
     {
-        return !op(a, b);
+        return !op(std::forward<T>(t), std::forward<U>(u));
     }
 };
 
 struct Sum
 {
-    template<class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr T operator()(const T &a, const T &b) const
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
     {
-        return a + b;
+        return std::forward<T>(t) + std::forward<U>(u);
     }
 };
 
 struct Difference
 {
-    template <class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr T operator()(const T &a, const T &b) const
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
     {
-        return a - b;
+        return std::forward<T>(t) - std::forward<U>(u);
     }
 };
 
 struct Division
 {
-    template <class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr T operator()(const T &a, const T &b) const
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr auto operator()(T&& t, U&& u) const -> decltype(auto)
     {
-        return a / b;
+        return std::forward<T>(t) / std::forward<U>(u);
     }
 };
 
 struct Max
 {
-    template<class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr T operator()(const T &a, const T &b) const
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
+        operator()(T&& t, U&& u) const
     {
-        return a < b ? b : a;
+        return t < u ? u : t;
     }
 };
 
 struct Min
 {
-    template<class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr T operator()(const T &a, const T &b) const
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
+        operator()(T&& t, U&& u) const
     {
-        return a < b ? a : b;
+        return t < u ? t : u;
     }
 };
 
@@ -155,9 +151,8 @@ struct ArgMin
 template <typename B>
 struct CastOp
 {
-    template <typename A>
-    HIPCUB_HOST_DEVICE inline
-    B operator()(const A &a) const
+    template<typename A>
+    HIPCUB_HOST_DEVICE inline B operator()(A&& a) const
     {
         return (B)a;
     }
@@ -257,10 +252,8 @@ struct BinaryFlip
     {
     }
 
-    template <typename T, typename U>
-    HIPCUB_DEVICE auto
-    operator()(T &&t, U &&u) -> decltype(binary_op(std::forward<U>(u),
-                                                    std::forward<T>(t)))
+    template<typename T, typename U>
+    HIPCUB_DEVICE auto operator()(T&& t, U&& u) -> decltype(auto)
     {
         return binary_op(std::forward<U>(u), std::forward<T>(t));
     }
@@ -276,7 +269,20 @@ BinaryFlip<BinaryOpT> MakeBinaryFlip(BinaryOpT binary_op)
 namespace detail
 {
 
-// CUB uses value_type of OutputIteratorT (if not void) as a type of intermediate results in reduce,
+// Non-void value type.
+template<typename IteratorT, typename FallbackT>
+using non_void_value_t =
+    typename std::conditional<std::is_same<IteratorT, void>::value, FallbackT, IteratorT>::type;
+
+// Invoke result type.
+template<typename Invokable, typename... Args>
+using invoke_result_t = typename ::rocprim::detail::invoke_result<Invokable, Args...>::type;
+
+/// Intermediate accumulator type.
+template<typename Invokable, typename InitT, typename InputT>
+using accumulator_t = std::decay_t<invoke_result_t<Invokable, InitT, InputT>>;
+
+// CUB uses value_type of OutputIteratorT (if not void) as a type of intermediate results in segmented reduce,
 // for example:
 //
 // /// The output value type
@@ -303,12 +309,9 @@ template<
 >
 struct convert_result_type_wrapper
 {
-    using input_type = typename std::iterator_traits<InputIteratorT>::value_type;
+    using input_type  = typename std::iterator_traits<InputIteratorT>::value_type;
     using output_type = typename std::iterator_traits<OutputIteratorT>::value_type;
-    using result_type =
-        typename std::conditional<
-            std::is_void<output_type>::value, input_type, output_type
-        >::type;
+    using result_type = non_void_value_t<output_type, input_type>;
 
     convert_result_type_wrapper(BinaryFunction op) : op(op) {}
 
@@ -332,6 +335,46 @@ convert_result_type_wrapper<InputIteratorT, OutputIteratorT, BinaryFunction>
 convert_result_type(BinaryFunction op)
 {
     return convert_result_type_wrapper<InputIteratorT, OutputIteratorT, BinaryFunction>(op);
+}
+
+// CUB now uses as intermediate result type the return type of BinaryFunction in reduce, scan
+// and reduce_by_key.
+//
+// // The accumulator type
+// using AccumT = typename std::decay<invoke_result_t<BinaryFunction, InitT, InputT>>::type;
+//
+// rocPRIM was being passed the value_type of OutputIteratorT (if not void) as intermediate
+// result type, following the previous behaviour of CUB.
+//
+// This wrapper allows to have compatibility with CUB in hipCUB.
+
+template<class InitT, class InputIteratorT, class OutputIteratorT, class BinaryFunction>
+struct convert_binary_result_type_wrapper
+{
+    using input_type  = typename std::iterator_traits<InputIteratorT>::value_type;
+    using output_type = typename std::iterator_traits<OutputIteratorT>::value_type;
+    using init_type   = InitT;
+    using accum_type  = accumulator_t<BinaryFunction, init_type, input_type>;
+
+    convert_binary_result_type_wrapper(BinaryFunction op) : op(op) {}
+
+    template<class T>
+    HIPCUB_HOST_DEVICE inline constexpr accum_type operator()(const T& a, const T& b) const
+    {
+        return static_cast<accum_type>(op(a, b));
+    }
+
+    BinaryFunction op;
+};
+
+template<class InitT, class InputIteratorT, class OutputIteratorT, class BinaryFunction>
+inline convert_binary_result_type_wrapper<InitT, InputIteratorT, OutputIteratorT, BinaryFunction>
+    convert_binary_result_type(BinaryFunction op)
+{
+    return convert_binary_result_type_wrapper<InitT,
+                                              InputIteratorT,
+                                              OutputIteratorT,
+                                              BinaryFunction>(op);
 }
 
 } // end detail namespace

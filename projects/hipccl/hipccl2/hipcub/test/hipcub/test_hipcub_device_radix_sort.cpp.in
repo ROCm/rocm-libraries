@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,17 +49,21 @@
 #endif
 
 #if   HIPCUB_TEST_TYPE_SLICE == 0
-    INSTANTIATE(params<signed char,           double, true                            >) 
+#if HIPCUB_IS_INT128_ENABLED
+    INSTANTIATE(params<__uint128_t,           __uint128_t,  true                      >) 
+    INSTANTIATE(params<__int128_t,            __int128_t,   true                      >) 
+#endif
+    INSTANTIATE(params<signed char,           double,       true                      >) 
     INSTANTIATE(params<int,                   short                                   >) 
-    INSTANTIATE(params<short,                 int,    true                            >) 
+    INSTANTIATE(params<short,                 int,          true                      >) 
     INSTANTIATE(params<long long,             char                                    >) 
     INSTANTIATE(params<double,                unsigned int                            >) 
-    INSTANTIATE(params<double,                int,    true                            >) 
+    INSTANTIATE(params<double,                int,          true                      >) 
     INSTANTIATE(params<float,                 int                                     >) 
     INSTANTIATE(params<test_utils::half,      int                                     >) 
-    INSTANTIATE(params<test_utils::half,      int,    true                            >) 
+    INSTANTIATE(params<test_utils::half,      int,          true                      >) 
     INSTANTIATE(params<test_utils::bfloat16,  int                                     >) 
-    INSTANTIATE(params<test_utils::bfloat16,  int,    true                            >) 
+    INSTANTIATE(params<test_utils::bfloat16,  int,          true                      >) 
     INSTANTIATE(params<int,                   test_utils::custom_test_type<float>     >) 
 #elif HIPCUB_TEST_TYPE_SLICE == 1
     // start_bit and end_bit

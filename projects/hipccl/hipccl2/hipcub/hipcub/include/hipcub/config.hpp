@@ -44,10 +44,31 @@
     #define HIPCUB_ROCPRIM_API 1
     #define HIPCUB_RUNTIME_FUNCTION __host__
 
-    #include <rocprim/intrinsics/thread.hpp>
+    #include <rocprim/device/config_types.hpp>
+
+namespace detail
+{
+inline unsigned int host_warp_size_wrapper()
+{
+    int          device_id      = 0;
+    unsigned int host_warp_size = 0;
+    hipError_t   error          = hipGetDevice(&device_id);
+    if(error != hipSuccess)
+    {
+        fprintf(stderr, "HIP error: %d line: %d: %s\n", error, __LINE__, hipGetErrorString(error));
+        fflush(stderr);
+    }
+    if(::rocprim::host_warp_size(device_id, host_warp_size) != hipSuccess)
+    {
+        return 0u;
+    }
+    return host_warp_size;
+}
+} // namespace detail
+
     #define HIPCUB_WARP_THREADS ::rocprim::warp_size()
     #define HIPCUB_DEVICE_WARP_THREADS ::rocprim::device_warp_size()
-    #define HIPCUB_HOST_WARP_THREADS ::rocprim::host_warp_size()
+    #define HIPCUB_HOST_WARP_THREADS detail::host_warp_size_wrapper()
     #define HIPCUB_ARCH 1 // ignored with rocPRIM backend
 #elif defined(__HIP_PLATFORM_NVIDIA__)
     #define HIPCUB_CUB_API 1
