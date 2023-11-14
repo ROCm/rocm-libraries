@@ -1,5 +1,6 @@
 /*
  *  Copyright 2018 NVIDIA Corporation
+ *  Modifications Copyright 2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -39,6 +40,13 @@ namespace mr
 class new_delete_resource final : public memory_resource<>
 {
 public:
+    /*! Allocates memory of size at least \p bytes and alignment at least \p alignment.
+     *
+     *  \param bytes size, in bytes, that is requested from this allocation
+     *  \param alignment alignment that is requested from this allocation
+     *  \throws thrust::bad_alloc when no memory with requested size and alignment can be allocated.
+     *  \return A pointer to void to the newly allocated memory.
+     */
     void * do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
 #if defined(__cpp_aligned_new)
@@ -60,6 +68,14 @@ public:
 #endif
     }
 
+    /*! Deallocates memory pointed to by \p p.
+     *
+     *  \param p pointer to be deallocated
+     *  \param bytes the size of the allocation. This must be equivalent to the value of \p bytes that
+     *      was passed to the allocation function that returned \p p.
+     *  \param alignment the size of the allocation. This must be equivalent to the value of \p alignment
+     *      that was passed to the allocation function that returned \p p.
+     */
     void do_deallocate(void * p, std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
 #if defined(__cpp_aligned_new)
