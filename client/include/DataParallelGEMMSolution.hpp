@@ -151,33 +151,17 @@ namespace rocRoller
                         }
                         command->addOperation(std::make_shared<Operations::Operation>(execute));
 
-                        if(m_solutionParams.storeLDSD)
-                        {
-                            command->addOperation(
-                                std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
-                                    TypeInfo<D>::Var.dataType, 2, 8, {(size_t)1}))); // D
-                        }
-                        else
-                        {
-                            command->addOperation(std::make_shared<Operations::Operation>(
-                                Operations::T_Store_Tiled(TypeInfo<D>::Var.dataType, 2, 8))); // D
-                        }
+                        command->addOperation(
+                            std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
+                                TypeInfo<D>::Var.dataType, 2, 8, {(size_t)1}))); // D
                     }
                     else
                     {
                         command->addOperation(std::make_shared<Operations::Operation>(
                             Operations::T_Mul(2, 0, 1))); // A * B
-                        if(m_solutionParams.storeLDSD)
-                        {
-                            command->addOperation(
-                                std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
-                                    TypeInfo<D>::Var.dataType, 2, 2, {(size_t)1}))); // D
-                        }
-                        else
-                        {
-                            command->addOperation(std::make_shared<Operations::Operation>(
-                                Operations::T_Store_Tiled(TypeInfo<D>::Var.dataType, 2, 2))); // D
-                        }
+                        command->addOperation(
+                            std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
+                                TypeInfo<D>::Var.dataType, 2, 2, {(size_t)1}))); // D
                     }
 
                     return command;

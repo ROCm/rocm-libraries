@@ -719,7 +719,20 @@ namespace rocRoller
                     numWords - count, potentialWords, ctx->kernelOptions().storeGlobalWidth);
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
 
-                auto dataSubset = data->subset(Generated(iota(count, count + width)));
+                auto valuesPerWord = m_wordSize / data->variableType().getElementSize();
+                Register::ValuePtr dataSubset;
+                if(valuesPerWord > 1)
+                {
+                    AssertFatal(data->registerCount() == numWords * valuesPerWord);
+                    co_yield packForStore(dataSubset,
+                                          data->element(Generated(iota(
+                                              count * valuesPerWord,
+                                              count * valuesPerWord + width * valuesPerWord))));
+                }
+                else
+                {
+                    dataSubset = data->subset(Generated(iota(count, count + width)));
+                }
                 co_yield_(Instruction(concatenate("buffer_store_dword",
                                                   width == 1 ? "" : "x" + std::to_string(width)),
                                       {},

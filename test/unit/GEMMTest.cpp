@@ -217,16 +217,8 @@ namespace GEMMDriverTest
 
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
-            if(gemm.storeLDSD)
-            {
-                command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                    rocRoller::Operations::T_Store_Tiled(dataType, 2, 8, oneStridesN))); // D
-            }
-            else
-            {
-                command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                    rocRoller::Operations::T_Store_Tiled(dataType, 2, 8))); // D
-            }
+            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+                rocRoller::Operations::T_Store_Tiled(dataType, 2, 8, oneStridesN))); // D
 
             KernelArguments runtimeArgs;
 
@@ -1028,7 +1020,7 @@ namespace GEMMDriverTest
         std::string generatedCode = m_context->instructions()->toString();
 
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
-        EXPECT_EQ(countSubstring(generatedCode, "v_pack_B32_F16"), 24);
+        EXPECT_EQ(countSubstring(generatedCode, "v_pack_B32_F16"), 88);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2x4UnrollK)
