@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,7 @@
 #include "block/block_histogram.hpp"
 #include "block/block_load.hpp"
 #include "block/block_radix_sort.hpp"
+#include "block/block_run_length_decode.hpp"
 #include "block/block_scan.hpp"
 #include "block/block_sort.hpp"
 #include "block/block_store.hpp"

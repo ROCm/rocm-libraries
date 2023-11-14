@@ -43,43 +43,24 @@ struct default_config_helper
     using type = ::rocprim::default_config;
 };
 
-struct user_config_helper
-{
-    // provides the same members as rocprim::scan_config and rocprim::scan_by_key_config
-    template<bool /* ByKey */>
-    struct type
-    {
-        static constexpr unsigned int                 block_size       = 256;
-        static constexpr unsigned int                 items_per_thread = 4;
-        static constexpr bool                         use_lookback     = false;
-        static constexpr ::rocprim::block_load_method block_load_method
-            = ::rocprim::block_load_method::default_method;
-        static constexpr ::rocprim::block_store_method block_store_method
-            = ::rocprim::block_store_method::default_method;
-        static constexpr ::rocprim::block_scan_algorithm block_scan_method
-            = ::rocprim::block_scan_algorithm::default_algorithm;
-        static constexpr unsigned int size_limit = ROCPRIM_GRID_SIZE_LIMIT;
-    };
-};
-
 template<unsigned int SizeLimit>
 struct size_limit_config_helper
 {
     template<bool ByKey>
     using type = std::conditional_t<
         ByKey,
-        rocprim::scan_by_key_config_v2<256,
-                                       16,
-                                       rocprim::block_load_method::block_load_transpose,
-                                       rocprim::block_store_method::block_store_transpose,
-                                       rocprim::block_scan_algorithm::using_warp_scan,
-                                       SizeLimit>,
-        rocprim::scan_config_v2<256,
-                                16,
-                                rocprim::block_load_method::block_load_transpose,
-                                rocprim::block_store_method::block_store_transpose,
-                                rocprim::block_scan_algorithm::using_warp_scan,
-                                SizeLimit>>;
+        rocprim::scan_by_key_config<256,
+                                    16,
+                                    rocprim::block_load_method::block_load_transpose,
+                                    rocprim::block_store_method::block_store_transpose,
+                                    rocprim::block_scan_algorithm::using_warp_scan,
+                                    SizeLimit>,
+        rocprim::scan_config<256,
+                             16,
+                             rocprim::block_load_method::block_load_transpose,
+                             rocprim::block_store_method::block_store_transpose,
+                             rocprim::block_scan_algorithm::using_warp_scan,
+                             SizeLimit>>;
 };
 
 // Params for tests
@@ -127,14 +108,14 @@ typedef ::testing::Types<
     DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config_helper<524288>>,
     DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config_helper<1048576>>,
     DeviceScanParams<int8_t, int8_t, rocprim::maximum<int8_t>>,
-    DeviceScanParams<uint8_t, uint8_t, rocprim::maximum<uint8_t>, false, user_config_helper>,
+    DeviceScanParams<uint8_t, uint8_t, rocprim::maximum<uint8_t>, false>,
     DeviceScanParams<rocprim::half, rocprim::half, rocprim::maximum<rocprim::half>>,
     DeviceScanParams<rocprim::half, float, rocprim::plus<float>>,
     DeviceScanParams<rocprim::bfloat16, rocprim::bfloat16, rocprim::maximum<rocprim::bfloat16>>,
     DeviceScanParams<rocprim::bfloat16, float, rocprim::plus<float>>,
     // Large
     DeviceScanParams<int, double, rocprim::plus<int>>,
-    DeviceScanParams<int, double, rocprim::plus<double>, false, user_config_helper>,
+    DeviceScanParams<int, double, rocprim::plus<double>, false>,
     DeviceScanParams<int, long long, rocprim::plus<long long>>,
     DeviceScanParams<unsigned int, unsigned long long, rocprim::plus<unsigned long long>>,
     DeviceScanParams<long long, long long, rocprim::maximum<long long>>,

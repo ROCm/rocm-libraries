@@ -75,33 +75,24 @@ ROCPRIM_HOST_DEVICE inline void merge_path_search(
     path_coordinate.y = diagonal - split_min;
 }
 
-
-
-
 /// \brief Returns the offset of the first value within \p input which does not compare less than \p val
 /// \tparam InputIteratorT   - <b>[inferred]</b> Type of iterator for the input data to be searched
 /// \tparam OffsetT          - <b>[inferred]</b> The data type of num_items
 /// \tparam T                - <b>[inferred]</b> The data type of the input sequence elements
 /// \param input     [in]    - Input sequence
-/// \param num_items [out]   - Input sequence length
+/// \param num_items [in]    - Input sequence length
 /// \param val       [in]    - Search Key
 /// \return                  - Offset at which val was found
-template <
-    typename InputIteratorT,
-    typename OffsetT,
-    typename T>
-ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT lower_bound(
-    InputIteratorT      input,
-    OffsetT             num_items,
-    T                   val)
+template<typename InputIteratorT, typename OffsetT, typename T>
+ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT lower_bound(InputIteratorT input, OffsetT num_items, T val)
 {
     OffsetT retval = 0;
-    while (num_items > 0)
+    while(num_items > 0)
     {
         OffsetT half = num_items >> 1;
-        if (input[retval + half] < val)
+        if(input[retval + half] < val)
         {
-            retval = retval + (half + 1);
+            retval    = retval + (half + 1);
             num_items = num_items - (half + 1);
         }
         else
@@ -113,40 +104,69 @@ ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT lower_bound(
     return retval;
 }
 
-
 /// \brief Returns the offset of the first value within \p input which compares greater than \p val
 /// \tparam InputIteratorT   - <b>[inferred]</b> Type of iterator for the input data to be searched
 /// \tparam OffsetT          - <b>[inferred]</b> The data type of num_items
 /// \tparam T                - <b>[inferred]</b> The data type of the input sequence elements
 /// \param input     [in]    - Input sequence
-/// \param num_items [out]   - Input sequence length
+/// \param num_items [in]    - Input sequence length
 /// \param val       [in]    - Search Key
 /// \return                  - Offset at which val was found
-template <
-    typename InputIteratorT,
-    typename OffsetT,
-    typename T>
-ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT upper_bound(
-    InputIteratorT      input,              ///< [in] Input sequence
-    OffsetT             num_items,          ///< [in] Input sequence length
-    T                   val)                ///< [in] Search key
+template<typename InputIteratorT, typename OffsetT, typename T>
+ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT upper_bound(InputIteratorT input, OffsetT num_items, T val)
 {
     OffsetT retval = 0;
-    while (num_items > 0)
+    while(num_items > 0)
     {
         OffsetT half = num_items >> 1;
-        if (val < input[retval + half])
+        if(val < input[retval + half])
         {
             num_items = half;
         }
         else
         {
-            retval = retval + (half + 1);
+            retval    = retval + (half + 1);
             num_items = num_items - (half + 1);
         }
     }
 
     return retval;
+}
+
+/// \brief Returns the offset of the first value within \p input which compares greater than \p val
+/// computed as a statically unrolled loop
+/// \tparam MaxNumItems      - The maximum number of items.
+/// \tparam InputIteratorT   - <b>[inferred]</b> Type of iterator for the input data to be searched
+/// \tparam OffsetT          - <b>[inferred]</b> The data type of num_items
+/// \tparam T                - <b>[inferred]</b> The data type of the input sequence elements
+/// \param input     [in]    - Input sequence
+/// \param num_items [in]    - Input sequence length
+/// \param val       [in]    - Search Key
+/// \return                  - Offset at which val was found
+template<int MaxNumItems, typename InputIteratorT, typename OffsetT, typename T>
+ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT static_upper_bound(InputIteratorT input,
+                                                         OffsetT        num_items,
+                                                         T              val)
+{
+    OffsetT lower_bound = 0;
+    OffsetT upper_bound = num_items;
+#pragma unroll
+    for(int i = 0; i <= Log2<MaxNumItems>::VALUE; i++)
+    {
+        OffsetT mid = lower_bound + (upper_bound - lower_bound) / 2;
+        mid         = rocprim::min(mid, num_items - 1);
+
+        if(val < input[mid])
+        {
+            upper_bound = mid;
+        }
+        else
+        {
+            lower_bound = mid + 1;
+        }
+    }
+
+    return lower_bound;
 }
 
 END_ROCPRIM_NAMESPACE

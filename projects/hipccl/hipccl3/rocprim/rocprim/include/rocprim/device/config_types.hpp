@@ -29,7 +29,6 @@
 #include <cassert>
 
 #include "../config.hpp"
-#include "../intrinsics/thread.hpp"
 #include "../detail/various.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
@@ -49,7 +48,7 @@ struct default_config
     // merge_sort_config
     using block_sort_config  = default_config;
     using block_merge_config = default_config;
-    // radix_sort_config_v2
+    // radix_sort_config
     using single_sort_config = default_config;
     using merge_sort_config  = default_config;
     using onesweep_config    = default_config;
@@ -227,7 +226,7 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
 /**
  * \brief Get the current architecture in device compilation.
  * 
- * This function will always return `unkown` when called from the host, host could should instead
+ * This function will always return `unknown` when called from the host, host could should instead
  * call host_target_arch to query the current device from the HIP API.
  * 
  * \return target_arch the architecture currently being compiled for on the device.
@@ -318,7 +317,6 @@ inline hipError_t get_device_arch(int device_id, target_arch& arch)
     return hipSuccess;
 }
 
-#ifndef _WIN32
 inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_id)
 {
     static constexpr hipStream_t default_stream = 0;
@@ -343,15 +341,9 @@ inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_i
 #endif
     return hipSuccess;
 }
-#endif
 
 inline hipError_t host_target_arch(const hipStream_t stream, target_arch& arch)
 {
-#ifdef _WIN32
-    (void)stream;
-    arch = target_arch::unknown;
-    return hipSuccess;
-#else
     int              device_id;
     const hipError_t result = get_device_from_stream(stream, device_id);
     if(result != hipSuccess)
@@ -360,10 +352,47 @@ inline hipError_t host_target_arch(const hipStream_t stream, target_arch& arch)
     }
 
     return get_device_arch(device_id, arch);
-#endif
 }
 
 } // end namespace detail
+
+/// \brief Returns a number of threads in a hardware warp for the actual device.
+/// At host side this constant is available at runtime only.
+/// \param device_id - the device that should be queried.
+/// \param warp_size - out parameter for the warp size.
+/// \return hipError_t any error that might occur.
+///
+/// It is constant for a device.
+ROCPRIM_HOST inline hipError_t host_warp_size(const int device_id, unsigned int& warp_size)
+{
+    warp_size = -1;
+    hipDeviceProp_t device_prop;
+    hipError_t      success = hipGetDeviceProperties(&device_prop, device_id);
+
+    if(success == hipSuccess)
+    {
+        warp_size = device_prop.warpSize;
+    }
+    return success;
+};
+
+/// \brief Returns the number of threads in a hardware warp for the device associated with the stream.
+/// At host side this constant is available at runtime only.
+/// \param stream - the stream, whose device should be queried.
+/// \param warp_size - out parameter for the warp size.
+/// \return hipError_t any error that might occur.
+///
+/// It is constant for a device.
+ROCPRIM_HOST inline hipError_t host_warp_size(const hipStream_t stream, unsigned int& warp_size)
+{
+    int        hip_device;
+    hipError_t success = detail::get_device_from_stream(stream, hip_device);
+    if(success == hipSuccess)
+    {
+        return host_warp_size(hip_device, warp_size);
+    }
+    return success;
+};
 
 END_ROCPRIM_NAMESPACE
 

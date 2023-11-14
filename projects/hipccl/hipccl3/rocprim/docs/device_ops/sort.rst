@@ -7,7 +7,7 @@ Configuring the kernel
 merge_sort
 ..........
 
-.. doxygentypedef:: rocprim::merge_sort_config
+.. doxygenstruct:: rocprim::merge_sort_config
 
 radix_sort
 ..........

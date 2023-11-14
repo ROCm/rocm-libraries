@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,9 +26,11 @@
 #include "benchmark_device_adjacent_difference.parallel.hpp"
 
 namespace {
-    auto benchmarks = config_autotune_register::create<device_adjacent_difference_benchmark<
+    auto benchmarks = config_autotune_register::create_bulk(
+        device_adjacent_difference_benchmark_generator< 
         @DataType@, 
+        @BlockSize@,
         @Left@, 
-        @InPlace@,
-        rocprim::adjacent_difference_config<@BlockSize@, @ItemsPerThread@>>>();
+        @InPlace@>::create);
+
 }

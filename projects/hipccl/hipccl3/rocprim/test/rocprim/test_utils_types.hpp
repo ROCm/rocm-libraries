@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -155,6 +155,13 @@ typedef ::testing::Types<
     block_param_type(uint8_t, short),
     block_param_type(int8_t, float)
 > BlockParamsIntegral;
+
+typedef ::testing::Types<block_param_type(int, test_utils::custom_test_type<int>),
+                         block_param_type(uint8_t, short),
+                         block_param_type(int8_t, float),
+                         block_param_type(__uint128_t, short),
+                         block_param_type(__int128_t, float)>
+    BlockParamsIntegralExtended;
 
 typedef ::testing::Types<
     block_param_type(float, long),

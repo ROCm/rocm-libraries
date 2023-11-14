@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -216,8 +216,7 @@ hipError_t merge_impl(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for merging across the device.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p merge_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p merge_config or a class derived from it.
 /// \tparam InputIterator1 - random-access iterator type of the first input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam InputIterator2 - random-access iterator type of the second input range. Must meet the
@@ -321,8 +320,7 @@ hipError_t merge(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for merging across the device.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p merge_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p merge_config or a class derived from it.
 /// \tparam KeysInputIterator1 - random-access iterator type of the first keys input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysInputIterator2 - random-access iterator type of the second keys input range. Must meet the

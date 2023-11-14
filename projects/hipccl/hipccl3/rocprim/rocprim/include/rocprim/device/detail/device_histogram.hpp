@@ -502,14 +502,12 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
                     const lane_mask_type bit_set_mask = ::rocprim::ballot(bit_set);
                     same_bin_lanes_mask &= (bit_set ? bit_set_mask : ~bit_set_mask);
                 }
-                const unsigned int same_bin_count = ::rocprim::bit_count(same_bin_lanes_mask);
-                const unsigned int prev_same_bin_count
-                    = ::rocprim::masked_bit_count(same_bin_lanes_mask);
-                if(prev_same_bin_count == 0)
+                if(::rocprim::group_elect(same_bin_lanes_mask))
                 {
                     // Write the number of lanes having this bin,
                     // if the current lane is the first (and maybe only) lane with this bin.
-                    ::rocprim::detail::atomic_add(&histogram[channel][bin], same_bin_count);
+                    ::rocprim::detail::atomic_add(&histogram[channel][bin],
+                                                  ::rocprim::bit_count(same_bin_lanes_mask));
                 }
             }
         }

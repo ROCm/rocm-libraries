@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,28 +36,6 @@
 
 namespace
 {
-template <typename T, unsigned int SizeLimit>
-struct size_limit_config
-{
-    static constexpr unsigned int item_scale
-        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(T), sizeof(int));
-
-    using type
-        = rocprim::adjacent_difference_config<256,
-                                              ::rocprim::max(1u, 16u / item_scale),
-                                              rocprim::block_load_method::block_load_transpose,
-                                              rocprim::block_store_method::block_store_transpose,
-                                              SizeLimit>;
-};
-
-template <typename T>
-struct size_limit_config<T, ROCPRIM_GRID_SIZE_LIMIT>
-{
-    using type = rocprim::default_config;
-};
-
-template <typename T, unsigned int SizeLimit>
-using size_limit_config_t = typename size_limit_config<T, SizeLimit>::type;
 
 template <typename Config = rocprim::default_config,
           typename InputIt,
@@ -146,12 +124,13 @@ auto get_expected_result(const std::vector<T>& input,
 } // namespace
 
 // Params for tests
-template <class InputType,
-          class OutputType                 = InputType,
-          bool         Left                = true,
-          bool         InPlace             = false,
-          bool         UseIdentityIterator = false,
-          unsigned int SizeLimit           = ROCPRIM_GRID_SIZE_LIMIT>
+template<class InputType,
+         class OutputType         = InputType,
+         bool Left                = true,
+         bool InPlace             = false,
+         bool UseIdentityIterator = false,
+         class Config             = rocprim::default_config>
+
 struct DeviceAdjacentDifferenceParams
 {
     using input_type                              = InputType;
@@ -159,7 +138,7 @@ struct DeviceAdjacentDifferenceParams
     static constexpr bool   left                  = Left;
     static constexpr bool   in_place              = InPlace;
     static constexpr bool   use_identity_iterator = UseIdentityIterator;
-    static constexpr size_t size_limit            = SizeLimit;
+    using config                                  = Config;
 };
 
 template <class Params>
@@ -172,25 +151,38 @@ public:
     static constexpr bool   in_place              = Params::in_place;
     static constexpr bool   use_identity_iterator = Params::use_identity_iterator;
     static constexpr bool   debug_synchronous     = false;
-    static constexpr size_t size_limit            = Params::size_limit;
+    using config                                  = typename Params::config;
 };
 
 using custom_double2     = test_utils::custom_test_type<double>;
 using custom_int64_array = test_utils::custom_test_array_type<std::int64_t, 8>;
 
+using custom_config_0 = rocprim::adjacent_difference_config<128, 4>;
+
+template<int SizeLimit>
+using custom_size_limit_config
+    = rocprim::adjacent_difference_config<1024,
+                                          2,
+                                          rocprim::block_load_method::block_load_transpose,
+                                          rocprim::block_store_method::block_store_transpose,
+                                          SizeLimit>;
+
 using RocprimDeviceAdjacentDifferenceTestsParams = ::testing::Types<
+    // Tests with default configuration
     DeviceAdjacentDifferenceParams<int>,
     DeviceAdjacentDifferenceParams<float, double, false>,
     DeviceAdjacentDifferenceParams<int8_t, int8_t, true, true>,
     DeviceAdjacentDifferenceParams<custom_double2, custom_double2, false, true>,
-    DeviceAdjacentDifferenceParams<rocprim::bfloat16, float, true, false, false, 512>,
-    DeviceAdjacentDifferenceParams<rocprim::half, rocprim::half, true, true, false, 2048>,
-    DeviceAdjacentDifferenceParams<custom_int64_array,
-                                   custom_int64_array,
-                                   false,
-                                   true,
-                                   true,
-                                   4096>>;
+    DeviceAdjacentDifferenceParams<rocprim::bfloat16, float, true, false, false>,
+    DeviceAdjacentDifferenceParams<rocprim::half, rocprim::half, true, true, false>,
+    DeviceAdjacentDifferenceParams<custom_int64_array, custom_int64_array, false, true, true>,
+    // Tests for supported config structs
+    DeviceAdjacentDifferenceParams<rocprim::bfloat16, float, true, false, false, custom_config_0>,
+    DeviceAdjacentDifferenceParams<rocprim::bfloat16, float, true, false, false>,
+    // Tests for different size_limits
+    DeviceAdjacentDifferenceParams<int, int, true, false, false, custom_size_limit_config<64>>,
+    DeviceAdjacentDifferenceParams<int, int, true, false, false, custom_size_limit_config<8192>>,
+    DeviceAdjacentDifferenceParams<int, int, true, false, false, custom_size_limit_config<10240>>>;
 
 TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceTests, RocprimDeviceAdjacentDifferenceTestsParams);
 
@@ -206,7 +198,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
     static constexpr bool in_place              = TestFixture::in_place;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     static constexpr bool debug_synchronous     = TestFixture::debug_synchronous;
-    using Config                                = size_limit_config_t<T, TestFixture::size_limit>;
+    using Config                                = typename TestFixture::config;
 
     SCOPED_TRACE(testing::Message() << "left = " << left << ", in_place = " << in_place);
 

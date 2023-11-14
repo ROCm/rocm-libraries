@@ -58,8 +58,7 @@ namespace detail
 /// * Range specified by \p selected_count_output must have at least 1 element.
 /// * Values of \p flag range should be implicitly convertible to `bool` type.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p select_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p select_config or a class derived from it.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam FlagIterator - random-access iterator type of the flag range. It can be
@@ -182,8 +181,7 @@ hipError_t select(void * temporary_storage,
 /// values can be copied into it.
 /// * Range specified by \p selected_count_output must have at least 1 element.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p select_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p select_config or a class derived from it.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. It can be

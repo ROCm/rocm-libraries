@@ -1,5 +1,14 @@
 ### Build dirs ###
-build/
+build*/
+
+### clangd. ### 
+/.cache
+
+### Docs dirs ###
+doc/html/
+doc/xml/
+doc/latex/
+doc/*.tag
 
 # Created by https://www.gitignore.io/api/c++,cmake
 

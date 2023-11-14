@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -74,13 +74,7 @@ public:
             T t = scan_op(warp_move_dpp<T, 0x118>(output), output); // row_shr:8
             if(row_lane_id >= 8) output = t;
         }
-#if ROCPRIM_NAVI
-        if(WarpSize > 16)
-        {
-            T t = scan_op(warp_swizzle<T, 0x1e0>(output), output); // row_bcast:15
-            if(lane_id % 32 >= 16) output = t;
-        }
-#else
+#ifdef ROCPRIM_DETAIL_HAS_DPP_BROADCAST
         if(WarpSize > 16)
         {
             T t = scan_op(warp_move_dpp<T, 0x142>(output), output); // row_bcast:15
@@ -91,6 +85,15 @@ public:
             T t = scan_op(warp_move_dpp<T, 0x143>(output), output); // row_bcast:31
             if(lane_id >= 32) output = t;
         }
+        static_assert(WarpSize <= 64, "WarpSize > 64 is not supported");
+#else
+        if(WarpSize > 16)
+        {
+            T t = scan_op(warp_swizzle<T, 0x1e0>(output), output); // row_bcast:15
+            if(lane_id % 32 >= 16)
+                output = t;
+        }
+        static_assert(WarpSize <= 32, "WarpSize > 32 is not supported without DPP broadcasts");
 #endif
     }
 

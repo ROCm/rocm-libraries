@@ -155,14 +155,20 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     void*         scan_state_storage;
     wrapped_type* previous_last_value;
 
+    detail::temp_storage::layout layout{};
+    const hipError_t             layout_result
+        = scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout);
+    if(layout_result != hipSuccess)
+    {
+        return layout_result;
+    }
+
     const hipError_t partition_result = detail::temp_storage::partition(
         temporary_storage,
         storage_size,
         detail::temp_storage::make_linear_partition(
             // This is valid even with offset_scan_state_with_sleep_type
-            detail::temp_storage::make_partition(
-                &scan_state_storage,
-                scan_state_type::get_temp_storage_layout(number_of_blocks)),
+            detail::temp_storage::make_partition(&scan_state_storage, layout),
             detail::temp_storage::ptr_aligned_array(&previous_last_value,
                                                     use_limited_size ? 1 : 0)));
     if(partition_result != hipSuccess || temporary_storage == nullptr)
@@ -181,14 +187,23 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         return error;
     }
 
+    scan_state_type scan_state{};
+    hipError_t      scan_state_result
+        = scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream);
+    scan_state_with_sleep_type scan_state_with_sleep{};
+    scan_state_result = scan_state_with_sleep_type::create(scan_state_with_sleep,
+                                                           scan_state_storage,
+                                                           number_of_blocks,
+                                                           stream);
+    if(scan_state_result != hipSuccess)
+    {
+        return scan_state_result;
+    }
+
     // Call the provided function with either scan_state or scan_state_with_sleep based on
     // the value of use_sleep_scan_state
     auto with_scan_state
-        = [use_sleep,
-           scan_state = scan_state_type::create(scan_state_storage, number_of_blocks),
-           scan_state_with_sleep
-           = scan_state_with_sleep_type::create(scan_state_storage, number_of_blocks)](
-              auto&& func) mutable -> decltype(auto)
+        = [use_sleep, scan_state, scan_state_with_sleep](auto&& func) mutable -> decltype(auto)
     {
         if(use_sleep)
         {
@@ -305,7 +320,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive, should be \p scan_by_key_config_v2.
+/// \tparam Config - [optional] configuration of the primitive, has to be \p scan_by_key_config or a class derived from it.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam ValuesInputIterator - random-access iterator type of the input range. It can be
@@ -428,7 +443,7 @@ inline hipError_t inclusive_scan_by_key(void* const                temporary_sto
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive, should be \p scan_by_key_config_v2.
+/// \tparam Config - [optional] configuration of the primitive, has to be \p scan_by_key_config or a class derived from it.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam ValuesInputIterator - random-access iterator type of the input range. It can be

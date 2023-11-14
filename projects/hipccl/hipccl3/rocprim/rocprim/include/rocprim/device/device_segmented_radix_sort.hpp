@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -589,8 +589,8 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// \p segmented_radix_sort_config or a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// \p segmented_radix_sort_config or a class derived from it.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -711,8 +711,8 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// \p segmented_radix_sort_config or a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// \p segmented_radix_sort_config or a class derived from it.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -834,8 +834,8 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// \p segmented_radix_sort_config or a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// \p segmented_radix_sort_config or a class derived from it.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -975,8 +975,8 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// \p segmented_radix_sort_config or a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// \p segmented_radix_sort_config or a class derived from it.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -1116,8 +1116,8 @@ hipError_t segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// \p segmented_radix_sort_config or a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// \p segmented_radix_sort_config or a class derived from it.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
@@ -1244,8 +1244,8 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// \p segmented_radix_sort_config or a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// \p segmented_radix_sort_config or a class derived from it.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
@@ -1372,8 +1372,8 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// \p segmented_radix_sort_config or a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// \p segmented_radix_sort_config or a class derived from it.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
@@ -1515,8 +1515,8 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// \p segmented_radix_sort_config or a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// \p segmented_radix_sort_config or a class derived from it.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the

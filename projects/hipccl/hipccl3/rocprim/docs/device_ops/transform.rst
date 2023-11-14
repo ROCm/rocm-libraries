@@ -4,7 +4,7 @@ Transform
 Configuring the kernel
 ~~~~~~~~~~~~~~~~~~~~~~
 
-.. doxygentypedef:: rocprim::transform_config
+.. doxygenstruct:: rocprim::transform_config
 
 transform
 ~~~~~~~~~

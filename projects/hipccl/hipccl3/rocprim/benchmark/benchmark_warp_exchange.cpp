@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -350,7 +350,9 @@ int main(int argc, char *argv[])
         CREATE_BENCHMARK(int, 256, 16, 32, ScatterToStripedOp)
     };
 
-    if(is_warp_size_supported(64))
+    int hip_device = 0;
+    HIP_CHECK(::rocprim::detail::get_device_from_stream(stream, hip_device));
+    if(is_warp_size_supported(64, hip_device))
     {
         std::vector<benchmark::internal::Benchmark*> additional_benchmarks{
             CREATE_BENCHMARK(int, 256,  1, 64, BlockedToStripedOp),

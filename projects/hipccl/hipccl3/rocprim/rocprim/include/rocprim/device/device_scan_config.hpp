@@ -32,24 +32,15 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename ScanConfig>
-constexpr scan_config_params wrap_scan_config()
-{
-    return scan_config_params{
-        {ScanConfig::block_size, ScanConfig::items_per_thread, ScanConfig::size_limit},
-        ScanConfig::block_load_method,
-        ScanConfig::block_store_method,
-        ScanConfig::block_scan_method
-    };
-}
-
 template<typename ScanConfig, typename>
 struct wrapped_scan_config
 {
+    static_assert(std::is_same<typename ScanConfig::tag, scan_config_tag>::value,
+                  "Config must be a specialization of struct template scan_config");
     template<target_arch Arch>
     struct architecture_config
     {
-        static constexpr scan_config_params params = wrap_scan_config<ScanConfig>();
+        static constexpr scan_config_params params = ScanConfig{};
     };
 };
 
@@ -60,7 +51,7 @@ struct wrapped_scan_config<default_config, Value>
     struct architecture_config
     {
         static constexpr scan_config_params params
-            = wrap_scan_config<default_scan_config<static_cast<unsigned int>(Arch), Value>>();
+            = default_scan_config<static_cast<unsigned int>(Arch), Value>{};
     };
 };
 

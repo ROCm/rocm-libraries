@@ -61,13 +61,12 @@ ROCPRIM_KERNEL
 {
     static constexpr merge_sort_block_sort_config_params params = device_params<Config>();
     block_sort_kernel_impl<params.block_sort_config.block_size,
-                           params.block_sort_config.items_per_thread,
-                           params.block_sort_method>(keys_input,
-                                                     keys_output,
-                                                     values_input,
-                                                     values_output,
-                                                     sorted_block_size,
-                                                     compare_function);
+                           params.block_sort_config.items_per_thread>(keys_input,
+                                                                      keys_output,
+                                                                      values_input,
+                                                                      values_output,
+                                                                      sorted_block_size,
+                                                                      compare_function);
 }
 
 template<class Config,

@@ -2,19 +2,39 @@
 
 Full documentation for rocPRIM is available at [https://rocprim.readthedocs.io/en/latest/](https://rocprim.readthedocs.io/en/latest/)
 
+## [Unreleased rocPRIM-3.0.0 for ROCm 6.1.0]
+### Added
+ - Added new primitive: `block_run_length_decode`.
+### Changed
+- Removed deprecated functionality: `reduce_by_key_config`, `MatchAny`, `scan_config`, `scan_by_key_config` and `radix_sort_config`.
+- Renamed `scan_config_v2` to `scan_config`, `scan_by_key_config_v2` to `scan_by_key_config`, `radix_sort_config_v2` to `radix_sort_config`, `reduce_by_key_config_v2` to `reduce_by_key_config`, `radix_sort_config_v2` to `radix_sort_config`.
+- Removed support for custom config types for device algorithms.
+- `host_warp_size()` was moved into `rocprim/device/config_types.hpp`, and now uses either a `device_id` or a `stream` parameter to query the proper device and a `device_id` out parameter. The return type is `hipError_t`.
+- Added support for __int128_t in `device_radix_sort` and `block_radix_sort`.
+### Fixed
+- Fixed build issues with `rmake.py` on Windows when using VS 2017 15.8 or later due to a breaking fix with extended aligned storage.
+
 ## [Unreleased rocPRIM-2.13.1 for ROCm 5.7.0]
 ### Added
 - `block_sort::sort()` overload for keys and values with a dynamic size, for all block sort algorithms. Additionally, all `block_sort::sort()` overloads with a dynamic size are now supported for `block_sort_algorithm::merge_sort` and `block_sort_algorithm::bitonic_sort`.
 - New two-way partition primitive `partition_two_way` which can write to two separate iterators.
+- Added config tuning and dynamic dispatch to `device_adjacent_difference` algorithm
+- New `rocprim::group_elect` warp intrinsic, which chooses one lane from the lanes enabled by a mask.
 ### Changed
 - Deprecated configuration `radix_sort_config` for device-level radix sort as it no longer matches the algorithm's parameters. New configuration `radix_sort_config_v2` is preferred instead.
 - Removed erroneous implementation of device-level `inclusive_scan` and `exclusive_scan`. The prior default implementation using lookback-scan now is the only available implementation.
 - The benchmark metric indicating the bytes processed for `exclusive_scan_by_key` and `inclusive_scan_by_key` has been changed to incorporate the key type. Furthermore, the benchmark log has been changed such that these algorithms are reported as `scan` and `scan_by_key` instead of `scan_exclusive` and `scan_inclusive`.
 - Deprecated configurations `scan_config` and `scan_by_key_config` for device-level scans, as they no longer match the algorithm's parameters. New configurations `scan_config_v2` and `scan_by_key_config_v2` are preferred instead.
 - Improved the performance of `partition`.
+- `merge_sort_block_sort` will always use stable merge sort as it is faster than the fallback implementation.
+- The `rocprim::match_any` interface has a new parameter, `valid` to enalble/disable lanes. The default value is true, so it doesn't change the previous behaviour. 
 ### Fixed
 - Fixed build issue caused by missing header in `thread/thread_search.hpp`.
 - Fixed `rocprim::MatchAny` for devices with 64-bit warp size. The function `rocprim::MatchAny` is deprecated and `rocprim::match_any` is preferred instead.
+- Fixed `device_adjacent_difference` using more shared memory than required.
+- Fixed a compilation error when `ROCPRIM_DISABLE_DPP` is defined.
+- rocPRIM should be more robust for detecting GPU architecture features. Explicitly listing each architecture is no longer required by developers, fixing compilation failures when
+  targeting devices not known by rocPRIM.
 
 ## [rocPRIM-2.13.0 for ROCm 5.5.0]
 ### Added

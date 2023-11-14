@@ -620,8 +620,8 @@ inline hipError_t
 
     constexpr bool is_default_config = std::is_same<Config, default_config>::value;
     // if config is not custom, provide default value for merge sort limit
-    constexpr size_t merge_sort_limit = std::
-        conditional<is_default_config, radix_sort_config_v2<>, Config>::type::merge_sort_limit;
+    constexpr size_t merge_sort_limit
+        = std::conditional<is_default_config, radix_sort_config<>, Config>::type::merge_sort_limit;
 
     // Instantiate single sort config to find the threshold that determines which algorithm is used.
 
@@ -732,8 +732,7 @@ inline hipError_t
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -839,8 +838,7 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -947,8 +945,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -1073,8 +1070,7 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -1199,8 +1195,7 @@ hipError_t radix_sort_pairs_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Size - integral type that represents the problem size.
 ///
@@ -1312,8 +1307,7 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Size - integral type that represents the problem size.
 ///
@@ -1425,8 +1419,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
 /// \tparam Size - integral type that represents the problem size.
@@ -1553,8 +1546,7 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
 /// \tparam Size - integral type that represents the problem size.

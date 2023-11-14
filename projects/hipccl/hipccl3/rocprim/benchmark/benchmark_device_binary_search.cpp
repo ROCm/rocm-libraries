@@ -40,6 +40,7 @@
 #include <rocprim/rocprim.hpp>
 
 #include "benchmark_device_binary_search.parallel.hpp"
+#include "rocprim/device/config_types.hpp"
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
@@ -96,32 +97,33 @@ void run_benchmark(benchmark::State& state,
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes;
-    HIP_CHECK(dispatch_binary_search(AlgorithmSelectorTag{},
-                                     d_temporary_storage,
-                                     temporary_storage_bytes,
-                                     d_haystack,
-                                     d_needles,
-                                     d_output,
-                                     haystack_size,
-                                     needles_size,
-                                     compare_op,
-                                     stream));
+    auto   dispatch_helper = dispatch_binary_search_helper<rocprim::default_config>();
+    HIP_CHECK(dispatch_helper.dispatch_binary_search(AlgorithmSelectorTag{},
+                                                     d_temporary_storage,
+                                                     temporary_storage_bytes,
+                                                     d_haystack,
+                                                     d_needles,
+                                                     d_output,
+                                                     haystack_size,
+                                                     needles_size,
+                                                     compare_op,
+                                                     stream));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK(dispatch_binary_search(AlgorithmSelectorTag{},
-                                         d_temporary_storage,
-                                         temporary_storage_bytes,
-                                         d_haystack,
-                                         d_needles,
-                                         d_output,
-                                         haystack_size,
-                                         needles_size,
-                                         compare_op,
-                                         stream));
+        HIP_CHECK(dispatch_helper.dispatch_binary_search(AlgorithmSelectorTag{},
+                                                         d_temporary_storage,
+                                                         temporary_storage_bytes,
+                                                         d_haystack,
+                                                         d_needles,
+                                                         d_output,
+                                                         haystack_size,
+                                                         needles_size,
+                                                         compare_op,
+                                                         stream));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -137,16 +139,16 @@ void run_benchmark(benchmark::State& state,
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK(dispatch_binary_search(AlgorithmSelectorTag{},
-                                             d_temporary_storage,
-                                             temporary_storage_bytes,
-                                             d_haystack,
-                                             d_needles,
-                                             d_output,
-                                             haystack_size,
-                                             needles_size,
-                                             compare_op,
-                                             stream));
+            HIP_CHECK(dispatch_helper.dispatch_binary_search(AlgorithmSelectorTag{},
+                                                             d_temporary_storage,
+                                                             temporary_storage_bytes,
+                                                             d_haystack,
+                                                             d_needles,
+                                                             d_output,
+                                                             haystack_size,
+                                                             needles_size,
+                                                             compare_op,
+                                                             stream));
         }
 
         // Record stop event and wait until it completes

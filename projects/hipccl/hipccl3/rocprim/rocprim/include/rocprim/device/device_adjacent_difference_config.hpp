@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,9 @@
 #include "../functional.hpp"
 
 #include "config_types.hpp"
+#include "detail/config/device_adjacent_difference.hpp"
+#include "detail/config/device_adjacent_difference_inplace.hpp"
+#include "detail/device_config_helper.hpp"
 
 #include "../block/block_load.hpp"
 #include "../block/block_store.hpp"
@@ -37,44 +40,62 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \brief Configuration of device-level adjacent_difference primitives.
-///
-/// \tparam BlockSize - number of threads in a block.
-/// \tparam ItemsPerThread - number of items processed by each thread
-/// \tparam LoadMethod - method for loading input values
-/// \tparam StoreMethod - method for storing values
-/// \tparam SizeLimit - limit on the number of items for a single adjacent_difference kernel launch.
-/// Larger input sizes will be broken up to multiple kernel launches.
-template <unsigned int       BlockSize,
-          unsigned int       ItemsPerThread,
-          block_load_method  LoadMethod  = block_load_method::block_load_transpose,
-          block_store_method StoreMethod = block_store_method::block_store_transpose,
-          unsigned int       SizeLimit   = ROCPRIM_GRID_SIZE_LIMIT>
-struct adjacent_difference_config : kernel_config<BlockSize, ItemsPerThread, SizeLimit>
-{
-    static constexpr block_load_method  load_method  = LoadMethod; ///< input values are loaded using this method
-    static constexpr block_store_method store_method = StoreMethod; ///< input values are stored using this method
-};
-
 namespace detail
 {
 
-template <class Value>
-struct adjacent_difference_config_fallback
+// Specialization for user provided configuration
+template<typename AdjacentDifferenceConfig, bool InPlace, typename>
+struct wrapped_adjacent_difference_config
 {
-    static constexpr unsigned int item_scale
-        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+    static_assert(
+        std::is_same<typename AdjacentDifferenceConfig::tag, adjacent_difference_config_tag>::value,
+        "Config must be a specialization of struct template adjacent_difference_config");
 
-    using type = adjacent_difference_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr adjacent_difference_config_params params = AdjacentDifferenceConfig{};
+    };
 };
 
-template <unsigned int TargetArch, class Value>
-struct default_adjacent_difference_config
-    : select_arch<TargetArch, adjacent_difference_config_fallback<Value>>
+// Specialization for selecting the default configuration for in place
+template<typename Value>
+struct wrapped_adjacent_difference_config<default_config, true, Value>
 {
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr adjacent_difference_config_params params
+            = default_adjacent_difference_inplace_config<static_cast<unsigned int>(Arch), Value>{};
+    };
 };
 
-} // end namespace detail
+// Specialization for selecting the default configuration for out of place
+template<typename Value>
+struct wrapped_adjacent_difference_config<default_config, false, Value>
+{
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr adjacent_difference_config_params params
+            = default_adjacent_difference_config<static_cast<unsigned int>(Arch), Value>{};
+    };
+};
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<class Value>
+template<target_arch Arch>
+constexpr adjacent_difference_config_params
+    wrapped_adjacent_difference_config<rocprim::default_config, true, Value>::architecture_config<
+        Arch>::params;
+template<class Value>
+template<target_arch Arch>
+constexpr adjacent_difference_config_params
+    wrapped_adjacent_difference_config<rocprim::default_config, false, Value>::architecture_config<
+        Arch>::params;
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
+} // namespace detail
 
 END_ROCPRIM_NAMESPACE
 

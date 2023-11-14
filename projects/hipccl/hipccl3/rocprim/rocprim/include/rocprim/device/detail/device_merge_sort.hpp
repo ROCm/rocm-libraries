@@ -318,145 +318,13 @@ struct block_permute_values_impl<Value,
 
 template<typename Key,
          typename Value,
-         unsigned int         BlockSize,
-         unsigned int         ItemsPerThread,
-         block_sort_algorithm Algo,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
          typename Enable = void>
-struct block_sort_impl
-{
-    using stable_key_type = rocprim::tuple<Key, unsigned int>;
-
-    using keys_load_type
-        = block_load<Key, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
-
-    using sort_type
-        = block_sort<stable_key_type, BlockSize, ItemsPerThread, rocprim::empty_type, Algo>;
-
-    using keys_store_type
-        = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
-
-    using values_permute_type = block_permute_values_impl<Value, BlockSize, ItemsPerThread>;
-
-    union storage_type
-    {
-        typename keys_load_type::storage_type      load_keys;
-        typename sort_type::storage_type           sort;
-        typename keys_store_type::storage_type     store_keys;
-        typename values_permute_type::storage_type permute_values;
-    };
-
-    template<typename KeysInputIterator,
-             typename KeysOutputIterator,
-             typename ValuesInputIterator,
-             typename ValuesOutputIterator,
-             typename BinaryFunction>
-    ROCPRIM_DEVICE  ROCPRIM_FORCE_INLINE
-    void sort(const unsigned int   valid_in_last_block,
-              const bool           is_incomplete_block,
-              KeysInputIterator    keys_input,
-              KeysOutputIterator   keys_output,
-              ValuesInputIterator  values_input,
-              ValuesOutputIterator values_output,
-              BinaryFunction       compare_function,
-              storage_type&        storage)
-    {
-        // By default, the block sort algorithm is not stable. We can make it stable
-        // by adding an index to each key.
-
-        Key keys[ItemsPerThread];
-
-        if(is_incomplete_block)
-        {
-            keys_load_type().load(keys_input, keys, valid_in_last_block, storage.load_keys);
-        }
-        else
-        {
-            keys_load_type().load(keys_input, keys, storage.load_keys);
-        }
-
-        const auto flat_id = block_thread_id<0>();
-
-        stable_key_type stable_keys[ItemsPerThread];
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; ++i)
-        {
-            stable_keys[i] = rocprim::make_tuple(keys[i], flat_id * ItemsPerThread + i);
-        }
-
-        syncthreads();
-
-        // Special compare function that enforces sorting is stable.
-        auto stable_compare_function
-            = [compare_function](const stable_key_type& a,
-                                 const stable_key_type& b) ROCPRIM_FORCE_INLINE mutable
-        {
-            const bool ab = compare_function(rocprim::get<0>(a), rocprim::get<0>(b));
-            return ab
-                   || (!compare_function(rocprim::get<0>(b), rocprim::get<0>(a))
-                       && (rocprim::get<1>(a) < rocprim::get<1>(b)));
-        };
-
-        if(is_incomplete_block)
-        {
-            // Special compare function that enforces sorting is stable, and that out-of-bounds elements
-            // are not compared.
-            auto stable_oob_compare_function
-                = [stable_compare_function, valid_in_last_block](const stable_key_type& a,
-                                                                 const stable_key_type& b) mutable
-            {
-                const bool a_oob = rocprim::get<1>(a) >= valid_in_last_block;
-                const bool b_oob = rocprim::get<1>(b) >= valid_in_last_block;
-                return a_oob || b_oob ? !a_oob : stable_compare_function(a, b);
-            };
-
-            // Note: rocprim::block_sort with an algorithm that is not stable_merge_sort does not implement sorting
-            // a misaligned amount of items.
-            sort_type().sort(stable_keys, storage.sort, stable_oob_compare_function);
-
-            unsigned int ranks[ItemsPerThread];
-            ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
-            {
-                keys[i]  = rocprim::get<0>(stable_keys[i]);
-                ranks[i] = rocprim::get<1>(stable_keys[i]);
-            }
-
-            syncthreads();
-            keys_store_type().store(keys_output, keys, valid_in_last_block, storage.store_keys);
-            values_permute_type().permute(ranks,
-                                          values_input,
-                                          values_output,
-                                          valid_in_last_block,
-                                          storage.permute_values);
-        }
-        else
-        {
-            sort_type().sort(stable_keys, storage.sort, stable_compare_function);
-
-            unsigned int ranks[ItemsPerThread];
-            ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
-            {
-                keys[i]  = rocprim::get<0>(stable_keys[i]);
-                ranks[i] = rocprim::get<1>(stable_keys[i]);
-            }
-
-            syncthreads();
-            keys_store_type().store(keys_output, keys, storage.store_keys);
-            values_permute_type().permute(ranks,
-                                          values_input,
-                                          values_output,
-                                          storage.permute_values);
-        }
-    }
-};
+struct block_sort_impl;
 
 template<typename Key, unsigned int BlockSize, unsigned int ItemsPerThread>
-struct block_sort_impl<Key,
-                       rocprim::empty_type,
-                       BlockSize,
-                       ItemsPerThread,
-                       block_sort_algorithm::stable_merge_sort>
+struct block_sort_impl<Key, rocprim::empty_type, BlockSize, ItemsPerThread>
 {
     using keys_load_type
         = block_load<Key, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
@@ -518,7 +386,6 @@ struct block_sort_impl<Key,
                        Value,
                        BlockSize,
                        ItemsPerThread,
-                       block_sort_algorithm::stable_merge_sort,
                        std::enable_if_t<(sizeof(Value) <= sizeof(int))>>
 {
     using keys_load_type
@@ -599,7 +466,6 @@ struct block_sort_impl<Key,
                        Value,
                        BlockSize,
                        ItemsPerThread,
-                       block_sort_algorithm::stable_merge_sort,
                        std::enable_if_t<(sizeof(Value) > sizeof(int))>>
 {
     using keys_load_type
@@ -677,9 +543,8 @@ struct block_sort_impl<Key,
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
-template<unsigned int         BlockSize,
-         unsigned int         ItemsPerThread,
-         block_sort_algorithm Algo,
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
@@ -704,7 +569,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_sort_kernel_impl(KeysInputIterato
     const unsigned int valid_in_last_block = input_size - block_offset;
     const bool         is_incomplete_block = flat_block_id == (input_size / items_per_block);
 
-    using sort_impl = block_sort_impl<key_type, value_type, BlockSize, ItemsPerThread, Algo>;
+    using sort_impl = block_sort_impl<key_type, value_type, BlockSize, ItemsPerThread>;
 
     ROCPRIM_SHARED_MEMORY typename sort_impl::storage_type storage;
 

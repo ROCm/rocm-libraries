@@ -72,8 +72,22 @@
     #define ROCPRIM_FORCE_INLINE __attribute__((always_inline))
 #endif
 
-#ifndef ROCPRIM_DISABLE_DPP
-    #define ROCPRIM_DETAIL_USE_DPP true
+// DPP is supported only after Volcanic Islands (GFX8+)
+// Only defined when support is present, in contrast to ROCPRIM_DETAIL_USE_DPP, which should be
+// always defined
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) \
+    && (!defined(__GFX6__) && !defined(__GFX7__))
+    #define ROCPRIM_DETAIL_HAS_DPP 1
+#endif
+
+#if !defined(ROCPRIM_DISABLE_DPP) && defined(ROCPRIM_DETAIL_HAS_DPP)
+    #define ROCPRIM_DETAIL_USE_DPP 1
+#else
+    #define ROCPRIM_DETAIL_USE_DPP 0
+#endif
+
+#if defined(ROCPRIM_DETAIL_HAS_DPP) && (defined(__GFX8__) || defined(__GFX9__))
+    #define ROCPRIM_DETAIL_HAS_DPP_BROADCAST 1
 #endif
 
 #ifndef ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS
@@ -95,11 +109,12 @@
     #define ROCPRIM_TARGET_ARCH 0
 #endif
 
-#if(__gfx1010__ || __gfx1011__ || __gfx1012__ || __gfx1030__ || __gfx1031__ || __gfx1032__ \
-    || __gfx1035__ || __gfx1100__ || __gfx1101__ || __gfx1102__)
-    #define ROCPRIM_NAVI 1
-#else
-    #define ROCPRIM_NAVI 0
+#ifndef ROCPRIM_NAVI
+    #if defined(__HIP_DEVICE_COMPILE__) && (defined(__GFX10__) || defined(__GFX11__))
+        #define ROCPRIM_NAVI 1
+    #else
+        #define ROCPRIM_NAVI 0
+    #endif
 #endif
 #define ROCPRIM_ARCH_90a 910
 

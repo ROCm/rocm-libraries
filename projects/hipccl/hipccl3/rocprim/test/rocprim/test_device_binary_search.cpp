@@ -52,37 +52,24 @@ public:
 using custom_int2 = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
 
-using custom_config_0 = rocprim::transform_config<128, 4>;
-using custom_config_1 = rocprim::binary_search_config<64, 2>;
-struct custom_config_2
-{
-    static constexpr unsigned int block_size       = 256;
-    static constexpr unsigned int items_per_thread = 1;
-    static constexpr unsigned int size_limit       = ROCPRIM_GRID_SIZE_LIMIT;
-};
+struct use_custom_config
+{};
 
-typedef ::testing::Types<params<int, int>,
-                         params<unsigned long long,
-                                unsigned long long,
-                                size_t,
-                                rocprim::greater<unsigned long long>,
-                                custom_config_0>,
-                         params<float, double, unsigned int, rocprim::greater<double>>,
-                         params<double, int>,
-                         params<int8_t, int8_t>,
-                         params<uint8_t, uint8_t>,
-                         params<rocprim::half, rocprim::half, size_t, rocprim::less<rocprim::half>>,
-                         params<rocprim::bfloat16,
-                                rocprim::bfloat16,
-                                size_t,
-                                rocprim::less<rocprim::bfloat16>,
-                                custom_config_1>,
-                         params<custom_int2, custom_int2>,
-                         params<custom_double2,
-                                custom_double2,
-                                unsigned int,
-                                rocprim::greater<custom_double2>,
-                                custom_config_2>>
+typedef ::testing::Types<
+    params<int, int>,
+    params<unsigned long long, unsigned long long, size_t, rocprim::greater<unsigned long long>>,
+    params<float, double, unsigned int, rocprim::greater<double>>,
+    params<double, int>,
+    params<int8_t, int8_t>,
+    params<uint8_t, uint8_t>,
+    params<rocprim::half, rocprim::half, size_t, rocprim::less<rocprim::half>>,
+    params<rocprim::bfloat16,
+           rocprim::bfloat16,
+           size_t,
+           rocprim::less<rocprim::bfloat16>,
+           use_custom_config>,
+    params<custom_int2, custom_int2>,
+    params<custom_double2, custom_double2, unsigned int, rocprim::greater<custom_double2>>>
     Params;
 
 TYPED_TEST_SUITE(RocprimDeviceBinarySearch, Params);
@@ -97,7 +84,10 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
     using needle_type = typename TestFixture::params::needle_type;
     using output_type = typename TestFixture::params::output_type;
     using compare_op_type = typename TestFixture::params::compare_op_type;
-    using config          = typename TestFixture::params::config;
+    using config          = std::conditional_t<
+        std::is_same<typename TestFixture::params::config, use_custom_config>::value,
+        rocprim::lower_bound_config<64, 2>,
+        typename TestFixture::params::config>;
 
     hipStream_t stream = 0;
 
@@ -218,7 +208,10 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
     using needle_type = typename TestFixture::params::needle_type;
     using output_type = typename TestFixture::params::output_type;
     using compare_op_type = typename TestFixture::params::compare_op_type;
-    using config          = typename TestFixture::params::config;
+    using config          = std::conditional_t<
+        std::is_same<typename TestFixture::params::config, use_custom_config>::value,
+        rocprim::upper_bound_config<64, 2>,
+        typename TestFixture::params::config>;
 
     hipStream_t stream = 0;
 
@@ -338,7 +331,10 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
     using needle_type = typename TestFixture::params::needle_type;
     using output_type = typename TestFixture::params::output_type;
     using compare_op_type = typename TestFixture::params::compare_op_type;
-    using config          = typename TestFixture::params::config;
+    using config          = std::conditional_t<
+        std::is_same<typename TestFixture::params::config, use_custom_config>::value,
+        rocprim::binary_search_config<64, 2>,
+        typename TestFixture::params::config>;
 
     hipStream_t stream = 0;
 
