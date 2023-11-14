@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +56,46 @@ struct key_comparator<Key,
         = EndBit == 8 * sizeof(Key) ? ~Key(0) : (Key(1) << EndBit) - 1;
     static constexpr Key radix_mask_bottom = (Key(1) << StartBit) - 1;
     static constexpr Key radix_mask = radix_mask_upper ^ radix_mask_bottom;
+
+    bool operator()(const Key& lhs, const Key& rhs) const
+    {
+        Key l = lhs & radix_mask;
+        Key r = rhs & radix_mask;
+        return Descending ? (r < l) : (l < r);
+    }
+};
+
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<Key,
+                      Descending,
+                      StartBit,
+                      EndBit,
+                      typename std::enable_if<std::is_same<Key, __int128_t>::value>::type>
+{
+    static constexpr Key radix_mask_upper
+        = EndBit == 8 * sizeof(Key) ? ~Key(0) : (Key(1) << EndBit) - 1;
+    static constexpr Key radix_mask_bottom = (Key(1) << StartBit) - 1;
+    static constexpr Key radix_mask        = radix_mask_upper ^ radix_mask_bottom;
+
+    bool operator()(const Key& lhs, const Key& rhs) const
+    {
+        Key l = lhs & radix_mask;
+        Key r = rhs & radix_mask;
+        return Descending ? (r < l) : (l < r);
+    }
+};
+
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<Key,
+                      Descending,
+                      StartBit,
+                      EndBit,
+                      typename std::enable_if<std::is_same<Key, __uint128_t>::value>::type>
+{
+    static constexpr Key radix_mask_upper
+        = EndBit == 8 * sizeof(Key) ? ~Key(0) : (Key(1) << EndBit) - 1;
+    static constexpr Key radix_mask_bottom = (Key(1) << StartBit) - 1;
+    static constexpr Key radix_mask        = radix_mask_upper ^ radix_mask_bottom;
 
     bool operator()(const Key& lhs, const Key& rhs) const
     {

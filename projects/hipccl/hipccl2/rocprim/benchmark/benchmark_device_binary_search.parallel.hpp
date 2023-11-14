@@ -28,6 +28,8 @@
 #include <vector>
 
 #include "benchmark_utils.hpp"
+#include "rocprim/device/config_types.hpp"
+#include "rocprim/device/detail/device_config_helper.hpp"
 #include <benchmark/benchmark.h>
 #include <hip/hip_runtime_api.h>
 #include <rocprim/device/device_binary_search.hpp>
@@ -56,23 +58,52 @@ struct upper_bound_subalgorithm
     }
 };
 
-template<class Config = rocprim::default_config, class... Args>
-hipError_t dispatch_binary_search(binary_search_subalgorithm, Args&&... args)
+template<class Config = rocprim::default_config>
+struct dispatch_binary_search_helper
 {
-    return rocprim::binary_search<Config>(std::forward<Args>(args)...);
-}
+    template<class... Args>
+    hipError_t dispatch_binary_search(binary_search_subalgorithm, Args&&... args)
+    {
+        using config = rocprim::binary_search_config<Config::block_size, Config::items_per_thread>;
+        return rocprim::binary_search<config>(std::forward<Args>(args)...);
+    }
 
-template<class Config = rocprim::default_config, class... Args>
-hipError_t dispatch_binary_search(upper_bound_subalgorithm, Args&&... args)
-{
-    return rocprim::upper_bound<Config>(std::forward<Args>(args)...);
-}
+    template<class... Args>
+    hipError_t dispatch_binary_search(upper_bound_subalgorithm, Args&&... args)
+    {
+        using config = rocprim::upper_bound_config<Config::block_size, Config::items_per_thread>;
+        return rocprim::upper_bound<config>(std::forward<Args>(args)...);
+    }
 
-template<class Config = rocprim::default_config, class... Args>
-hipError_t dispatch_binary_search(lower_bound_subalgorithm, Args&&... args)
+    template<class... Args>
+    hipError_t dispatch_binary_search(lower_bound_subalgorithm, Args&&... args)
+    {
+        using config = rocprim::lower_bound_config<Config::block_size, Config::items_per_thread>;
+        return rocprim::lower_bound<config>(std::forward<Args>(args)...);
+    }
+};
+
+template<>
+struct dispatch_binary_search_helper<rocprim::default_config>
 {
-    return rocprim::lower_bound<Config>(std::forward<Args>(args)...);
-}
+    template<class... Args>
+    hipError_t dispatch_binary_search(binary_search_subalgorithm, Args&&... args)
+    {
+        return rocprim::binary_search<rocprim::default_config>(std::forward<Args>(args)...);
+    }
+
+    template<class... Args>
+    hipError_t dispatch_binary_search(upper_bound_subalgorithm, Args&&... args)
+    {
+        return rocprim::upper_bound<rocprim::default_config>(std::forward<Args>(args)...);
+    }
+
+    template<class... Args>
+    hipError_t dispatch_binary_search(lower_bound_subalgorithm, Args&&... args)
+    {
+        return rocprim::lower_bound<rocprim::default_config>(std::forward<Args>(args)...);
+    }
+};
 
 template<class SubAlgorithm, class T, class OutputType, class Config>
 struct device_binary_search_benchmark : public config_autotune_interface
@@ -116,30 +147,31 @@ struct device_binary_search_benchmark : public config_autotune_interface
 
         void*  d_temporary_storage = nullptr;
         size_t temporary_storage_bytes;
-        HIP_CHECK(dispatch_binary_search<Config>(SubAlgorithm{},
-                                                 d_temporary_storage,
-                                                 temporary_storage_bytes,
-                                                 d_haystack,
-                                                 d_needles,
-                                                 d_output,
-                                                 haystack_size,
-                                                 needles_size,
-                                                 compare_op,
-                                                 stream));
+        auto   dispatch_helper = dispatch_binary_search_helper<Config>();
+        HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
+                                                         d_temporary_storage,
+                                                         temporary_storage_bytes,
+                                                         d_haystack,
+                                                         d_needles,
+                                                         d_output,
+                                                         haystack_size,
+                                                         needles_size,
+                                                         compare_op,
+                                                         stream));
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         // Warm-up
-        HIP_CHECK(dispatch_binary_search<Config>(SubAlgorithm{},
-                                                 d_temporary_storage,
-                                                 temporary_storage_bytes,
-                                                 d_haystack,
-                                                 d_needles,
-                                                 d_output,
-                                                 haystack_size,
-                                                 needles_size,
-                                                 compare_op,
-                                                 stream));
+        HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
+                                                         d_temporary_storage,
+                                                         temporary_storage_bytes,
+                                                         d_haystack,
+                                                         d_needles,
+                                                         d_output,
+                                                         haystack_size,
+                                                         needles_size,
+                                                         compare_op,
+                                                         stream));
         HIP_CHECK(hipDeviceSynchronize());
 
         // HIP events creation
@@ -152,16 +184,16 @@ struct device_binary_search_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            HIP_CHECK(dispatch_binary_search<Config>(SubAlgorithm{},
-                                                     d_temporary_storage,
-                                                     temporary_storage_bytes,
-                                                     d_haystack,
-                                                     d_needles,
-                                                     d_output,
-                                                     haystack_size,
-                                                     needles_size,
-                                                     compare_op,
-                                                     stream));
+            HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
+                                                             d_temporary_storage,
+                                                             temporary_storage_bytes,
+                                                             d_haystack,
+                                                             d_needles,
+                                                             d_output,
+                                                             haystack_size,
+                                                             needles_size,
+                                                             compare_op,
+                                                             stream));
 
             // Record stop event and wait until it completes
             HIP_CHECK(hipEventRecord(stop, stream));

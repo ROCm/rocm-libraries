@@ -44,24 +44,6 @@ constexpr unsigned int warp_size()
     return warpSize;
 }
 
-/// \brief Returns a number of threads in a hardware warp for the actual device.
-/// At host side this constant is available at runtime time only.
-///
-/// It is constant for a device.
-ROCPRIM_HOST inline
-unsigned int host_warp_size()
-{
-    int default_hip_device;
-    hipError_t success = hipGetDevice(&default_hip_device);
-    hipDeviceProp_t device_prop;
-    success = hipGetDeviceProperties(&device_prop,default_hip_device);
-
-    if(success != hipSuccess)
-        return -1;
-    else
-        return device_prop.warpSize;
-};
-
 /// \brief Returns a number of threads in a hardware warp for the actual target.
 /// At device side this constant is available at compile time.
 ///

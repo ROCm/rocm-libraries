@@ -226,14 +226,20 @@ inline auto scan_impl(void*               temporary_storage,
     real_init_value_type* previous_last_element;
     real_init_value_type* new_last_element;
 
+    detail::temp_storage::layout layout{};
+    hipError_t                   layout_result
+        = scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout);
+    if(layout_result != hipSuccess)
+    {
+        return layout_result;
+    }
+
     const hipError_t partition_result = detail::temp_storage::partition(
         temporary_storage,
         storage_size,
         detail::temp_storage::make_linear_partition(
             // This is valid even with offset_scan_state_with_sleep_type
-            detail::temp_storage::make_partition(
-                &scan_state_storage,
-                scan_state_type::get_temp_storage_layout(number_of_blocks)),
+            detail::temp_storage::make_partition(&scan_state_storage, layout),
             detail::temp_storage::ptr_aligned_array(&previous_last_element,
                                                     use_limited_size ? 1 : 0),
             detail::temp_storage::ptr_aligned_array(&new_last_element, use_limited_size ? 1 : 0)));
@@ -251,9 +257,18 @@ inline auto scan_impl(void*               temporary_storage,
     if(number_of_blocks > 1 || use_limited_size)
     {
         // Create and initialize lookback_scan_state obj
-        auto scan_state = scan_state_type::create(scan_state_storage, number_of_blocks);
-        auto scan_state_with_sleep
-            = scan_state_with_sleep_type::create(scan_state_storage, number_of_blocks);
+        scan_state_type scan_state{};
+        hipError_t      result
+            = scan_state_type::create(scan_state, scan_state_storage, number_of_blocks, stream);
+        scan_state_with_sleep_type scan_state_with_sleep{};
+        result = scan_state_with_sleep_type::create(scan_state_with_sleep,
+                                                    scan_state_storage,
+                                                    number_of_blocks,
+                                                    stream);
+        if(result != hipSuccess)
+        {
+            return result;
+        }
 
         hipDeviceProp_t prop;
         int deviceId;
@@ -442,7 +457,7 @@ inline auto scan_impl(void*               temporary_storage,
 /// * By default, the input type is used for accumulation. A custom type
 /// can be specified using <tt>rocprim::transform_iterator</tt>, see the example below.
 ///
-/// \tparam Config - [optional] configuration of the primitive, should be \p scan_config_v2.
+/// \tparam Config - [optional] configuration of the primitive, has to be \p scan_config or a class derived from it.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -571,7 +586,7 @@ inline hipError_t inclusive_scan(void*             temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive, should be \p scan_config_v2.
+/// \tparam Config - [optional] configuration of the primitive, has to be \p scan_config or a class derived from it.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the

@@ -175,7 +175,8 @@ TYPED_TEST(WarpStoreTest, WarpLoad)
     constexpr unsigned int block_size = 1024;
     constexpr unsigned int items_count = items_per_thread * block_size;
 
-    SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size);
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size, device_id);
 
     std::vector<T> input(items_count);
     std::iota(input.begin(), input.end(), static_cast<T>(0));
@@ -227,7 +228,8 @@ TYPED_TEST(WarpStoreTest, WarpStoreGuarded)
     constexpr unsigned items_count = items_per_thread * block_size;
     constexpr int valid_items = warp_size / 4;
 
-    SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size);
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size, device_id);
 
     std::vector<T> input(items_count);
     std::iota(input.begin(), input.end(), static_cast<T>(0));

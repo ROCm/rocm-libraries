@@ -222,12 +222,12 @@ struct device_scan_benchmark_generator
             {
                 void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
                 {
-                    storage.emplace_back(std::make_unique<device_scan_benchmark<
-                                             false,
-                                             T,
-                                             rocprim::plus<T>,
-                                             rocprim::scan_config_v2<
-                                                 block_size,
+                    storage.emplace_back(
+                        std::make_unique<device_scan_benchmark<
+                            false,
+                            T,
+                            rocprim::plus<T>,
+                            rocprim::scan_config<block_size,
                                                  ItemsPerThread,
                                                  rocprim::block_load_method::block_load_transpose,
                                                  rocprim::block_store_method::block_store_transpose,

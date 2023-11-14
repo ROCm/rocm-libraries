@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -113,15 +113,7 @@ private:
             const digit_counter_type warp_digit_prefix = *digit_counters[i];
 
             // Construct a mask of threads in this wave which have the same digit.
-            ::rocprim::lane_mask_type peer_mask = ::rocprim::ballot(1);
-
-            ROCPRIM_UNROLL
-            for(unsigned int b = 0; b < RadixBits; ++b)
-            {
-                const unsigned int              bit_set      = digit & (1u << b);
-                const ::rocprim::lane_mask_type bit_set_mask = ::rocprim::ballot(bit_set);
-                peer_mask &= (bit_set ? bit_set_mask : ~bit_set_mask);
-            }
+            ::rocprim::lane_mask_type peer_mask = ::rocprim::match_any<RadixBits>(digit);
 
             ::rocprim::wave_barrier();
 
@@ -131,8 +123,7 @@ private:
             // than the current thread's.
             const unsigned int peer_digit_prefix = rocprim::masked_bit_count(peer_mask);
 
-            // The first thread with a particular digit gets to update the shared counter.
-            if(peer_digit_prefix == 0)
+            if(::rocprim::group_elect(peer_mask))
             {
                 *digit_counters[i] = warp_digit_prefix + digit_count;
             }

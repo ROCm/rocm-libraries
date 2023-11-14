@@ -459,6 +459,22 @@ class AlgorithmDeviceLowerBound(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceAdjacentDifference(Algorithm):
+    algorithm_name = 'device_adjacent_difference'
+    cpp_configuration_template_name = 'adjacent_difference_config_template'
+    config_selection_params = [
+            SelectionType(name='value_type', is_optional=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDeviceAdjacentDifferenceInplace(Algorithm):
+    algorithm_name = 'device_adjacent_difference_inplace'
+    cpp_configuration_template_name = 'adjacent_difference_inplace_config_template'
+    config_selection_params = [
+            SelectionType(name='value_type', is_optional=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 def filt_algo_regex(e, algorithm_name):
     if 'algo_regex' in e:
         return re.match(e['algo_regex'], algorithm_name) is not None
@@ -488,6 +504,10 @@ def create_algorithm(algorithm_name: str, fallback_entries):
         return AlgorithmDeviceUpperBound(fallback_entries)
     elif algorithm_name == 'device_lower_bound':
         return AlgorithmDeviceLowerBound(fallback_entries)
+    elif algorithm_name == 'device_adjacent_difference':
+        return AlgorithmDeviceAdjacentDifference(fallback_entries)
+    elif algorithm_name == 'device_adjacent_difference_inplace':
+        return AlgorithmDeviceAdjacentDifferenceInplace(fallback_entries)
     else:
         raise(NotSupportedError(f'Algorithm "{algorithm_name}" is not supported (yet)'))
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,10 +23,16 @@
 
 // Std::memcpy and std::memcmp
 #include <cstring>
+#include <vector>
 
-#include "test_utils_half.hpp"
+#include <rocprim/test_seed.hpp>
+#include <rocprim/type_traits.hpp>
+#include <rocprim/types.hpp>
+
+#include "common_test_header.hpp"
 #include "test_utils_bfloat16.hpp"
 #include "test_utils_custom_test_types.hpp"
+#include "test_utils_half.hpp"
 
 namespace test_utils {
 
@@ -113,6 +119,23 @@ public:
 };
 // End of extended numeric_limits
 
+// Converts possible device side types to their relevant host side native types
+inline rocprim::native_half convert_to_native(const rocprim::half& value)
+{
+    return rocprim::native_half(value);
+}
+
+inline rocprim::native_bfloat16 convert_to_native(const rocprim::bfloat16& value)
+{
+    return rocprim::native_bfloat16(value);
+}
+
+template<class T>
+inline auto convert_to_native(const T& value)
+{
+    return value;
+}
+
 // Helper class to generate a vector of special values for any type
 template<class T>
 struct special_values {
@@ -157,6 +180,90 @@ void add_special_values(std::vector<T>& source, seed_type seed_value)
         unsigned int start = gen() % (source.size() - special_values.size());
         std::copy(special_values.begin(), special_values.end(), source.begin() + start);
     }
+}
+
+template<class T, class U, class V>
+inline auto get_random_data(size_t size, U min, V max, seed_type seed_value) ->
+    typename std::enable_if<std::is_same<T, __int128_t>::value, std::vector<T>>::type
+{
+    engine_type gen{seed_value};
+    using dis_type = typename std::conditional<
+        is_valid_for_int_distribution<T>::value,
+        T,
+        typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
+    std::uniform_int_distribution<dis_type> distribution(static_cast<dis_type>(min),
+                                                         static_cast<dis_type>(max));
+    std::vector<T>                          data(size);
+    size_t                                  segment_size = size / random_data_generation_segments;
+    if(segment_size != 0)
+    {
+        for(uint32_t segment_index = 0; segment_index < random_data_generation_segments;
+            segment_index++)
+        {
+            if(segment_index % random_data_generation_repeat_strides == 0)
+            {
+                T repeated_value = static_cast<T>(distribution(gen));
+                std::fill(data.begin() + segment_size * segment_index,
+                          data.begin() + segment_size * (segment_index + 1),
+                          repeated_value);
+            }
+            else
+            {
+                std::generate(data.begin() + segment_size * segment_index,
+                              data.begin() + segment_size * (segment_index + 1),
+                              [&]() { return static_cast<T>(distribution(gen)); });
+            }
+        }
+    }
+    else
+    {
+        std::generate(data.begin(),
+                      data.end(),
+                      [&]() { return static_cast<T>(distribution(gen)); });
+    }
+    return data;
+}
+
+template<class T, class U, class V>
+inline auto get_random_data(size_t size, U min, V max, seed_type seed_value) ->
+    typename std::enable_if<std::is_same<T, __uint128_t>::value, std::vector<T>>::type
+{
+    engine_type gen{seed_value};
+    using dis_type = typename std::conditional<
+        is_valid_for_int_distribution<T>::value,
+        T,
+        typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
+    std::uniform_int_distribution<dis_type> distribution(static_cast<dis_type>(min),
+                                                         static_cast<dis_type>(max));
+    std::vector<T>                          data(size);
+    size_t                                  segment_size = size / random_data_generation_segments;
+    if(segment_size != 0)
+    {
+        for(uint32_t segment_index = 0; segment_index < random_data_generation_segments;
+            segment_index++)
+        {
+            if(segment_index % random_data_generation_repeat_strides == 0)
+            {
+                T repeated_value = static_cast<T>(distribution(gen));
+                std::fill(data.begin() + segment_size * segment_index,
+                          data.begin() + segment_size * (segment_index + 1),
+                          repeated_value);
+            }
+            else
+            {
+                std::generate(data.begin() + segment_size * segment_index,
+                              data.begin() + segment_size * (segment_index + 1),
+                              [&]() { return static_cast<T>(distribution(gen)); });
+            }
+        }
+    }
+    else
+    {
+        std::generate(data.begin(),
+                      data.end(),
+                      [&]() { return static_cast<T>(distribution(gen)); });
+    }
+    return data;
 }
 
 template<class T, class U, class V>
@@ -430,6 +537,33 @@ std::vector<size_t> get_large_sizes(T seed_value)
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
+}
+
+/// \brief Computes the closest multiple of \p divisor to a certain \p ref.
+/// \param ref Number to be rounded up.
+/// \param divisor Number which closest multiple to \p ref we are looking for.
+inline size_t closest_greater_multiple(const size_t ref, const size_t divisor)
+{
+    if(!divisor)
+    {
+        return ref;
+    }
+    const size_t remainder = ref % divisor;
+    size_t       distance  = remainder ? divisor - remainder : 0;
+    return ref + distance;
+}
+
+template<class T>
+std::vector<size_t> get_block_size_multiples(T seed_value, const unsigned int block_size)
+{
+    std::vector<size_t> sizes = get_sizes(seed_value);
+    std::transform(sizes.begin(),
+                   sizes.end(),
+                   sizes.begin(),
+                   [block_size](size_t size)
+                   { return test_utils::closest_greater_multiple(size, block_size); });
+    std::set<size_t> unique_sizes(sizes.begin(), sizes.end());
+    return std::vector<size_t>(unique_sizes.begin(), unique_sizes.end());
 }
 }
 

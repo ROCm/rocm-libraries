@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -68,6 +68,33 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::
 };
 
 template<class Key, class BitKey>
+struct radix_key_codec_integral<
+    Key,
+    BitKey,
+    typename std::enable_if<std::is_same<Key, __uint128_t>::value>::type>
+{
+    using bit_key_type = BitKey;
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE static bit_key_type encode(Key key)
+    {
+        return __builtin_bit_cast(bit_key_type, key);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE static Key decode(bit_key_type bit_key)
+    {
+        return __builtin_bit_cast(Key, bit_key);
+    }
+
+    template<bool Descending>
+    ROCPRIM_DEVICE static unsigned int
+        extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
+    {
+        unsigned int mask = (1u << length) - 1;
+        return static_cast<unsigned int>(bit_key >> start) & mask;
+    }
+};
+
+template<class Key, class BitKey>
 struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::is_signed<Key>::value>::type>
 {
     using bit_key_type = BitKey;
@@ -83,6 +110,36 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static Key decode(bit_key_type bit_key)
+    {
+        bit_key ^= sign_bit;
+        return __builtin_bit_cast(Key, bit_key);
+    }
+
+    template<bool Descending>
+    ROCPRIM_DEVICE static unsigned int
+        extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
+    {
+        unsigned int mask = (1u << length) - 1;
+        return static_cast<unsigned int>(bit_key >> start) & mask;
+    }
+};
+
+template<class Key, class BitKey>
+struct radix_key_codec_integral<Key,
+                                BitKey,
+                                typename std::enable_if<std::is_same<Key, __int128_t>::value>::type>
+{
+    using bit_key_type = BitKey;
+
+    static constexpr bit_key_type sign_bit = bit_key_type(1) << (sizeof(bit_key_type) * 8 - 1);
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE static bit_key_type encode(Key key)
+    {
+        const bit_key_type bit_key = __builtin_bit_cast(bit_key_type, key);
+        return sign_bit ^ bit_key;
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE static Key decode(bit_key_type bit_key)
     {
         bit_key ^= sign_bit;
         return __builtin_bit_cast(Key, bit_key);
@@ -198,6 +255,18 @@ struct radix_key_codec_base<
     Key,
     typename std::enable_if<::rocprim::is_integral<Key>::value>::type
 > : radix_key_codec_integral<Key, typename std::make_unsigned<Key>::type> { };
+
+template<class Key>
+struct radix_key_codec_base<Key,
+                            typename std::enable_if<std::is_same<Key, __int128_t>::value>::type>
+    : radix_key_codec_integral<Key, __uint128_t>
+{};
+
+template<class Key>
+struct radix_key_codec_base<Key,
+                            typename std::enable_if<std::is_same<Key, __uint128_t>::value>::type>
+    : radix_key_codec_integral<Key, __uint128_t>
+{};
 
 template<>
 struct radix_key_codec_base<bool>

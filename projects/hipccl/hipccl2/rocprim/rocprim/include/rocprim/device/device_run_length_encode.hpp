@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -76,8 +76,7 @@ namespace detail
 /// * Ranges specified by \p unique_output and \p counts_output must have at least
 /// <tt>*runs_count_output</tt> (i.e. the number of runs) elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p run_length_encode_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p run_length_encode_config or a class derived from it.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam UniqueOutputIterator - random-access iterator type of the output range. Must meet the
@@ -192,8 +191,7 @@ hipError_t run_length_encode(void * temporary_storage,
 /// * Ranges specified by \p offsets_output and \p counts_output must have at least
 /// <tt>*runs_count_output</tt> (i.e. the number of non-trivial runs) elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p run_length_encode_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be \p run_length_encode_config or a class derived from it.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OffsetsOutputIterator - random-access iterator type of the output range. Must meet the

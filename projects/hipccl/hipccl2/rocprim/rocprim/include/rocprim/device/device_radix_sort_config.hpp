@@ -48,7 +48,7 @@ template<class SingleSortConfig = default_config,
          class MergeSortConfig  = default_config,
          class OnesweepConfig   = default_config,
          size_t MergeSortLimit  = 1024 * 1024>
-struct radix_sort_config_v2
+struct radix_sort_config
 {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     /// \brief Configuration of radix sort single kernel.
@@ -59,52 +59,6 @@ struct radix_sort_config_v2
     using onesweep_config = OnesweepConfig;
     /// \brief Maximum number of items to use merge sort algorithm.
     static constexpr size_t merge_sort_limit = MergeSortLimit;
-#endif
-};
-
-/// \brief Legacy configuration of device-level radix sort operation.
-///
-/// \deprecated Due to a new implementation the configuration options no longer match the algorithm
-/// parameters. Use `radix_sort_config_v2` for the new parameters of the algorithm. Only a best
-/// effort mapping is provided for these options, parameters not applicable to the new algorithm
-/// are ignored.
-///
-/// Radix sort is executed in a single tile (at size < BlocksPerItem) or few iterations (passes)
-/// depending on total number of bits to be sorted (\p begin_bit and \p end_bit), each iteration
-/// sorts either \p LongRadixBits or \p ShortRadixBits bits, chosen to cover whole bit range in
-/// optimal way.
-///
-/// For example, if \p LongRadixBits is 7, \p ShortRadixBits is 6, \p begin_bit is 0 and \p end_bit
-/// is 32 there will be 5 iterations: 7 + 7 + 6 + 6 + 6 = 32 bits.
-///
-/// \tparam LongRadixBits - number of bits in long iterations.
-/// \tparam ShortRadixBits - number of bits in short iterations, must be equal to or less than \p LongRadixBits.
-/// \tparam ScanConfig - configuration of digits scan kernel. Must be \p kernel_config.
-/// \tparam SortConfig - configuration of radix sort kernel. Must be \p kernel_config.
-template<unsigned int LongRadixBits,
-         unsigned int ShortRadixBits,
-         class ScanConfig,
-         class SortConfig,
-         class SortSingleConfig               = kernel_config<256, 10>,
-         class SortMergeConfig                = kernel_config<1024, 1>,
-         unsigned int MergeSizeLimitBlocks    = 1024U,
-         bool         ForceSingleKernelConfig = false,
-         class OnesweepHistogramConfig        = kernel_config<256, 8>,
-         class OnesweepSortConfig             = kernel_config<256, 15>,
-         unsigned int OnesweepRadixBits       = 4>
-struct [[deprecated("use radix_sort_config_v2")]] radix_sort_config
-{
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-    /// \brief Configuration of radix sort single kernel.
-    using single_sort_config = SortSingleConfig;
-    /// \brief Configuration of merge sort algorithm.
-    using merge_sort_config = default_config;
-    /// \brief Configuration of radix sort onesweep.
-    using onesweep_config = radix_sort_onesweep_config<OnesweepHistogramConfig,
-                                                       OnesweepSortConfig,
-                                                       OnesweepRadixBits>;
-    /// \brief Maximum number of items to use merge sort algorithm.
-    static constexpr size_t merge_sort_limit = 1024 * MergeSizeLimitBlocks;
 #endif
 };
 

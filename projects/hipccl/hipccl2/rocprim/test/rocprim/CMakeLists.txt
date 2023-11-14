@@ -234,6 +234,7 @@ add_rocprim_test("rocprim.block_sort_merge_stable" test_block_sort_merge_stable.
 add_rocprim_test_parallel("rocprim.block_radix_rank" test_block_radix_rank.cpp.in)
 add_rocprim_test("rocprim.block_radix_sort" test_block_radix_sort.cpp)
 add_rocprim_test("rocprim.block_reduce" test_block_reduce.cpp)
+add_rocprim_test("rocprim.block_run_length_decode" test_block_run_length_decode.cpp)
 add_rocprim_test_parallel("rocprim.block_scan" test_block_scan.cpp.in)
 add_rocprim_test("rocprim.block_shuffle" test_block_shuffle.cpp)
 add_rocprim_test("rocprim.block_sort_bitonic" test_block_sort_bitonic.cpp)

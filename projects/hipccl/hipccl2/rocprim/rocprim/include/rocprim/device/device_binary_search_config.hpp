@@ -56,8 +56,8 @@ struct wrapped_transform_config<default_config_for_binary_search<Value, Output>,
     template<target_arch Arch>
     struct architecture_config
     {
-        static constexpr transform_config_params params = wrap_transform_config<
-            default_binary_search_config<static_cast<unsigned int>(Arch), Value, Output>>();
+        static constexpr transform_config_params params
+            = default_binary_search_config<static_cast<unsigned int>(Arch), Value, Output>{};
     };
 };
 
@@ -67,8 +67,8 @@ struct wrapped_transform_config<default_config_for_upper_bound<Value, Output>, U
     template<target_arch Arch>
     struct architecture_config
     {
-        static constexpr transform_config_params params = wrap_transform_config<
-            default_upper_bound_config<static_cast<unsigned int>(Arch), Value, Output>>();
+        static constexpr transform_config_params params
+            = default_upper_bound_config<static_cast<unsigned int>(Arch), Value, Output>{};
     };
 };
 
@@ -78,8 +78,8 @@ struct wrapped_transform_config<default_config_for_lower_bound<Value, Output>, U
     template<target_arch Arch>
     struct architecture_config
     {
-        static constexpr transform_config_params params = wrap_transform_config<
-            default_lower_bound_config<static_cast<unsigned int>(Arch), Value, Output>>();
+        static constexpr transform_config_params params
+            = default_lower_bound_config<static_cast<unsigned int>(Arch), Value, Output>{};
     };
 };
 

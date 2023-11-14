@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -542,4 +542,96 @@ TEST(RocprimDeviceReduceByKey, LargeSegmentCountReduceByKeyLargeValueType)
 {
     // large value type to test TilesPerBlock > 1
     large_segment_count_reduce_by_key<test_utils::custom_test_type<size_t>>();
+}
+
+TEST(RocprimDeviceReduceByKey, ReduceByNonEqualKeys)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using key_type   = size_t;
+    using value_type = unsigned int;
+
+    const bool debug_synchronous = false;
+
+    ::rocprim::plus<value_type> reduce_op;
+    auto                        key_compare_op = [](const auto&, const auto&) { return false; };
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(size_t block_size_multiple : test_utils::get_block_size_multiples(seed_value, 256))
+        {
+            const size_t size = block_size_multiple + 1;
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            hipStream_t stream = 0; // default
+
+            // Using segments of size 1.
+            auto d_keys_input = rocprim::make_counting_iterator(key_type(0));
+
+            // Setting all values to 1, so the reduction will contain the size of the input array.
+            auto d_values_input = rocprim::constant_iterator<value_type>(1);
+
+            size_t unique_count_expected = size;
+
+            // Discard all output
+            auto d_unique_output     = rocprim::make_discard_iterator();
+            auto d_aggregates_output = rocprim::make_discard_iterator();
+
+            size_t* d_unique_count_output;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_count_output, sizeof(size_t)));
+
+            size_t temporary_storage_bytes;
+
+            HIP_CHECK(rocprim::reduce_by_key(nullptr,
+                                             temporary_storage_bytes,
+                                             d_keys_input,
+                                             d_values_input,
+                                             size,
+                                             d_unique_output,
+                                             d_aggregates_output,
+                                             d_unique_count_output,
+                                             reduce_op,
+                                             key_compare_op,
+                                             stream,
+                                             debug_synchronous));
+
+            ASSERT_GT(temporary_storage_bytes, 0);
+
+            void* d_temporary_storage;
+            HIP_CHECK(
+                test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+            HIP_CHECK(rocprim::reduce_by_key(d_temporary_storage,
+                                             temporary_storage_bytes,
+                                             d_keys_input,
+                                             d_values_input,
+                                             size,
+                                             d_unique_output,
+                                             d_aggregates_output,
+                                             d_unique_count_output,
+                                             reduce_op,
+                                             key_compare_op,
+                                             stream,
+                                             debug_synchronous));
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+
+            size_t unique_count_output;
+            HIP_CHECK(hipMemcpy(&unique_count_output,
+                                d_unique_count_output,
+                                sizeof(unique_count_output),
+                                hipMemcpyDeviceToHost));
+
+            HIP_CHECK(hipFree(d_unique_count_output));
+
+            ASSERT_EQ(unique_count_output, unique_count_expected);
+        }
+    }
 }

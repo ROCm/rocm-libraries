@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -71,22 +71,28 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-template <typename Config,
-          bool InPlace,
-          bool Right,
-          typename InputIt,
-          typename OutputIt,
-          typename BinaryFunction>
-void ROCPRIM_KERNEL __launch_bounds__(Config::block_size) adjacent_difference_kernel(
-    const InputIt                                             input,
-    const OutputIt                                            output,
-    const std::size_t                                         size,
-    const BinaryFunction                                      op,
-    const typename std::iterator_traits<InputIt>::value_type* previous_values,
-    const std::size_t                                         starting_block)
+template<typename Config,
+         bool InPlace,
+         bool Right,
+         typename InputIt,
+         typename OutputIt,
+         typename BinaryFunction>
+void ROCPRIM_KERNEL
+    __launch_bounds__(device_params<Config>().adjacent_difference_kernel_config.block_size)
+        adjacent_difference_kernel(
+            const InputIt                                             input,
+            const OutputIt                                            output,
+            const std::size_t                                         size,
+            const BinaryFunction                                      op,
+            const typename std::iterator_traits<InputIt>::value_type* previous_values,
+            const std::size_t                                         starting_block)
 {
-    adjacent_difference_kernel_impl<Config, InPlace, Right>(
-        input, output, size, op, previous_values, starting_block);
+    adjacent_difference_kernel_impl<Config, InPlace, Right>(input,
+                                                            output,
+                                                            size,
+                                                            op,
+                                                            previous_values,
+                                                            starting_block);
 }
 
 template <typename Config,
@@ -106,16 +112,23 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 {
     using value_type = typename std::iterator_traits<InputIt>::value_type;
 
-    using config = detail::default_or_custom_config<
-        Config,
-        detail::default_adjacent_difference_config<ROCPRIM_TARGET_ARCH, value_type>>;
+    using config = wrapped_adjacent_difference_config<Config, InPlace, value_type>;
 
-    static constexpr unsigned int block_size       = config::block_size;
-    static constexpr unsigned int items_per_thread = config::items_per_thread;
-    static constexpr unsigned int items_per_block  = block_size * items_per_thread;
+    detail::target_arch target_arch;
+    hipError_t          result = detail::host_target_arch(stream, target_arch);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
 
-    const std::size_t num_blocks = ceiling_div(size, items_per_block);
-    const std::size_t num_previous_values = InPlace && num_blocks >= 2 ? num_blocks - 1 : 0;
+    const detail::adjacent_difference_config_params params
+        = detail::dispatch_target_arch<config>(target_arch);
+
+    const unsigned int block_size       = params.adjacent_difference_kernel_config.block_size;
+    const unsigned int items_per_thread = params.adjacent_difference_kernel_config.items_per_thread;
+    const unsigned int items_per_block  = block_size * items_per_thread;
+    const std::size_t  num_blocks       = ceiling_div(size, items_per_block);
+    const std::size_t  num_previous_values = InPlace && num_blocks >= 2 ? num_blocks - 1 : 0;
 
     value_type* previous_values;
 
@@ -139,11 +152,11 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
     {
         // If doing left adjacent diff then the last item of each block is needed for the
         // next block, otherwise the first item is needed for the previous block
-        static constexpr auto offset = items_per_block - (Right ? 0 : 1);
+        const auto offset = items_per_block - (Right ? 0 : 1);
 
         const auto block_starts_iter = make_transform_iterator(
-            rocprim::make_counting_iterator(std::size_t {0}),
-            [base = input + offset](std::size_t i) { return base[i * items_per_block]; });
+            rocprim::make_counting_iterator(std::size_t{0}),
+            [=, base = input + offset](std::size_t i) { return base[i * items_per_block]; });
 
         const hipError_t error = ::rocprim::transform(block_starts_iter,
                                                       previous_values,
@@ -157,9 +170,9 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
         }
     }
 
-    static constexpr unsigned int size_limit     = config::size_limit;
-    static constexpr auto number_of_blocks_limit = std::max(size_limit / items_per_block, 1u);
-    static constexpr auto aligned_size_limit     = number_of_blocks_limit * items_per_block;
+    const unsigned int size_limit             = params.adjacent_difference_kernel_config.size_limit;
+    const auto         number_of_blocks_limit = std::max(size_limit / items_per_block, 1u);
+    const auto         aligned_size_limit     = number_of_blocks_limit * items_per_block;
 
     // Launch number_of_blocks_limit blocks while there is still at least as many blocks
     // left as the limit
@@ -210,7 +223,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 }
 } // namespace detail
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+    #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
@@ -231,8 +244,8 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 /// }
 /// \endcode
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// `adjacent_difference_config` or a class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// `adjacent_difference_config` or a class derived from it.
 /// \tparam InputIt - [inferred] random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIt - [inferred] random-access iterator type of the output range. Must meet the
@@ -327,8 +340,8 @@ hipError_t adjacent_difference(void* const          temporary_storage,
 /// }
 /// \endcode
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// `adjacent_difference_config` or a class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// `adjacent_difference_config` or a class derived from it.
 /// \tparam InputIt - [inferred] random-access iterator type of the value range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam BinaryFunction - [inferred] binary operation function object that will be applied to
@@ -380,8 +393,8 @@ hipError_t adjacent_difference_inplace(void* const          temporary_storage,
 /// }
 /// \endcode
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// `adjacent_difference_config` or a class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// `adjacent_difference_config` or a class derived from it.
 /// \tparam InputIt - [inferred] random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIt - [inferred] random-access iterator type of the output range. Must meet the
@@ -476,8 +489,8 @@ hipError_t adjacent_difference_right(void* const          temporary_storage,
 /// }
 /// \endcode
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be
-/// `adjacent_difference_config` or a class with the same members.
+/// \tparam Config - [optional] configuration of the primitive. It has to be
+/// `adjacent_difference_config` or a class derived from it.
 /// \tparam InputIt - [inferred] random-access iterator type of the value range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam BinaryFunction - [inferred] binary operation function object that will be applied to

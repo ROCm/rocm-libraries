@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,12 @@
 #ifndef TEST_TEST_UTILS_HPP_
 #define TEST_TEST_UTILS_HPP_
 
-#include <rocprim/types.hpp>
+#include <rocprim/detail/match_result_type.hpp>
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/functional.hpp>
 #include <rocprim/intrinsics.hpp>
 #include <rocprim/type_traits.hpp>
-#include <rocprim/detail/match_result_type.hpp>
+#include <rocprim/types.hpp>
 
 // Identity iterator
 #include "identity_iterator.hpp"
@@ -432,16 +433,16 @@ void iota(ForwardIt first, ForwardIt last, T value)
     }
 }
 
-#define SKIP_IF_UNSUPPORTED_WARP_SIZE(test_warp_size) { \
-    const auto host_warp_size = ::rocprim::host_warp_size(); \
-    if (host_warp_size < (test_warp_size)) \
-    { \
-        GTEST_SKIP() << "Cannot run test of warp size " \
-            << (test_warp_size) \
-            << " on a device with warp size " \
-            << host_warp_size; \
-    } \
-}
+#define SKIP_IF_UNSUPPORTED_WARP_SIZE(test_warp_size, device_id)                \
+    {                                                                           \
+        unsigned int host_warp_size;                                            \
+        HIP_CHECK(::rocprim::host_warp_size(device_id, host_warp_size));        \
+        if(host_warp_size < (test_warp_size))                                   \
+        {                                                                       \
+            GTEST_SKIP() << "Cannot run test of warp size " << (test_warp_size) \
+                         << " on a device with warp size " << host_warp_size;   \
+        }                                                                       \
+    }
 
 template<unsigned int LogicalWarpSize>
 struct DeviceSelectWarpSize

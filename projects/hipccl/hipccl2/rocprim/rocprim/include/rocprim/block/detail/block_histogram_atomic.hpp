@@ -69,14 +69,8 @@ public:
             const unsigned int bin = static_cast<unsigned int>(input[i]);
 
             // Get a mask with the threads that have the same value for `bin`.
-            ::rocprim::lane_mask_type peer_mask = ballot(1);
-            ROCPRIM_UNROLL
-            for(unsigned int b = 1; b < Bins; b <<= 1)
-            {
-                const unsigned int bit_set      = bin & b;
-                const auto         bit_set_mask = ballot(bit_set);
-                peer_mask &= (bit_set ? bit_set_mask : ~bit_set_mask);
-            }
+            ::rocprim::lane_mask_type peer_mask
+                = ::rocprim::match_any<::rocprim::Log2<Bins>::VALUE>(bin);
 
             // The total number of threads in the warp which also have this digit.
             const unsigned int bin_count = bit_count(peer_mask);

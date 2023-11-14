@@ -258,7 +258,7 @@ struct device_scan_by_key_benchmark_generator
                                              rocprim::plus<ValueType>,
                                              rocprim::equal_to<KeyType>,
                                              1024,
-                                             rocprim::scan_by_key_config_v2<
+                                             rocprim::scan_by_key_config<
                                                  block_size,
                                                  ItemsPerThread,
                                                  rocprim::block_load_method::block_load_transpose,

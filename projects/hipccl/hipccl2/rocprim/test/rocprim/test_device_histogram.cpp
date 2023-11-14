@@ -100,16 +100,6 @@ struct transform_op
     }
 };
 
-// provides the same members as rocprim::histogram_config
-struct user_config
-{
-    using histogram = ::rocprim::kernel_config<256, 1>;
-
-    static constexpr unsigned int max_grid_size          = 1024;
-    static constexpr unsigned int shared_impl_max_bins   = 2048;
-    static constexpr unsigned int shared_impl_histograms = 3;
-};
-
 template<class SampleType,
          unsigned int Bins,
          int          LowerLevel,
@@ -143,7 +133,7 @@ typedef ::testing::Types<params1<int, 10, 0, 10>,
                          params1<unsigned char, 10, 20, 240, unsigned char, unsigned int>,
                          params1<unsigned char, 256, 0, 256, short>,
 
-                         params1<double, 10, 0, 1000, double, int, user_config>,
+                         params1<double, 10, 0, 1000, double, int>,
                          params1<int, 123, 100, 5635, int>,
                          params1<double, 55, -123, +123, double, unsigned int, custom_config1>>
     Params1;

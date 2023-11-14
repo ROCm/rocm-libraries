@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,9 @@ namespace detail
 template<typename ReduceConfig, typename>
 struct wrapped_reduce_config
 {
+    static_assert(std::is_same<typename ReduceConfig::tag, reduce_config_tag>::value,
+                  "Config must be a specialization of struct template reduce_config");
+
     template<target_arch Arch>
     struct architecture_config
     {

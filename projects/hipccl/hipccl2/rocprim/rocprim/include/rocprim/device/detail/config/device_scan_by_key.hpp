@@ -51,11 +51,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int
@@ -67,11 +67,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = double, value_type = short
@@ -83,11 +83,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -98,11 +98,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = int64_t
@@ -114,11 +114,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<128,
-                            10,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         10,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = float, value_type = int
@@ -130,11 +130,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            12,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         12,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = short
@@ -146,11 +146,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -161,11 +161,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<128,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int64_t
@@ -176,11 +176,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int
@@ -191,11 +191,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -206,11 +206,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int8_t
@@ -221,11 +221,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int64_t
@@ -237,11 +237,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -253,11 +253,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -269,11 +269,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int8_t
@@ -284,11 +284,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int64_t
@@ -300,11 +300,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<128,
-                            10,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         10,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int
@@ -316,11 +316,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            12,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         12,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = short
@@ -332,11 +332,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -347,11 +347,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<128,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = int64_t
@@ -363,11 +363,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = short, value_type = int
@@ -379,11 +379,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = short
@@ -395,11 +395,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = short, value_type = int8_t
@@ -410,11 +410,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int64_t
@@ -425,11 +425,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int
@@ -440,11 +440,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<128,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = short
@@ -455,11 +455,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int8_t
@@ -470,11 +470,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = double, value_type = int64_t
@@ -486,11 +486,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = double, value_type = int
@@ -502,11 +502,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<128,
-                            19,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<128,
+                         19,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = double, value_type = short
@@ -518,11 +518,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<128,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<128,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -533,11 +533,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<128,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = float, value_type = int64_t
@@ -549,11 +549,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            10,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         10,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = int
@@ -565,11 +565,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            12,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         12,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = short
@@ -581,11 +581,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -596,11 +596,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int64_t
@@ -611,11 +611,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int
@@ -626,11 +626,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -641,11 +641,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int8_t
@@ -656,11 +656,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int64_t
@@ -672,11 +672,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -688,11 +688,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<128,
-                            19,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<128,
+                         19,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -704,11 +704,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<128,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<128,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int8_t
@@ -719,11 +719,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<128,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int64_t
@@ -735,11 +735,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            10,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         10,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int
@@ -751,11 +751,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            12,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         12,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = short
@@ -767,11 +767,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -782,11 +782,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = int64_t
@@ -798,11 +798,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = int
@@ -814,11 +814,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = short
@@ -830,11 +830,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = short, value_type = int8_t
@@ -845,11 +845,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int64_t
@@ -860,11 +860,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int
@@ -875,11 +875,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            17,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         17,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = short
@@ -890,11 +890,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int8_t
@@ -905,11 +905,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int64_t
@@ -921,11 +921,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int
@@ -937,11 +937,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = short
@@ -953,11 +953,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            23,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         23,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -968,11 +968,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = float, value_type = int64_t
@@ -984,11 +984,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            15,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         15,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = int
@@ -1000,11 +1000,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            15,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         15,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = short
@@ -1016,11 +1016,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -1031,11 +1031,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int64_t
@@ -1046,11 +1046,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int
@@ -1061,11 +1061,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -1076,11 +1076,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int8_t
@@ -1091,11 +1091,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int64_t
@@ -1107,11 +1107,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -1123,11 +1123,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -1139,11 +1139,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            23,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         23,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int8_t
@@ -1154,11 +1154,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int64_t
@@ -1170,11 +1170,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            15,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         15,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = int
@@ -1186,11 +1186,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            15,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         15,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = short
@@ -1202,11 +1202,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -1217,11 +1217,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = int64_t
@@ -1233,11 +1233,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = int
@@ -1249,11 +1249,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = short
@@ -1265,11 +1265,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = int8_t
@@ -1280,11 +1280,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int64_t
@@ -1295,11 +1295,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int
@@ -1310,11 +1310,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            13,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         13,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = short
@@ -1325,11 +1325,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int8_t
@@ -1340,11 +1340,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = double, value_type = int64_t
@@ -1356,11 +1356,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<128,
-                            23,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         23,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int
@@ -1372,11 +1372,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<128,
-                            23,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<128,
+                         23,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = double, value_type = short
@@ -1388,11 +1388,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -1403,11 +1403,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            17,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         17,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = float, value_type = int64_t
@@ -1419,11 +1419,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            9,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         9,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = float, value_type = int
@@ -1435,11 +1435,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            15,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         15,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = float, value_type = short
@@ -1451,11 +1451,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -1466,11 +1466,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<128,
-                            7,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<128,
+                         7,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int64_t
@@ -1481,11 +1481,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            23,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         23,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int
@@ -1496,11 +1496,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<128,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -1511,11 +1511,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<128,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int8_t
@@ -1526,11 +1526,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int64_t
@@ -1542,11 +1542,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            13,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         13,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -1558,11 +1558,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<128,
-                            19,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         19,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -1574,11 +1574,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int8_t
@@ -1589,11 +1589,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = int64_t
@@ -1605,11 +1605,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            9,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         9,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int
@@ -1621,11 +1621,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<128,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<128,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = short
@@ -1637,11 +1637,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -1652,11 +1652,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<128,
-                            7,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<128,
+                         7,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = short, value_type = int64_t
@@ -1668,11 +1668,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            9,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         9,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = int
@@ -1684,11 +1684,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<128,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = short
@@ -1700,11 +1700,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<128,
-                            22,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         22,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = int8_t
@@ -1715,11 +1715,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int64_t
@@ -1730,11 +1730,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<128,
-                            17,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<128,
+                         17,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int
@@ -1745,11 +1745,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            12,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         12,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = short
@@ -1760,11 +1760,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<128,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int8_t
@@ -1775,11 +1775,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int64_t
@@ -1791,11 +1791,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int
@@ -1807,11 +1807,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = double, value_type = short
@@ -1823,11 +1823,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -1838,11 +1838,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = int64_t
@@ -1854,11 +1854,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<128,
-                            10,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         10,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = float, value_type = int
@@ -1870,11 +1870,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            12,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         12,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = short
@@ -1886,11 +1886,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -1901,11 +1901,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<128,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int64_t
@@ -1916,11 +1916,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int
@@ -1931,11 +1931,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -1946,11 +1946,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int8_t
@@ -1961,11 +1961,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int64_t
@@ -1977,11 +1977,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -1993,11 +1993,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -2009,11 +2009,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int8_t
@@ -2024,11 +2024,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int64_t
@@ -2040,11 +2040,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<128,
-                            10,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         10,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int
@@ -2056,11 +2056,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            12,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         12,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = short
@@ -2072,11 +2072,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -2087,11 +2087,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<128,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = int64_t
@@ -2103,11 +2103,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = short, value_type = int
@@ -2119,11 +2119,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = short
@@ -2135,11 +2135,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = short, value_type = int8_t
@@ -2150,11 +2150,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int64_t
@@ -2165,11 +2165,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int
@@ -2180,11 +2180,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<128,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = short
@@ -2195,11 +2195,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int8_t
@@ -2210,11 +2210,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = double, value_type = int64_t
@@ -2226,11 +2226,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int
@@ -2242,11 +2242,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = double, value_type = short
@@ -2258,11 +2258,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = double, value_type = int8_t
@@ -2273,11 +2273,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = int64_t
@@ -2289,11 +2289,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<128,
-                            10,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         10,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = float, value_type = int
@@ -2305,11 +2305,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            12,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         12,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = short
@@ -2321,11 +2321,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = float, value_type = int8_t
@@ -2336,11 +2336,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<128,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int64_t
@@ -2351,11 +2351,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int
@@ -2366,11 +2366,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = short
@@ -2381,11 +2381,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = rocprim::half, value_type = int8_t
@@ -2396,11 +2396,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int64_t
@@ -2412,11 +2412,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int
@@ -2428,11 +2428,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int64_t, value_type = short
@@ -2444,11 +2444,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<64,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int64_t, value_type = int8_t
@@ -2459,11 +2459,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
                       && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int64_t
@@ -2475,11 +2475,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<128,
-                            10,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         10,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int, value_type = int
@@ -2491,11 +2491,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            12,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         12,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = short
@@ -2507,11 +2507,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int, value_type = int8_t
@@ -2522,11 +2522,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
                       && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<128,
-                            14,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         14,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = int64_t
@@ -2538,11 +2538,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
                       && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = short, value_type = int
@@ -2554,11 +2554,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
                       && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<256,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = short, value_type = short
@@ -2570,11 +2570,11 @@ struct default_scan_by_key_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
                       && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = short, value_type = int8_t
@@ -2585,11 +2585,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
                       && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<256,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int64_t
@@ -2600,11 +2600,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : scan_by_key_config_v2<64,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<64,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int
@@ -2615,11 +2615,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : scan_by_key_config_v2<128,
-                            18,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::using_warp_scan>
+    : scan_by_key_config<128,
+                         18,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::using_warp_scan>
 {};
 
 // Based on key_type = int8_t, value_type = short
@@ -2630,11 +2630,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : scan_by_key_config_v2<256,
-                            20,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         20,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 // Based on key_type = int8_t, value_type = int8_t
@@ -2645,11 +2645,11 @@ struct default_scan_by_key_config<
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
                       && (sizeof(value_type) <= 1))>>
-    : scan_by_key_config_v2<256,
-                            24,
-                            ::rocprim::block_load_method::block_load_transpose,
-                            ::rocprim::block_store_method::block_store_transpose,
-                            block_scan_algorithm::reduce_then_scan>
+    : scan_by_key_config<256,
+                         24,
+                         ::rocprim::block_load_method::block_load_transpose,
+                         ::rocprim::block_store_method::block_store_transpose,
+                         block_scan_algorithm::reduce_then_scan>
 {};
 
 } // end namespace detail

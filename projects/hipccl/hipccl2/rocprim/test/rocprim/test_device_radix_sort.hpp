@@ -139,10 +139,10 @@ inline void sort_keys()
                 test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
 
             // Use arbitrary custom config to increase test coverage without making more test cases
-            using config = rocprim::radix_sort_config_v2<rocprim::default_config,
-                                                         rocprim::default_config,
-                                                         rocprim::default_config,
-                                                         1024 * 512>;
+            using config = rocprim::radix_sort_config<rocprim::default_config,
+                                                      rocprim::default_config,
+                                                      rocprim::default_config,
+                                                      1024 * 512>;
 
             size_t temporary_storage_bytes;
             HIP_CHECK(rocprim::radix_sort_keys<config>(nullptr,
@@ -319,7 +319,7 @@ inline void sort_pairs()
             }
 
             // Use arbitrary custom config to increase test coverage without making more test cases
-            using config = rocprim::radix_sort_config_v2<
+            using config = rocprim::radix_sort_config<
                 rocprim::kernel_config<256, 1>,
                 rocprim::merge_sort_config<128, 64, 2, 128, 64, 2>,
                 rocprim::radix_sort_onesweep_config<rocprim::kernel_config<128, 1>,

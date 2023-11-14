@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,7 @@
 #include "../../detail/match_result_type.hpp"
 #include "../../detail/various.hpp"
 #include "../../intrinsics/thread.hpp"
+#include "../../thread/thread_operators.hpp"
 
 #include "../../config.hpp"
 
@@ -58,6 +59,36 @@ using wrapped_type_t = rocprim::tuple<unsigned int, AccumulatorType>;
 template<typename AccumulatorType, bool UseSleep = false>
 using lookback_scan_state_t
     = detail::lookback_scan_state<wrapped_type_t<AccumulatorType>, UseSleep>;
+
+template<typename EqualityOp>
+struct guarded_inequality_wrapper
+{
+    /// Wrapped equality operator
+    EqualityOp op;
+
+    /// Out-of-bounds limit
+    size_t guard;
+
+    /// Constructor
+    ROCPRIM_HOST_DEVICE inline guarded_inequality_wrapper(EqualityOp op, size_t guard)
+        : op(op), guard(guard)
+    {}
+
+    /// \brief Guarded boolean inequality operator.
+    ///
+    /// \tparam T Type of the operands compared by the equality operator
+    /// \param a Left hand-side operand
+    /// \param b Right hand-side operand
+    /// \param idx Index of the thread calling to this operator. This is used to determine which
+    /// operations are out-of-bounds
+    /// \returns <tt>!op(a, b)</tt> for a certain equality operator \p op when in-bounds.
+    template<typename T>
+    ROCPRIM_HOST_DEVICE inline bool operator()(const T& a, const T& b, size_t idx) const
+    {
+        // In-bounds return operation result, out-of-bounds return false.
+        return (idx < guard) ? !op(a, b) : 0;
+    }
+};
 
 template<typename KeyType,
          typename AccumulatorType,
@@ -93,14 +124,8 @@ struct load_helper
         }
         else
         {
-            // Pad with the last valid value so out-of-bound items are not flagged
-            block_load_keys{}.load(tile_keys,
-                                   keys,
-                                   valid_in_global_last_tile,
-                                   tile_keys[valid_in_global_last_tile - 1],
-                                   storage.keys);
+            block_load_keys{}.load(tile_keys, keys, valid_in_global_last_tile, storage.keys);
             ::rocprim::syncthreads();
-
             block_load_values{}.load(tile_values,
                                      values,
                                      valid_in_global_last_tile,
@@ -121,22 +146,47 @@ struct discontinuity_helper
                                    CompareFunction compare,
                                    unsigned int (&head_flags)[ItemsPerThread],
                                    const bool    is_global_first_tile,
+                                   const bool    is_global_last_tile,
+                                   const size_t  remaining,
                                    storage_type& storage)
     {
-        auto not_equal = [compare](const auto& a, const auto& b) mutable { return !compare(a, b); };
-
-        if(!is_global_first_tile)
+        if(is_global_last_tile)
         {
-            const KeyType tile_predecessor = tile_keys[-1];
-            block_discontinuity_type{}.flag_heads(head_flags,
-                                                  tile_predecessor,
-                                                  keys,
-                                                  not_equal,
-                                                  storage);
+            // If it's the last tile globally, the out-of-bound items should not be flagged.
+            auto guarded_not_equal
+                = guarded_inequality_wrapper<CompareFunction>(compare, remaining);
+
+            if(!is_global_first_tile)
+            {
+                const KeyType tile_predecessor = tile_keys[-1];
+                block_discontinuity_type{}.flag_heads(head_flags,
+                                                      tile_predecessor,
+                                                      keys,
+                                                      guarded_not_equal,
+                                                      storage);
+            }
+            else
+            {
+                block_discontinuity_type{}.flag_heads(head_flags, keys, guarded_not_equal, storage);
+            }
         }
         else
         {
-            block_discontinuity_type{}.flag_heads(head_flags, keys, not_equal, storage);
+            auto not_equal = rocprim::inequality_wrapper<CompareFunction>(compare);
+
+            if(!is_global_first_tile)
+            {
+                const KeyType tile_predecessor = tile_keys[-1];
+                block_discontinuity_type{}.flag_heads(head_flags,
+                                                      tile_predecessor,
+                                                      keys,
+                                                      not_equal,
+                                                      storage);
+            }
+            else
+            {
+                block_discontinuity_type{}.flag_heads(head_flags, keys, not_equal, storage);
+            }
         }
     }
 };
@@ -270,8 +320,11 @@ public:
         // first tile in this launch
         const bool is_first_tile = tile_id == 0;
 
+        // When in last tile valid_in_global_last_tile = remaining
         const unsigned int valid_in_global_last_tile
             = static_cast<unsigned int>(size - ((total_number_of_tiles - 1) * items_per_tile));
+        const size_t remaining
+            = static_cast<size_t>(size - (size_t{global_tile_id} * items_per_tile));
 
         const unsigned int flat_thread_id = threadIdx.x;
 
@@ -293,6 +346,8 @@ public:
                                         compare,
                                         head_flags,
                                         is_global_first_tile,
+                                        is_global_last_tile,
+                                        remaining,
                                         storage.scan.flags);
 
         wrapped_type wrapped_values[ItemsPerThread];

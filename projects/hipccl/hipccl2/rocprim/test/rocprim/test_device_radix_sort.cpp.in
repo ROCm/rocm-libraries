@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,6 +49,10 @@
 #endif
 
 #if   ROCPRIM_TEST_TYPE_SLICE == 0
+#if   defined(__GNUC__) || defined(__clang__)
+    INSTANTIATE(params<__int128_t,          __int128_t>)
+    INSTANTIATE(params<__uint128_t,         __uint128_t>)
+#endif
     INSTANTIATE(params<signed char,         double, true>)
     INSTANTIATE(params<int,                 short>)
     INSTANTIATE(params<short,               int,    true>)

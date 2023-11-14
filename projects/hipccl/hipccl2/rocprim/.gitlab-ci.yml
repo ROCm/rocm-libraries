@@ -230,9 +230,7 @@ build:package:
 
 build:benchmark:
   stage: build
-  needs:
-    - job: "autotune:generate-config"
-      optional: true
+  needs: []
   tags:
     - rocm-build
   extends:
@@ -270,7 +268,7 @@ autotune:build:
   extends:
     - .cmake-minimum
     - .gpus:rocm-gpus
-    - .rules:manual
+    - .rules:benchmark
   variables:
     BENCHMARK_TARGETS: benchmark_config_tuning
   script:
@@ -282,6 +280,7 @@ autotune:build:
       -S $CI_PROJECT_DIR
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_CXX_FLAGS="-Wno-#pragma-messages"
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=OFF
       -D BUILD_EXAMPLE=OFF
@@ -472,11 +471,7 @@ autotune:execute-tuning:
     # Exclude benchmark that is known to fail on gfx906
     # On ROCm 5.7 or later, check if this can be removed - the presumption is that the failure is caused by a compiler issue.
     - >
-      if [[ "${GPU_TARGET}" == "gfx906" ]] && [[ "${AUTOTUNE_ALGORITHM_REGEX}" == "" ]]; then
-        export AUTOTUNE_ALGORITHM_REGEX="-\{\"lvl\":\"device\",\"algo\":\"radix_sort_onesweep\",\"key_type\":\"short\",\"value_type\":\"short\",\"cfg\":\{\"histogram\":\{\"bs\":1024,\"ipt\":22},\"sort\":\{\"bs\":1024,\"ipt\":22},\"bits_per_place\":5,\"algorithm\":\"block_radix_rank_algorithm::match\"}}"
-      fi
-    - 'printf "CI Variables used in benchmarks:\nAUTOTUNE_RESULT_DIR: %s\nAUTOTUNE_FILENAME_REGEX: %s\nAUTOTUNE_ALGORITHM_REGEX: %s \nAUTOTUNE_SIZE: %s \nAUTOTUNE_TRIALS: %s\n" "$AUTOTUNE_RESULT_DIR" "$AUTOTUNE_FILENAME_REGEX" "$AUTOTUNE_ALGORITHM_REGEX" "$AUTOTUNE_SIZE" "$AUTOTUNE_TRIALS"'
-    - cd "${CI_PROJECT_DIR}"
+      cd "${CI_PROJECT_DIR}"
     - mkdir -p "${AUTOTUNE_RESULT_DIR}"
     - python3
       .gitlab/run_benchmarks.py
