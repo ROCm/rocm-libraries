@@ -145,6 +145,14 @@ namespace rocRoller
             return std::make_shared<Expression>(MultiplyAdd{a, b, c});
         }
 
+        inline ExpressionPtr conditional(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
+        {
+            auto  cond = Conditional{a, b, c};
+            auto* expr = new Expression(cond);
+            auto  pt   = std::shared_ptr<Expression>(expr);
+            return std::make_shared<Expression>(Conditional{a, b, c});
+        }
+
         inline ExpressionPtr magicMultiple(ExpressionPtr a)
         {
             return std::make_shared<Expression>(MagicMultiple{a});
@@ -272,6 +280,8 @@ namespace rocRoller
 
         EXPRESSION_INFO(ShiftLAdd);
         EXPRESSION_INFO(AddShiftL);
+
+        EXPRESSION_INFO(Conditional);
 
         EXPRESSION_INFO(GreaterThan);
         EXPRESSION_INFO(GreaterThanEqual);

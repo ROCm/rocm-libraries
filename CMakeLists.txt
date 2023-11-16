@@ -252,6 +252,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/BitwiseAnd.cpp
  lib/source/CodeGen/Arithmetic/BitwiseOr.cpp
  lib/source/CodeGen/Arithmetic/BitwiseXor.cpp
+ lib/source/CodeGen/Arithmetic/Conditional.cpp
  lib/source/CodeGen/Arithmetic/Convert.cpp
  lib/source/CodeGen/Arithmetic/Divide.cpp
  lib/source/CodeGen/Arithmetic/Equal.cpp

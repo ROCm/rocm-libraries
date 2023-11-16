@@ -561,6 +561,18 @@ namespace ArithmeticTest
                                              v_c->subset({0}),
                                              Register::Value::Literal(120),
                                              4);
+
+            co_yield generateOp<Expression::Conditional>(s_c, s_shift, s_a, s_b);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(124), 4);
+
+            auto scc = m_context->getSCC();
+            co_yield generate(scc, A >= B, m_context);
+            co_yield generateOp<Expression::Conditional>(s_c, scc, s_a, s_b);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 4);
         };
 
         m_context->schedule(kb());
@@ -576,7 +588,8 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            auto d_result = make_shared_device<int>(31);
+            size_t const result_count = 33;
+            auto         d_result     = make_shared_device<int>(result_count);
 
             for(int a : TestValues::int32Values)
             {
@@ -592,7 +605,7 @@ namespace ArithmeticTest
 
                         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-                        std::vector<int> result(31);
+                        std::vector<int> result(result_count);
                         ASSERT_THAT(hipMemcpy(result.data(),
                                               d_result.get(),
                                               result.size() * sizeof(int),
@@ -653,6 +666,12 @@ namespace ArithmeticTest
                             EXPECT_EQ(result[28], LITERAL_TEST % b);
                         EXPECT_EQ(result[29], ((a <= b) && (b <= a)) ? 1 : 0);
                         EXPECT_EQ(result[30], ((a < 0) && (b > 0)) ? 1 : 0);
+                        EXPECT_EQ(result[31], shift ? a : b)
+                            << "a: " << a << ", b: " << b << ", shift: " << shift;
+                        ;
+                        EXPECT_EQ(result[32], a >= b ? a : b)
+                            << "a: " << a << ", b: " << b << ", shift: " << shift;
+                        ;
                     }
                 }
             }
@@ -1130,6 +1149,11 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(184), 8);
+
+            co_yield generateOp<Expression::Conditional>(s_c, s_shift, s_a, s_b);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(192), 8);
         };
 
         m_context->schedule(kb());
@@ -1145,7 +1169,8 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            auto d_result = make_shared_device<int64_t>(24);
+            size_t const result_count = 25;
+            auto         d_result     = make_shared_device<int64_t>(result_count);
             static_assert(sizeof(int64_t) == 8);
 
             for(int64_t a : TestValues::int64Values)
@@ -1162,7 +1187,7 @@ namespace ArithmeticTest
 
                         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-                        std::vector<int64_t> result(24);
+                        std::vector<int64_t> result(result_count);
                         ASSERT_THAT(hipMemcpy(result.data(),
                                               d_result.get(),
                                               result.size() * sizeof(int64_t),
@@ -1208,6 +1233,8 @@ namespace ArithmeticTest
                             EXPECT_EQ(result[22], LITERAL_TEST % b) << "b: " << b;
                         EXPECT_EQ(result[23], (int64_t)(((__int128_t)a * (__int128_t)b) >> 64))
                             << "a: " << a << ", b: " << b;
+                        EXPECT_EQ(result[24], shift ? a : b)
+                            << "a: " << a << ", b: " << b << ", shift: " << shift;
                     }
                 }
             }

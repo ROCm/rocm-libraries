@@ -46,6 +46,7 @@ namespace rocRoller
 
         struct AddShiftL;
         struct ShiftLAdd;
+        struct Conditional;
 
         template <DataType DATATYPE>
         struct Convert;
@@ -84,6 +85,7 @@ namespace rocRoller
             AddShiftL,
             ShiftLAdd,
             MatrixMultiply,
+            Conditional,
 
             // --- TernaryMixed Operations ---
             MultiplyAdd,

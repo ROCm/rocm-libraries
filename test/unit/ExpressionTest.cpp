@@ -1269,6 +1269,40 @@ namespace ExpressionTest
         }
     }
 
+    TEST_F(ExpressionTest, EvaluateConditionalTernary)
+    {
+        auto command = std::make_shared<Command>();
+        auto ca      = command->allocateArgument({DataType::Int32, PointerType::Value});
+        auto cb      = command->allocateArgument({DataType::Int32, PointerType::Value});
+
+        auto a = std::make_shared<Expression::Expression>(ca);
+        auto b = std::make_shared<Expression::Expression>(cb);
+
+        auto vals_shiftL = conditional(a >= b, a, b);
+
+        for(auto aVal : TestValues::int32Values)
+        {
+            for(auto bVal : TestValues::int32Values)
+            {
+                KernelArguments runtimeArgs;
+                runtimeArgs.append("a", aVal);
+                runtimeArgs.append("b", bVal);
+                auto args = runtimeArgs.runtimeArguments();
+
+                // At kernel launch time
+                EXPECT_EQ(aVal >= bVal ? aVal : bVal,
+                          std::get<int>(Expression::evaluate(vals_shiftL, args)));
+
+                // At translate time
+                auto a_static = std::make_shared<Expression::Expression>(aVal);
+                auto b_static = std::make_shared<Expression::Expression>(bVal);
+                EXPECT_EQ(aVal >= bVal ? aVal : bVal,
+                          std::get<int>(Expression::evaluate(
+                              conditional(a_static >= b_static, a_static, b_static))));
+            }
+        }
+    }
+
     TEST_F(ExpressionTest, EvaluateBitwiseOps)
     {
         auto command = std::make_shared<Command>();
@@ -1727,11 +1761,12 @@ namespace ExpressionTest
         void basicTernaryExpression(
             std::function<Expression::ExpressionPtr(
                 Expression::ExpressionPtr, Expression::ExpressionPtr, Expression::ExpressionPtr)> f,
-            TA   aValue,
-            TB   bValue,
-            TC   cValue,
-            TR   resultValue,
-            bool resultPlaceholder = false)
+            TA             aValue,
+            TB             bValue,
+            TC             cValue,
+            TR             resultValue,
+            bool           resultPlaceholder = false,
+            Register::Type regType           = Register::Type::Vector)
         {
             DataType aDType = TypeInfo<TA>::Var.dataType;
             DataType bDType = TypeInfo<TB>::Var.dataType;
@@ -1739,9 +1774,9 @@ namespace ExpressionTest
             DataType rDType = TypeInfo<TR>::Var.dataType;
 
             auto k    = m_context->kernel();
-            auto v_a  = Register::Value::Placeholder(m_context, Register::Type::Vector, aDType, 1);
-            auto v_b  = Register::Value::Placeholder(m_context, Register::Type::Vector, bDType, 1);
-            auto v_c  = Register::Value::Placeholder(m_context, Register::Type::Vector, cDType, 1);
+            auto v_a  = Register::Value::Placeholder(m_context, regType, aDType, 1);
+            auto v_b  = Register::Value::Placeholder(m_context, regType, bDType, 1);
+            auto v_c  = Register::Value::Placeholder(m_context, regType, cDType, 1);
             auto a    = v_a->expression();
             auto b    = v_b->expression();
             auto c    = v_c->expression();
@@ -1764,7 +1799,7 @@ namespace ExpressionTest
                 co_yield m_context->argLoader()->getValue("c", s_c);
 
                 auto v_result_ptr = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, {rDType, PointerType::PointerGlobal}, 1);
+                    m_context, regType, {rDType, PointerType::PointerGlobal}, 1);
 
                 co_yield v_a->allocate();
                 co_yield v_b->allocate();
@@ -1779,11 +1814,17 @@ namespace ExpressionTest
 
                 Register::ValuePtr v_r;
                 if(resultPlaceholder)
-                    v_r = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, TypeInfo<TR>::Var, 1);
+                    v_r = Register::Value::Placeholder(m_context, regType, TypeInfo<TR>::Var, 1);
                 co_yield Expression::generate(v_r, expr, m_context);
 
-                co_yield m_context->mem()->storeFlat(v_result_ptr, v_r, 0, sizeof(TR));
+                if(regType == Register::Type::Vector)
+                {
+                    co_yield m_context->mem()->storeFlat(v_result_ptr, v_r, 0, sizeof(TR));
+                }
+                else
+                {
+                    co_yield m_context->mem()->storeScalar(v_result_ptr, v_r, 0, sizeof(TR));
+                }
             };
 
             m_context->schedule(kb());
@@ -2021,6 +2062,108 @@ namespace ExpressionTest
                        Expression::ExpressionPtr c) { return (a + b) >> c; };
 
         basicTernaryExpression(expr, a, b, c, r, true);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalUInt32_0)
+    {
+        uint32_t a   = std::numeric_limits<uint32_t>::max();
+        uint32_t b   = 12326;
+        uint32_t c   = 9;
+        namespace Ex = Expression;
+
+        auto r    = a > b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a > b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalUInt32_1)
+    {
+        uint32_t a   = std::numeric_limits<uint32_t>::max();
+        uint32_t b   = 12326;
+        uint32_t c   = 9;
+        namespace Ex = Expression;
+
+        auto r    = a < b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a < b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalInt32_0)
+    {
+        int32_t a    = std::numeric_limits<int32_t>::max();
+        int32_t b    = -12326;
+        int32_t c    = 9;
+        namespace Ex = Expression;
+
+        auto r    = a > b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a > b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalInt32_1)
+    {
+        int32_t a    = std::numeric_limits<int32_t>::max();
+        int32_t b    = -12326;
+        int32_t c    = 9;
+        namespace Ex = Expression;
+
+        auto r    = a < b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a < b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalInt64_0)
+    {
+        int64_t a    = std::numeric_limits<int64_t>::max();
+        int64_t b    = -12326;
+        int64_t c    = 9;
+        namespace Ex = Expression;
+
+        auto r    = a > b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a > b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalInt64_1)
+    {
+        int64_t a    = std::numeric_limits<int64_t>::max();
+        int64_t b    = -12326;
+        int64_t c    = 9;
+        namespace Ex = Expression;
+
+        auto r    = a < b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a < b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
     }
 
     TEST_P(ARCH_ExpressionTest, ComplexExpressionScalar)

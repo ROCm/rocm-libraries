@@ -293,6 +293,16 @@ namespace rocRoller
         };
 
         /**
+         * Represents DEST = LHS ? R1HS : R2HS.
+         * Utilizes cselect
+        */
+        struct Conditional : Ternary
+        {
+            constexpr static inline auto Type      = Category::Arithmetic;
+            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+        };
+
+        /**
          * Represents DEST = LHS * R1HS + R2HS.
          * Utilizes TernaryMixed instead of Ternary
          * allows for mixed precision arithmetic

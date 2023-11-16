@@ -289,6 +289,7 @@ namespace rocRoller
 #include "BitwiseAnd.hpp"
 #include "BitwiseOr.hpp"
 #include "BitwiseXor.hpp"
+#include "Conditional.hpp"
 #include "Convert.hpp"
 #include "Divide.hpp"
 #include "Equal.hpp"
