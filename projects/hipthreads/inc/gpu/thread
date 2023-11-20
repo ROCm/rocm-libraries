@@ -283,6 +283,7 @@ __host__ WorkNode<Callable_t>::WorkNode(uint32_t width, Callable_t &&callable) :
 // TODO: many of these might be better as member functions of WorkNode or WorkNode_Header, and we could potentially make
 // a bunch of WorkNode_Header's member variables private
 static inline __device__ void insertWorkNodeAtTail(WorkNode_Header *worknode) {
+    // TODO: use __shfl_up to allow multiple lanes to call insertWorkNodeAtTail at once.
     WorkNode_Header **currentTail = worknode->link_to_self = lockAndFetchTail();
     *(worknode->link_to_self) = worknode;
     if (currentTail != &workListHead) {
@@ -625,7 +626,6 @@ __host__ __device__ inline thread::~thread() {
 }
 
 __device__ inline void thread::join() {
-    assert(threadIdx.x == 0);
     // TODO: check that the user has called gpu::start(), in case they use a hip kernel launch to get here
     if (!joinable()) {
         assert(joinable() && "Attempted to join a gpu::thread object that doesn't have an associated thread");
@@ -679,22 +679,24 @@ __host__ inline void thread::detach() {
 }
 
 __device__ inline void thread::detach() {
-    assert(threadIdx.x == 0);
     if (!joinable()) {
         assert(joinable() && "Attempted to detach a gpu::thread object that doesn't have an associated thread");
     }
-    WorkNode_Header **currentTail = lockAndFetchTail();
+    WorkNode_Header **currentTail;
+    if (threadIdx.x == 0)
+        currentTail = lockAndFetchTail();
+
     if (worknode_d->finishedOrDetached) {
         // It's already finished, so we have the only pointer to worknode_d. Thus, we can just free the memory.
-        setAndUnlockTail(currentTail);
         ::free(worknode_d);
-        return;
+    } else {
+        worknode_d->finishedOrDetached = true;
+        // Since the gpu::thread instance is in device memory, we know the gpu did the allocation for worknode_d, no need to
+        // copy the data to memory the gpu can free on its own.
     }
 
-    worknode_d->finishedOrDetached = true;
-    // Since the gpu::thread instance is in device memory, we know the gpu did the allocation for worknode_d, no need to
-    // copy the data to memory the gpu can free on its own.
-    setAndUnlockTail(currentTail);
+    if (threadIdx.x == 0)
+        setAndUnlockTail(currentTail);
 
     worknode_d = nullptr;
 }
