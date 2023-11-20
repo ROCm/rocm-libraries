@@ -147,9 +147,6 @@ namespace rocRoller
 
         inline ExpressionPtr conditional(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
         {
-            auto  cond = Conditional{a, b, c};
-            auto* expr = new Expression(cond);
-            auto  pt   = std::shared_ptr<Expression>(expr);
             return std::make_shared<Expression>(Conditional{a, b, c});
         }
 
