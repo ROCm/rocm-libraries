@@ -357,9 +357,67 @@ template<unsigned LogicalWarpSize>
 struct DeviceSelectWarpSize
 {
     static constexpr unsigned value = HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize
-        ? LogicalWarpSize
-        : HIPCUB_DEVICE_WARP_THREADS;
+                                          ? LogicalWarpSize
+                                          : HIPCUB_DEVICE_WARP_THREADS;
 };
+
+template<typename Iterator>
+using it_value_t = typename std::iterator_traits<Iterator>::value_type;
+
+using engine_type = std::default_random_engine;
+
+// generate_random_data_n() generates only part of sequence and replicates it,
+// because benchmarks usually do not need "true" random sequence.
+template<class OutputIter, class U, class V, class Generator>
+inline auto generate_random_data_n(
+    OutputIter it, size_t size, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
+    -> typename std::enable_if_t<std::is_integral<it_value_t<OutputIter>>::value, OutputIter>
+{
+    using T = it_value_t<OutputIter>;
+
+    using dis_type = typename std::conditional<(sizeof(T) == 1), short, T>::type;
+    std::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
+    std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
+    for(size_t i = max_random_size; i < size; i += max_random_size)
+    {
+        std::copy_n(it, std::min(size - i, max_random_size), it + i);
+    }
+    return it + size;
+}
+
+template<class OutputIterator, class U, class V, class Generator>
+inline auto generate_random_data_n(OutputIterator it,
+                                   size_t         size,
+                                   U              min,
+                                   V              max,
+                                   Generator&     gen,
+                                   size_t         max_random_size = 1024 * 1024)
+    -> std::enable_if_t<std::is_floating_point<it_value_t<OutputIterator>>::value, OutputIterator>
+{
+    using T = typename std::iterator_traits<OutputIterator>::value_type;
+
+    std::uniform_real_distribution<T> distribution((T)min, (T)max);
+    std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
+    for(size_t i = max_random_size; i < size; i += max_random_size)
+    {
+        std::copy_n(it, std::min(size - i, max_random_size), it + i);
+    }
+    return it + size;
+}
+
+template<std::size_t Size, std::size_t Alignment>
+struct alignas(Alignment) custom_aligned_type
+{
+    unsigned char data[Size];
+};
+
+template<typename T,
+         typename U,
+         std::enable_if_t<std::is_integral<T>::value && std::is_unsigned<U>::value, int> = 0>
+inline constexpr auto ceiling_div(const T a, const U b)
+{
+    return a / b + (a % b > 0 ? 1 : 0);
+}
 
 } // end benchmark_util namespace
 
