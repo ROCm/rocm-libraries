@@ -21,18 +21,24 @@
 #ifndef ROCPRIM_TEST_UTILS_ASSERTIONS_HPP
 #define ROCPRIM_TEST_UTILS_ASSERTIONS_HPP
 
-// Std::memcpy and std::memcmp
-#include <cstring>
-
 #include "test_utils_half.hpp"
 #include "test_utils_bfloat16.hpp"
 #include "test_utils_custom_test_types.hpp"
+
+#include <rocprim/type_traits.hpp>
+
+#include <gtest/gtest.h>
+
+// Std::memcpy and std::memcmp
+#include <cstring>
+#include <vector>
 
 namespace test_utils {
 
 // begin assert_eq
 template<class T>
-bool inline bit_equal(T a, T b){
+bool inline bit_equal(const T& a, const T& b)
+{
     return std::memcmp(&a,  &b, sizeof(T))==0;
 }
 

@@ -5,12 +5,14 @@ Full documentation for rocPRIM is available at [https://rocprim.readthedocs.io/e
 ## [Unreleased rocPRIM-3.0.0 for ROCm 6.1.0]
 ### Added
  - Added new primitive: `block_run_length_decode`.
+ - Added new primitive: `batch_memcpy`.
 ### Changed
 - Removed deprecated functionality: `reduce_by_key_config`, `MatchAny`, `scan_config`, `scan_by_key_config` and `radix_sort_config`.
 - Renamed `scan_config_v2` to `scan_config`, `scan_by_key_config_v2` to `scan_by_key_config`, `radix_sort_config_v2` to `radix_sort_config`, `reduce_by_key_config_v2` to `reduce_by_key_config`, `radix_sort_config_v2` to `radix_sort_config`.
 - Removed support for custom config types for device algorithms.
 - `host_warp_size()` was moved into `rocprim/device/config_types.hpp`, and now uses either a `device_id` or a `stream` parameter to query the proper device and a `device_id` out parameter. The return type is `hipError_t`.
 - Added support for __int128_t in `device_radix_sort` and `block_radix_sort`.
+- Improved the performance of `match_any` and `block_histogram` that uses it
 ### Fixed
 - Fixed build issues with `rmake.py` on Windows when using VS 2017 15.8 or later due to a breaking fix with extended aligned storage.
 

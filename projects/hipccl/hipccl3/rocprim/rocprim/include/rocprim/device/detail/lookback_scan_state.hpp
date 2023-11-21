@@ -36,6 +36,7 @@
 #include "../../detail/various.hpp"
 
 #include "../config_types.hpp"
+#include "rocprim/config.hpp"
 
 extern "C"
 {
@@ -221,6 +222,23 @@ public:
         value = prefix.value;
     }
 
+    /// \brief Gets the prefix value for a block. Should only be called after all
+    /// blocks/prefixes are completed.
+    ROCPRIM_DEVICE ROCPRIM_INLINE T get_complete_value(const unsigned int block_id)
+    {
+        constexpr unsigned int padding = ::rocprim::device_warp_size();
+
+        auto        p = prefixes[padding + block_id];
+        prefix_type prefix{};
+#ifndef __HIP_CPU_RT__
+        __builtin_memcpy(&prefix, &p, sizeof(prefix_type));
+#else
+        std::memcpy(&prefix, &p, sizeof(prefix_type));
+#endif
+        assert(prefix.flag == PREFIX_COMPLETE);
+        return prefix.value;
+    }
+
 private:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void set(const unsigned int block_id, const flag_type flag, const T value)
@@ -366,6 +384,16 @@ public:
             value = prefixes_partial_values[padding + block_id];
         else
             value = prefixes_complete_values[padding + block_id];
+    }
+
+    /// \brief Gets the prefix value for a block. Should only be called after all
+    /// blocks/prefixes are completed.
+    ROCPRIM_DEVICE ROCPRIM_INLINE T get_complete_value(const unsigned int block_id)
+    {
+        constexpr unsigned int padding = ::rocprim::device_warp_size();
+
+        assert(prefixes_flags[padding + block_id] == PREFIX_COMPLETE);
+        return prefixes_complete_values[padding + block_id];
     }
 
 private:

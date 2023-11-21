@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,9 @@
 
 #include "test_utils_half.hpp"
 #include "test_utils_bfloat16.hpp"
+
+#include "rocprim/functional.hpp"
+#include <type_traits>
 
 namespace test_utils {
 
@@ -121,6 +124,40 @@ struct custom_test_type
     {
         return !(*this == other);
     }
+};
+
+template<class T>
+struct custom_non_copyable_type
+{
+    T x;
+
+    custom_non_copyable_type()                                           = default;
+    custom_non_copyable_type(const custom_non_copyable_type&)            = delete;
+    custom_non_copyable_type(custom_non_copyable_type&&)                 = default;
+    ~custom_non_copyable_type()                                          = default;
+    custom_non_copyable_type& operator=(const custom_non_copyable_type&) = delete;
+    custom_non_copyable_type& operator=(custom_non_copyable_type&&)      = default;
+};
+
+template<class T>
+struct custom_non_moveable_type
+{
+    T x;
+
+    custom_non_moveable_type()                                           = default;
+    custom_non_moveable_type(const custom_non_moveable_type&)            = delete;
+    custom_non_moveable_type(custom_non_moveable_type&&)                 = delete;
+    ~custom_non_moveable_type()                                          = default;
+    custom_non_moveable_type& operator=(const custom_non_moveable_type&) = delete;
+    custom_non_moveable_type& operator=(custom_non_moveable_type&&)      = delete;
+};
+
+template<class T>
+struct custom_non_default_type
+{
+    T x;
+
+    custom_non_default_type() = delete;
 };
 
 // Custom type used in tests
@@ -306,5 +343,35 @@ struct inner_type<custom_test_array_type<T, N>>
 {
     using type = T;
 };
+
+template<class T>
+struct inner_type<custom_non_copyable_type<T>>
+{
+    using type = T;
+};
+
+template<class T>
+struct inner_type<custom_non_moveable_type<T>>
+{
+    using type = T;
+};
+
+template<class T>
+struct inner_type<custom_non_default_type<T>>
+{
+    using type = T;
+};
+
+template<class T>
+struct is_custom_test_type<custom_non_copyable_type<T>> : std::true_type
+{};
+
+template<class T>
+struct is_custom_test_type<custom_non_moveable_type<T>> : std::true_type
+{};
+
+template<class T>
+struct is_custom_test_type<custom_non_default_type<T>> : std::true_type
+{};
 }
 #endif //ROCPRIM_TEST_UTILS_CUSTOM_TEST_TYPES_HPP

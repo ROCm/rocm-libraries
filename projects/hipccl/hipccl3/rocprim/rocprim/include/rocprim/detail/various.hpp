@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,14 +24,20 @@
 #include <type_traits>
 
 #include "../config.hpp"
-#include "../types.hpp"
+#include "../functional.hpp"
 #include "../type_traits.hpp"
+#include "../types.hpp"
 
 #include <hip/hip_runtime.h>
 
 // Check for c++ standard library features, in a backwards compatible manner
 #ifndef __has_include
     #define __has_include(x) 0
+#endif
+
+// Check for builtins (clang-extension) and fallback
+#ifndef __has_builtin
+    #define __has_builtin(X) 0
 #endif
 
 #if __has_include(<version>) // version is only mandated in c++20
@@ -336,6 +342,52 @@ template<class... Types, class Function>
 ROCPRIM_HOST_DEVICE inline void for_each_in_tuple(::rocprim::tuple<Types...>& t, Function f)
 {
     for_each_in_tuple_impl(t, f, ::rocprim::index_sequence_for<Types...>());
+}
+
+/// \brief Reinterprets the pointer as another type and increments it to match the alignment of
+/// the new type.
+///
+/// \tparam DstPtr Destination Type to align to
+/// \tparam Src Type of source pointer
+/// \param pointer The pointer to align
+/// \return Aligned pointer
+template<typename DstPtr, typename Src>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE DstPtr cast_align_up(Src* pointer)
+{
+    static_assert(std::is_pointer<DstPtr>::value, "DstPtr must be a pointer type");
+    using Dst = std::remove_pointer_t<DstPtr>;
+#if __has_builtin(__builtin_align_up)
+    return reinterpret_cast<DstPtr>(__builtin_align_up(pointer, alignof(Dst)));
+#else
+    // https://github.com/KabukiStarship/KabukiToolkit/wiki/Fastest-Method-to-Align-Pointers
+    constexpr size_t mask  = alignof(Dst) - 1;
+    auto             value = reinterpret_cast<uintptr_t>(pointer);
+    value += (-value) & mask;
+    return reinterpret_cast<DstPtr>(value);
+#endif
+}
+
+/// \brief Reinterprets the pointer as another type and decrements it to match the alignment of
+/// the new type.
+///
+/// \tparam Ptr Destination Type to align to
+/// \tparam Src Type of source pointer
+/// \param pointer The pointer to align
+/// \return Aligned pointer
+template<typename DstPtr, typename Src>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE DstPtr cast_align_down(Src* pointer)
+{
+    static_assert(std::is_pointer<DstPtr>::value, "DstPtr must be a pointer type");
+    using Dst = std::remove_pointer_t<DstPtr>;
+#if __has_builtin(__builtin_align_down)
+    return reinterpret_cast<DstPtr>(__builtin_align_down(pointer, alignof(Dst)));
+#else
+    // https://github.com/KabukiStarship/KabukiToolkit/wiki/Fastest-Method-to-Align-Pointers
+    constexpr size_t mask  = ~(alignof(Dst) - 1);
+    auto             value = reinterpret_cast<uintptr_t>(pointer);
+    value &= mask;
+    return reinterpret_cast<DstPtr>(value);
+#endif
 }
 
 } // end namespace detail
