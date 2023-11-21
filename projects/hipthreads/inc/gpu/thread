@@ -91,7 +91,8 @@ class thread {
     __device__ void detach();
     __host__ void detach();
 
-    __device__ static unsigned int hardware_concurrency() noexcept { return NUM_VCORES; }
+    __host__ __device__ static constexpr unsigned int max_width() noexcept { return MAX_THREAD_WIDTH; }
+    __device__ static constexpr unsigned int hardware_concurrency() noexcept { return NUM_VCORES; }
     __host__ static inline unsigned int hardware_concurrency() noexcept;
   private:
     // If we don't initialize worknode_d to nullptr, operator= might fail when assigning to a default constructed gpu::thread.
@@ -466,6 +467,15 @@ static inline __device__ void pseudo_yield() {
 
     invokeNext();
 }
+static inline __device__ unsigned int get_width() noexcept {
+    using namespace internal;
+    return currentWorkNode[blockIdx.x]->width;
+}
+static inline __device__ unsigned int get_lane_id() noexcept {
+    using namespace internal;
+    return threadIdx.x;
+}
+
 } // namespace this_thread
 
 static inline __host__ void start() {
