@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <numeric>
 #include <random>
@@ -115,15 +116,20 @@ struct is_valid_for_int_distribution :
         std::is_same<unsigned long long, T>::value
     > {};
 
+template<typename Iterator>
+using it_value_t = typename std::iterator_traits<Iterator>::value_type;
+
 using engine_type = std::default_random_engine;
 
-// get_random_data() generates only part of sequence and replicates it,
+// generate_random_data_n() generates only part of sequence and replicates it,
 // because benchmarks usually do not need "true" random sequence.
-template<class T, class U, class V>
-inline auto get_random_data(size_t size, U min, V max, size_t max_random_size = 1024 * 1024)
-    -> typename std::enable_if<rocprim::is_integral<T>::value, std::vector<T>>::type
+template<class OutputIter, class U, class V, class Generator>
+inline auto generate_random_data_n(
+    OutputIter it, size_t size, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
+    -> typename std::enable_if_t<rocprim::is_integral<it_value_t<OutputIter>>::value, OutputIter>
 {
-    engine_type gen{std::random_device{}()};
+    using T = it_value_t<OutputIter>;
+
     using dis_type = typename std::conditional<
         is_valid_for_int_distribution<T>::value,
         T,
@@ -132,36 +138,35 @@ inline auto get_random_data(size_t size, U min, V max, size_t max_random_size = 
             unsigned int>::type
         >::type;
     std::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
-    std::vector<T> data(size);
-    std::generate(
-        data.begin(), data.begin() + std::min(size, max_random_size),
-        [&]() { return distribution(gen); }
-    );
+    std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
-        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(it, std::min(size - i, max_random_size), it + i);
     }
-    return data;
+    return it + size;
 }
 
-template<class T, class U, class V>
-inline auto get_random_data(size_t size, U min, V max, size_t max_random_size = 1024 * 1024)
-    -> typename std::enable_if<rocprim::is_floating_point<T>::value, std::vector<T>>::type
+template<class OutputIterator, class U, class V, class Generator>
+inline auto generate_random_data_n(OutputIterator it,
+                                   size_t         size,
+                                   U              min,
+                                   V              max,
+                                   Generator&     gen,
+                                   size_t         max_random_size = 1024 * 1024)
+    -> std::enable_if_t<rocprim::is_floating_point<it_value_t<OutputIterator>>::value,
+                        OutputIterator>
 {
-    engine_type gen{std::random_device{}()};
+    using T = typename std::iterator_traits<OutputIterator>::value_type;
+
     // Generate floats when T is half
-    using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
+    using dis_type = std::conditional_t<std::is_same<rocprim::half, T>::value, float, T>;
     std::uniform_real_distribution<dis_type> distribution((dis_type)min, (dis_type)max);
-    std::vector<T> data(size);
-    std::generate(
-        data.begin(), data.begin() + std::min(size, max_random_size),
-        [&]() { return distribution(gen); }
-    );
+    std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
-        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(it, std::min(size - i, max_random_size), it + i);
     }
-    return data;
+    return it + size;
 }
 
 template<class T>
@@ -184,7 +189,10 @@ inline std::vector<T> get_random_data01(size_t size, float p, size_t max_random_
 template<class T>
 inline T get_random_value(T min, T max)
 {
-    return get_random_data(1, min, max)[0];
+    T           result;
+    engine_type gen{std::random_device{}()};
+    generate_random_data_n(&result, 1, min, max, gen);
+    return result;
 }
 
 template<class T, class U = T>
@@ -231,33 +239,62 @@ struct is_custom_type : std::false_type {};
 template<class T, class U>
 struct is_custom_type<custom_type<T,U>> : std::true_type {};
 
-template<class T>
-inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
-    -> typename std::enable_if<is_custom_type<T>::value, std::vector<T>>::type
+template<class OutputIterator, class Generator>
+inline auto generate_random_data_n(OutputIterator             it,
+                                   size_t                     size,
+                                   it_value_t<OutputIterator> min,
+                                   it_value_t<OutputIterator> max,
+                                   Generator&                 gen,
+                                   size_t                     max_random_size = 1024 * 1024)
+    -> std::enable_if_t<is_custom_type<it_value_t<OutputIterator>>::value, OutputIterator>
 {
+    using T = it_value_t<OutputIterator>;
+
     using first_type = typename T::first_type;
     using second_type = typename T::second_type;
-    std::vector<T> data(size);
-    auto fdata = get_random_data<first_type>(size, min.x, max.x, max_random_size);
-    auto sdata = get_random_data<second_type>(size, min.y, max.y, max_random_size);
+
+    std::vector<first_type>  fdata(size);
+    std::vector<second_type> sdata(size);
+    generate_random_data_n(fdata.begin(), size, min.x, max.x, gen, max_random_size);
+    generate_random_data_n(sdata.begin(), size, min.y, max.y, gen, max_random_size);
+
     for(size_t i = 0; i < size; i++)
     {
-        data[i] = T(fdata[i], sdata[i]);
+        it[i] = T(fdata[i], sdata[i]);
     }
-    return data;
+    return it + size;
 }
 
-template<class T>
-inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
-    -> typename std::enable_if<!is_custom_type<T>::value && !std::is_same<decltype(max.x), void>::value, std::vector<T>>::type
+template<class OutputIterator, class Generator>
+inline auto generate_random_data_n(OutputIterator             it,
+                                   size_t                     size,
+                                   it_value_t<OutputIterator> min,
+                                   it_value_t<OutputIterator> max,
+                                   Generator&                 gen,
+                                   size_t                     max_random_size = 1024 * 1024)
+    -> std::enable_if_t<!is_custom_type<it_value_t<OutputIterator>>::value
+                            && !std::is_same<decltype(max.x), void>::value,
+                        OutputIterator>
 {
+    using T = it_value_t<OutputIterator>;
+
     using field_type = decltype(max.x);
-    std::vector<T> data(size);
-    auto field_data = get_random_data<field_type>(size, min.x, max.x, max_random_size);
+    std::vector<field_type> field_data(size);
+    generate_random_data_n(field_data.begin(), size, min.x, max.x, gen, max_random_size);
     for(size_t i = 0; i < size; i++)
     {
-        data[i] = T(field_data[i]);
+        it[i] = T(field_data[i]);
     }
+    return it + size;
+}
+
+template<class T, class U, class V>
+inline std::vector<T>
+    get_random_data(size_t size, U min, V max, size_t max_random_size = 1024 * 1024)
+{
+    std::vector<T> data(size);
+    engine_type    gen{std::random_device{}()};
+    generate_random_data_n(data.begin(), size, min, max, gen, max_random_size);
     return data;
 }
 
@@ -802,5 +839,11 @@ inline const char* get_block_scan_method_name(rocprim::block_scan_algorithm alg)
     }
     return "unknown_algorithm";
 }
+
+template<std::size_t Size, std::size_t Alignment>
+struct alignas(Alignment) custom_aligned_type
+{
+    unsigned char data[Size];
+};
 
 #endif // ROCPRIM_BENCHMARK_UTILS_HPP_

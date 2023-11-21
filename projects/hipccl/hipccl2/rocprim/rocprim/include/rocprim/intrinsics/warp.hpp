@@ -24,6 +24,8 @@
 #include "../config.hpp"
 #include "../types.hpp"
 
+#include <type_traits>
+
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \addtogroup intrinsicsmodule
@@ -142,11 +144,25 @@ ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label, bool 
     ROCPRIM_UNROLL
     for(unsigned int bit = 0; bit < LabelBits; ++bit)
     {
-        const auto bit_set = label & (1u << bit);
-        // Create mask of threads which have the same bit set or unset.
-        const auto same_mask = ballot(bit_set);
-        // Remove bits which do not match from the peer mask.
-        peer_mask &= (bit_set ? same_mask : ~same_mask);
+        static constexpr int lane_width = std::numeric_limits<lane_mask_type>::digits;
+        using lane_mask_type_s          = std::make_signed_t<lane_mask_type>;
+        const auto label_signed         = static_cast<lane_mask_type_s>(label);
+
+        // Get all zeros or all ones depending on label's i-th bit.
+        // Moves the bit into the sign position by left shifting, then shifts it into all the bits
+        // by (arithmetic) right shift which does sign-extension.
+        const lane_mask_type_s bit_set
+            = (label_signed << (lane_width - 1 - bit)) >> (lane_width - 1);
+
+        // Remove all lanes from the mask with a bit that differs from ours
+        // - if we have the bit set we keep the lanes that do too so we mask with the result
+        //   of the ballot
+        // - if we don't have it, then we keep the lanes that also don't, so we flip all bits
+        //   in the mask before and-ing.
+        // since bit_set is all ones if we have the bit and all zeros if not, the flipping is
+        // the same as xor-ing with its inverse
+        const lane_mask_type bit_set_mask = ballot(bit_set);
+        peer_mask &= bit_set_mask ^ ~bit_set;
     }
 
     return -lane_mask_type{valid} & peer_mask;
