@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -80,6 +80,7 @@ add_hipcub_benchmark(benchmark_block_run_length_decode.cpp)
 add_hipcub_benchmark(benchmark_block_scan.cpp)
 add_hipcub_benchmark(benchmark_block_shuffle.cpp)
 add_hipcub_benchmark(benchmark_device_adjacent_difference.cpp)
+add_hipcub_benchmark(benchmark_device_batch_memcpy.cpp)
 add_hipcub_benchmark(benchmark_device_histogram.cpp)
 add_hipcub_benchmark(benchmark_device_memory.cpp)
 add_hipcub_benchmark(benchmark_device_merge_sort.cpp)

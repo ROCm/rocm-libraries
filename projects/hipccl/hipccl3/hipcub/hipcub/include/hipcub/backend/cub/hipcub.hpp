@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2022, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -53,6 +53,7 @@
 // hipError_t instead of cudaError_t
 #include "device/device_adjacent_difference.hpp"
 #include "device/device_histogram.hpp"
+#include "device/device_memcpy.hpp"
 #include "device/device_merge_sort.hpp"
 #include "device/device_partition.hpp"
 #include "device/device_radix_sort.hpp"

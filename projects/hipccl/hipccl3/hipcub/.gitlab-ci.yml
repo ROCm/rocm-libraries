@@ -45,7 +45,7 @@ clang-format:
   stage: lint
   needs: []
   tags:
-    - rocm-build
+    - build
   variables:
     CLANG_FORMAT: "/opt/rocm/llvm/bin/clang-format"
     GIT_CLANG_FORMAT: "/opt/rocm/llvm/bin/git-clang-format"
@@ -62,7 +62,7 @@ copyright-date:
   stage: lint
   needs: []
   tags:
-    - rocm-build
+    - build
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
@@ -107,7 +107,7 @@ build:rocm:
     - .rules:build
   stage: build
   tags:
-    - rocm-build
+    - build
   needs: []
   script:
     - cmake
@@ -145,7 +145,7 @@ build:rocm-benchmark:
     - .rules:build
   stage: build
   tags:
-    - rocm-build
+    - build
   needs: []
   script:
     - cmake
@@ -304,7 +304,7 @@ build:nvcc:
     - .nvcc
     - .rules:build
   tags:
-    - nvcc-build
+    - build
   needs: []
   script:
     - cmake
@@ -339,7 +339,7 @@ build:nvcc-benchmark:
     - .nvcc
     - .rules:build
   tags:
-    - nvcc-build
+    - build
   needs: []
   script:
     - cmake

@@ -10,6 +10,9 @@ See README.md on how to build the hipCUB documentation using Doxygen.
 ### Fixed
 - Fixed build issues with `rmake.py` on Windows when using VS 2017 15.8 or later due to a breaking fix with extended aligned storage.
 
+### Added
+- Added interface `DeviceMemcpy::Batched` for batched memcpy from rocPRIM and CUB.
+
 ## (Unreleased) hipCUB-2.13.1 for ROCm 5.7.0
 ### Changed
 - CUB backend references CUB and Thrust version 2.0.1.
