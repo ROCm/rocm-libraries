@@ -40,7 +40,8 @@ template<
     // Tests output iterator with void value_type (OutputIterator concept)
     // Segmented scan primitives which use head flags do not support this kind
     // of output iterators.
-    bool UseIdentityIterator = false
+    bool UseIdentityIterator = false,
+    bool UseGraphs = false
 >
 struct params
 {
@@ -51,6 +52,7 @@ struct params
     static constexpr unsigned int min_segment_length = MinSegmentLength;
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
     static constexpr bool use_identity_iterator = UseIdentityIterator;
+    static constexpr bool use_graphs = UseGraphs;
 };
 
 template<class Params>
@@ -76,7 +78,8 @@ typedef ::testing::Types<
     params<bfloat16, bfloat16, rocprim::minimum<bfloat16>, 0, 1000, 30000>,
     params<half, float, rocprim::plus<float>, 0, 10, 200, true>,
     params<half, half, rocprim::minimum<half>, 0, 1000, 30000>,
-    params<unsigned char, long long, rocprim::plus<int>, 10, 3000, 4000>>
+    params<unsigned char, long long, rocprim::plus<int>, 10, 3000, 4000>,
+    params<int, int, ::rocprim::plus<int>, 0, 0, 1000, false, true>>
     Params;
 
 TYPED_TEST_SUITE(RocprimDeviceSegmentedScan, Params);
@@ -107,6 +110,11 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
     );
 
     hipStream_t stream = 0; // default stream
+    if (TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -185,6 +193,11 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
             );
             HIP_CHECK(hipDeviceSynchronize());
 
+            hipGraph_t graph;
+            hipGraphExec_t graph_instance;
+            if (TestFixture::params::use_graphs)
+                graph = test_utils::createGraphHelper(stream);
+            
             size_t temporary_storage_bytes;
             HIP_CHECK(
                 rocprim::segmented_inclusive_scan(
@@ -198,10 +211,16 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
                 )
             );
 
+            if (TestFixture::params::use_graphs)
+               graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+            
             ASSERT_GT(temporary_storage_bytes, 0);
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
+            if (TestFixture::params::use_graphs)
+                test_utils::resetGraphHelper(graph, graph_instance, stream);
+            
             HIP_CHECK(
                 rocprim::segmented_inclusive_scan(
                     d_temporary_storage, temporary_storage_bytes,
@@ -213,6 +232,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
                     stream, debug_synchronous
                 )
             );
+
+            if (TestFixture::params::use_graphs)
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+            
             HIP_CHECK(hipDeviceSynchronize());
 
             std::vector<output_type> values_output(size);
@@ -232,9 +255,14 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
             HIP_CHECK(hipFree(d_values_input));
             HIP_CHECK(hipFree(d_offsets));
             HIP_CHECK(hipFree(d_values_output));
+
+            if (TestFixture::params::use_graphs)
+                test_utils::cleanupGraphHelper(graph, graph_instance);
         }
     }
 
+    if (TestFixture::params::use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
@@ -265,6 +293,11 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
     );
 
     hipStream_t stream = 0; // default stream
+    if (TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -343,6 +376,11 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
             );
             HIP_CHECK(hipDeviceSynchronize());
 
+            hipGraph_t graph;
+            hipGraphExec_t graph_instance;
+            if (TestFixture::params::use_graphs)
+                graph = test_utils::createGraphHelper(stream);
+            
             size_t temporary_storage_bytes;
             HIP_CHECK(
                 rocprim::segmented_exclusive_scan(
@@ -355,11 +393,18 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
                     stream, debug_synchronous
                 )
             );
+
+            if (TestFixture::params::use_graphs)
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+
             HIP_CHECK(hipDeviceSynchronize());
 
             ASSERT_GT(temporary_storage_bytes, 0);
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+            if (TestFixture::params::use_graphs)
+                test_utils::resetGraphHelper(graph, graph_instance, stream);
 
             HIP_CHECK(
                 rocprim::segmented_exclusive_scan(
@@ -372,6 +417,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
                     stream, debug_synchronous
                 )
             );
+
+            if (TestFixture::params::use_graphs)
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
             HIP_CHECK(hipDeviceSynchronize());
 
             std::vector<output_type> values_output(size);
@@ -391,9 +440,14 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
             HIP_CHECK(hipFree(d_values_input));
             HIP_CHECK(hipFree(d_offsets));
             HIP_CHECK(hipFree(d_values_output));
+
+            if (TestFixture::params::use_graphs)
+                test_utils::cleanupGraphHelper(graph, graph_instance);
         }
     }
 
+    if (TestFixture::params::use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
@@ -415,6 +469,11 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
     scan_op_type scan_op;
 
     hipStream_t stream = 0; // default stream
+    if (TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -501,6 +560,11 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
                                                                             expected.begin(),
                                                                             scan_op);
 
+            hipGraph_t graph;
+            hipGraphExec_t graph_instance;
+            if (TestFixture::params::use_graphs)
+                graph = test_utils::createGraphHelper(stream);
+
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
@@ -512,6 +576,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
                     debug_synchronous
                 )
             );
+
+            if (TestFixture::params::use_graphs)
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
             HIP_CHECK(hipDeviceSynchronize());
 
             // temp_storage_size_bytes must be >0
@@ -522,6 +590,9 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
+            if (TestFixture::params::use_graphs)
+                test_utils::resetGraphHelper(graph, graph_instance, stream);
+
             // Run
             HIP_CHECK(
                 rocprim::segmented_inclusive_scan(
@@ -531,6 +602,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
                     debug_synchronous
                 )
             );
+
+            if (TestFixture::params::use_graphs)
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
@@ -550,9 +625,14 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_flags));
             HIP_CHECK(hipFree(d_output));
+
+            if (TestFixture::params::use_graphs)
+                test_utils::cleanupGraphHelper(graph, graph_instance);
         }
     }
 
+    if (TestFixture::params::use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
@@ -576,6 +656,11 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
     scan_op_type scan_op;
 
     hipStream_t stream = 0; // default stream
+    if (TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -663,6 +748,11 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
                                                                 scan_op,
                                                                 init);
 
+            hipGraph_t graph;
+            hipGraphExec_t graph_instance;
+            if (TestFixture::params::use_graphs)
+                graph = test_utils::createGraphHelper(stream);
+            
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
@@ -673,6 +763,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
                     input.size(), scan_op, stream, debug_synchronous
                 )
             );
+
+            if (TestFixture::params::use_graphs)
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+
             HIP_CHECK(hipDeviceSynchronize());
 
             // temp_storage_size_bytes must be >0
@@ -683,6 +777,9 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
+            if (TestFixture::params::use_graphs)
+                test_utils::resetGraphHelper(graph, graph_instance, stream);
+
             // Run
             HIP_CHECK(
                 rocprim::segmented_exclusive_scan(
@@ -691,6 +788,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
                     input.size(), scan_op, stream, debug_synchronous
                 )
             );
+
+            if (TestFixture::params::use_graphs)
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
@@ -702,6 +803,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
                     hipMemcpyDeviceToHost
                 )
             );
+
+            if (TestFixture::params::use_graphs)
+                test_utils::cleanupGraphHelper(graph, graph_instance);
+            
             HIP_CHECK(hipDeviceSynchronize());
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, precision));
@@ -713,4 +818,6 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
         }
     }
 
+    if (TestFixture::params::use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
 }

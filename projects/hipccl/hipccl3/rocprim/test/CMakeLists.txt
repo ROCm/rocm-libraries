@@ -126,6 +126,10 @@ add_hip_test("hip.async_copy" hip/test_hip_async_copy.cpp)
 # rocPRIM test
 add_subdirectory(rocprim)
 
+# hipGraph tests
+add_hip_test("hipgraph.basic" hipgraph/test_hipgraph_basic.cpp)
+add_hip_test("hipgraph.algs" hipgraph/test_hipgraph_algs.cpp)
+
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"

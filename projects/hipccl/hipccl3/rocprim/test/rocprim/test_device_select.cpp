@@ -37,7 +37,8 @@ template<
     class InputType,
     class OutputType = InputType,
     class FlagType = unsigned int,
-    bool UseIdentityIterator = false
+    bool UseIdentityIterator = false,
+    bool UseGraphs = false
 >
 struct DeviceSelectParams
 {
@@ -45,6 +46,7 @@ struct DeviceSelectParams
     using output_type = OutputType;
     using flag_type = FlagType;
     static constexpr bool use_identity_iterator = UseIdentityIterator;
+    static constexpr bool use_graphs = UseGraphs;
 };
 
 template<class Params>
@@ -56,6 +58,7 @@ public:
     using flag_type = typename Params::flag_type;
     const bool debug_synchronous = false;
     static constexpr bool use_identity_iterator = Params::use_identity_iterator;
+    static constexpr bool use_graphs = Params::use_graphs;
 };
 
 typedef ::testing::Types<
@@ -66,7 +69,8 @@ typedef ::testing::Types<
     DeviceSelectParams<rocprim::bfloat16, rocprim::bfloat16>,
     DeviceSelectParams<unsigned char, float, int, true>,
     DeviceSelectParams<double, double, int, true>,
-    DeviceSelectParams<test_utils::custom_test_type<double>, test_utils::custom_test_type<double>, int, true>
+    DeviceSelectParams<test_utils::custom_test_type<double>, test_utils::custom_test_type<double>, int, true>,
+    DeviceSelectParams<int, int, unsigned int, false, true>
 > RocprimDeviceSelectTestsParams;
 
 TYPED_TEST_SUITE(RocprimDeviceSelectTests, RocprimDeviceSelectTestsParams);
@@ -81,9 +85,13 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
-    const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
+    if (TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -133,6 +141,11 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
                 }
             }
 
+            hipGraph_t graph;
+            hipGraphExec_t graph_instance;
+            if (TestFixture::use_graphs)
+                graph = test_utils::createGraphHelper(stream);
+            
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
@@ -146,9 +159,13 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
                     d_selected_count_output,
                     input.size(),
                     stream,
-                    debug_synchronous
+                    TestFixture::debug_synchronous
                 )
             );
+
+            if (TestFixture::use_graphs)
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+            
             HIP_CHECK(hipDeviceSynchronize());
 
             // temp_storage_size_bytes must be >0
@@ -159,6 +176,9 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
+            if (TestFixture::use_graphs)
+                test_utils::resetGraphHelper(graph, graph_instance, stream);
+            
             // Run
             HIP_CHECK(
                 rocprim::select(
@@ -170,9 +190,13 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
                     d_selected_count_output,
                     input.size(),
                     stream,
-                    debug_synchronous
+                    TestFixture::debug_synchronous
                 )
             );
+
+            if (TestFixture::use_graphs)
+                graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+            
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if number of selected value is as expected
@@ -204,10 +228,16 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
             hipFree(d_output);
             hipFree(d_selected_count_output);
             hipFree(d_temp_storage);
+
+            if (TestFixture::use_graphs)
+                test_utils::cleanupGraphHelper(graph, graph_instance);
         }
     }
 
+    if (TestFixture::use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
 }
+
 
 template<class T>
 struct select_op
@@ -231,6 +261,11 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
+    if (TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -270,6 +305,11 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
                 }
             }
 
+            hipGraph_t graph;
+            hipGraphExec_t graph_instance;
+            if (TestFixture::use_graphs)
+                graph = test_utils::createGraphHelper(stream);
+
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
@@ -286,6 +326,10 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
                     debug_synchronous
                 )
             );
+
+            if (TestFixture::use_graphs)
+                graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+            
             HIP_CHECK(hipDeviceSynchronize());
 
             // temp_storage_size_bytes must be >0
@@ -295,6 +339,9 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
             void * d_temp_storage = nullptr;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
+
+            if (TestFixture::use_graphs)
+                test_utils::resetGraphHelper(graph, graph_instance, stream);
 
             // Run
             HIP_CHECK(
@@ -310,6 +357,10 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
                     debug_synchronous
                 )
             );
+
+            if (TestFixture::use_graphs)
+                graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if number of selected value is as expected
@@ -340,9 +391,14 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
             hipFree(d_output);
             hipFree(d_selected_count_output);
             hipFree(d_temp_storage);
+
+            if (TestFixture::use_graphs)
+                test_utils::cleanupGraphHelper(graph, graph_instance);
         }
     }
 
+    if (TestFixture::use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
 }
 
 std::vector<float> get_discontinuity_probabilities()
@@ -369,6 +425,11 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
+    if (TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -423,6 +484,11 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                     }
                 }
 
+                hipGraph_t graph;
+                hipGraphExec_t graph_instance;
+                if (TestFixture::use_graphs)
+                    graph = test_utils::createGraphHelper(stream);
+                
                 // temp storage
                 size_t temp_storage_size_bytes;
                 // Get size of d_temp_storage
@@ -439,6 +505,10 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                         debug_synchronous
                     )
                 );
+
+                if (TestFixture::use_graphs)
+                    graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+                
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // temp_storage_size_bytes must be >0
@@ -448,6 +518,9 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                 void * d_temp_storage = nullptr;
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
                 HIP_CHECK(hipDeviceSynchronize());
+
+                if (TestFixture::use_graphs)
+                    test_utils::resetGraphHelper(graph, graph_instance, stream);
 
                 // Run
                 HIP_CHECK(
@@ -463,6 +536,10 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                         debug_synchronous
                     )
                 );
+
+                if (TestFixture::use_graphs)
+                    graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+                
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Check if number of selected value is as expected
@@ -493,9 +570,15 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                 hipFree(d_output);
                 hipFree(d_selected_count_output);
                 hipFree(d_temp_storage);
+
+                if (TestFixture::use_graphs)
+                    test_utils::cleanupGraphHelper(graph, graph_instance);
             }
         }
     }
+
+    if (TestFixture::use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
 }
 
 // The operator must be only called, when we have valid element in a block
@@ -520,7 +603,8 @@ struct element_equal_operator
     }
 };
 
-TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
+template<bool UseGraphs = false>
+void testUniqueGuardedOperator()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -534,6 +618,11 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
     const bool debug_synchronous = false;
 
     hipStream_t stream = 0; // default stream
+    if (UseGraphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -601,6 +690,11 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
                     }
                 }
 
+                hipGraph_t graph;
+                hipGraphExec_t graph_instance;
+                if (UseGraphs)
+                    graph = test_utils::createGraphHelper(stream);
+
                 // temp storage
                 size_t temp_storage_size_bytes;
                 // Get size of d_temp_storage
@@ -617,6 +711,10 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
                         debug_synchronous
                     )
                 );
+
+                if (UseGraphs)
+                    graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // temp_storage_size_bytes must be >0
@@ -626,6 +724,9 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
                 void * d_temp_storage = nullptr;
                 HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
                 HIP_CHECK(hipDeviceSynchronize());
+
+                if (UseGraphs)
+                    test_utils::resetGraphHelper(graph, graph_instance, stream);
 
                 // Run
                 HIP_CHECK(
@@ -641,6 +742,10 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
                         debug_synchronous
                     )
                 );
+
+                if (UseGraphs)
+                    graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Check if number of selected value is as expected
@@ -672,9 +777,25 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
                 hipFree(d_output);
                 hipFree(d_selected_count_output);
                 hipFree(d_temp_storage);
+
+                if (UseGraphs)
+                    test_utils::cleanupGraphHelper(graph, graph_instance);
             }
         }
     }
+
+    if (UseGraphs)
+        HIP_CHECK(hipStreamDestroy(stream));
+}
+
+TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
+{
+    testUniqueGuardedOperator();
+}
+
+TEST(RocprimDeviceSelectTests, UniqueGuardedOperatorWithGraphs)
+{
+    testUniqueGuardedOperator<true>();
 }
 
 // Params for tests
@@ -683,7 +804,8 @@ template<
     typename ValueType,
     typename OutputKeyType = KeyType, 
     typename OutputValueType = ValueType, 
-    bool UseIdentityIterator = false
+    bool UseIdentityIterator = false,
+    bool UseGraphs = false
 >
 struct DeviceUniqueByKeyParams
 {
@@ -692,6 +814,7 @@ struct DeviceUniqueByKeyParams
     using output_key_type = OutputKeyType;
     using output_value_type = OutputValueType;
     static constexpr bool use_identity_iterator = UseIdentityIterator;
+    static constexpr bool use_graphs = UseGraphs;
 };
 
 template<class Params>
@@ -704,6 +827,7 @@ public:
     using output_value_type      = typename Params::output_value_type;
     const bool debug_synchronous = false;
     static constexpr bool use_identity_iterator = Params::use_identity_iterator;
+    const bool use_graphs = Params::use_graphs;
 };
 
 typedef ::testing::Types<
@@ -714,7 +838,8 @@ typedef ::testing::Types<
     DeviceUniqueByKeyParams<uint8_t, long long>,
     DeviceUniqueByKeyParams<int, float, long, double>,
     DeviceUniqueByKeyParams<long long, uint8_t, long, int, true>,
-    DeviceUniqueByKeyParams<test_utils::custom_test_type<double>, test_utils::custom_test_type<double>>
+    DeviceUniqueByKeyParams<test_utils::custom_test_type<double>, test_utils::custom_test_type<double>>,
+    DeviceUniqueByKeyParams<int, int, int, int, false, true>
 > RocprimDeviceUniqueByKeyTestParams;
 
 TYPED_TEST_SUITE(RocprimDeviceUniqueByKeyTests, RocprimDeviceUniqueByKeyTestParams);
@@ -737,6 +862,11 @@ TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKey)
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
+    if (TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -808,6 +938,11 @@ TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKey)
                     }
                 }
 
+                hipGraph_t graph;
+                hipGraphExec_t graph_instance;
+                if (TestFixture::use_graphs)
+                    graph = test_utils::createGraphHelper(stream);
+
                 // temp storage
                 size_t temp_storage_size_bytes;
                 // Get size of d_temp_storage
@@ -826,6 +961,10 @@ TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKey)
                         debug_synchronous
                     )
                 );
+
+                if (TestFixture::use_graphs)
+                    graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // temp_storage_size_bytes must be >0
@@ -836,6 +975,9 @@ TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKey)
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
                 HIP_CHECK(hipDeviceSynchronize());
 
+                if (TestFixture::use_graphs)
+                    test_utils::resetGraphHelper(graph, graph_instance, stream);
+                
                 // Run
                 HIP_CHECK(
                     rocprim::unique_by_key(
@@ -852,6 +994,10 @@ TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKey)
                         debug_synchronous
                     )
                 );
+
+                if (TestFixture::use_graphs)
+                    graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+                
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Check if number of selected value is as expected
@@ -893,18 +1039,28 @@ TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKey)
                 hipFree(d_values_output);
                 hipFree(d_selected_count_output);
                 hipFree(d_temp_storage);
+
+                if (TestFixture::use_graphs)
+                    test_utils::cleanupGraphHelper(graph, graph_instance);
             }
         }
     }
+
+    if (TestFixture::use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
 }
 
-class RocprimDeviceSelectLargeInputTests : public ::testing::TestWithParam<unsigned int> {
+class RocprimDeviceSelectLargeInputTests : public ::testing::TestWithParam<std::pair<unsigned int, bool>> {
     public:
         const bool debug_synchronous = false;
 };
 
-INSTANTIATE_TEST_SUITE_P(RocprimDeviceSelectLargeInputFlaggedTest, RocprimDeviceSelectLargeInputTests, ::testing::Values(
-    2048, 9643, 32768, 38713
+INSTANTIATE_TEST_SUITE_P(RocprimDeviceSelectLargeInputFlaggedTest, RocprimDeviceSelectLargeInputTests,
+                         ::testing::Values(std::make_pair(2048, false), // params: flag_selector/segment_length, use_graphs
+                                           std::make_pair(9643, false),
+                                           std::make_pair(32768, false),
+                                           std::make_pair(38713, false),
+                                           std::make_pair(38713, true)
 ));
 
 TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
@@ -913,13 +1069,20 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    unsigned int flag_selector = GetParam();
+    auto param = GetParam();
+    unsigned int flag_selector = std::get<0>(param);
+    const bool use_graphs = std::get<1>(param);
 
     using InputIterator = typename rocprim::counting_iterator<size_t>;
 
     const bool debug_synchronous = RocprimDeviceSelectLargeInputTests::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
+    if (use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for(auto size : test_utils::get_large_sizes(0))
     {
@@ -960,6 +1123,11 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
         size_t temp_storage_size_bytes;
         void *d_temp_storage = nullptr;
 
+        hipGraph_t graph;
+        hipGraphExec_t graph_instance;
+        if (use_graphs)
+            graph = test_utils::createGraphHelper(stream);
+
         // Get size of d_temp_storage
         HIP_CHECK(
             rocprim::select(
@@ -974,6 +1142,10 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
                 debug_synchronous
             )
         );
+
+        if (use_graphs)
+            graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
         HIP_CHECK(hipDeviceSynchronize());
 
         // temp_storage_size_bytes must be >0
@@ -982,6 +1154,9 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
         // allocate temporary storage
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
+
+        if (use_graphs)
+            test_utils::resetGraphHelper(graph, graph_instance, stream);
 
         // Run
         HIP_CHECK(
@@ -997,6 +1172,10 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
                 debug_synchronous
             )
         );
+
+        if (use_graphs)
+            graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if number of selected value is as expected
@@ -1025,19 +1204,33 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
         hipFree(d_output);
         hipFree(d_selected_count_output);
         hipFree(d_temp_storage);
+
+        if (use_graphs)
+            test_utils::cleanupGraphHelper(graph, graph_instance);
     }
+
+    if (use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
 {
     static constexpr bool        debug_synchronous = false;
-    static constexpr hipStream_t stream            = 0;
+
+    auto param = GetParam();
+    const unsigned int segment_length = std::get<0>(param);
+    const bool use_graphs = std::get<1>(param);
+
+    hipStream_t stream = 0;
+    if (use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     const int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-
-    const unsigned int segment_length = GetParam();
 
     for(const auto size : test_utils::get_large_sizes(0))
     {
@@ -1061,6 +1254,11 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_count_output,
                                                      sizeof(*d_unique_count_output)));
 
+        hipGraph_t graph;
+        hipGraphExec_t graph_instance;
+        if (use_graphs)
+            graph = test_utils::createGraphHelper(stream);
+
         size_t temp_storage_size_bytes{};
         void*  d_temp_storage{};
         HIP_CHECK(rocprim::unique(d_temp_storage,
@@ -1072,8 +1270,15 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
                                   rocprim::equal_to<size_t>{},
                                   stream,
                                   debug_synchronous));
+
+        if (use_graphs)
+            graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+
         ASSERT_GT(temp_storage_size_bytes, 0);
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+
+        if (use_graphs)
+            test_utils::resetGraphHelper(graph, graph_instance, stream);
 
         HIP_CHECK(rocprim::unique(d_temp_storage,
                                   temp_storage_size_bytes,
@@ -1084,6 +1289,9 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
                                   rocprim::equal_to<size_t>{},
                                   stream,
                                   debug_synchronous));
+
+        if (use_graphs)
+            graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
 
         size_t unique_count_output{};
         HIP_CHECK(hipMemcpyWithStream(&unique_count_output,
@@ -1106,5 +1314,11 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
         HIP_CHECK(hipFree(d_output));
         HIP_CHECK(hipFree(d_unique_count_output));
         HIP_CHECK(hipFree(d_temp_storage));
+
+        if (use_graphs)
+            test_utils::cleanupGraphHelper(graph, graph_instance);
     }
+
+    if (use_graphs)
+        HIP_CHECK(hipStreamDestroy(stream));
 }
