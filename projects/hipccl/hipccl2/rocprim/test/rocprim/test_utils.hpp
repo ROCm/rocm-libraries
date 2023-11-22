@@ -40,6 +40,7 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_assertions.hpp"
+#include "test_utils_hipgraphs.hpp"
 
 // Helper macros to disable warnings in clang
 #ifdef __clang__

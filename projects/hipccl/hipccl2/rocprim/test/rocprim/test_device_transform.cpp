@@ -35,7 +35,8 @@ template<
     class InputType,
     class OutputType = InputType,
     bool UseIdentityIterator = false,
-    unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT
+    unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT,
+    bool UseGraphs = false
 >
 struct DeviceTransformParams
 {
@@ -43,6 +44,7 @@ struct DeviceTransformParams
     using output_type = OutputType;
     static constexpr bool use_identity_iterator = UseIdentityIterator;
     static constexpr size_t size_limit = SizeLimit;
+    static constexpr bool use_graphs = UseGraphs;
 };
 
 // ---------------------------------------------------------
@@ -58,6 +60,7 @@ public:
     static constexpr bool use_identity_iterator = Params::use_identity_iterator;
     static constexpr bool debug_synchronous = false;
     static constexpr size_t size_limit = Params::size_limit;
+    static constexpr bool use_graphs = Params::use_graphs;
 };
 
 using custom_short2  = test_utils::custom_test_type<short>;
@@ -79,7 +82,8 @@ typedef ::testing::Types<
     DeviceTransformParams<float, float, false, 2048>,
     DeviceTransformParams<int, int, false, 4096>,
     DeviceTransformParams<int, int, false, 2097152>,
-    DeviceTransformParams<int, int, false, 1073741824>
+    DeviceTransformParams<int, int, false, 1073741824>,
+    DeviceTransformParams<int, int, false, ROCPRIM_GRID_SIZE_LIMIT, true>
 > RocprimDeviceTransformTestsParams;
 
 template <unsigned int SizeLimit>
@@ -116,7 +120,6 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
-    const bool debug_synchronous = TestFixture::debug_synchronous;
     using Config = size_limit_config_t<TestFixture::size_limit>;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -127,6 +130,11 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
         for(auto size : test_utils::get_sizes(seed_value))
         {
             hipStream_t stream = 0; // default
+            if (TestFixture::use_graphs)
+            {
+                // Default stream does not support hipGraph stream capture, so create one
+                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+            }
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -151,14 +159,23 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
             std::vector<U> expected(input.size());
             std::transform(input.begin(), input.end(), expected.begin(), transform<U>());
 
+            hipGraph_t graph;
+            hipGraphExec_t graph_instance;
+            if (TestFixture::use_graphs)
+                graph = test_utils::createGraphHelper(stream);
+            
             // Run
             HIP_CHECK(
                 rocprim::transform<Config>(
                     d_input,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    input.size(), transform<U>(), stream, debug_synchronous
+                    input.size(), transform<U>(), stream, TestFixture::debug_synchronous
                 )
             );
+
+            if (TestFixture::use_graphs)
+                graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+            
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -178,9 +195,14 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
 
             hipFree(d_input);
             hipFree(d_output);
+
+            if (TestFixture::use_graphs)
+            {
+                test_utils::cleanupGraphHelper(graph, graph_instance);
+                HIP_CHECK(hipStreamDestroy(stream));
+            }
         }
     }
-
 }
 
 template<class T1, class T2, class U>
@@ -214,6 +236,11 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
         for(auto size : test_utils::get_sizes(seed_value))
         {
             hipStream_t stream = 0; // default
+            if (TestFixture::use_graphs)
+            {
+                // Default stream does not support hipGraph stream capture, so create one
+                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+            }
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -251,6 +278,11 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
                 expected.begin(), binary_transform<T1, T2, U>()
             );
 
+            hipGraph_t graph;
+            hipGraphExec_t graph_instance;
+            if (TestFixture::use_graphs)
+                graph = test_utils::createGraphHelper(stream);
+
             // Run
             HIP_CHECK(
                 rocprim::transform<Config>(
@@ -259,6 +291,10 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
                     input1.size(), binary_transform<T1, T2, U>(), stream, debug_synchronous
                 )
             );
+
+            if (TestFixture::use_graphs)
+                graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+            
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -279,12 +315,18 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
             hipFree(d_input1);
             hipFree(d_input2);
             hipFree(d_output);
+            
+            if (TestFixture::use_graphs)
+            {
+                test_utils::cleanupGraphHelper(graph, graph_instance);
+                HIP_CHECK(hipStreamDestroy(stream));
+            }
         }
     }
-
 }
 
-TEST(RocprimDeviceTransformTests, LargeIndices)
+template<bool UseGraphs = false>
+void testLargeIndices()
 {
     const int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -295,7 +337,12 @@ TEST(RocprimDeviceTransformTests, LargeIndices)
     using OutputIterator         = rocprim::discard_iterator;
     const bool debug_synchronous = false;
 
-    const hipStream_t stream = 0; // default
+    hipStream_t stream = 0; // default
+    if (UseGraphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -336,9 +383,18 @@ TEST(RocprimDeviceTransformTests, LargeIndices)
                 return 0;
             };
 
+            hipGraph_t graph;
+            hipGraphExec_t graph_instance;
+            if (UseGraphs)
+                graph = test_utils::createGraphHelper(stream);
+
             // Run
             HIP_CHECK(
                 rocprim::transform(input, output, size, flag_expected, stream, debug_synchronous));
+
+            if (UseGraphs)
+                graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -348,8 +404,24 @@ TEST(RocprimDeviceTransformTests, LargeIndices)
 
             ASSERT_TRUE(flags[0]);
             ASSERT_TRUE(flags[1]);
+            
+            HIP_CHECK(hipFree(d_flag));
 
-            hipFree(d_flag);
+            if (UseGraphs)
+                test_utils::cleanupGraphHelper(graph, graph_instance);
         }
     }
+
+    if (UseGraphs)
+        HIP_CHECK(hipStreamDestroy(stream));    
+}
+
+TEST(RocprimDeviceTransformTests, LargeIndices)
+{
+    testLargeIndices();
+}
+
+TEST(RocprimDeviceTransformTests, LargeIndicesWithGraphs)
+{
+    testLargeIndices<true>();
 }
