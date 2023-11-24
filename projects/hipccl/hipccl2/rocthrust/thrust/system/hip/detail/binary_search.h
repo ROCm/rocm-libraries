@@ -464,12 +464,38 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
             values_type  values(policy, 1);
             results_type result(policy, 1);
 
-            values[0] = value;
+            {
+                typedef typename thrust::iterator_system<const T*>::type value_in_system_t;
+                value_in_system_t                                        value_in_system;
+                using thrust::system::detail::generic::select_system;
+                thrust::copy_n(
+                    select_system(
+                        thrust::detail::derived_cast(thrust::detail::strip_const(value_in_system)),
+                        thrust::detail::derived_cast(thrust::detail::strip_const(policy))),
+                    &value,
+                    1,
+                    values.begin());
+            }
 
             __binary_search::lower_bound(
                 policy, first, last, values.begin(), values.end(), result.begin(), compare_op);
 
-            return first + result[0];
+            difference_type h_result;
+            {
+                typedef
+                    typename thrust::iterator_system<difference_type*>::type result_out_system_t;
+                result_out_system_t                                          result_out_system;
+                using thrust::system::detail::generic::select_system;
+                thrust::copy_n(
+                    select_system(thrust::detail::derived_cast(thrust::detail::strip_const(policy)),
+                                  thrust::detail::derived_cast(
+                                      thrust::detail::strip_const(result_out_system))),
+                    result.begin(),
+                    1,
+                    &h_result);
+            }
+
+            return first + h_result;
         }
 
         __device__
@@ -524,13 +550,39 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
           values_type values(policy, 1);
           results_type result(policy, 1);
 
-          values[0] = value;
+          {
+                typedef typename thrust::iterator_system<const T*>::type value_in_system_t;
+                value_in_system_t                                        value_in_system;
+                using thrust::system::detail::generic::select_system;
+                thrust::copy_n(
+                    select_system(
+                        thrust::detail::derived_cast(thrust::detail::strip_const(value_in_system)),
+                        thrust::detail::derived_cast(thrust::detail::strip_const(policy))),
+                    &value,
+                    1,
+                    values.begin());
+          }
 
           __binary_search::upper_bound(
               policy, first, last, values.begin(), values.end(), result.begin(), compare_op
           );
 
-          return first + result[0];
+          difference_type h_result;
+          {
+                typedef
+                    typename thrust::iterator_system<difference_type*>::type result_out_system_t;
+                result_out_system_t                                          result_out_system;
+                using thrust::system::detail::generic::select_system;
+                thrust::copy_n(
+                    select_system(thrust::detail::derived_cast(thrust::detail::strip_const(policy)),
+                                  thrust::detail::derived_cast(
+                                      thrust::detail::strip_const(result_out_system))),
+                    result.begin(),
+                    1,
+                    &h_result);
+          }
+
+          return first + h_result;
         }
 
         __device__
@@ -583,13 +635,38 @@ bool binary_search(execution_policy<Derived>& policy,
           values_type values(policy, 1);
           results_type result(policy, 1);
 
-          values[0] = value;
+          {
+                typedef typename thrust::iterator_system<const T*>::type value_in_system_t;
+                value_in_system_t                                        value_in_system;
+                using thrust::system::detail::generic::select_system;
+                thrust::copy_n(
+                    select_system(
+                        thrust::detail::derived_cast(thrust::detail::strip_const(value_in_system)),
+                        thrust::detail::derived_cast(thrust::detail::strip_const(policy))),
+                    &value,
+                    1,
+                    values.begin());
+          }
 
           __binary_search::binary_search(
               policy, first, last, values.begin(), values.end(), result.begin(), compare_op
           );
 
-          return result[0] != 0;
+          int h_result;
+          {
+                typedef typename thrust::iterator_system<int*>::type result_out_system_t;
+                result_out_system_t                                  result_out_system;
+                using thrust::system::detail::generic::select_system;
+                thrust::copy_n(
+                    select_system(thrust::detail::derived_cast(thrust::detail::strip_const(policy)),
+                                  thrust::detail::derived_cast(
+                                      thrust::detail::strip_const(result_out_system))),
+                    result.begin(),
+                    1,
+                    &h_result);
+          }
+
+          return h_result != 0;
         }
 
         __device__

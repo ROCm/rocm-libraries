@@ -683,6 +683,29 @@ TEST(BinarySearchTests, TestScalarEqualRangeDispatchImplicit)
     ASSERT_EQ(13, vec.front());
 }
 
+TEST(BinarySearchTests, TestEqualRangeExecutionPolicy)
+{
+    using thrust_exec_policy_t
+        = thrust::detail::execute_with_allocator<thrust::device_allocator<char>,
+                                                 thrust::hip_rocprim::execute_on_stream_base>;
+
+    constexpr int              data[] = {1, 2, 3, 4, 4, 5, 6, 7, 8, 9};
+    constexpr size_t           size   = sizeof(data) / sizeof(data[0]);
+    constexpr int              key    = 4;
+    thrust::device_vector<int> d_data(data, data + size);
+
+    thrust::pair<thrust::device_vector<int>::iterator, thrust::device_vector<int>::iterator> range
+        = thrust::equal_range(
+            thrust_exec_policy_t(thrust::hip_rocprim::execute_on_stream_base<thrust_exec_policy_t>(
+                                     hipStreamPerThread),
+                                 thrust::device_allocator<char>()),
+            d_data.begin(),
+            d_data.end(),
+            key);
+
+    ASSERT_EQ(*range.first, 4);
+    ASSERT_EQ(*range.second, 5);
+}
 
 __global__
 THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
