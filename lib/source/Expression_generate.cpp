@@ -515,6 +515,37 @@ namespace rocRoller
                 co_yield generateOp<Operation>(dest, results[0], results[1], results[2]);
             }
 
+            Generator<Instruction> operator()(Register::ValuePtr& dest, Conditional const& expr)
+            {
+                bool                            schedulerLocked = false;
+                std::vector<Register::ValuePtr> results;
+                std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
+
+                co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
+                auto cond = results[0];
+                results.erase(results.begin());
+                auto regType    = promoteRegisterTypes(results);
+                auto valueCount = resultValueCount(dest, results);
+
+                if(valueCount > 1 && regType == Register::Type::Accumulator)
+                {
+                    regType = Register::Type::Vector;
+                    for(int i = 0; i < results.size(); ++i)
+                    {
+                        co_yield m_context->copier()->ensureType(results[i], results[i], regType);
+                    }
+                }
+
+                if(!dest)
+                {
+                    auto varType = promoteVariableTypes(results);
+                    dest         = resultPlaceholder({regType, varType}, true, valueCount);
+                }
+
+                //If dest, results have multiple elements, handled inside generateOp
+                co_yield generateOp<Conditional>(dest, cond, results[0], results[1]);
+            }
+
             template <CUnary Operation>
             requires CKernelExecuteTime<Operation> Generator<Instruction>
             operator()(Register::ValuePtr& dest, Operation const& expr)

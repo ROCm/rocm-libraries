@@ -539,7 +539,7 @@ namespace rocRoller
         struct OperationEvaluatorVisitor<Conditional> : public TernaryEvaluatorVisitor<Conditional>
         {
             template <typename LHS_Type, typename RHS_Type>
-            std::enable_if_t<std::is_convertible_v<LHS_Type, bool>, RHS_Type>
+            std::enable_if_t<std::is_integral_v<LHS_Type>, RHS_Type>
                 evaluate(LHS_Type const& lhs, RHS_Type const& r1hs, RHS_Type const& r2hs) const
             {
                 return lhs ? r1hs : r2hs;

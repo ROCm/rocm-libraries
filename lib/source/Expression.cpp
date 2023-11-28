@@ -297,6 +297,26 @@ namespace rocRoller
                                   ShowValue(rhsVal.regType));
             }
 
+            ResultType operator()(Conditional const& expr) const
+            {
+                auto lhsVal  = call(expr.lhs);
+                auto r1hsVal = call(expr.r1hs);
+                auto r2hsVal = call(expr.r2hs);
+
+                AssertFatal(r2hsVal.varType == r1hsVal.varType,
+                            ShowValue(r1hsVal.varType),
+                            ShowValue(r2hsVal.varType));
+                auto varType = r2hsVal.varType;
+
+                if(lhsVal.varType == DataType::Bool32 || lhsVal.regType == Register::Type::Vector
+                   || r1hsVal.regType == Register::Type::Vector
+                   || r2hsVal.regType == Register::Type::Vector)
+                {
+                    return {Register::Type::Vector, varType};
+                }
+                return {Register::Type::Scalar, varType};
+            }
+
             ResultType operator()(CommandArgumentPtr const& expr) const
             {
                 AssertFatal(expr != nullptr, "Null subexpression!");

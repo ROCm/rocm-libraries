@@ -10,8 +10,8 @@ namespace rocRoller
     std::shared_ptr<TernaryArithmeticGenerator<Expression::Conditional>>
         GetGenerator<Expression::Conditional>(Register::ValuePtr dst,
                                               Register::ValuePtr lhs,
-                                              Register::ValuePtr rhs,
-                                              Register::ValuePtr shiftAmount);
+                                              Register::ValuePtr r1hs,
+                                              Register::ValuePtr r2hs);
 
     // Generator for all register types and datatypes.
     class ConditionalGenerator : public TernaryArithmeticGenerator<Expression::Conditional>
@@ -47,8 +47,8 @@ namespace rocRoller
         // Method to generate instructions
         Generator<Instruction> generate(Register::ValuePtr dest,
                                         Register::ValuePtr lhs,
-                                        Register::ValuePtr rhs,
-                                        Register::ValuePtr shiftAmount);
+                                        Register::ValuePtr r1hs,
+                                        Register::ValuePtr r2hs);
 
         static const std::string Name;
     };

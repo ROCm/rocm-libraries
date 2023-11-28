@@ -41,13 +41,13 @@ namespace rocRoller
                     Instruction::Lock(Scheduling::Dependency::SCC, "Start of Conditional(SCC)"));
                 co_yield generateOp<Expression::Equal>(
                     m_context->getSCC(), cond, Register::Value::Literal(0));
-                left  = r2hs;
-                right = r1hs;
+                left  = std::move(r2hs);
+                right = std::move(r1hs);
             }
             else
             {
-                left  = r1hs;
-                right = r2hs;
+                left  = std::move(r1hs);
+                right = std::move(r2hs);
             }
 
             auto const elementSize = dest->variableType().getElementSize();
@@ -71,7 +71,31 @@ namespace rocRoller
         }
         else
         {
-            AssertFatal(false, "Non-SGPRs are not supported");
+            AssertFatal(cond->isVCC() || cond->regType() == Register::Type::Scalar,
+                        ShowValue(cond->regType()));
+
+            auto const elementSize = dest->variableType().getElementSize();
+            if(elementSize == 8)
+            {
+                co_yield_(Instruction("v_cndmask_b32_e64",
+                                      {dest->subset({0})},
+                                      {r2hs->subset({0}), r1hs->subset({0}), cond},
+                                      {},
+                                      ""));
+                co_yield_(Instruction("v_cndmask_b32_e64",
+                                      {dest->subset({1})},
+                                      {r2hs->subset({1}), r1hs->subset({1}), cond},
+                                      {},
+                                      ""));
+            }
+            else if(elementSize == 4)
+            {
+                co_yield_(Instruction("v_cndmask_b32_e64", {dest}, {r2hs, r1hs, cond}, {}, ""));
+            }
+            else
+            {
+                AssertFatal(false, "Unsupported size ", ShowValue(elementSize));
+            }
         }
     }
 }

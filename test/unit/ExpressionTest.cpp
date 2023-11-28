@@ -2064,7 +2064,7 @@ namespace ExpressionTest
         basicTernaryExpression(expr, a, b, c, r, true);
     }
 
-    TEST_P(ARCH_ExpressionTest, ConditionalUInt32_0)
+    TEST_P(ARCH_ExpressionTest, ConditionalUInt32Scalar_0)
     {
         uint32_t a   = std::numeric_limits<uint32_t>::max();
         uint32_t b   = 12326;
@@ -2081,11 +2081,79 @@ namespace ExpressionTest
         basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
     }
 
-    TEST_P(ARCH_ExpressionTest, ConditionalUInt32_1)
+    TEST_P(ARCH_ExpressionTest, ConditionalUInt32Scalar_1)
     {
         uint32_t a   = std::numeric_limits<uint32_t>::max();
         uint32_t b   = 12326;
         uint32_t c   = 9;
+        namespace Ex = Expression;
+
+        auto r    = a < b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a < b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalInt32Scalar_0)
+    {
+        int32_t a    = std::numeric_limits<int32_t>::max();
+        int32_t b    = -12326;
+        int32_t c    = 9;
+        namespace Ex = Expression;
+
+        auto r    = a > b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a > b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalInt32Scalar_1)
+    {
+        int32_t a    = std::numeric_limits<int32_t>::max();
+        int32_t b    = -12326;
+        int32_t c    = 9;
+        namespace Ex = Expression;
+
+        auto r    = a < b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a < b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalInt64Scalar_0)
+    {
+        int64_t a    = std::numeric_limits<int64_t>::max();
+        int64_t b    = -12326;
+        int64_t c    = 9;
+        namespace Ex = Expression;
+
+        auto r    = a > b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a > b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalInt64Scalar_1)
+    {
+        int64_t a    = std::numeric_limits<int64_t>::max();
+        int64_t b    = -12326;
+        int64_t c    = 9;
         namespace Ex = Expression;
 
         auto r    = a < b ? b : c;
@@ -2112,7 +2180,7 @@ namespace ExpressionTest
             auto d = a > b;
             return Ex::conditional(d, b, c);
         };
-        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+        basicTernaryExpression(expr, a, b, c, r, true);
     }
 
     TEST_P(ARCH_ExpressionTest, ConditionalInt32_1)
@@ -2129,7 +2197,7 @@ namespace ExpressionTest
             auto d = a < b;
             return Ex::conditional(d, b, c);
         };
-        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+        basicTernaryExpression(expr, a, b, c, r, true);
     }
 
     TEST_P(ARCH_ExpressionTest, ConditionalInt64_0)
@@ -2146,7 +2214,7 @@ namespace ExpressionTest
             auto d = a > b;
             return Ex::conditional(d, b, c);
         };
-        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+        basicTernaryExpression(expr, a, b, c, r, true);
     }
 
     TEST_P(ARCH_ExpressionTest, ConditionalInt64_1)
@@ -2163,7 +2231,75 @@ namespace ExpressionTest
             auto d = a < b;
             return Ex::conditional(d, b, c);
         };
-        basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
+        basicTernaryExpression(expr, a, b, c, r, true);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalFloat_0)
+    {
+        float a      = std::numeric_limits<float>::max();
+        float b      = -12326.156;
+        float c      = 9.894;
+        namespace Ex = Expression;
+
+        auto r    = a > b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a > b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalFloat_1)
+    {
+        float a      = std::numeric_limits<float>::max();
+        float b      = -12326.156;
+        float c      = 9.894;
+        namespace Ex = Expression;
+
+        auto r    = a < b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a < b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalDouble_0)
+    {
+        double a     = std::numeric_limits<double>::max();
+        double b     = -12326.156;
+        double c     = 9.894;
+        namespace Ex = Expression;
+
+        auto r    = a > b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a > b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ConditionalDouble_1)
+    {
+        double a     = std::numeric_limits<double>::max();
+        double b     = -12326.156;
+        double c     = 9.894;
+        namespace Ex = Expression;
+
+        auto r    = a < b ? b : c;
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            auto d = a < b;
+            return Ex::conditional(d, b, c);
+        };
+        basicTernaryExpression(expr, a, b, c, r, true);
     }
 
     TEST_P(ARCH_ExpressionTest, ComplexExpressionScalar)
