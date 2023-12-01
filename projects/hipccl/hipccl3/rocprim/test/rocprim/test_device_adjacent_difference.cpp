@@ -462,18 +462,23 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
 {
     const int device_id = test_common_utils::obtain_device_from_ctest();
 
+#ifdef _WIN32
     if (TestFixture::use_graphs)
     {
-        // Skip this test on gfx1030 on Windows, since check_output_iterator does not appear to work there.
+        // Skip this test on Navi2x/3x on Windows, since check_output_iterator does not appear to work there.
         hipDeviceProp_t props;
         HIP_CHECK(hipGetDeviceProperties(&props, device_id));
         std::string deviceName = std::string(props.gcnArchName);
-        if(deviceName.rfind("gfx1030", 0) == 0)
+        if(deviceName.rfind("gfx1030", 0) == 0 ||
+           deviceName.rfind("gfx1100", 0) == 0 ||
+           deviceName.rfind("gfx1101", 0) == 0 ||
+           deviceName.rfind("gfx1102", 0) == 0)
         {
-            // This is a gfx1030 device, so skip this test
-            GTEST_SKIP() << "Temporarily skipping test on Windows for on gfx1030";
+            // This is a Navi2x/3x device, so skip this test
+            GTEST_SKIP() << "Temporarily skipping test on Windows for on gfx1030, gfx1100, gfx1101, gfx1102";
         }
     }
+#endif
 
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
