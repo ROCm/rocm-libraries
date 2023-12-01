@@ -1,96 +1,126 @@
 # rocPRIM
 
-The rocPRIM is a header-only library providing HIP parallel primitives for developing
-performant GPU-accelerated code on AMD ROCm platform.
+rocPRIM is a header-only library that provides HIP parallel primitives. You can use this library to
+develop performant GPU-accelerated code on AMD ROCm platforms.
 
 ## Requirements
 
 * Git
 * CMake (3.16 or later)
-* AMD [ROCm](https://rocm.github.io/install.html) platform (1.8.2 or later)
-  * Including [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang) compiler
+* AMD [ROCm](https://rocm.docs.amd.com/en/latest/) platform (1.8.2 or later)
+  * Including
+    [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang)
+    compiler
 * C++14
 * Python 3.6 or higher (HIP on Windows only, required only for install script)
-* Visual Studio 2019 with clang support (HIP on Windows only)
+* Visual Studio 2019 with Clang support (HIP on Windows only)
 * Strawberry Perl (HIP on Windows only)
 
 Optional:
 
-* [GTest](https://github.com/google/googletest)
-  * Required only for tests. Building tests is enabled by default.
-  * It will be automatically downloaded and built by cmake script.
+* [GoogleTest](https://github.com/google/googletest)
+  * Required only for tests. Building tests is on by default.
+  * This is automatically downloaded and built by the CMake script.
 * [Google Benchmark](https://github.com/google/benchmark)
   * Required only for benchmarks. Building benchmarks is off by default.
-  * It will be automatically downloaded and built by cmake script.
+  * This is automatically downloaded and built by the CMake script.
 
-## Build and Install
-### Linux
+## Documentation
+
+Documentation for rocPRIM is available at
+[https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
+
+To build our documentation locally, use the following code:
+
 ```shell
-git clone https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+# Go to rocPRIM docs directory
+cd rocPRIM; cd docs
 
-# Go to rocPRIM directory, create and go to the build directory.
-cd rocPRIM; mkdir build; cd build
+# Install Python dependencies
+python3 -m pip install -r .sphinx/requirements.txt
 
-# Configure rocPRIM, setup options for your system.
-# Build options:
-#   ONLY_INSTALL - OFF by default, If this flag is on, the build ignore the BUILD_* flags
-#   BUILD_TEST - OFF by default,
-#   BUILD_EXAMPLE - OFF by default,
-#   BUILD_BENCHMARK - OFF by default.
-#   BENCHMARK_CONFIG_TUNING - OFF by default. The purpose of this flag to find the best kernel config parameters.
-#     At ON the compilation time can be increased significantly.
-#   AMDGPU_TARGETS - list of AMD architectures, default: gfx803;gfx900;gfx906;gfx908.
-#     You can make compilation faster if you want to test/benchmark only on one architecture,
-#     for example, add -DAMDGPU_TARGETS=gfx906 to 'cmake' parameters.
-#   AMDGPU_TEST_TARGETS - list of AMD architectures, default: "" (default system device)
-#     If you want to detect failures on a per GFX IP basis, setting it to some set of ips will create
-#     separate tests with the ip name embedded into the test name. Building for all, but selecting
-#     tests only of a specific architecture is possible for eg: ctest -R gfx803|gfx900
-#
-# ! IMPORTANT !
-# Set C++ compiler to HIP-clang. You can do it by adding 'CXX=<path-to-compiler>'
-# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the compiler.
-# Using HIP-clang:
-[CXX=hipcc] cmake -DBUILD_BENCHMARK=ON ../.
-#
-# ! EXPERIMENTAL !
-# Alternatively one may build using the experimental (and highly incomplete) HIP-CPU back-end for host-side
-# execution using any C++17 conforming compiler (supported by HIP-CPU). AMDGPU_* options are unavailable in this case. 
-#   USE_HIP_CPU - OFF by default
+# Build the documentation
+python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 
-# Build
-make -j4
-
-# Optionally, run tests if they're enabled.
-ctest --output-on-failure
-
-# Install
-[sudo] make install
+# For local HTML version
+cd _build/html
+python3 -m http.server
 ```
-### Windows
 
-Initial support for HIP on Windows has been added.  To install, use the provided rmake.py python script:
-```shell
-git clone https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-cd rocPRIM
+## Build and install
 
-# the -i option will install rocPRIM to C:\hipSDK by default
-python rmake.py -i
+You can build and install rocPRIM on Linux or Windows.
 
-# the -c option will build all clients including unit tests
-python rmake.py -c
-```
+* Linux:
+
+  ```shell
+  git clone https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+
+  # Go to rocPRIM directory, create and go to the build directory.
+  cd rocPRIM; mkdir build; cd build
+
+  # Configure rocPRIM, setup options for your system.
+  # Build options:
+  #   ONLY_INSTALL - OFF by default, If this flag is on, the build ignore the BUILD_* flags
+  #   BUILD_TEST - OFF by default,
+  #   BUILD_EXAMPLE - OFF by default,
+  #   BUILD_BENCHMARK - OFF by default.
+  #   BENCHMARK_CONFIG_TUNING - OFF by default. The purpose of this flag to find the best kernel config parameters.
+  #     At ON the compilation time can be increased significantly.
+  #   AMDGPU_TARGETS - list of AMD architectures, default: gfx803;gfx900;gfx906;gfx908.
+  #     You can make compilation faster if you want to test/benchmark only on one architecture,
+  #     for example, add -DAMDGPU_TARGETS=gfx906 to 'cmake' parameters.
+  #   AMDGPU_TEST_TARGETS - list of AMD architectures, default: "" (default system device)
+  #     If you want to detect failures on a per GFX IP basis, setting it to some set of ips will create
+  #     separate tests with the ip name embedded into the test name. Building for all, but selecting
+  #     tests only of a specific architecture is possible for eg: ctest -R gfx803|gfx900
+  #
+  # ! IMPORTANT !
+  # Set C++ compiler to HIP-clang. You can do it by adding 'CXX=<path-to-compiler>'
+  # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the compiler.
+  # Using HIP-clang:
+  [CXX=hipcc] cmake -DBUILD_BENCHMARK=ON ../.
+  #
+  # ! EXPERIMENTAL !
+  # Alternatively one may build using the experimental (and highly incomplete) HIP-CPU back-end for host-side
+  # execution using any C++17 conforming compiler (supported by HIP-CPU). AMDGPU_* options are unavailable in this case. 
+  #   USE_HIP_CPU - OFF by default
+
+  # Build
+  make -j4
+
+  # Optionally, run tests if they're enabled.
+  ctest --output-on-failure
+
+  # Install
+  [sudo] make install
+  ```
+
+* Windows:
+
+  We've added initial support for HIP on Windows; to install, use the provided `rmake.py` python script:
+
+  ```shell
+  git clone https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+  cd rocPRIM
+
+  # the -i option will install rocPRIM to C:\hipSDK by default
+  python rmake.py -i
+
+  # the -c option will build all clients including unit tests
+  python rmake.py -c
+  ```
 
 ### Using rocPRIM
 
-Include `<rocprim/rocprim.hpp>` header:
+Include the `<rocprim/rocprim.hpp>` header:
 
 ```cpp
 #include <rocprim/rocprim.hpp>
 ```
 
-Recommended way of including rocPRIM into a CMake project is by using its package
-configuration files. rocPRIM package name is `rocprim`.
+We recommended including rocPRIM into a CMake project by using the package configuration files.
+The rocPRIM package name is `rocprim`.
 
 ```cmake
 # "/opt/rocm" - default install prefix
@@ -106,9 +136,10 @@ target_link_libraries(<your_target> roc::rocprim)
 target_link_libraries(<your_target> roc::rocprim_hip)
 ```
 
-## Running Unit Tests
+## Running unit tests
 
-Unit tests are implemented in terms of Google Test and collections of tests are wrapped to be invoked from CTest for convenience.
+Unit tests are implemented in terms of GoogleTest. Collections of tests are wrapped and invoked from
+CTest.
 
 ```shell
 # Go to rocPRIM build directory
@@ -129,15 +160,29 @@ ctest -R <regex>
 
 ### Using multiple GPUs concurrently for testing
 
-This feature requires CMake 3.16+ to be used for building / testing. _(Prior versions of CMake cannot assign ids to tests when running in parallel. Assigning tests to distinct devices could only be done at the cost of extreme complexity._)
+This feature requires using CMake 3.16+ for building and testing.
 
-The unit tests can make use of [CTest Resource Allocation](https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation) feature enabling distributing tests across multiple GPUs in an intelligent manner. The feature can accelerate testing when multiple GPUs of the same family are in a system as well as test multiple family of products from one invocation without having to resort to `HIP_VISIBLE_DEVICES` environment variable. The feature relies on the presence of a resource spec file.
+```note
+Prior versions of CMake can't assign IDs to tests when running in parallel. Assigning tests to distinct
+devices could only be done at the cost of extreme complexity.
+```
 
-> IMPORTANT: trying to use `RESOURCE_GROUPS` and `--resource-spec-file` with CMake/CTest respectively of versions prior to 3.16 omits the feature silently. No warnings issued about unknown properties or command-line arguments. Make sure that `cmake`/`ctest` invoked are sufficiently recent.
+Unit tests can make use of the
+[CTest resource allocation](https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation)
+feature, which you can use to distribute tests across multiple GPUs in an intelligent manner. This
+feature can accelerate testing when multiple GPUs of the same family are in a system. It can also test
+multiple product families from one invocation without having to use the `HIP_VISIBLE_DEVICES`
+environment variable. The feature relies on the presence of a resource specifications file.
 
-#### Auto resource spec generation
+```important
+Trying to use `RESOURCE_GROUPS` and `--resource-spec-file` with CMake and CTest for versions prior
+to 3.16 silently omits the feature. No warnings are issued about unknown properties or command-line
+arguments. Make sure that the `cmake` and `ctest` versions you invoke are sufficiently recent.
+```
 
-There is a utility script in the repo that may be called independently:
+#### Auto resource specification generation
+
+You can independently call the utility script located in the repository using the following code:
 
 ```shell
 # Go to rocPRIM build directory
@@ -152,7 +197,11 @@ ctest --resource-spec-file ./resources.json --parallel 2
 
 #### Manual
 
-Assuming the user has 2 GPUs from the gfx900 family and they are the first devices enumerated by the system one may specify during configuration `-D AMDGPU_TEST_TARGETS=gfx900` stating only one family will be tested. Leaving this var empty (default) results in targeting the default device in the system. To let CMake know there are 2 GPUs that should be targeted, one has to feed CTest a JSON file via the `--resource-spec-file <path_to_file>` flag. For example:
+Assuming you have two GPUs from the gfx900 family and they are the first devices enumerated by the
+system, you can use `-D AMDGPU_TEST_TARGETS=gfx900` during configuration to specify that only
+one family will be tested. Leaving this var empty (default) results in targeting the default device in the
+system. To let CMake know there are two GPUs that should be targeted, you have to provide a `JSON`
+file to CTest via the `--resource-spec-file <path_to_file>` flag. For example:
 
 ```json
 {
@@ -175,11 +224,13 @@ Assuming the user has 2 GPUs from the gfx900 family and they are the first devic
 }
 ```
 
-Invoking CTest as `ctest --resource-spec-file <path_to_file> --parallel 2` will allow two tests to run concurrently which will be distributed among the two GPUs.
+Invoking CTest as `ctest --resource-spec-file <path_to_file> --parallel 2` allows two tests to run
+concurrently, distributed between the two GPUs.
 
 ### Using custom seeds for the tests
 
-Go to the `rocPRIM/test/rocprim/test_seed.hpp` file.
+Modify the `rocPRIM/test/rocprim/test_seed.hpp` file.
+
 ```cpp
 //(1)
 static constexpr int random_seeds_count = 10;
@@ -191,17 +242,19 @@ static constexpr unsigned int seeds [] = {0, 2, 10, 1000};
 static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
 ```
 
-(1) defines a constant that sets how many passes over the tests will be done with runtime-generated seeds. Modify at will.
+(1) Defines a constant that sets how many passes over the tests will be done with runtime-generated
+seeds. Modify at will.
 
-(2) defines the user generated seeds. Each of the elements of the array will be used as seed for all tests. Modify at will. If no static seeds are desired, the array should be left empty.
+(2) Defines the user-generated seeds. Each of the array elements will be used as seed for all tests.
+Modify at will. If you don't want any static seeds, leave the array empty.
 
 ```cpp
 static constexpr unsigned int seeds [] = {};
 ```
 
-(3) this line should never be modified.
+(3) Never modify this line.
 
-## Running Benchmarks
+## Running benchmarks
 
 ```shell
 # Go to rocPRIM build directory
@@ -225,48 +278,32 @@ cd rocPRIM; cd build
 
 ### Performance configuration
 
-Most of device-wide primitives provided by rocPRIM can be tuned for different AMD device,
-different types or different operations using compile-time configuration structures passed
-to them as a template parameter. Main "knobs" are usually size of the block and number of
-items processed by a single thread.
+Most device-specific primitives provided by rocPRIM can be tuned for other AMD devices, and
+different types and operations, by passing compile-time configuration structures as a template
+parameter. The main "knobs" are usually the size of the block and the number of items processed by a
+single thread.
 
-rocPRIM has built-in default configurations for each of its primitives. In order to use
-included configurations user should define macro `ROCPRIM_TARGET_ARCH` to `803` if algorithms
-should be optimized for gfx803 GCN version, or to `900` for gfx900.
-
-## Documentation
-The latest rocPRIM documentation and API description can be found [here](https://rocprim.readthedocs.io/en/latest/).
-
-It can also be built using the following commands:
-
-```shell
-# Go to rocPRIM docs directory
-cd rocPRIM; cd docs
-
-# Install Python dependencies
-python3 -m pip install -r .sphinx/requirements.txt
-
-# Build the documentation
-python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
-
-# For e.g. serve the HTML docs locally
-cd _build/html
-python3 -m http.server
-```
+rocPRIM has built-in default configurations for each of its primitives. In order to use the included
+configurations, you need to define the macro `ROCPRIM_TARGET_ARCH` as `803` if you want the
+algorithms optimized for gfx803 GCN version, or to `900` for gfx900.
 
 ## hipCUB
 
 [hipCUB](https://github.com/ROCmSoftwarePlatform/hipCUB/) is a thin wrapper library on top of
-[rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or [CUB](https://github.com/NVlabs/cub).
-It enables developers to port project that uses CUB library to the
-[HIP](https://github.com/ROCm-Developer-Tools/HIP) layer and to run them on AMD hardware. In [ROCm](https://rocm.github.io/)
-environment hipCUB uses rocPRIM library as the backend, however, on CUDA platforms it uses CUB instead.
+[rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or
+[CUB](https://github.com/NVlabs/cub). You can use it to port projects that use the CUB library to the
+[HIP](https://github.com/ROCm-Developer-Tools/HIP) layer and run them on AMD hardware. In the
+[ROCm](https://rocm.docs.amd.com/en/latest/) environment, hipCUB uses the rocPRIM library as a
+backend; on CUDA platforms, it uses CUB as a backend.
 
 ## Support
 
-Bugs and feature requests can be reported through [the issue tracker](https://github.com/ROCmSoftwarePlatform/rocPRIM/issues).
+You can report bugs and feature requests through our GitHub
+[issue tracker](https://github.com/ROCmSoftwarePlatform/rocPRIM/issues).
 
-## Contributions and License
+## Contributions and license
 
-Contributions of any kind are most welcome! More details are found at [CONTRIBUTING](./CONTRIBUTING.md)
-and [LICENSE](./LICENSE.txt).
+Contributions of any kind are most welcome! Contribution instructions are in
+[CONTRIBUTING](./CONTRIBUTING.md).
+
+Licensing information is in [LICENSE](./LICENSE.txt).
