@@ -1,35 +1,58 @@
 # rocThrust
 
-## Introduction
-
-Thrust is a parallel algorithm library. This library has been ported to [HIP](https://github.com/ROCm-Developer-Tools/HIP)/[ROCm](https://rocm.github.io/) platform, which uses the [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library. The HIP ported library works on HIP/ROCm platforms. Currently there is no CUDA backend in place.
+Thrust is a parallel algorithm library. It has been ported to
+[HIP](https://github.com/ROCm-Developer-Tools/HIP) and [ROCm](https://rocm.github.io/), which use
+the [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library. The HIP-ported library
+works on HIP and ROCm software. Currently there is no CUDA backend in place.
 
 ## Requirements
 
-### Software
+Software requirements include:
 
 * CMake (3.5.1 or later)
-* AMD [ROCm](https://rocm.docs.amd.com) platform (1.8.0 or later)
-  * Including [HipCC](https://github.com/ROCm-Developer-Tools/HIP) compiler, which must be
-    set as C++ compiler on ROCm platform.
+* AMD [ROCm](https://rocm.docs.amd.com) Software (1.8.0 or later)
+  * Including the [HipCC](https://github.com/ROCm-Developer-Tools/HIP) compiler, which must be set
+    as your C++ compiler for ROCm
 * [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library
-  * It will be automatically downloaded and built by CMake script.
-* Python 3.6 or higher (HIP on Windows only, only required for install scripts)
-* Visual Studio 2019 with clang support (HIP on Windows only)
-* Strawberry Perl (HIP on Windows only)
+  * This is automatically downloaded and built by the CMake script
+* Python 3.6 or higher (for HIP on Windows; only required for install scripts)
+* Visual Studio 2019 with Clang support (for HIP on Windows)
+* Strawberry Perl (for HIP on Windows)
 
 Optional:
 
-* [GTest](https://github.com/google/googletest)
-  * Required only for tests. Building tests is enabled by default.
-  * It will be automatically downloaded and built by CMake script.
+* [GoogleTest](https://github.com/google/googletest)
+  * Required only for tests; building tests is enabled by default
+  * This is automatically downloaded and built by the CMake script
 
-### Hardware
-Visit the following link for ROCm hardware requirements:
-https://github.com/RadeonOpenCompute/ROCm/blob/master/README.md#supported-cpus
+For ROCm hardware requirements, refer to:
 
+* [Linux support](https://rocm.docs.amd.com/en/latest/release/gpu_os_support.html)
+* [Windows support](https://rocm.docs.amd.com/en/latest/release/windows_support.html)
 
-## Build And Install
+## Documentation
+
+Documentation for rocThrust available at
+[https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
+
+You can build our documentation locally using the following commands:
+
+```shell
+# Go to rocThrust docs directory
+cd rocThrust; cd docs
+
+# Install Python dependencies
+python3 -m pip install -r .sphinx/requirements.txt
+
+# Build the documentation
+python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+
+# For e.g. serve the HTML docs locally
+cd _build/html
+python3 -m http.server
+```
+
+## Build and install
 
 ```sh
 git clone https://github.com/ROCmSoftwarePlatform/rocThrust
@@ -68,7 +91,8 @@ make package
 
 ### HIP on Windows
 
-Initial support for HIP on Windows has been added.  To install, use the provided rmake.py python script:
+We've added initial support for HIP on Windows. To install, use the provided `rmake.py` Python script:
+
 ```shell
 git clone https://github.com/ROCmSoftwarePlatform/rocThrust.git
 cd rocThrust
@@ -82,17 +106,16 @@ python rmake.py -c
 
 ### Macro options
 
-```
+```cpp
 # Performance improvement option. If you define THRUST_HIP_PRINTF_ENABLED before
 # thrust includes to 0, you can disable printfs on device side and improve
 # performance. The default value is 1
 #define THRUST_HIP_PRINTF_ENABLED 0
 ```
 
-### Using rocThrust In A Project
+### Using rocThrust in a project
 
-Recommended way of including rocThrust into a CMake project is by using its package
-configuration files.
+We recommended including rocThrust into a CMake project by using its package configuration files.
 
 ```cmake
 # On ROCm rocThrust requires rocPRIM
@@ -106,7 +129,7 @@ includes rocThrust headers and roc::rocprim_hip target
 target_link_libraries(<your_target> roc::rocthrust)
 ```
 
-## Running Unit Tests
+## Running unit tests
 
 ```sh
 # Go to rocThrust build directory
@@ -127,11 +150,21 @@ ctest
 
 ### Using multiple GPUs concurrently for testing
 
-This feature requires CMake 3.16+ to be used for building / testing. _(Prior versions of CMake cannot assign ids to tests when running in parallel. Assigning tests to distinct devices could only be done at the cost of extreme complexity._)
+This feature requires CMake 3.16+ to be used for building and testing. *(Prior versions of CMake can't
+assign IDs to tests when running in parallel. Assigning tests to distinct devices could only be done at
+the cost of extreme complexity.)*
 
-The unit tests can make use of [CTest Resource Allocation](https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation) feature enabling distributing tests across multiple GPUs in an intelligent manner. The feature can accelerate testing when multiple GPUs of the same family are in a system as well as test multiple family of products from one invocation without having to resort to `HIP_VISIBLE_DEVICES` environment variable. The feature relies on the presence of a resource spec file.
+Unit tests can make use of the
+[CTest Resource Allocation](https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation) feature, which enables distributing tests across multiple GPUs in an intelligent manner. This feature can
+accelerate testing when multiple GPUs of the same family are in a system. It can also test multiple
+product families from one invocation without having to use the `HIP_VISIBLE_DEVICES` environment
+variable. CTest Resource Allocation requires a resource spec file.
 
-> IMPORTANT: trying to use `RESOURCE_GROUPS` and `--resource-spec-file` with CMake/CTest respectively of versions prior to 3.16 omits the feature silently. No warnings issued about unknown properties or command-line arguments. Make sure that `cmake`/`ctest` invoked are sufficiently recent.
+```important
+Using `RESOURCE_GROUPS` and `--resource-spec-file` with CMake and CTest, respectively for versions
+prior to 3.16 omits the feature silently. Therefore, you must ensure that the `cmake` and `ctest` you
+invoke are sufficiently recent.
+```
 
 #### Auto resource spec generation
 
@@ -150,7 +183,11 @@ ctest --resource-spec-file ./resources.json --parallel 2
 
 #### Manual
 
-Assuming the user has 2 GPUs from the gfx900 family and they are the first devices enumerated by the system one may specify during configuration `-D AMDGPU_TEST_TARGETS=gfx900` stating only one family will be tested. Leaving this var empty (default) results in targeting the default device in the system. To let CMake know there are 2 GPUs that should be targeted, one has to feed CTest a JSON file via the `--resource-spec-file <path_to_file>` flag. For example:
+Assuming you have two GPUs from the gfx900 family and they are the first devices enumerated by the
+system, you can specify `-D AMDGPU_TEST_TARGETS=gfx900` during configuration to specify that you
+want only one family to be tested. If you leave this var empty (default), the default device in the system
+is targeted. To specify that there are two GPUs that should be targeted, you must feed a JSON file to
+CTest using the `--resource-spec-file <path_to_file>` flag. For example:
 
 ```json
 {
@@ -175,13 +212,22 @@ Assuming the user has 2 GPUs from the gfx900 family and they are the first devic
 
 ## Using custom seeds for the tests
 
-There are 2 CMake configuration-time options that control random data fed to unit tests.
+There are two CMake configuration-time options that control random data fed to unit tests.
 
-- `RNG_SEED_COUNT`, (0 by default) controls non-repeatable random dataset count. It draws values from a default constructed `std::random_device`. Should tests fail, the actual seed producing the failure are reported by Gtest, enabling reproducibility.
-- `PRNG_SEEDS`, (1 by default) controls repeatable dataset seeds. It is a CMake formatted (semi-colon delimited) array of 32-bit unsigned integrals.
-  - _(Note: semi-colons often collide with shell command parsing. It is advised to escape the entire CMake CLI argument to avoid the variable itself picking up quotation marks. Pass `cmake "-DPRNG_SEEDS=1;2;3;4"` instead of `cmake -DPRNG_SEEDS="1;2;3;4"`, the two cases differ in how the CMake executable receives its arguments from the OS.)_
+* `RNG_SEED_COUNT`: 0 by default, controls non-repeatable random dataset count.
+  * Draws values from a default constructed `std::random_device`.
+  * Should tests fail, the actual seed producing the failure is reported by Googletest, which allows for
+    reproducibility.
 
-## Running Examples
+* `PRNG_SEEDS`: 1 by default, controls repeatable dataset seeds.
+  * This is a CMake formatted (semicolon delimited) array of 32-bit unsigned integrals. Note that
+    semicolons often collide with shell command parsing. We advise escaping the entire CMake CLI
+    argument to avoid having the variable pick up quotation marks. For example, pass
+    `cmake "-DPRNG_SEEDS=1;2;3;4"` instead of `cmake -DPRNG_SEEDS="1;2;3;4"` (these cases differ in
+    how the CMake executable receives arguments from the operating system).
+
+## Running examples
+
 ```sh
 # Go to rocThrust build directory
 cd rocThrust; cd build
@@ -201,7 +247,8 @@ make -j4
 ./examples/cpp_integration/example_thrust_linking
 ```
 
-## Running Benchmarks
+## Running benchmarks
+
 ```sh
 # Go to rocThrust build directory
 cd rocThrust; cd build
@@ -216,31 +263,10 @@ make -j4
 ./benchmarks/benchmark_thrust_bench
 ```
 
-
-## Documentation
-
-Documentation is available [here](https://rocthrust.readthedocs.io/en/latest/).
-
-It can also be build using the following commands:
-
-```shell
-# Go to rocThrust docs directory
-cd rocThrust; cd docs
-
-# Install Python dependencies
-python3 -m pip install -r .sphinx/requirements.txt
-
-# Build the documentation
-python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
-
-# For e.g. serve the HTML docs locally
-cd _build/html
-python3 -m http.server
-```
-
 ## Support
 
-Bugs and feature requests can be reported through [the issue tracker](https://github.com/ROCmSoftwarePlatform/rocThrust/issues).
+You can report bugs and feature requests through the GitHub
+[issue tracker](https://github.com/ROCmSoftwarePlatform/rocThrust/issues).
 
 ## License
 
