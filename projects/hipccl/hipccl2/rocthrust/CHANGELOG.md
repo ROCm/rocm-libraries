@@ -1,146 +1,258 @@
-# Change Log for rocThrust
+# Changelog for rocThrust
 
-Full documentation for rocThrust is available at [https://rocthrust.readthedocs.io/en/latest/](https://rocthrust.readthedocs.io/en/latest/)
+Documentation for rocThrust available at
+[https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
 ## (Unreleased) rocThrust 2.17.0 for ROCm 6.0
-### Added
-- Updated to match upstream Thrust 2.0.1
-- NV_IF_TARGET macro from libcu++ for NVIDIA backend and HIP implementation for HIP backend.
-### Changed
-- Removed cub symlink from the root of the repository.
-- Removed support for deprecated macros (THRUST_DEVICE_BACKEND and THRUST_HOST_BACKEND).
-- The cmake build system now additionally accepts `GPU_TARGETS` in addition to `AMDGPU_TARGETS` for
-  setting the targeted gpu architectures. `GPU_TARGETS=all` will compile for all supported architectures.
-  `AMDGPU_TARGETS` is only provided for backwards compatibility, `GPU_TARGETS` should be preferred.
-### Fixed
-- Fixed a segmentation fault when binary search / upper bound / lower bound / equal range was invoked with `hip_rocprim::execute_on_stream_base` policy.
+
+### Additions
+
+* Updated to match upstream Thrust 2.0.1
+* `NV_IF_TARGET` macro from libcu++ for NVIDIA backend and HIP implementation for HIP backend
+
+### Changes
+
+* Removed CUB symlink from the root of the repository
+* Removed support for deprecated macros (`THRUST_DEVICE_BACKEND` and
+  `THRUST_HOST_BACKEND`)
+* The CMake build system now accepts `GPU_TARGETS` in addition to `AMDGPU_TARGETS` for
+  setting targeted GPU architectures
+  * `GPU_TARGETS=all` compiles for all supported architectures
+  * `AMDGPU_TARGETS` is only provided for backwards compatibility (`GPU_TARGETS` is preferred)
+
+### Fixes
+
+* Segmentation fault when binary search, upper bound, lower bound, or equal range was invoked with
+  the `hip_rocprim::execute_on_stream_base` policy
+
 ### Known issues
-- For NVIDIA backend, `NV_IF_TARGET` and `THRUST_RDC_ENABLED` intend to substitute the `THRUST_HAS_CUDART` macro, which is now no longer used in Thrust (provided for legacy support only). However, there is no `THRUST_RDC_ENABLED` macro available for the HIP backend, so some branches in Thrust's code may be unreachable in the HIP backend.
+
+* The `THRUST_HAS_CUDART` macro, which is no longer used in Thrust (it's provided only for legacy
+  support) is replaced with `NV_IF_TARGET` and `THRUST_RDC_ENABLED` in the NVIDIA backend. The
+  HIP backend doesn't have a `THRUST_RDC_ENABLED` macro, so some branches in Thrust code may
+  be unreachable in the HIP backend.
 
 ## (Unreleased) rocThrust 2.18.0 for ROCm 5.7
-### Fixed 
-- `lower_bound`, `upper_bound`, and `binary_search` failed to compile for certain types.
-- Fixed issue where `transform_iterator` would not compile with `__device__`-only operators.
-### Changed
-- Updated `docs` directory structure to match the standard of [rocm-docs-core](https://github.com/RadeonOpenCompute/rocm-docs-core).
-- Removed references to and workarounds for deprecated hcc
+
+### Fixes
+
+* `lower_bound`, `upper_bound`, and `binary_search` failed to compile for certain types
+* `transform_iterator` was not compiling with `__device__`-only operators
+
+### Changes
+
+* Updated the `docs` directory structure to match the standard of
+  [rocm-docs-core](https://github.com/RadeonOpenCompute/rocm-docs-core)
+* Removed references to, and workarounds for, deprecated hcc
 
 ## rocThrust 2.17.0 for ROCm 5.5
-### Added
-- Updated to match upstream Thrust 1.17.2
-### Changed
-- `partition_copy` now uses the new `rocprim::partition_two_way` for increased performance.
-### Fixed
-- set_difference and set_intersection no longer hang if the number of items is above `UINT_MAX`. Previously, the unit tests for set_difference and set_intersection failed the `TestSetDifferenceWithBigIndexes`.
+
+### Additions
+
+* Updates to match upstream Thrust 1.17.2
+
+### Changes
+
+* `partition_copy` now uses `rocprim::partition_two_way` for increased performance
+
+### Fixes
+
+* `set_difference` and `set_intersection` no longer hang if the number of items is above `UINT_MAX`
+  (the unit tests for `set_difference` and `set_intersection` used to fail the
+  `TestSetDifferenceWithBigIndexes`)
 
 ## rocThrust 2.16.0 for ROCm 5.3
-### Added
-- Updated to match upstream Thrust 1.16.0
-### Changed
-- rocThrust functionality dependent on device malloc works is functional as ROCm 5.2 reneabled device malloc. Device launched `thrust::sort` and `thrust::sort_by_key` are available for use.
+
+### Additions
+
+* Updates to match upstream Thrust 1.16.0
+
+### Changes
+
+* rocThrust functionality dependent on device malloc is functional (ROCm 5.2 reenabled device malloc); you can now use device launched `thrust::sort` and `thrust::sort_by_key`
 
 ## rocThrust 2.15.0 for ROCm 5.2
-### Added
-- Packages for tests and benchmark executable on all supported OSes using CPack.
+
+### Additions
+
+* Packages for tests and benchmark executables on all supported operating systems using CPack
+
 ### Known issues
-- async_copy, partition, and stable_sort_by_key unit tests are failing on HIP on Windows.
+
+* `async_copy`, `partition`, and `stable_sort_by_key` unit tests are failing for HIP on Windows
 
 ## rocThrust 2.14.0 for ROCm 5.1
-### Added
-- Updated to match upstream Thrust 1.15.0
+
+### Additions
+
+* Updates to match upstream Thrust 1.15.0
+
 ### Known issues
-- async_copy, partition, and stable_sort_by_key unit tests are failing on HIP on Windows.
+
+* `async_copy`, `partition`, and `stable_sort_by_key` unit tests are failing for HIP on Windows
 
 ## rocThrust 2.13.0 for ROCm 5.0
-- Updated to match upstream Thrust 1.13.0
-- Updated to match upstream Thrust 1.14.0
-- Added async scan
-### Changed
-- Scan algorithms: `inclusive_scan` now uses the input-type as accumulator-type, `exclusive_scan` uses initial-value-type.
-    - This particularly changes behaviour of small-size input types with large-size output types (e.g. `short` input, `int` output).
-    - And low-res input with high-res output (e.g. `float` input, `double` output)
+
+### Changes
+
+* Updates to match upstream Thrust 1.13.0
+* Updates to match upstream Thrust 1.14.0
+* Added async scan
+* Scan algorithms: `inclusive_scan` now uses the `input-type` as `accumulator-type`; `exclusive_scan`
+  uses `initial-value-type`
+  * This changes the behavior of small-size input types with large-size output types (e.g. `short` input,
+    `int` output) and low-res input with high-res output (e.g. `float` input, `double` output)
 
 ## rocThrust-2.11.2 for ROCm 4.5.0
-### Added
-- Initial HIP on Windows support. See README for instructions on how to build and install.
-### Changed
-- Packaging changed to a development package (called rocthrust-dev for `.deb` packages, and rocthrust-devel for `.rpm` packages). As rocThrust is a header-only library, there is no runtime package. To aid in the transition, the development package sets the "provides" field to provide the package rocthrust, so that existing packages depending on rocthrust can continue to work. This provides feature is introduced as a deprecated feature and will be removed in a future ROCm release.
+
+### Additions
+
+* Initial HIP on Windows support
+
+### Changes
+
+* Packaging has changed to a development package (called `rocthrust-dev` for `.deb` packages and
+  `rocthrust-devel` for `.rpm` packages). Because rocThrust is a header-only library, there is no runtime package. To aid in the transition, the development package sets the `provides` field to `rocthrust`, so that existing packages that are dependent on rocThrust can continue to work. This `provides` feature is introduced as a deprecated feature because it will be removed in a future ROCm release.
+
 ### Known issues
-- async_copy, partition, and stable_sort_by_key unit tests are failing on HIP on Windows.
-- Mixed type exclusive scan algorithm still not using the initial value type for results type.
+
+* `async_copy`, `partition`, and `stable_sort_by_key` unit tests are failing for HIP on Windows
+* Mixed-type exclusive scan algorithm is not using the initial value type for the results type
 
 ## [rocThrust-2.11.1 for ROCm 4.4.0]
-### Added
-- gfx1030 support
-- Address Sanitizer build option
-### Fixed
-- async_transform unit test failure fixed.
+
+### Additions
+
+* gfx1030 support
+* AddressSanitizer build option
+
+### Fixes
+
+* async_transform unit test failure
 
 ## [rocThrust-2.11.0 for ROCm 4.3.0]
-### Added
-- Updated to match upstream Thrust 1.11
-- gfx90a support added
-- gfx803 support re-enabled
+
+### Additions
+
+* Updates to match upstream Thrust 1.11
+* gfx90a support
+* gfx803 support re-enabled
 
 ## [rocThrust-2.10.9 for ROCm 4.2.0]
-### Added
-- Updated to match upstream Thrust 1.10
-### Changed
-- Minimum cmake version required for building rocThrust is now 3.10.2
-### Fixed
-- Size zero inputs are now properly handled with newer ROCm builds that no longer allow zero-size kernel grid/block dimensions
-- Warning of unused results fixed.
+
+### Additions
+
+* Updates to match upstream Thrust 1.10
+
+### Changes
+
+* rocThrust now requires CMake version 3.10.2 or greater
+
+### Fixes
+
+* Size zero inputs are now properly handled with newer ROCm builds, which no longer allow zero-size
+  kernel grid/block dimensions
+* Warning of unused results
 
 ## [rocThrust-2.10.8 for ROCm 4.1.0]
-### Added
-- No new features
+
+* There are no changes with this release
 
 ## [rocThrust-2.10.7 for ROCm 4.0.0]
-### Added
-- Updated to upstream Thrust 1.10.0
-- Implemented runtime error for unsupported algorithms and disabled respective tests.
-- Updated CMake to use downloaded rocPRIM.
+
+### Additions
+
+* Updated to upstream Thrust 1.10.0
+* Implemented runtime error for unsupported algorithms and disabled respective tests
+* Updated CMake to use downloaded rocPRIM
 
 ## [rocThrust-2.10.6 for ROCm 3.10]
-### Added
-- Added copy_if on device test case
+
+### Additions
+
+* `copy_if` on device test case
+
 ### Known issues
-- ROCm support for device malloc has been disabled. As a result, rocThrust functionality dependent on device malloc does not work. Please avoid using device launched thrust::sort and thrust::sort_by_key. Host launched functionality is not impacted. A partial enablement of device malloc is possible by setting HIP_ENABLE_DEVICE_MALLOC to 1. Thrust::sort and thrust::sort_by_key may work on certain input sizes but is not recommended for production code.
+
+* We've disabled ROCm support for device malloc. As a result, rocThrust functionality dependent on
+  device malloc does not work--avoid using device launched `thrust::sort` and `thrust::sort_by_key`. Note
+  that Host launched functionality is not impacted.
+  * A partial enablement of device malloc is possible by setting `HIP_ENABLE_DEVICE_MALLOC` to 1.
+  * `thrust::sort` and `thrust::sort_by_key` may work on certain input sizes but we don't recommended
+    this for production code.
 
 ## [rocThrust-2.10.5 for ROCm 3.9.0]
-### Added
-- Updated to upstream Thrust 1.9.8
-- New test cases for device-side algorithms
+
+### Additions
+
+* Updated to upstream Thrust 1.9.8
+* New test cases for device-side algorithms
+
 ### Fixes
-- Bugfix for binary search
-- Implemented workarounds for hipStreamDefault hang
+
+* Bug for binary search
+* Implemented workarounds for `hipStreamDefault` hang
+
 ### Known issues
-- ROCm support for device malloc has been disabled. As a result, rocThrust functionality dependent on device malloc does not work. Please avoid using device launched thrust::sort and thrust::sort_by_key. Host launched functionality is not impacted. A partial enablement of device malloc is possible by setting HIP_ENABLE_DEVICE_MALLOC to 1. Thrust::sort and thrust::sort_by_key may work on certain input sizes but is not recommended for production code.
+
+* We've disabled ROCm support for device malloc. As a result, rocThrust functionality dependent on
+  device malloc does not work--avoid using device launched `thrust::sort` and `thrust::sort_by_key`. Note
+  that Host launched functionality is not impacted.
+  * A partial enablement of device malloc is possible by setting `HIP_ENABLE_DEVICE_MALLOC` to 1.
+  * `thrust::sort` and `thrust::sort_by_key` may work on certain input sizes but we don't recommended
+    this for production code.
 
 ## [rocThrust-2.10.4 for ROCm 3.8.0]
-### Added
-- No new features
+
 ### Known issues
-- ROCm support for device malloc has been disabled. As a result, rocThrust functionality dependent on device malloc does not work. Please avoid using device launched thrust::sort and thrust::sort_by_key. Host launched functionality is not impacted. A partial enablement of device malloc is possible by setting HIP_ENABLE_DEVICE_MALLOC to 1. Thrust::sort and thrust::sort_by_key may work on certain input sizes but is not recommended for production code.
+
+* We've disabled ROCm support for device malloc. As a result, rocThrust functionality dependent on
+  device malloc does not work--avoid using device launched `thrust::sort` and `thrust::sort_by_key`. Note
+  that Host launched functionality is not impacted.
+  * A partial enablement of device malloc is possible by setting `HIP_ENABLE_DEVICE_MALLOC` to 1.
+  * `thrust::sort` and `thrust::sort_by_key` may work on certain input sizes but we don't recommended
+    this for production code.
 
 ## [rocThrust-2.10.3 for ROCm 3.7.0]
-### Added
-- Updated to upstream Thrust 1.9.4
-### Changed
-- Package dependecy change to rocprim only
+
+### Additions
+
+* Updated to upstream Thrust 1.9.4
+
+### Changes
+
+* Package dependency has changed to rocPRIM only
+
 ### Known issues
-- ROCm support for device malloc has been disabled. As a result, rocThrust functionality dependent on device malloc does not work. Please avoid using device launched thrust::sort and thrust::sort_by_key. Host launched functionality is not impacted. A partial enablement of device malloc is possible by setting HIP_ENABLE_DEVICE_MALLOC to 1. Thrust::sort and thrust::sort_by_key may work on certain input sizes but is not recommended for production code.
+
+* We've disabled ROCm support for device malloc. As a result, rocThrust functionality dependent on
+  device malloc does not work--avoid using device launched `thrust::sort` and `thrust::sort_by_key`. Note
+  that Host launched functionality is not impacted.
+  * A partial enablement of device malloc is possible by setting `HIP_ENABLE_DEVICE_MALLOC` to 1.
+  * `thrust::sort` and `thrust::sort_by_key` may work on certain input sizes but we don't recommended
+    this for production code.
 
 ## [rocThrust-2.10.2 for ROCm 3.6.0]
-### Added
-- No new features
-### Known Issues
-- ROCm support for device malloc has been disabled. As a result, rocThrust functionality dependent on device malloc does not work. Please avoid using device launched thrust::sort and thrust::sort_by_key. Host launched functionality is not impacted. A partial enablement of device malloc is possible by setting HIP_ENABLE_DEVICE_MALLOC to 1. Thrust::sort and thrust::sort_by_key may work on certain input sizes but is not recommended for production code.
+
+### Known issues
+
+* We've disabled ROCm support for device malloc. As a result, rocThrust functionality dependent on
+  device malloc does not work--avoid using device launched `thrust::sort` and `thrust::sort_by_key`. Note
+  that Host launched functionality is not impacted.
+  * A partial enablement of device malloc is possible by setting `HIP_ENABLE_DEVICE_MALLOC` to 1.
+  * `thrust::sort` and `thrust::sort_by_key` may work on certain input sizes but we don't recommended
+    this for production code.
 
 ## [rocThrust-2.10.1 for ROCm 3.5.0]
-### Added
-- Improved tests with fixed and random seeds for test data
-### Changed
-- CMake searches for rocThrust locally first; downloads from github if local search fails
-### Deprecated
-- HCC build deprecated
+
+### Additions
+
+* Improved tests with fixed and random seeds for test data
+
+### Changes
+
+* CMake searches for rocThrust locally first; if it isn't found, CMake downloads it from GitHub
+
+### Deprecations
+
+* HCC build has been deprecated
