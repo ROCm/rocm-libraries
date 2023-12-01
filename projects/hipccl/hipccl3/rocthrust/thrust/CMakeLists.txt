@@ -35,12 +35,16 @@ target_link_libraries(rocthrust
     roc::rocprim_hip
 )
 
+# hipstdpar header target
+add_library(hipstdpar INTERFACE)
+target_link_libraries(hipstdpar INTERFACE rocthrust)
+
 # Installation
 
 # We need to install headers manually as rocm_install_targets
 # does not support header-only libraries (INTERFACE targets)
 rocm_install_targets(
-  TARGETS rocthrust
+  TARGETS rocthrust hipstdpar
 )
 if(CMAKE_VERSION VERSION_LESS 3.7)
   # Workaround: old versions of CMake do not support set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
@@ -63,13 +67,13 @@ rocm_install(
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 
-#Install the wrapper to rocthrust folder. 
+#Install the wrapper to rocthrust folder.
 #So wrapper would be in /opt/rocm-xxx/rocthrust/include/thrust
 if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   rocm_install(
     DIRECTORY
     "${PROJECT_BINARY_DIR}/rocthrust/wrapper/"
-    DESTINATION rocthrust/ 
+    DESTINATION rocthrust/
   )
 endif()
 
@@ -80,4 +84,3 @@ rocm_export_targets_header_only(
   DEPENDS PACKAGE rocprim
   NAMESPACE roc::
 )
-
