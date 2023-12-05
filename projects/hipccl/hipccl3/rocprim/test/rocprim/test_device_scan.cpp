@@ -1312,7 +1312,7 @@ struct check_value_inclusive
         const size_t expected_sum = (run_start + current_index_) * index_in_run / 2;
         if(value != expected_sum)
         {
-            rocprim::detail::atomic_exch(rocprim::get<1>(args_), 1);
+            rocprim::detail::atomic_store(rocprim::get<1>(args_), 1);
         }
         return value;
     }
@@ -1337,7 +1337,7 @@ struct check_value_exclusive
             = rocprim::get<1>(args_) + (run_start + current_index_ - 1) * index_in_run / 2;
         if(value != expected_sum)
         {
-            rocprim::detail::atomic_exch(rocprim::get<2>(args_), 1);
+            rocprim::detail::atomic_store(rocprim::get<2>(args_), 1);
         }
         return value;
     }

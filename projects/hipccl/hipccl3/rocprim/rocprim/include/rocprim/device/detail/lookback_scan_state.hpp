@@ -38,6 +38,21 @@
 #include "../config_types.hpp"
 #include "rocprim/config.hpp"
 
+// This version is specific for devices with slow __threadfence ("agent" fence which does
+// L2 cache flushing and invalidation).
+// Fences with "workgroup" scope are used instead to ensure ordering only but not coherence,
+// they do not flush and invalidate cache.
+// Global coherence of prefixes_*_values is ensured by atomic_load/atomic_store that bypass
+// cache.
+#ifndef ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
+    #if defined(__HIP_DEVICE_COMPILE__) \
+        && (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__))
+        #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES 1
+    #else
+        #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES 0
+    #endif
+#endif // ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
+
 extern "C"
 {
     void __builtin_amdgcn_s_sleep(int);
@@ -111,6 +126,16 @@ public:
         return hipSuccess;
     }
 
+    [[deprecated(
+        "Please use the overload returns an error code, this function assumes the default"
+        " stream and silently ignores errors.")]] ROCPRIM_HOST static inline lookback_scan_state
+        create(void* temp_storage, const unsigned int number_of_blocks)
+    {
+        lookback_scan_state result;
+        (void)create(result, temp_storage, number_of_blocks, /*default stream*/ 0);
+        return result;
+    }
+
     ROCPRIM_HOST static inline hipError_t get_storage_size(const unsigned int number_of_blocks,
                                                            const hipStream_t  stream,
                                                            size_t&            storage_size)
@@ -123,6 +148,15 @@ public:
         return error;
     }
 
+    [[deprecated("Please use the overload returns an error code, this function assumes the default"
+                 " stream and silently ignores errors.")]] ROCPRIM_HOST static inline size_t
+        get_storage_size(const unsigned int number_of_blocks)
+    {
+        size_t result;
+        (void)get_storage_size(number_of_blocks, /*default stream*/ 0, result);
+        return result;
+    }
+
     ROCPRIM_HOST static inline hipError_t
         get_temp_storage_layout(const unsigned int            number_of_blocks,
                                 const hipStream_t             stream,
@@ -132,6 +166,16 @@ public:
         hipError_t error        = get_storage_size(number_of_blocks, stream, storage_size);
         layout = detail::temp_storage::layout{storage_size, alignof(prefix_underlying_type)};
         return error;
+    }
+
+    [[deprecated("Please use the overload returns an error code, this function assumes the default"
+                 " stream and silently ignores errors.")]] ROCPRIM_HOST static inline detail::
+        temp_storage::layout
+        get_temp_storage_layout(const unsigned int number_of_blocks)
+    {
+        detail::temp_storage::layout result;
+        (void)get_temp_storage_layout(number_of_blocks, /*default stream*/ 0, result);
+        return result;
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -189,7 +233,7 @@ public:
         const unsigned int SLEEP_MAX = 32;
         unsigned int times_through = 1;
 
-        prefix_underlying_type p = ::rocprim::detail::atomic_add(&prefixes[padding + block_id], 0);
+        prefix_underlying_type p = ::rocprim::detail::atomic_load(&prefixes[padding + block_id]);
 #ifndef __HIP_CPU_RT__
         __builtin_memcpy(&prefix, &p, sizeof(prefix_type));
 #else
@@ -208,8 +252,8 @@ public:
                 if (times_through < SLEEP_MAX)
                     times_through++;
             }
-            // atomic_add(..., 0) is used to load values atomically
-            prefix_underlying_type p = ::rocprim::detail::atomic_add(&prefixes[padding + block_id], 0);
+            prefix_underlying_type p
+                = ::rocprim::detail::atomic_load(&prefixes[padding + block_id]);
 #ifndef __HIP_CPU_RT__
             __builtin_memcpy(&prefix, &p, sizeof(prefix_type));
 #else
@@ -252,7 +296,7 @@ private:
 #else
         std::memcpy(&p, &prefix, sizeof(prefix_type));
 #endif
-        ::rocprim::detail::atomic_exch(&prefixes[padding + block_id], p);
+        ::rocprim::detail::atomic_store(&prefixes[padding + block_id], p);
     }
 
     prefix_underlying_type * prefixes;
@@ -284,11 +328,21 @@ public:
         state.prefixes_flags = reinterpret_cast<flag_type*>(ptr);
         ptr += ::rocprim::detail::align_size(n * sizeof(flag_type));
 
-        state.prefixes_partial_values = reinterpret_cast<T*>(ptr);
-        ptr += ::rocprim::detail::align_size(n * sizeof(T));
+        state.prefixes_partial_values = ptr;
+        ptr += ::rocprim::detail::align_size(n * sizeof(value_underlying_type));
 
-        state.prefixes_complete_values = reinterpret_cast<T*>(ptr);
+        state.prefixes_complete_values = ptr;
         return error;
+    }
+
+    [[deprecated(
+        "Please use the overload returns an error code, this function assumes the default"
+        " stream and silently ignores errors.")]] ROCPRIM_HOST static inline lookback_scan_state
+        create(void* temp_storage, const unsigned int number_of_blocks)
+    {
+        lookback_scan_state result;
+        (void)create(result, temp_storage, number_of_blocks, /*default stream*/ 0);
+        return result;
     }
 
     ROCPRIM_HOST static inline hipError_t get_storage_size(const unsigned int number_of_blocks,
@@ -299,8 +353,19 @@ public:
         hipError_t   error = ::rocprim::host_warp_size(stream, warp_size);
         const auto   n     = warp_size + number_of_blocks;
         storage_size       = ::rocprim::detail::align_size(n * sizeof(flag_type));
-        storage_size += 2 * ::rocprim::detail::align_size(n * sizeof(T));
+        // Always use sizeof(value_underlying_type) instead of sizeof(T) because storage is
+        // allocated by host so it can hold both types no matter what device is used.
+        storage_size += 2 * ::rocprim::detail::align_size(n * sizeof(value_underlying_type));
         return error;
+    }
+
+    [[deprecated("Please use the overload returns an error code, this function assumes the default"
+                 " stream and silently ignores errors.")]] ROCPRIM_HOST static inline size_t
+        get_storage_size(const unsigned int number_of_blocks)
+    {
+        size_t result;
+        (void)get_storage_size(number_of_blocks, /*default stream*/ 0, result);
+        return result;
     }
 
     ROCPRIM_HOST static inline hipError_t
@@ -309,15 +374,24 @@ public:
                                 detail::temp_storage::layout& layout)
     {
         size_t     storage_size = 0;
-        size_t alignment = std::max(alignof(flag_type), alignof(T));
+        size_t alignment = std::max({alignof(flag_type), alignof(T), alignof(value_underlying_type)});
         hipError_t error        = get_storage_size(number_of_blocks, stream, storage_size);
         layout                  = detail::temp_storage::layout{storage_size, alignment};
         return error;
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void initialize_prefix(const unsigned int block_id,
-                           const unsigned int number_of_blocks)
+    [[deprecated("Please use the overload returns an error code, this function assumes the default"
+                 " stream and silently ignores errors.")]] ROCPRIM_HOST static inline detail::
+        temp_storage::layout
+        get_temp_storage_layout(const unsigned int number_of_blocks)
+    {
+        detail::temp_storage::layout result;
+        (void)get_temp_storage_layout(number_of_blocks, /*default stream*/ 0, result);
+        return result;
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE void initialize_prefix(const unsigned int block_id,
+                                                         const unsigned int number_of_blocks)
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
         if(block_id < number_of_blocks)
@@ -330,38 +404,25 @@ public:
         }
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void set_partial(const unsigned int block_id, const T value)
+    ROCPRIM_DEVICE ROCPRIM_INLINE void set_partial(const unsigned int block_id, const T value)
     {
-        constexpr unsigned int padding = ::rocprim::device_warp_size();
-
-        prefixes_partial_values[padding + block_id] = value;
-        ::rocprim::detail::memory_fence_device();
-        ::rocprim::detail::atomic_exch(&prefixes_flags[padding + block_id], PREFIX_PARTIAL);
+        this->set(block_id, PREFIX_PARTIAL, value);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void set_complete(const unsigned int block_id, const T value)
+    ROCPRIM_DEVICE ROCPRIM_INLINE void set_complete(const unsigned int block_id, const T value)
     {
-        constexpr unsigned int padding = ::rocprim::device_warp_size();
-
-        prefixes_complete_values[padding + block_id] = value;
-        ::rocprim::detail::memory_fence_device();
-        ::rocprim::detail::atomic_exch(&prefixes_flags[padding + block_id], PREFIX_COMPLETE);
+        this->set(block_id, PREFIX_COMPLETE, value);
     }
 
     // block_id must be > 0
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void get(const unsigned int block_id, flag_type& flag, T& value)
+    ROCPRIM_DEVICE ROCPRIM_INLINE void get(const unsigned int block_id, flag_type& flag, T& value)
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
 
         const unsigned int SLEEP_MAX = 32;
         unsigned int times_through = 1;
 
-        // atomic_add(..., 0) is used to load values atomically
-        flag = ::rocprim::detail::atomic_add(&prefixes_flags[padding + block_id], 0);
-        ::rocprim::detail::memory_fence_device();
+        flag = ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id]);
         while(flag == PREFIX_EMPTY)
         {
             if (UseSleep)
@@ -376,14 +437,26 @@ public:
                     times_through++;
             }
 
-            flag = ::rocprim::detail::atomic_add(&prefixes_flags[padding + block_id], 0);
-            ::rocprim::detail::memory_fence_device();
+            flag = ::rocprim::detail::atomic_load(&prefixes_flags[padding + block_id]);
         }
+#if ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
+        rocprim::detail::atomic_fence_acquire_order_only();
 
-        if(flag == PREFIX_PARTIAL)
-            value = prefixes_partial_values[padding + block_id];
-        else
-            value = prefixes_complete_values[padding + block_id];
+        const auto* values = static_cast<const value_underlying_type*>(
+            flag == PREFIX_PARTIAL ? prefixes_partial_values : prefixes_complete_values);
+        value_underlying_type v;
+        for(unsigned int i = 0; i < value_underlying_type::words_no; ++i)
+        {
+            v.words[i] = ::rocprim::detail::atomic_load(&values[padding + block_id].words[i]);
+        }
+        __builtin_memcpy(&value, &v, sizeof(value));
+#else
+        ::rocprim::detail::memory_fence_device();
+
+        const auto* values = static_cast<const T*>(
+            flag == PREFIX_PARTIAL ? prefixes_partial_values : prefixes_complete_values);
+        value       = values[padding + block_id];
+#endif
     }
 
     /// \brief Gets the prefix value for a block. Should only be called after all
@@ -392,17 +465,63 @@ public:
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
 
+#if ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
+        T    value;
+        const auto* values = static_cast<const value_underlying_type*>(prefixes_complete_values);
+        value_underlying_type v;
+        for(unsigned int i = 0; i < value_underlying_type::words_no; ++i)
+        {
+            v.words[i] = ::rocprim::detail::atomic_load(&values[padding + block_id].words[i]);
+        }
+        __builtin_memcpy(&value, &v, sizeof(value));
+        return value;
+#else
         assert(prefixes_flags[padding + block_id] == PREFIX_COMPLETE);
-        return prefixes_complete_values[padding + block_id];
+        const auto* values = static_cast<const T*>(prefixes_complete_values);
+        return values[padding + block_id];
+#endif
     }
 
 private:
+    ROCPRIM_DEVICE ROCPRIM_INLINE void
+        set(const unsigned int block_id, const flag_type flag, const T value)
+    {
+        constexpr unsigned int padding = ::rocprim::device_warp_size();
+
+#if ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
+        auto* values = static_cast<value_underlying_type*>(
+            flag == PREFIX_PARTIAL ? prefixes_partial_values : prefixes_complete_values);
+        value_underlying_type v;
+        __builtin_memcpy(&v, &value, sizeof(value));
+        for(unsigned int i = 0; i < value_underlying_type::words_no; ++i)
+        {
+            ::rocprim::detail::atomic_store(&values[padding + block_id].words[i], v.words[i]);
+        }
+        // Wait for all atomic stores of prefixes_*_values before signaling complete / partial state
+        rocprim::detail::atomic_fence_release_vmem_order_only();
+#else
+        auto* values = static_cast<T*>(flag == PREFIX_PARTIAL ? prefixes_partial_values
+                                                              : prefixes_complete_values);
+        values[padding + block_id] = value;
+        ::rocprim::detail::memory_fence_device();
+#endif
+
+        ::rocprim::detail::atomic_store(&prefixes_flags[padding + block_id], flag);
+    }
+
+    struct value_underlying_type
+    {
+        static constexpr int words_no = ceiling_div(sizeof(T), sizeof(unsigned int));
+
+        unsigned int words[words_no];
+    };
+
     flag_type * prefixes_flags;
     // We need to separate arrays for partial and final prefixes, because
     // value can be overwritten before flag is changed (flag and value are
     // not stored in single instruction).
-    T * prefixes_partial_values;
-    T * prefixes_complete_values;
+    void* prefixes_partial_values;
+    void* prefixes_complete_values;
 };
 
 template<class T, class BinaryFunction, class LookbackScanState>

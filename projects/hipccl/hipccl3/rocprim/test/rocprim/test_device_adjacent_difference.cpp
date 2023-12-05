@@ -360,7 +360,7 @@ private:
         {
             if(value != current_index_)
             {
-                rocprim::detail::atomic_exch(incorrect_flag_, 1);
+                rocprim::detail::atomic_store(incorrect_flag_, 1);
             }
             if(current_index_ % SamplingRate == 0)
             {
