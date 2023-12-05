@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -73,6 +73,59 @@ namespace detail
     unsigned long long atomic_exch(unsigned long long * address, unsigned long long value)
     {
         return ::atomicExch(address, value);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE unsigned int atomic_load(const unsigned int* address)
+    {
+        return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE unsigned long long atomic_load(const unsigned long long* address)
+    {
+        return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned int* address, unsigned int value)
+    {
+        __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned long long* address,
+                                                    unsigned long long  value)
+    {
+        __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
+    /// \brief Wait for all vector memory operations to complete
+    ///
+    /// This ensures that previous visible writes to vector memory have completed before the function
+    /// returns. Atomic operations following the call are guaranteed to be visible
+    /// to other threads in the device after vmem writes preceding the call.
+    ///
+    /// Provides no guarantees about visibility, only ordering, i.e. caches are not flushed.
+    /// Visibility has to be enforced in another way (e.g. writing *through* cache)
+    ///
+    /// This is a dangerous internal function not meant for users, and only meant to be used by
+    /// developers that know what they are doing.
+    ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_release_vmem_order_only()
+    {
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+        // Wait until all vmem operations complete (s_waitcnt vmcnt(0))
+        __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4) | (/*lgkmcnt*/ 0xf << 8));
+    }
+
+    /// \brief Make sure visible operations are complete
+    ///
+    /// Ensure that following visible reads are not reordered before preceding atomic operations
+    /// Similarly to atomic_fence_release_vmem_order_only() this function provides no visibility
+    /// guarantees, visiblity of reads must be guaranteed in other wise (like reading *through*
+    /// caches)
+    ///
+    /// This is a dangerous internal function not meant for users, and only meant to be used by
+    /// developers that know what they are doing.
+    ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_acquire_order_only()
+    {
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
     }
 }
 
