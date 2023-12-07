@@ -117,6 +117,7 @@ __global__ void offload_delete_kernel(_Tp *__ptr) {
     __ptr->~_Tp();
 }
 
+// TODO: maybe rename this to offload_destruct
 // Launches a kernel which calls the destructor for the pointed to data, and queues an async free into the same stream after the kernel
 template <class _Tp>
 struct _LIBGPU_TEMPLATE_VIS offload_delete {
@@ -149,6 +150,9 @@ struct _LIBGPU_TEMPLATE_VIS offload_delete {
         }
     }
 };
+
+// TODO: maybe also provide a 'skip_destruct' deleter which acts like host_delete, but accepts
+// non-trivially-destructible classes
 
 template <class _Deleter>
 struct __unique_ptr_deleter_sfinae {
