@@ -237,7 +237,7 @@ namespace rocRoller
                 case Register::Type::Scalar:
                     if(inputVarType == DataType::Int32 || inputVarType == DataType::UInt32
                        || inputVarType == DataType::Bool)
-                        return {Register::Type::Special, DataType::Bool};
+                        return {Register::Type::SCC, DataType::Bool};
                     else
                         return {Register::Type::Scalar, DataType::Bool32};
                 case Register::Type::Vector:
@@ -283,13 +283,13 @@ namespace rocRoller
                 case Register::Type::Scalar:
                     if(inputVarType == DataType::Bool || inputVarType == DataType::Bool32
                        || inputVarType == DataType::Raw32 || inputVarType == DataType::UInt64)
-                        return {Register::Type::Special, DataType::Bool};
+                        return {Register::Type::SCC, DataType::Bool};
                     break;
-
-                case Register::Type::Special:
-                    return {Register::Type::Special, DataType::Bool};
-
                 default:
+                    if(IsSpecial(inputRegType))
+                    {
+                        return {Register::Type::SCC, DataType::Bool};
+                    }
                     break;
                 }
                 Throw<FatalError>("Invalid register types for logical: ",

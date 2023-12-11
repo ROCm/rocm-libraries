@@ -17,12 +17,7 @@ namespace rocRoller
             Accumulator,
             LocalData,
             Label,
-            Special,
-            Count // Always last enum entry
-        };
-        enum class SpecialType
-        {
-            SCC = 0,
+            SCC,
             VCC,
             VCC_LO,
             VCC_HI,
@@ -54,9 +49,6 @@ namespace rocRoller
 
         std::string   toString(AllocationState state);
         std::ostream& operator<<(std::ostream& stream, AllocationState state);
-
-        std::string   toString(SpecialType);
-        std::ostream& operator<<(std::ostream&, SpecialType);
     }
 
 }

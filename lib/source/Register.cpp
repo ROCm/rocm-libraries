@@ -25,12 +25,11 @@ namespace rocRoller
         bool Value::isVCC() const
         {
             auto context = m_context.lock();
-            if(context && m_regType == Type::Special)
+            if(context && IsSpecial(m_regType))
             {
                 return (
-                    (context->kernel()->wavefront_size() == 64 && m_specialName == SpecialType::VCC)
-                    || (context->kernel()->wavefront_size() == 32
-                        && m_specialName == SpecialType::VCC_LO));
+                    (context->kernel()->wavefront_size() == 64 && m_regType == Type::VCC)
+                    || (context->kernel()->wavefront_size() == 32 && m_regType == Type::VCC_LO));
             }
             return false;
         }
@@ -48,17 +47,17 @@ namespace rocRoller
             {
                 co_return;
             }
-            if(m_regType == Type::Special)
+            if(IsSpecial(m_regType))
             {
                 auto context = m_context.lock();
-                if(context->kernel()->wavefront_size() == 64 && m_specialName == SpecialType::VCC)
+                if(context->kernel()->wavefront_size() == 64 && m_regType == Type::VCC)
                 {
-                    co_yield RegisterId(m_regType, static_cast<int>(SpecialType::VCC_LO));
-                    co_yield RegisterId(m_regType, static_cast<int>(SpecialType::VCC_HI));
+                    co_yield RegisterId(Type::VCC_LO, static_cast<int>(Type::VCC_LO));
+                    co_yield RegisterId(Type::VCC_HI, static_cast<int>(Type::VCC_HI));
                 }
                 else
                 {
-                    co_yield RegisterId(m_regType, static_cast<int>(m_specialName));
+                    co_yield RegisterId(m_regType, static_cast<int>(m_regType));
                 }
             }
             else

@@ -96,7 +96,7 @@ namespace rocRoller
                                                  bool              allowSpecial = true,
                                                  int               valueCount   = 1)
             {
-                if(resType.regType == Register::Type::Special && resType.varType == DataType::Bool)
+                if(IsSpecial(resType.regType) && resType.varType == DataType::Bool)
                 {
                     if(allowSpecial)
                         return m_context->getSCC();
@@ -183,7 +183,7 @@ namespace rocRoller
                 for(int i = 0; i < exprs.size(); i++)
                 {
                     resultTypes[i] = resultType(exprs[i]);
-                    if(resultTypes[i].regType == Register::Type::Special)
+                    if(IsSpecial(resultTypes[i].regType))
                         specials++;
                 }
 
@@ -192,7 +192,7 @@ namespace rocRoller
                 {
                     for(int i = 0; i < exprs.size() && specials > 1; i++)
                     {
-                        if(resultTypes[i].regType == Register::Type::Special)
+                        if(IsSpecial(resultTypes[i].regType))
                         {
                             results[i] = resultPlaceholder(resultTypes[i], false);
                             specials--;
@@ -205,8 +205,7 @@ namespace rocRoller
                     std::vector<Generator<Instruction>> schedulable;
                     for(int i = 0; i < exprs.size(); i++)
                     {
-                        if(resultTypes[i].regType != Register::Type::Special
-                           || results[i] != nullptr)
+                        if(!IsSpecial(resultTypes[i].regType) || results[i] != nullptr)
                         {
                             schedulable.push_back(call(results[i], exprs[i]));
                             done[i] = true;
@@ -360,8 +359,7 @@ namespace rocRoller
                     for(size_t k = 0; k < dest->valueCount(); ++k)
                     {
                         auto lhsVal = lhs->regType() == Register::Type::Literal
-                                              || lhs->regType() == Register::Type::Special
-                                              || lhs->valueCount() == 1
+                                              || IsSpecial(lhs->regType()) || lhs->valueCount() == 1
                                           ? lhs
                                           : lhs->element({k});
                         if(!destInfo.isIntegral && lhs->variableType() != resType.varType)
@@ -372,8 +370,7 @@ namespace rocRoller
                         }
 
                         auto rhsVal = rhs->regType() == Register::Type::Literal
-                                              || rhs->regType() == Register::Type::Special
-                                              || rhs->valueCount() == 1
+                                              || IsSpecial(rhs->regType()) || rhs->valueCount() == 1
                                           ? rhs
                                           : rhs->element({k});
                         if(!destInfo.isIntegral && rhs->variableType() != resType.varType)
@@ -828,7 +825,7 @@ namespace rocRoller
             if(dest == nullptr)
             {
                 auto resType = resultType(expr);
-                if(resType.regType == Register::Type::Special)
+                if(IsSpecial(resType.regType))
                     dest = v.resultPlaceholder(resType, false);
             }
 

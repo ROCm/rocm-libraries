@@ -168,7 +168,7 @@ namespace rocRoller
         else if(dest->regType() == Register::Type::Scalar
                 && (src->regType() == Register::Type::Scalar || src->isSCC()))
         {
-            if(src->registerCount() == 0)
+            if(src->isSCC())
             {
                 co_yield_(Instruction("s_mov_b32", {dest->subset({0})}, {src}, {}, comment));
             }

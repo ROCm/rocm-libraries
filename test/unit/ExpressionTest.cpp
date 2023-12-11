@@ -929,7 +929,7 @@ namespace ExpressionTest
         EXPECT_EQ(rSgprInt64, resultType(sgprInt64 + sgprInt32));
 
         Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32};
-        Expression::ResultType rSpecialBool{Register::Type::Special, DataType::Bool};
+        Expression::ResultType rSpecialBool{Register::Type::SCC, DataType::Bool};
 
         EXPECT_EQ(rSgprBool32, resultType(vgprFloat > vgprFloat));
         EXPECT_EQ(rSgprBool32, resultType(sgprFloat < vgprFloat));

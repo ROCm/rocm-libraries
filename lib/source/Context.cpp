@@ -130,29 +130,36 @@ namespace rocRoller
 
     Register::ValuePtr Context::getVCC()
     {
-        auto name = kernel()->wavefront_size() == 32 ? Register::SpecialType::VCC_LO
-                                                     : Register::SpecialType::VCC;
-        return Register::Value::Special(name, shared_from_this());
+        if(kernel()->wavefront_size() == 32)
+            return std::make_shared<Register::Value>(
+                shared_from_this(), Register::Type::VCC_LO, DataType::Bool32, 1);
+        else
+            return std::make_shared<Register::Value>(
+                shared_from_this(), Register::Type::VCC, DataType::Bool32, 2);
     }
 
     Register::ValuePtr Context::getVCC_LO()
     {
-        return Register::Value::Special(Register::SpecialType::VCC_LO, shared_from_this());
+        return std::make_shared<Register::Value>(
+            shared_from_this(), Register::Type::VCC_LO, DataType::Bool32, 1);
     }
 
     Register::ValuePtr Context::getVCC_HI()
     {
-        return Register::Value::Special(Register::SpecialType::VCC_HI, shared_from_this());
+        return std::make_shared<Register::Value>(
+            shared_from_this(), Register::Type::VCC_HI, DataType::Bool32, 1);
     }
 
     Register::ValuePtr Context::getSCC()
     {
-        return Register::Value::Special(Register::SpecialType::SCC, shared_from_this());
+        return std::make_shared<Register::Value>(
+            shared_from_this(), Register::Type::SCC, DataType::Bool, 1);
     }
 
     Register::ValuePtr Context::getExec()
     {
-        return Register::Value::Special(Register::SpecialType::EXEC, shared_from_this());
+        return std::make_shared<Register::Value>(
+            shared_from_this(), Register::Type::EXEC, DataType::Bool32, 1);
     }
 
     std::ostream& operator<<(std::ostream& stream, ContextPtr const& ctx)

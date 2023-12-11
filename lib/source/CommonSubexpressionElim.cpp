@@ -388,7 +388,7 @@ namespace rocRoller
                                                  bool              allowSpecial = true,
                                                  int               valueCount   = 1) const
             {
-                if(resType.regType == Register::Type::Special && resType.varType == DataType::Bool)
+                if(Register::IsSpecial(resType.regType) && resType.varType == DataType::Bool)
                 {
                     if(allowSpecial)
                         return m_context->getSCC();

@@ -26,7 +26,14 @@ namespace rocRoller
 
         inline std::string RegisterId::toString() const
         {
-            return concatenate(TypePrefix(regType), regIndex);
+            if(IsSpecial(regType))
+            {
+                return concatenate(regType, regIndex);
+            }
+            else
+            {
+                return concatenate(TypePrefix(regType), regIndex);
+            }
         }
 
         inline std::string toString(RegisterId const& regId)
@@ -62,6 +69,22 @@ namespace rocRoller
             case Type::Scalar:
             case Type::Vector:
             case Type::Accumulator:
+                return true;
+
+            default:
+                return false;
+            }
+        }
+
+        constexpr inline bool IsSpecial(Type t)
+        {
+            switch(t)
+            {
+            case Type::SCC:
+            case Type::VCC:
+            case Type::VCC_LO:
+            case Type::VCC_HI:
+            case Type::EXEC:
                 return true;
 
             default:
@@ -105,8 +128,6 @@ namespace rocRoller
                 return "Literal";
             case Type::Label:
                 return "Label";
-            case Type::Special:
-                return "Special";
             case Type::Scalar:
                 return "SGPR";
             case Type::Vector:
@@ -117,10 +138,18 @@ namespace rocRoller
                 return "LDS";
             case Type::Count:
                 return "Count";
-
-            default:
-                throw std::runtime_error("Invalid register type!");
+            case Type::SCC:
+                return "SCC";
+            case Type::VCC:
+                return "VCC";
+            case Type::VCC_LO:
+                return "VCC_LO";
+            case Type::VCC_HI:
+                return "VCC_HI";
+            case Type::EXEC:
+                return "EXEC";
             }
+            Throw<FatalError>("Invalid register type!");
         }
 
         inline std::ostream& operator<<(std::ostream& stream, Type t)
@@ -153,34 +182,6 @@ namespace rocRoller
         inline std::ostream& operator<<(std::ostream& stream, AllocationState state)
         {
             return stream << toString(state);
-        }
-
-        inline std::string toString(SpecialType spec)
-        {
-            AssertFatal(spec != SpecialType::Count,
-                        "SpecialType::Count not a valid type for a register!");
-            switch(spec)
-            {
-            case SpecialType::SCC:
-                return "scc";
-            case SpecialType::VCC:
-                return "vcc";
-            case SpecialType::VCC_LO:
-                return "vcc_lo";
-            case SpecialType::VCC_HI:
-                return "vcc_hi";
-            case SpecialType::EXEC:
-                return "exec";
-            case SpecialType::Count:
-            default:
-                break;
-            }
-            Throw<FatalError>("Invalid SpecialType: ", (int)spec);
-        }
-
-        inline std::ostream& operator<<(std::ostream& stream, SpecialType spec)
-        {
-            return stream << toString(spec);
         }
 
         inline Value::Value() = default;
@@ -282,31 +283,6 @@ namespace rocRoller
             v->m_literalValue = value;
             v->m_varType      = rocRoller::variableType(value);
             v->m_regType      = Type::Literal;
-
-            return v;
-        }
-
-        inline ValuePtr Value::Special(SpecialType name)
-        {
-            AssertFatal(name != SpecialType::Count, "Count not a valid type for Special register!");
-            auto v = std::make_shared<Value>();
-
-            v->m_specialName = name;
-            v->m_regType     = Type::Special;
-            v->m_varType     = {DataType::Raw32, PointerType::Value};
-
-            return v;
-        }
-
-        inline ValuePtr Value::Special(SpecialType name, ContextPtr ctx)
-        {
-            AssertFatal(name != SpecialType::Count, "Count not a valid type for Special register!");
-            auto v = std::make_shared<Value>();
-
-            v->m_specialName = name;
-            v->m_regType     = Type::Special;
-            v->m_varType     = {DataType::Raw32, PointerType::Value};
-            v->m_context     = ctx;
 
             return v;
         }
@@ -416,17 +392,17 @@ namespace rocRoller
 
         inline bool Value::isSpecial() const
         {
-            return m_regType == Type::Special;
+            return IsSpecial(m_regType);
         }
 
         inline bool Value::isSCC() const
         {
-            return m_regType == Type::Special && m_specialName == SpecialType::SCC;
+            return m_regType == Type::SCC;
         }
 
         inline bool Value::isExec() const
         {
-            return m_regType == Type::Special && m_specialName == SpecialType::EXEC;
+            return m_regType == Type::EXEC;
         }
 
         inline ValuePtr Value::placeholder() const
@@ -498,6 +474,31 @@ namespace rocRoller
         inline void Value::assertCanUseAsOperand() const
         {
             AssertFatal(canUseAsOperand(), "Tried to use unallocated register value!");
+        }
+
+        inline void Value::specialString(std::ostream& os) const
+        {
+            switch(m_regType)
+            {
+            case Type::SCC:
+                os << "scc";
+                return;
+            case Type::VCC:
+                os << "vcc";
+                return;
+            case Type::VCC_LO:
+                os << "vcc_lo";
+                return;
+            case Type::VCC_HI:
+                os << "vcc_hi";
+                return;
+            case Type::EXEC:
+                os << "exec";
+                return;
+            default:
+                break;
+            }
+            Throw<FatalError>("Invalid special register: ", (int)m_regType);
         }
 
         inline void Value::gprString(std::ostream& os) const
@@ -578,8 +579,12 @@ namespace rocRoller
             case Type::Label:
                 os << m_label;
                 return;
-            case Type::Special:
-                os << m_specialName;
+            case Type::SCC:
+            case Type::VCC:
+            case Type::VCC_LO:
+            case Type::VCC_HI:
+            case Type::EXEC:
+                specialString(os);
                 return;
             case Type::Literal:
                 os << getLiteral();

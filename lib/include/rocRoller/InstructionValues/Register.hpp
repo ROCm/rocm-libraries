@@ -96,6 +96,15 @@ namespace rocRoller
         constexpr bool IsRegister(Type t);
 
         /**
+         * @brief Says whether a Register::Type represents a special register.
+         *
+         * @param t Register::Type to test
+         * @return true If the type represents a special
+         * @return false If the type does not represent a special register.
+         */
+        constexpr bool IsSpecial(Type t);
+
+        /**
          * Represents a single value (or single value per lane) stored in one or more registers,
          * or a literal value, or a one-dimensional array of registers suitable for use in a
          * MFMA or similar instruction.
@@ -114,12 +123,6 @@ namespace rocRoller
             static ValuePtr Literal(T const& value);
 
             static ValuePtr Literal(CommandArgumentValue const& value);
-
-            /**
-             * Special-purpose register such as vcc or exec.
-             */
-            static ValuePtr Special(SpecialType name);
-            static ValuePtr Special(SpecialType name, ContextPtr ctx);
 
             static ValuePtr Label(const std::string& label);
 
@@ -312,6 +315,11 @@ namespace rocRoller
             void gprString(std::ostream& os) const;
 
             /**
+             * Implementation of toString() for special registers.
+             */
+            void specialString(std::ostream& os) const;
+
+            /**
              * Must only be called during `split()`.
              * Creates a new Allocation which consists of only the registers assigned to `this`.
              * The parent `Value` and `Allocation` will be left in an invalid state.
@@ -323,7 +331,6 @@ namespace rocRoller
             std::weak_ptr<Context> m_context;
 
             std::string m_name;
-            SpecialType m_specialName = SpecialType::Count;
 
             std::string m_label;
 
