@@ -675,9 +675,7 @@ namespace rocRoller
 
         int duplicateChain(KernelGraph& graph, std::vector<int> const& startNodes)
         {
-            GraphReindexer reindexer;
-            return duplicateControlNodes(
-                graph, reindexer, startNodes, [](int x) { return true; })[0];
+            return duplicateControlNodes(graph, nullptr, startNodes, [](int x) { return true; })[0];
         }
 
         void

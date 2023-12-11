@@ -314,8 +314,6 @@ namespace rocRoller
 
                 co_yield Instruction::Comment("Initialize DoWhileLoop");
 
-                auto connections = m_graph->mapper.getConnections(tag);
-
                 co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock DoWhile");
 
                 //Do Body at least once
@@ -359,10 +357,9 @@ namespace rocRoller
                 auto init = m_graph->control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
                 co_yield generate(init, coords);
 
-                auto connections = m_graph->mapper.getConnections(tag);
-                AssertFatal(connections.size() == 1);
-                auto loopIncrTag = connections[0].coordinate;
-                auto iterReg     = m_context->registerTagManager()->getRegister(loopIncrTag);
+                auto loopIncrTag = m_graph->mapper.get(tag, NaryArgument::DEST);
+
+                auto iterReg = m_context->registerTagManager()->getRegister(loopIncrTag);
                 {
                     auto loopDims
                         = m_graph->coordinates.getOutputNodeIndices<DataFlowEdge>(loopIncrTag);

@@ -45,7 +45,8 @@ namespace rocRoller
             graph.control.addElement(Initialize(), {forK}, {initK});
             graph.control.addElement(ForLoopIncrement(), {forK}, {incrementK});
 
-            graph.mapper.connect<Dimension>(forK, rangeK);
+            graph.mapper.connect(forK, rangeK, NaryArgument::DEST);
+            graph.mapper.connect<ForLoop>(forK, dimK);
             graph.mapper.connect(initK, rangeK, NaryArgument::DEST);
             graph.mapper.connect(incrementK, rangeK, NaryArgument::DEST);
 
@@ -56,10 +57,9 @@ namespace rocRoller
         {
             namespace CG = rocRoller::KernelGraph::CoordinateGraph;
 
-            auto range = kgraph.mapper.getConnections(forLoopOp)[0].coordinate;
-            auto forLoop
-                = only(kgraph.coordinates.getOutputNodeIndices(range, CG::isEdge<CG::DataFlow>));
-            return {*forLoop, range};
+            auto range   = kgraph.mapper.get(forLoopOp, NaryArgument::DEST);
+            auto forLoop = kgraph.mapper.get<ForLoop>(forLoopOp);
+            return {forLoop, range};
         }
 
         std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>
@@ -82,11 +82,7 @@ namespace rocRoller
                     continue;
                 auto addExpr = std::get<Expression::Add>(*loopIncrementOp.expression);
 
-                auto connections = graph.mapper.getConnections(increment);
-                //Iterator should have one connection, if it doesn't it's not connected to coordinate.
-                if(connections.size() != 1)
-                    continue;
-                auto dim_tag = connections[0].coordinate;
+                auto dim_tag = graph.mapper.get(increment, NaryArgument::DEST);
                 //Iterator should have a DataFlow expression as its LHS
                 if(!(std::holds_alternative<Expression::DataFlowTag>(*addExpr.lhs)))
                     continue;
@@ -95,7 +91,7 @@ namespace rocRoller
                     continue;
                 //If all else is true and the first connection of the forLoop is the dim_tag
                 //Then we have the loopIncrement that we were searching for.
-                if(graph.mapper.getConnections(forLoop)[0].coordinate != dim_tag)
+                if(graph.mapper.get(forLoop, NaryArgument::DEST) != dim_tag)
                     continue;
                 return {addExpr.lhs, addExpr.rhs};
             }

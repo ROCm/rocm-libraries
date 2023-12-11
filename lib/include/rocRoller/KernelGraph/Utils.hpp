@@ -235,10 +235,10 @@ namespace rocRoller
          * @return New start nodes for the duplicated sub-graph.
          */
         template <std::predicate<int> Predicate>
-        std::vector<int> duplicateControlNodes(KernelGraph&            graph,
-                                               GraphReindexer&         reindexer,
-                                               std::vector<int> const& startNodes,
-                                               Predicate               dontDuplicate);
+        std::vector<int> duplicateControlNodes(KernelGraph&                    graph,
+                                               std::shared_ptr<GraphReindexer> reindexer,
+                                               std::vector<int> const&         startNodes,
+                                               Predicate                       dontDuplicate);
 
         /**
          * @brief Return VariableType of load/store operation.

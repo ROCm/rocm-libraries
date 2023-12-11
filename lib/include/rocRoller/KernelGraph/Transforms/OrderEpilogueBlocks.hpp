@@ -6,17 +6,17 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-         * @brief Performs the Sequentialize transformation.
+         * @brief Performs the Order Epilogue Blocks transformation.
          *
-         * Sequentializes the epilogue components post forLoop.
+         * Orders the epilogue components.
          */
-        class Sequentialize : public GraphTransform
+        class OrderEpilogueBlocks : public GraphTransform
         {
         public:
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
             {
-                return "Sequentialize";
+                return "OrderEpilogueBlocks";
             }
         };
     }

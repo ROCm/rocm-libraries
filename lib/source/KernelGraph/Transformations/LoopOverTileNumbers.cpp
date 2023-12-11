@@ -134,8 +134,9 @@ namespace rocRoller
                     return true;
                 return false;
             };
-            auto maybeTopLoopOp = only(original.control.findElements(findTopLoopPredicate));
-            if(!maybeTopLoopOp)
+            auto maybeTopLoopOp = original.control.findNodes(
+                *original.control.roots().begin(), findTopLoopPredicate, GD::Downstream);
+            if(maybeTopLoopOp.empty())
             {
                 rocRoller::Log::getLogger()->warn(
                     "Unable to find ForLoop '{}' during LoopOverTileNumbers pass.  "
@@ -143,7 +144,7 @@ namespace rocRoller
                     m_topLoop);
                 return original;
             }
-            m_topLoopOp = *maybeTopLoopOp;
+            m_topLoopOp = *maybeTopLoopOp.take(1).only();
 
             auto graph = original;
             stage(graph);

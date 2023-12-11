@@ -408,7 +408,7 @@ namespace rocRoller
          *     if sendTileExpr:
          *       StoreTile()
          *       WaitZero()
-	 *       Barrier()
+         *       Barrier()
          *       flag = Assign(SGPR, 1u);
          *       StoreSGPR(flag)
          *       WaitZero()
@@ -583,7 +583,7 @@ namespace rocRoller
                            VariableType       varType)
         {
             auto forLoop = graph.control.addElement(ForLoopOp{conditionExpr, loopName});
-            graph.mapper.connect<Dimension>(forLoop, incrementCoord);
+            graph.mapper.connect(forLoop, incrementCoord, NaryArgument::DEST);
 
             auto initialize = graph.control.addElement(
                 Assign{Register::Type::Scalar, Expression::literal(0, varType)});
@@ -600,8 +600,8 @@ namespace rocRoller
         }
 
         /**
-	 * Add chain of SetCoordinate and Assign nodes to initialize coordinates.
-	 */
+         * Add chain of SetCoordinate and Assign nodes to initialize coordinates.
+         */
         int initializeCoordinates(KernelGraph&               graph,
                                   int                        top,
                                   std::initializer_list<int> setCoordinates,
@@ -828,6 +828,23 @@ namespace rocRoller
                     ContextPtr             context)
         {
             //
+            // Find the epilogue operations; detach them.
+            //
+            // They will be re-attached later.
+            //
+            std::vector<int> epilogueOperations;
+            for(auto tag : graph.control.getNeighbours<GD::Downstream>(loopInfo.topLoopOp))
+            {
+                auto maybeSequence = graph.control.get<Sequence>(tag);
+                if(maybeSequence)
+                {
+                    epilogueOperations.push_back(
+                        *only(graph.control.getNeighbours<GD::Downstream>(tag)));
+                    graph.control.deleteElement(tag);
+                }
+            }
+
+            //
             // Create new Scope and insert it above the top-loop
             //
             auto scope = graph.control.addElement(Scope());
@@ -872,27 +889,16 @@ namespace rocRoller
             int dpTopLoop, dpAccumLoop;
             if(twoTile)
             {
-                GraphReindexer reindexer;
-                dpTopLoop   = *only(duplicateControlNodes(
+                auto reindexer = std::make_shared<GraphReindexer>();
+                dpTopLoop      = *only(duplicateControlNodes(
                     graph, reindexer, {loopInfo.topLoopOp}, [](int x) { return true; }));
-                dpAccumLoop = reindexer.control[loopInfo.accumulatorLoopOp];
-            }
+                dpAccumLoop    = reindexer->control[loopInfo.accumulatorLoopOp];
 
-            //
-            // Find operations that come after the accumulation loop; detach them.
-            //
-            // They will be re-attached later.
-            //
-            std::vector<int> postAccumulationOperations;
-            for(auto tag : graph.control.getNeighbours<GD::Downstream>(loopInfo.accumulatorLoopOp))
-            {
-                auto maybeSequence = graph.control.get<Sequence>(tag);
-                if(maybeSequence)
-                {
-                    postAccumulationOperations.push_back(
-                        *only(graph.control.getNeighbours<GD::Downstream>(tag)));
-                    graph.control.deleteElement(tag);
-                }
+                // Duplicate the epilogue
+                auto epilogueDuplicates = duplicateControlNodes(
+                    graph, nullptr, epilogueOperations, [](int x) { return true; });
+                for(auto const& epilogueDuplicate : epilogueDuplicates)
+                    graph.control.addElement(Sequence(), {dpTopLoop}, {epilogueDuplicate});
             }
 
             //
@@ -1102,7 +1108,7 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {assignNextNonAccumTile}, {loopInfo.topLoopOp});
 
             graph.control.addElement(
-                Sequence(), {loopInfo.accumulatorLoopOp}, {sendInfo.assignSendBoolSGPR});
+                Sequence(), {loopInfo.topLoopOp}, {sendInfo.assignSendBoolSGPR});
             graph.control.addElement(
                 Sequence(), {sendInfo.assignSendBoolSGPR}, {sendInfo.preWaitZero});
             graph.control.addElement(Sequence(), {sendInfo.sendCond}, {receiveInfo.preWaitZero});
@@ -1151,14 +1157,14 @@ namespace rocRoller
             }
 
             //
-            // Now can re-attach postAccumulationOperations.  We defer
+            // Now can re-attach epilogueOperations.  We defer
             // this to now so that code above can duplicate the
             // for-loops.
             //
             // Make sure receive happens before other operations after
             // the accumulator loop.
             //
-            for(auto tag : postAccumulationOperations)
+            for(auto tag : epilogueOperations)
             {
                 graph.control.addElement(Body(), {postAccumulationCond}, {tag});
             }
@@ -1353,9 +1359,13 @@ namespace rocRoller
                 return findLoopPredicate;
             };
 
+            auto kernel = *original.control.roots().begin();
+
             // Find the loop control nodes
             auto maybeTopLoopOp
-                = only(original.control.findElements(makeFindLoopPredicate(m_topLoop)));
+                = original.control.findNodes(kernel, makeFindLoopPredicate(m_topLoop))
+                      .take(1)
+                      .only();
             if(!maybeTopLoopOp)
             {
                 rocRoller::Log::warn("Unable to find ForLoop '{}' during AddStreamK pass.  "

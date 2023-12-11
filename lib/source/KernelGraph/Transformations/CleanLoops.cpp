@@ -21,8 +21,8 @@ namespace rocRoller
             for(auto const& loop : k.control.getNodes<ForLoopOp>().to<std::vector>())
             {
                 auto [lhs, rhs] = getForLoopIncrement(k, loop);
-                auto forLoopDim = getSize(
-                    std::get<Dimension>(k.coordinates.getElement(k.mapper.get<Dimension>(loop))));
+                auto forLoopDim = getSize(std::get<Dimension>(
+                    k.coordinates.getElement(k.mapper.get(loop, NaryArgument::DEST))));
 
                 //Ensure forLoopDim is translate time evaluatable.
                 if(!(evaluationTimes(forLoopDim)[EvaluationTime::Translate]))

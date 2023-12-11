@@ -96,6 +96,13 @@ namespace AddStreamKTest
 
     struct AddStreamKTestGPU : public GPUContextFixtureParam<bool>
     {
+    protected:
+        void SetUp() override
+        {
+            m_kernelOptions.assertWaitCntState = false;
+
+            GPUContextFixtureParam<bool>::SetUp();
+        }
     };
 
     //

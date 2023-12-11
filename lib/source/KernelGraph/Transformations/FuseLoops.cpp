@@ -225,8 +225,8 @@ namespace rocRoller
                         return;
 
                     // Check to see if loops are all the same length
-                    auto forLoopDim = getSize(std::get<Dimension>(
-                        graph.coordinates.getElement(graph.mapper.get<Dimension>(forLoop))));
+                    auto forLoopDim = getSize(std::get<Dimension>(graph.coordinates.getElement(
+                        graph.mapper.get(forLoop, NaryArgument::DEST))));
                     if(loopLength)
                     {
                         if(!identical(forLoopDim, loopLength))

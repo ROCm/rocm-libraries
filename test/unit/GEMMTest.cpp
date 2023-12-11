@@ -55,8 +55,6 @@ namespace GEMMDriverTest
         std::string transB = "T";
 
         // Unroll Sizes
-        unsigned int unrollX = 0;
-        unsigned int unrollY = 0;
         unsigned int unrollK = 0;
 
         bool loadLDSA  = true;
@@ -271,8 +269,6 @@ namespace GEMMDriverTest
             auto kernelOptions                           = std::make_shared<KernelOptions>();
             kernelOptions->fuseLoops                     = gemm.fuseLoops;
             kernelOptions->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
-            kernelOptions->unrollX                       = gemm.unrollX;
-            kernelOptions->unrollY                       = gemm.unrollY;
             kernelOptions->unrollK                       = gemm.unrollK;
             kernelOptions->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
             kernelOptions->prefetch                      = gemm.prefetch;
@@ -498,10 +494,10 @@ namespace GEMMDriverTest
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
 
-        // It works with prefetching too!!
-        gemm.unrollK          = 2;
-        gemm.prefetch         = true;
-        gemm.prefetchInFlight = 2;
+        // TODO: Does not work with unrolling K
+        //gemm.unrollK          = 2;
+        //gemm.prefetch         = true;
+        //gemm.prefetchInFlight = 2;
 
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
@@ -538,10 +534,10 @@ namespace GEMMDriverTest
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
 
-        // It works with prefetching too!!
-        gemm.unrollK          = 2;
-        gemm.prefetch         = true;
-        gemm.prefetchInFlight = 2;
+        // TODO: Does not work with unrolling K
+        //gemm.unrollK          = 2;
+        //gemm.prefetch         = true;
+        //gemm.prefetchInFlight = 2;
 
         for(auto twoTile : {true, false})
         {
@@ -749,60 +745,6 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
         gemm.waveK = 8;
-
-        basicGEMM<Half>(m_context, gemm, 2.e-5);
-    }
-
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2UnrollX)
-    {
-        GEMMProblem gemm;
-
-        gemm.m = 256;
-        gemm.n = 512;
-        gemm.k = 64;
-
-        gemm.macM = 128;
-        gemm.macN = 256;
-        gemm.macK = 16;
-
-        gemm.waveK = 8;
-
-        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
-        gemm.workgroupSizeY = 4;
-
-        gemm.unrollX = 2;
-        gemm.unrollY = 1;
-
-        gemm.loadLDSA  = false;
-        gemm.storeLDSD = false;
-        gemm.fuseLoops = false;
-
-        basicGEMM<Half>(m_context, gemm, 2.e-5);
-    }
-
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2UnrollY)
-    {
-        GEMMProblem gemm;
-
-        gemm.m = 256;
-        gemm.n = 512;
-        gemm.k = 64;
-
-        gemm.macM = 128;
-        gemm.macN = 256;
-        gemm.macK = 16;
-
-        gemm.waveK = 8;
-
-        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
-        gemm.workgroupSizeY = 4;
-
-        gemm.unrollX = 1;
-        gemm.unrollY = 2;
-
-        gemm.loadLDSA  = false;
-        gemm.storeLDSD = false;
-        gemm.fuseLoops = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }

@@ -33,15 +33,12 @@ namespace rocRoller::KernelGraph
         if(!forLoopOp)
             return {};
 
-        namespace CG = rocRoller::KernelGraph::CoordinateGraph;
+        auto forLoopCoord = kgraph.mapper.get<ForLoop>(*forLoopOp);
 
-        auto incr = kgraph.mapper.getConnections(*forLoopOp)[0].coordinate;
-        for(auto f : kgraph.coordinates.getOutputNodeIndices(incr, CG::isEdge<CG::DataFlow>))
-        {
-            if(std::find(within.cbegin(), within.cend(), f) != within.cend())
-                return f;
-        }
-        return {};
+        if(std::find(within.cbegin(), within.cend(), forLoopCoord) != within.cend())
+            return forLoopCoord;
+        else
+            return {};
     }
 
     template <typename T>
@@ -71,12 +68,15 @@ namespace rocRoller::KernelGraph
     }
 
     template <std::predicate<int> Predicate>
-    std::vector<int> duplicateControlNodes(KernelGraph&            graph,
-                                           GraphReindexer&         reindexer,
-                                           std::vector<int> const& startNodes,
-                                           Predicate               dontDuplicate)
+    std::vector<int> duplicateControlNodes(KernelGraph&                    graph,
+                                           std::shared_ptr<GraphReindexer> reindexer,
+                                           std::vector<int> const&         startNodes,
+                                           Predicate                       dontDuplicate)
     {
         std::vector<int> newStartNodes;
+
+        if(reindexer == nullptr)
+            reindexer = std::make_shared<GraphReindexer>();
 
         // Create duplicates of all of the nodes downstream of the startNodes
         for(auto const& node :
@@ -85,12 +85,12 @@ namespace rocRoller::KernelGraph
             // Only do this step if element is a node
             if(graph.control.getElementType(node) == Graph::ElementType::Node)
             {
-                auto op                 = graph.control.addElement(graph.control.getElement(node));
-                reindexer.control[node] = op;
+                auto op                  = graph.control.addElement(graph.control.getElement(node));
+                reindexer->control[node] = op;
             }
         }
 
-        for(auto const& reindex : reindexer.control)
+        for(auto const& reindex : reindexer->control)
         {
             // Create all edges within new sub-graph
             auto location = graph.control.getLocation(reindex.first);
@@ -98,8 +98,9 @@ namespace rocRoller::KernelGraph
             {
                 int child
                     = *graph.control.getNeighbours<Graph::Direction::Downstream>(output).begin();
-                graph.control.addElement(
-                    graph.control.getElement(output), {reindex.second}, {reindexer.control[child]});
+                graph.control.addElement(graph.control.getElement(output),
+                                         {reindex.second},
+                                         {reindexer->control[child]});
             }
 
             // Use the same coordinate graph mappings
@@ -110,7 +111,7 @@ namespace rocRoller::KernelGraph
                 if(dontDuplicate(coord))
                 {
                     graph.mapper.connect(reindex.second, coord, c.connection);
-                    reindexer.coordinates.insert_or_assign(coord, coord);
+                    reindexer->coordinates.insert_or_assign(coord, coord);
                     continue;
                 }
 
@@ -123,11 +124,11 @@ namespace rocRoller::KernelGraph
                 auto maybeLDS       = graph.coordinates.get<LDS>(c.coordinate);
                 if(maybeMacroTile || maybeLDS)
                 {
-                    if(reindexer.coordinates.count(c.coordinate) == 0)
+                    if(reindexer->coordinates.count(c.coordinate) == 0)
                     {
                         auto dim = graph.coordinates.addElement(
                             graph.coordinates.getElement(c.coordinate));
-                        reindexer.coordinates[c.coordinate] = dim;
+                        reindexer->coordinates[c.coordinate] = dim;
                         auto duplicate
                             = graph.coordinates.getOutputNodeIndices(coord, CT::isEdge<PassThrough>)
                                   .to<std::vector>();
@@ -136,22 +137,22 @@ namespace rocRoller::KernelGraph
                         else
                             graph.coordinates.addElement(PassThrough(), {dim}, {duplicate[0]});
                     }
-                    coord = reindexer.coordinates[c.coordinate];
+                    coord = reindexer->coordinates[c.coordinate];
                 }
                 graph.mapper.connect(reindex.second, coord, c.connection);
             }
         }
 
         // Change coordinate values in Expressions
-        for(auto const& pair : reindexer.control)
+        for(auto const& pair : reindexer->control)
         {
-            reindexExpressions(graph, pair.second, reindexer);
+            reindexExpressions(graph, pair.second, *reindexer);
         }
 
         // Return the new start nodes
         for(auto const& startNode : startNodes)
         {
-            newStartNodes.push_back(reindexer.control[startNode]);
+            newStartNodes.push_back(reindexer->control[startNode]);
         }
 
         return newStartNodes;

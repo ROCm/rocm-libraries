@@ -284,10 +284,21 @@ namespace rocRoller
             auto [WaveTilesY, forWaveTilesY]
                 = rangeFor(graph, literal(wavetilesPerWavefront[1]), rocRoller::YLOOP);
 
+            auto forWaveTilesEpilogueX = *only(
+                duplicateControlNodes(graph, nullptr, {forWaveTilesX}, [](int x) { return true; }));
+
+            auto forWaveTilesEpilogueY = *only(
+                duplicateControlNodes(graph, nullptr, {forWaveTilesY}, [](int x) { return true; }));
+
+            auto forWaveTilesEpilogueYNOP = graph.control.addElement(NOP());
+
             graph.control.addElement(Body(), {info.kernel}, {forWaveTilesX});
             graph.control.addElement(Body(), {forWaveTilesX}, {forWaveTilesY});
             graph.control.addElement(Body(), {forWaveTilesY}, {initD});
             graph.control.addElement(Sequence(), {initD}, {forK});
+            graph.control.addElement(Sequence(), {forWaveTilesX}, {forWaveTilesEpilogueX});
+            graph.control.addElement(Body(), {forWaveTilesEpilogueX}, {forWaveTilesEpilogueY});
+            graph.control.addElement(Body(), {forWaveTilesEpilogueY}, {forWaveTilesEpilogueYNOP});
 
             // Connect ops after contraction to forK, remove contraction and its incoming edges
             auto tcOutgoingEdges
@@ -298,7 +309,8 @@ namespace rocRoller
                 auto dst  = graph.control.getNeighbours<Graph::Direction::Downstream>(e)
                                .to<std::vector>();
                 graph.control.deleteElement(e);
-                graph.control.addElement(e, elem, std::vector<int>{forK}, dst);
+                graph.control.addElement(
+                    Sequence(), std::vector<int>{forWaveTilesEpilogueYNOP}, dst);
             }
             auto tcIncomingEdges
                 = graph.control.getNeighbours<Graph::Direction::Upstream>(tag).to<std::vector>();
@@ -318,7 +330,7 @@ namespace rocRoller
                 // TODO: This explicitly puts the + beta * C portion of a GEMM after the
                 //       forK loop. We might want to remove this after the dynamic
                 //       scheduling has been implemented.
-                graph.control.addElement(Sequence(), {forK}, {index});
+                graph.control.addElement(Sequence(), {forWaveTilesEpilogueYNOP}, {index});
             }
 
             for(auto const index : info.siblingOps)

@@ -1348,13 +1348,13 @@ namespace KernelGraphTest
 
         // Verify that loops have been unrolled
         auto unrolledForLoops = kgraph_unrolled.control.getNodes<ForLoopOp>().to<std::vector>();
-        EXPECT_EQ(unrolledForLoops.size(), 7);
+        EXPECT_EQ(unrolledForLoops.size(), 10);
 
         auto kgraph_fused = kgraph_unrolled.transform(fuseLoopsTransform);
 
         // Verify that loops have been fused
         auto fusedForLoops = kgraph_fused.control.getNodes<ForLoopOp>().to<std::vector>();
-        EXPECT_EQ(fusedForLoops.size(), 3);
+        EXPECT_EQ(fusedForLoops.size(), 5);
 
         auto fusedLoads = kgraph_fused.control.getNodes<LoadTiled>().to<std::vector>();
         EXPECT_EQ(fusedLoads.size(), 12);

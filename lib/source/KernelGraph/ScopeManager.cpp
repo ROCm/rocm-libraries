@@ -25,7 +25,14 @@ namespace rocRoller::KernelGraph
     {
         for(auto tag : m_tags.back())
         {
-            m_context->registerTagManager()->deleteTag(tag);
+            // TODO: Add a way to allocate AGPR registers within a loop
+            //       that can be used later in a different loop.
+            if(m_context->registerTagManager()->hasRegister(tag))
+            {
+                auto reg = m_context->registerTagManager()->getRegister(tag);
+                if(reg->regType() != Register::Type::Accumulator)
+                    m_context->registerTagManager()->deleteTag(tag);
+            }
         }
         m_tags.pop_back();
     }

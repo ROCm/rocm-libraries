@@ -321,8 +321,8 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/LowerLinear.cpp
  lib/source/KernelGraph/Transformations/LowerTensorContraction.cpp
  lib/source/KernelGraph/Transformations/LowerTile.cpp
+ lib/source/KernelGraph/Transformations/OrderEpilogueBlocks.cpp
  lib/source/KernelGraph/Transformations/OrderMemory.cpp
- lib/source/KernelGraph/Transformations/Sequentialize.cpp
  lib/source/KernelGraph/Transformations/Simplify.cpp
  lib/source/KernelGraph/Transformations/UnrollLoops.cpp
  lib/source/KernelGraph/Transformations/UpdateParameters.cpp
