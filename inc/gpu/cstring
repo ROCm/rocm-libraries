@@ -1,0 +1,7 @@
+#ifndef __GPU_CSTRING__
+#define __GPU_CSTRING__
+
+#include "gpu/__clib/memcmp.h"
+#include "gpu/__clib/memcpy.h"
+
+#endif // __GPU_CSTRING__
