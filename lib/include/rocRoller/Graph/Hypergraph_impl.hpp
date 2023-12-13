@@ -212,8 +212,7 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         void Hypergraph<Node, Edge, Hyper>::deleteElement(int index)
         {
-            auto elem        = getElement(index);
-            auto elementType = getElementType(elem);
+            auto elem = getElement(index);
 
             clearCache();
 
@@ -449,9 +448,9 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::childNodes(int parent) const
         {
-            std::set<int> visited;
             if(getElementType(parent) == ElementType::Node)
             {
+                std::set<int> visited;
                 for(auto const& edgeIndex : getNeighbours<Direction::Downstream>(parent))
                 {
                     auto neighbours = getNeighbours<Direction::Downstream>(edgeIndex);
@@ -474,9 +473,9 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::parentNodes(int child) const
         {
-            std::set<int> visited;
             if(getElementType(child) == ElementType::Node)
             {
+                std::set<int> visited;
                 for(auto const& edgeIndex : getNeighbours<Direction::Upstream>(child))
                 {
                     auto neighbours = getNeighbours<Direction::Upstream>(edgeIndex);

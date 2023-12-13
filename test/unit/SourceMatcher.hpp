@@ -132,7 +132,8 @@ inline Generator<std::string> NormalizedSourceLines(std::string input, bool incl
         if(ch == '\n')
         {
             if(anyContent)
-                co_yield(curPart);
+                co_yield curPart;
+
             curPart    = "";
             anyContent = false;
             anySpace   = false;
@@ -181,6 +182,7 @@ inline Generator<std::string> NormalizedSourceLines(std::string input, bool incl
 
             if(pos == input.end())
                 break;
+
             continue;
         }
 
@@ -190,7 +192,9 @@ inline Generator<std::string> NormalizedSourceLines(std::string input, bool incl
             // Note that we want to keep the newline so that this line is
             // processed correctly.
             for(; pos + 1 != input.end() && *(pos + 1) != '\n'; pos++)
-                ;
+            {
+                // Empty loop
+            }
             continue;
         }
 
@@ -200,10 +204,12 @@ inline Generator<std::string> NormalizedSourceLines(std::string input, bool incl
             pos += 2;
             for(; pos != input.end() && !startsWith("*/", pos, input.end()); pos++)
             {
+                //Empty loop
             }
             // If this is not checked, we could double increment and go past the end.
             if(pos == input.end())
                 break;
+
             pos += 2;
             continue;
         }
@@ -230,18 +236,22 @@ inline Generator<std::string> NormalizedSourceLines(std::string input, bool incl
             anySpace   = false;
             if(pos == input.end())
                 break;
+
             continue;
         }
 
         if(anySpace)
             curPart += ' ';
+
         curPart += ch;
         anySpace   = false;
         anyContent = true;
     }
 
     if(anyContent)
-        co_yield_(curPart);
+        co_yield curPart;
+
+    co_return;
 }
 
 inline std::string NormalizedSource(std::string const& input, bool includeComments = false)
@@ -249,7 +259,8 @@ inline std::string NormalizedSource(std::string const& input, bool includeCommen
     std::string rv;
     for(auto const& line : NormalizedSourceLines(input, includeComments))
     {
-        rv += line + '\n';
+        rv += line;
+        rv += "\n";
     }
 
     return rv;

@@ -6,26 +6,22 @@ project(rocRoller VERSION 1.0)
 option(ROCROLLER_ENABLE_TIMERS         "Enable rocRoller timer code." OFF)
 option(ROCROLLER_TESTS_SKIP_GUIDEPOSTS "Skip compiling guidepost tests." OFF)
 option(ROCROLLER_TESTS_SKIP_SLOW       "Skip slow tests (currently only Python tests)" ON)
-option(ROCROLLER_TESTS_USE_YAML_CPP    "Use yaml-cpp in testing." ON)
 option(ROCROLLER_USE_HIP               "Use HIP within the rocRoller." ON)
+option(ROCROLLER_USE_LLVM              "Use LLVM for generating metadata." OFF)
+option(ROCROLLER_USE_YAML_CPP          "Use yaml-cpp for generating metadata." ON)
 option(SKIP_CPPCHECK                   "Skip CPPCHECK." ON)
 
 option(CODE_ANALYSIS                    "When building, don't query for tests etc." OFF)
 option(CODE_COVERAGE                    "Build with code coverage flags (clang only)" OFF)
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  option(ROCROLLER_USE_LLVM      "Use LLVM for generating metadata." OFF)
-  option(ROCROLLER_USE_YAML_CPP  "Use yaml-cpp for generating metadata." ON)
+option(BUILD_SHARED_LIBS                "Build using shared libraries" ON)
 
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   set(COROUTINES_COMPILE_OPTION -fcoroutines-ts)
   set(EXTRA_COMPILE_OPTIONS -stdlib=libc++)
   set(EXTRA_LINK_OPTIONS -lc++ -lm -fuse-ld=lld)
-  set(CMAKE_CXX_FLAGS -stdlib=libc++)
   set_source_files_properties(lib/source/Assembler.cpp PROPERTIES COMPILE_FLAGS "-stdlib=libstdc++")
 else()
-  option(ROCROLLER_USE_LLVM      "Use LLVM for generating metadata." ON)
-  option(ROCROLLER_USE_YAML_CPP  "Use yaml-cpp for generating metadata." OFF)
-
   set(COROUTINES_COMPILE_OPTION -fcoroutines)
   set(EXTRA_COMPILE_OPTIONS )
   set(EXTRA_LINK_OPTIONS )
@@ -43,7 +39,7 @@ if(CODE_COVERAGE)
   set(EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_LINK_OPTIONS})
 endif()
 
-if(ROCROLLER_USE_LLVM AND ROCROLLER_USE_YAML_CPP)
+if((ROCROLLER_USE_LLVM AND ROCROLLER_USE_YAML_CPP) OR (NOT ROCROLLER_USE_LLVM AND NOT ROCROLLER_USE_YAML_CPP))
   message(FATAL_ERROR "Use either LLVM or yaml-cpp backend for serialization, not both.")
 endif()
 
@@ -96,12 +92,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(msgpack)
 
-if(ROCROLLER_USE_YAML_CPP OR ROCROLLER_TESTS_USE_YAML_CPP)
-FetchContent_Declare(
-  yaml-cpp
-  URL https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.7.0.zip
-)
-FetchContent_MakeAvailable(yaml-cpp)
+if(ROCROLLER_USE_YAML_CPP)
+  FetchContent_Declare(
+    yaml-cpp
+    URL https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.7.0.zip
+  )
+  FetchContent_MakeAvailable(yaml-cpp)
+
+  target_compile_options(yaml-cpp PUBLIC ${EXTRA_COMPILE_OPTIONS})
+  target_link_options(yaml-cpp PUBLIC ${EXTRA_LINK_OPTIONS})
+  set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
+  set_property(TARGET yaml-cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-shadow")
 endif()
 
 target_compile_options(gtest PUBLIC ${EXTRA_COMPILE_OPTIONS})
@@ -167,7 +168,9 @@ target_compile_options(GPUArchitectureGenerator PUBLIC  ${COROUTINES_COMPILE_OPT
 target_link_options(GPUArchitectureGenerator PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
   GPUArchitectureGenerator PUBLIC
+  -Wl,--whole-archive
   rocroller
+  -Wl,--no-whole-archive
   ${llvm_libs}
   msgpackc-cxx
 )
@@ -359,7 +362,7 @@ if(ROCROLLER_USE_HIP)
   )
 endif()
 
-add_library(rocroller SHARED
+add_library(rocroller
  ${rocroller_src}
 )
 
@@ -367,7 +370,11 @@ add_dependencies(rocroller spdlog)
 
 # Users of rocroller should link with rocroller_interface for GPUArchitecture_def dependency
 add_library(rocroller_interface INTERFACE)
-target_link_libraries(rocroller_interface INTERFACE rocroller)
+target_link_libraries(rocroller_interface INTERFACE
+  -Wl,--whole-archive
+  rocroller
+  -Wl,--no-whole-archive
+)
 add_dependencies(rocroller_interface GPUArchitecture_def)
 
 target_compile_features(rocroller PUBLIC cxx_std_20)
@@ -391,11 +398,8 @@ target_include_directories(rocroller SYSTEM PUBLIC
 if(ROCROLLER_USE_YAML_CPP)
   target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_YAML_CPP)
   target_link_libraries(rocroller PUBLIC yaml-cpp)
-  set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
-  set_property(TARGET yaml-cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-shadow")
 
   target_compile_definitions(GPUArchitectureGenerator PUBLIC ROCROLLER_USE_YAML_CPP)
-  target_link_libraries(GPUArchitectureGenerator PUBLIC yaml-cpp)
 endif()
 if(ROCROLLER_USE_LLVM)
   target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLVM)
@@ -415,7 +419,7 @@ endif()
 # Component stand-alone test
 add_executable(ComponentTest test/standalone/ComponentTest.cpp)
 target_compile_options(ComponentTest PUBLIC ${EXTRA_COMPILE_OPTIONS})
-target_link_options(ComponentTest PUBLIC ${EXTRA_LINK_OPTIONS})
+target_link_options(ComponentTest PUBLIC ${EXTRA_LINK_OPTIONS} -pthread)
 target_link_libraries(ComponentTest
   rocroller_interface
   msgpackc-cxx
@@ -543,9 +547,8 @@ if(ROCROLLER_USE_HIP)
   target_compile_definitions(rocRollerTests PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
 endif()
 
-if(ROCROLLER_TESTS_USE_YAML_CPP)
+if(ROCROLLER_USE_YAML_CPP)
   target_compile_definitions(rocRollerTests PUBLIC ROCROLLER_TESTS_USE_YAML_CPP)
-  target_link_libraries(rocRollerTests yaml-cpp)
 endif()
 
 # ArchGen unit tests
@@ -583,7 +586,6 @@ target_link_libraries(
 
 if(ROCROLLER_USE_YAML_CPP)
   target_compile_definitions(ArchGenTests PUBLIC ROCROLLER_USE_YAML_CPP)
-  target_link_libraries(ArchGenTests PUBLIC yaml-cpp)
 endif()
 if(ROCROLLER_USE_LLVM)
   target_compile_definitions(ArchGenTests PUBLIC ROCROLLER_USE_LLVM)

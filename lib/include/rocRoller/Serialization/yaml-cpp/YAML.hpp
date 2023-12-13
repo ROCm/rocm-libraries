@@ -45,8 +45,6 @@ namespace rocRoller
             YAML::Emitter* emitter;
             void*          context;
 
-            void mapRequired();
-
             EmitterOutput(YAML::Emitter* e, void* c = nullptr)
                 : emitter(e)
                 , context(c)
@@ -224,12 +222,24 @@ namespace rocRoller
             }
         };
 
+        template <typename T>
+        inline void nodeInputHelper(YAML::Node& n, T& obj)
+        {
+            obj = n.as<T>();
+        }
+
+        template <>
+        inline void nodeInputHelper(YAML::Node& n, Half& val)
+        {
+            float floatVal;
+            nodeInputHelper(n, floatVal);
+            val = floatVal;
+        }
+
         struct NodeInput
         {
             YAML::Node* node;
             void*       context;
-
-            void mapRequired();
 
             NodeInput(YAML::Node* n, void* c = nullptr)
                 : node(n)
@@ -265,15 +275,7 @@ namespace rocRoller
             template <typename T>
             void input(YAML::Node& n, T& obj)
             {
-                obj = n.as<T>();
-            }
-
-            template <>
-            void input(YAML::Node& n, Half& val)
-            {
-                float floatVal;
-                input(n, floatVal);
-                val = floatVal;
+                nodeInputHelper(n, obj);
             }
 
             template <SequenceType<NodeInput> T>
