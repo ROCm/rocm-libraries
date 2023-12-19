@@ -281,10 +281,9 @@ namespace rocRoller
                 co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Conditional");
                 auto [conditionRegisterType, conditionVariableType]
                     = Expression::resultType(op.condition);
-                auto conditionResult
-                    = IsSpecial(conditionRegisterType) && conditionVariableType == DataType::Bool
-                          ? m_context->getSCC()
-                          : m_context->getVCC();
+                auto conditionResult = conditionVariableType == DataType::Bool
+                                           ? m_context->getSCC()
+                                           : m_context->getVCC();
                 co_yield Expression::generate(
                     conditionResult, m_fastArith(op.condition), m_context);
 
@@ -321,10 +320,9 @@ namespace rocRoller
 
                 auto [conditionRegisterType, conditionVariableType]
                     = Expression::resultType(op.condition);
-                auto conditionResult
-                    = IsSpecial(conditionRegisterType) && conditionVariableType == DataType::Bool
-                          ? m_context->getSCC()
-                          : m_context->getVCC();
+                auto conditionResult = conditionVariableType == DataType::Bool
+                                           ? m_context->getSCC()
+                                           : m_context->getVCC();
 
                 co_yield Instruction::Label(topLabel);
                 co_yield generate(body, coords);
@@ -372,10 +370,9 @@ namespace rocRoller
                 co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock For Loop");
                 auto [conditionRegisterType, conditionVariableType]
                     = Expression::resultType(op.condition);
-                auto conditionResult
-                    = IsSpecial(conditionRegisterType) && conditionVariableType == DataType::Bool
-                          ? m_context->getSCC()
-                          : m_context->getVCC();
+                auto conditionResult = conditionVariableType == DataType::Bool
+                                           ? m_context->getSCC()
+                                           : m_context->getVCC();
                 co_yield Expression::generate(
                     conditionResult, m_fastArith(op.condition), m_context);
                 co_yield m_context->brancher()->branchIfZero(

@@ -145,6 +145,16 @@ namespace rocRoller
             return std::make_shared<Expression>(MultiplyAdd{a, b, c});
         }
 
+        inline ExpressionPtr addShiftL(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
+        {
+            return std::make_shared<Expression>(AddShiftL{a, b, c});
+        }
+
+        inline ExpressionPtr shiftLAdd(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
+        {
+            return std::make_shared<Expression>(ShiftLAdd{a, b, c});
+        }
+
         inline ExpressionPtr conditional(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
         {
             return std::make_shared<Expression>(Conditional{a, b, c});

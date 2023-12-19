@@ -235,11 +235,7 @@ namespace rocRoller
                 case Register::Type::Literal:
                     return {Register::Type::Literal, DataType::Bool};
                 case Register::Type::Scalar:
-                    if(inputVarType == DataType::Int32 || inputVarType == DataType::UInt32
-                       || inputVarType == DataType::Bool)
-                        return {Register::Type::SCC, DataType::Bool};
-                    else
-                        return {Register::Type::Scalar, DataType::Bool32};
+                    return {Register::Type::Scalar, DataType::Bool};
                 case Register::Type::Vector:
                     return {Register::Type::Scalar, DataType::Bool32};
 
@@ -294,7 +290,9 @@ namespace rocRoller
                 }
                 Throw<FatalError>("Invalid register types for logical: ",
                                   ShowValue(lhsVal.regType),
-                                  ShowValue(rhsVal.regType));
+                                  ShowValue(lhsVal.varType),
+                                  ShowValue(rhsVal.regType),
+                                  ShowValue(rhsVal.varType));
             }
 
             ResultType operator()(Conditional const& expr) const

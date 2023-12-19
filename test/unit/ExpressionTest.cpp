@@ -847,30 +847,66 @@ namespace ExpressionTest
 
     TEST_F(ExpressionTest, ResultType)
     {
+        auto vgprFloat
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Float, 1)
+                  ->expression();
+        auto vgprDouble
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Double, 1)
+                  ->expression();
         auto vgprInt32
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1)
                   ->expression();
         auto vgprInt64
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int64, 1)
                   ->expression();
-        auto vgprFloat
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Float, 1)
+        auto vgprUInt32
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::UInt32, 1)
                   ->expression();
+        auto vgprUInt64
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::UInt64, 1)
+                  ->expression();
+        auto vgprHalf
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Half, 1)
+                  ->expression();
+        auto vgprHalfx2
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Halfx2, 1)
+                  ->expression();
+        auto vgprBool32
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Bool32, 1)
+                  ->expression();
+        auto vgprBool
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Bool, 1)
+                  ->expression();
+
         auto sgprFloat
             = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Float, 1)
-                  ->expression();
-        auto vgprDouble
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Double, 1)
                   ->expression();
         auto sgprDouble
             = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Double, 1)
                   ->expression();
-
         auto sgprInt32
             = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Int32, 1)
                   ->expression();
         auto sgprInt64
             = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Int64, 1)
+                  ->expression();
+        auto sgprUInt32
+            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::UInt32, 1)
+                  ->expression();
+        auto sgprUInt64
+            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::UInt64, 1)
+                  ->expression();
+        auto sgprHalf
+            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Half, 1)
+                  ->expression();
+        auto sgprHalfx2
+            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Halfx2, 1)
+                  ->expression();
+        auto sgprBool32
+            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Bool32, 1)
+                  ->expression();
+        auto sgprBool
+            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Bool, 1)
                   ->expression();
 
         auto agprFloat = Register::Value::Placeholder(
@@ -885,14 +921,30 @@ namespace ExpressionTest
         auto litFloat  = Expression::literal(5.0f);
         auto litDouble = Expression::literal(5.0);
 
+        Expression::ResultType rVgprFloat{Register::Type::Vector, DataType::Float};
+        Expression::ResultType rVgprDouble{Register::Type::Vector, DataType::Double};
         Expression::ResultType rVgprInt32{Register::Type::Vector, DataType::Int32};
         Expression::ResultType rVgprInt64{Register::Type::Vector, DataType::Int64};
+        Expression::ResultType rVgprUInt32{Register::Type::Vector, DataType::UInt32};
+        Expression::ResultType rVgprUInt64{Register::Type::Vector, DataType::UInt64};
+        Expression::ResultType rVgprHalf{Register::Type::Vector, DataType::Half};
+        Expression::ResultType rVgprHalfx2{Register::Type::Vector, DataType::Halfx2};
+        Expression::ResultType rVgprBool32{Register::Type::Vector, DataType::Bool32};
+
+        Expression::ResultType rSgprFloat{Register::Type::Scalar, DataType::Float};
+        Expression::ResultType rSgprDouble{Register::Type::Scalar, DataType::Double};
         Expression::ResultType rSgprInt32{Register::Type::Scalar, DataType::Int32};
         Expression::ResultType rSgprInt64{Register::Type::Scalar, DataType::Int64};
-        Expression::ResultType rVgprFloat{Register::Type::Vector, DataType::Float};
-        Expression::ResultType rSgprFloat{Register::Type::Scalar, DataType::Float};
-        Expression::ResultType rVgprDouble{Register::Type::Vector, DataType::Double};
-        Expression::ResultType rSgprDouble{Register::Type::Scalar, DataType::Double};
+        Expression::ResultType rSgprUInt32{Register::Type::Scalar, DataType::UInt32};
+        Expression::ResultType rSgprUInt64{Register::Type::Scalar, DataType::UInt64};
+        Expression::ResultType rSgprHalf{Register::Type::Scalar, DataType::Half};
+        Expression::ResultType rSgprHalfx2{Register::Type::Scalar, DataType::Halfx2};
+        Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32};
+        Expression::ResultType rSgprBool{Register::Type::Scalar, DataType::Bool};
+
+        Expression::ResultType rVCC{Register::Type::VCC, DataType::Bool32};
+        Expression::ResultType rSCC{Register::Type::SCC, DataType::Bool};
+
         Expression::ResultType rAgprFloat{Register::Type::Accumulator, DataType::Float};
         Expression::ResultType rAgprDouble{Register::Type::Accumulator, DataType::Double};
 
@@ -928,19 +980,243 @@ namespace ExpressionTest
         EXPECT_EQ(rSgprInt64, resultType(sgprInt64 + litInt32));
         EXPECT_EQ(rSgprInt64, resultType(sgprInt64 + sgprInt32));
 
-        Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32};
-        Expression::ResultType rSpecialBool{Register::Type::SCC, DataType::Bool};
-
         EXPECT_EQ(rSgprBool32, resultType(vgprFloat > vgprFloat));
         EXPECT_EQ(rSgprBool32, resultType(sgprFloat < vgprFloat));
         EXPECT_EQ(rSgprBool32, resultType(sgprDouble <= vgprDouble));
         EXPECT_EQ(rSgprBool32, resultType(sgprInt32 <= vgprInt32));
         EXPECT_EQ(rSgprBool32, resultType(litInt32 > vgprInt64));
-        EXPECT_EQ(rSgprBool32, resultType(litInt32 <= sgprInt64));
-        EXPECT_EQ(rSpecialBool, resultType(litInt32 >= sgprInt32));
+        EXPECT_EQ(rSgprBool, resultType(litInt32 <= sgprInt64));
+        EXPECT_EQ(rSgprBool, resultType(litInt32 >= sgprInt32));
 
         EXPECT_ANY_THROW(resultType(sgprDouble <= vgprFloat));
         EXPECT_ANY_THROW(resultType(vgprInt32 > vgprFloat));
+
+        typedef Expression::ExpressionPtr unary_func_t(Expression::ExpressionPtr);
+        typedef Expression::ExpressionPtr binary_func_t(Expression::ExpressionPtr,
+                                                        Expression::ExpressionPtr);
+        typedef Expression::ExpressionPtr ternary_func_t(
+            Expression::ExpressionPtr, Expression::ExpressionPtr, Expression::ExpressionPtr);
+
+        constexpr std::array<unary_func_t*, 4> arithmeticUnaryOps{
+            // Expression::operator+,
+            Expression::operator-, // cppcheck-suppress syntaxError
+            Expression::magicMultiple,
+            Expression::magicShifts,
+            Expression::magicSign,
+        };
+
+        for(auto const& op : arithmeticUnaryOps)
+        {
+            EXPECT_EQ(rVgprFloat, resultType(op(vgprFloat)));
+            EXPECT_EQ(rVgprDouble, resultType(op(vgprDouble)));
+            EXPECT_EQ(rVgprInt32, resultType(op(vgprInt32)));
+            EXPECT_EQ(rVgprInt64, resultType(op(vgprInt64)));
+            EXPECT_EQ(rVgprUInt32, resultType(op(vgprUInt32)));
+            EXPECT_EQ(rVgprUInt64, resultType(op(vgprUInt64)));
+            EXPECT_EQ(rVgprHalf, resultType(op(vgprHalf)));
+            EXPECT_EQ(rVgprHalfx2, resultType(op(vgprHalfx2)));
+            EXPECT_EQ(rVgprBool32, resultType(op(vgprBool32)));
+
+            EXPECT_EQ(rSgprFloat, resultType(op(sgprFloat)));
+            EXPECT_EQ(rSgprDouble, resultType(op(sgprDouble)));
+            EXPECT_EQ(rSgprInt32, resultType(op(sgprInt32)));
+            EXPECT_EQ(rSgprInt64, resultType(op(sgprInt64)));
+            EXPECT_EQ(rSgprUInt32, resultType(op(sgprUInt32)));
+            EXPECT_EQ(rSgprUInt64, resultType(op(sgprUInt64)));
+            EXPECT_EQ(rSgprHalf, resultType(op(sgprHalf)));
+            EXPECT_EQ(rSgprHalfx2, resultType(op(sgprHalfx2)));
+            EXPECT_EQ(rSgprBool32, resultType(op(sgprBool32)));
+        }
+
+        constexpr std::array<binary_func_t*, 5> comparisionOps{
+            Expression::operator<,
+            Expression::operator<=,
+            Expression::operator>,
+            Expression::operator>=,
+            Expression::operator==,
+            // Expression::operator!=
+        };
+
+        for(auto const& op : comparisionOps)
+        {
+            EXPECT_EQ(rSgprBool32, resultType(op(vgprFloat, vgprFloat)));
+            EXPECT_EQ(rSgprBool32, resultType(op(vgprDouble, vgprDouble)));
+            EXPECT_EQ(rSgprBool32, resultType(op(vgprInt32, vgprInt32)));
+            EXPECT_EQ(rSgprBool32, resultType(op(vgprInt64, vgprInt64)));
+            EXPECT_EQ(rSgprBool32, resultType(op(vgprUInt32, vgprUInt32)));
+            EXPECT_EQ(rSgprBool32, resultType(op(vgprUInt64, vgprUInt64)));
+            EXPECT_EQ(rSgprBool32, resultType(op(vgprHalf, vgprHalf)));
+            EXPECT_EQ(rSgprBool32, resultType(op(vgprHalfx2, vgprHalfx2)));
+            EXPECT_EQ(rSgprBool32, resultType(op(vgprBool32, vgprBool32)));
+            EXPECT_EQ(rSgprBool32, resultType(op(vgprBool, vgprBool)));
+
+            EXPECT_EQ(rSgprBool, resultType(op(sgprFloat, sgprFloat)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprDouble, sgprDouble)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprInt32, sgprInt32)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprInt64, sgprInt64)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprUInt32, sgprUInt32)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprUInt64, sgprUInt64)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprHalf, sgprHalf)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprHalfx2, sgprHalfx2)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprBool32, sgprBool32)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprBool, sgprBool)));
+        }
+
+        constexpr std::array<binary_func_t*, 7> arithmeticBinOps{
+            Expression::operator*,
+            Expression::operator/,
+            Expression::operator%,
+            Expression::operator+,
+            Expression::operator-,
+            Expression::operator>>,
+            Expression::arithmeticShiftR,
+        };
+
+        for(auto const& op : arithmeticBinOps)
+        {
+            EXPECT_EQ(rVgprFloat, resultType(op(vgprFloat, vgprFloat)));
+            EXPECT_EQ(rVgprDouble, resultType(op(vgprDouble, vgprDouble)));
+            EXPECT_EQ(rVgprInt32, resultType(op(vgprInt32, vgprInt32)));
+            EXPECT_EQ(rVgprInt64, resultType(op(vgprInt64, vgprInt64)));
+            EXPECT_EQ(rVgprUInt32, resultType(op(vgprUInt32, vgprUInt32)));
+            EXPECT_EQ(rVgprUInt64, resultType(op(vgprUInt64, vgprUInt64)));
+            EXPECT_EQ(rVgprHalf, resultType(op(vgprHalf, vgprHalf)));
+            EXPECT_EQ(rVgprHalfx2, resultType(op(vgprHalfx2, vgprHalfx2)));
+            EXPECT_EQ(rVgprBool32, resultType(op(vgprBool32, vgprBool32)));
+
+            EXPECT_EQ(rSgprFloat, resultType(op(sgprFloat, sgprFloat)));
+            EXPECT_EQ(rSgprDouble, resultType(op(sgprDouble, sgprDouble)));
+            EXPECT_EQ(rSgprInt32, resultType(op(sgprInt32, sgprInt32)));
+            EXPECT_EQ(rSgprInt64, resultType(op(sgprInt64, sgprInt64)));
+            EXPECT_EQ(rSgprUInt32, resultType(op(sgprUInt32, sgprUInt32)));
+            EXPECT_EQ(rSgprUInt64, resultType(op(sgprUInt64, sgprUInt64)));
+            EXPECT_EQ(rSgprHalf, resultType(op(sgprHalf, sgprHalf)));
+            EXPECT_EQ(rSgprHalfx2, resultType(op(sgprHalfx2, sgprHalfx2)));
+            EXPECT_EQ(rSgprBool32, resultType(op(sgprBool32, sgprBool32)));
+        }
+
+        constexpr std::array<binary_func_t*, 1> logicalOps{
+            // Expression::operator!,
+            Expression::operator&&,
+            // Expression::operator||,
+        };
+
+        for(auto const& op : logicalOps)
+        {
+            EXPECT_ANY_THROW(resultType(op(vgprFloat, vgprFloat)));
+            EXPECT_ANY_THROW(resultType(op(vgprDouble, vgprDouble)));
+            EXPECT_ANY_THROW(resultType(op(vgprInt32, vgprInt32)));
+            EXPECT_ANY_THROW(resultType(op(vgprInt64, vgprInt64)));
+            EXPECT_ANY_THROW(resultType(op(vgprUInt32, vgprUInt32)));
+            EXPECT_ANY_THROW(resultType(op(vgprUInt64, vgprUInt64)));
+            EXPECT_ANY_THROW(resultType(op(vgprHalf, vgprHalf)));
+            EXPECT_ANY_THROW(resultType(op(vgprHalfx2, vgprHalfx2)));
+            EXPECT_ANY_THROW(resultType(op(vgprBool32, vgprBool32)));
+            EXPECT_ANY_THROW(resultType(op(vgprBool, vgprBool)));
+
+            EXPECT_ANY_THROW(resultType(op(sgprFloat, sgprFloat)));
+            EXPECT_ANY_THROW(resultType(op(sgprDouble, sgprDouble)));
+            EXPECT_ANY_THROW(resultType(op(sgprInt32, sgprInt32)));
+            EXPECT_ANY_THROW(resultType(op(sgprInt64, sgprInt64)));
+            EXPECT_ANY_THROW(resultType(op(sgprUInt32, sgprUInt32)));
+            // TODO: broken
+            EXPECT_EQ(rSCC, resultType(op(sgprUInt64, sgprUInt64)));
+            EXPECT_ANY_THROW(resultType(op(sgprHalf, sgprHalf)));
+            EXPECT_ANY_THROW(resultType(op(sgprHalfx2, sgprHalfx2)));
+            EXPECT_EQ(rSCC, resultType(op(sgprBool32, sgprBool32)));
+            EXPECT_EQ(rSCC, resultType(op(sgprBool, sgprBool)));
+        }
+
+        constexpr std::array<binary_func_t*, 5> bitwiseBinOps{// Expression::operator~,
+                                                              Expression::operator<<,
+                                                              Expression::logicalShiftR,
+                                                              Expression::operator&,
+                                                              Expression::operator^,
+                                                              Expression::operator| };
+
+        for(auto const& op : bitwiseBinOps)
+        {
+            EXPECT_EQ(rVgprFloat, resultType(op(vgprFloat, vgprFloat)));
+            EXPECT_EQ(rVgprDouble, resultType(op(vgprDouble, vgprDouble)));
+            EXPECT_EQ(rVgprInt32, resultType(op(vgprInt32, vgprInt32)));
+            EXPECT_EQ(rVgprInt64, resultType(op(vgprInt64, vgprInt64)));
+            EXPECT_EQ(rVgprUInt32, resultType(op(vgprUInt32, vgprUInt32)));
+            EXPECT_EQ(rVgprHalf, resultType(op(vgprHalf, vgprHalf)));
+            EXPECT_EQ(rVgprHalfx2, resultType(op(vgprHalfx2, vgprHalfx2)));
+            EXPECT_EQ(rVgprBool32, resultType(op(vgprBool32, vgprBool32)));
+
+            EXPECT_EQ(rSgprFloat, resultType(op(sgprFloat, sgprFloat)));
+            EXPECT_EQ(rSgprDouble, resultType(op(sgprDouble, sgprDouble)));
+            EXPECT_EQ(rSgprInt32, resultType(op(sgprInt32, sgprInt32)));
+            EXPECT_EQ(rSgprInt64, resultType(op(sgprInt64, sgprInt64)));
+            EXPECT_EQ(rSgprUInt32, resultType(op(sgprUInt32, sgprUInt32)));
+            EXPECT_EQ(rSgprHalf, resultType(op(sgprHalf, sgprHalf)));
+            EXPECT_EQ(rSgprHalfx2, resultType(op(sgprHalfx2, sgprHalfx2)));
+            EXPECT_EQ(rSgprBool32, resultType(op(sgprBool32, sgprBool32)));
+        }
+
+        constexpr std::array<ternary_func_t*, 3> arithmeticTernaryOps{
+            Expression::multiplyAdd, Expression::addShiftL, Expression::shiftLAdd};
+
+        for(auto const& op : arithmeticTernaryOps)
+        {
+            EXPECT_EQ(rVgprFloat, resultType(op(vgprFloat, vgprFloat, vgprFloat)));
+            EXPECT_EQ(rVgprDouble, resultType(op(vgprDouble, vgprDouble, vgprDouble)));
+            EXPECT_EQ(rVgprInt32, resultType(op(vgprInt32, vgprInt32, vgprInt32)));
+            EXPECT_EQ(rVgprInt64, resultType(op(vgprInt64, vgprInt64, vgprInt64)));
+            EXPECT_EQ(rVgprUInt32, resultType(op(vgprUInt32, vgprUInt32, vgprUInt32)));
+            EXPECT_EQ(rVgprHalf, resultType(op(vgprHalf, vgprHalf, vgprHalf)));
+            EXPECT_EQ(rVgprHalfx2, resultType(op(vgprHalfx2, vgprHalfx2, vgprHalfx2)));
+            EXPECT_EQ(rVgprBool32, resultType(op(vgprBool32, vgprBool32, vgprBool32)));
+
+            EXPECT_EQ(rSgprFloat, resultType(op(sgprFloat, sgprFloat, sgprFloat)));
+            EXPECT_EQ(rSgprDouble, resultType(op(sgprDouble, sgprDouble, sgprDouble)));
+            EXPECT_EQ(rSgprInt32, resultType(op(sgprInt32, sgprInt32, sgprInt32)));
+            EXPECT_EQ(rSgprInt64, resultType(op(sgprInt64, sgprInt64, sgprInt64)));
+            EXPECT_EQ(rSgprUInt32, resultType(op(sgprUInt32, sgprUInt32, sgprUInt32)));
+            EXPECT_EQ(rSgprHalf, resultType(op(sgprHalf, sgprHalf, sgprHalf)));
+            EXPECT_EQ(rSgprHalfx2, resultType(op(sgprHalfx2, sgprHalfx2, sgprHalfx2)));
+            EXPECT_EQ(rSgprBool32, resultType(op(sgprBool32, sgprBool32, sgprBool32)));
+        }
+
+        {
+            auto op = Expression::conditional;
+            EXPECT_EQ(rVgprFloat, resultType(op(sgprBool, vgprFloat, vgprFloat)));
+            EXPECT_EQ(rVgprDouble, resultType(op(sgprBool, vgprDouble, vgprDouble)));
+            EXPECT_EQ(rVgprInt32, resultType(op(sgprBool, vgprInt32, vgprInt32)));
+            EXPECT_EQ(rVgprInt64, resultType(op(sgprBool, vgprInt64, vgprInt64)));
+            EXPECT_EQ(rVgprUInt32, resultType(op(sgprBool, vgprUInt32, vgprUInt32)));
+            EXPECT_EQ(rVgprHalf, resultType(op(sgprBool, vgprHalf, vgprHalf)));
+            EXPECT_EQ(rVgprHalfx2, resultType(op(sgprBool, vgprHalfx2, vgprHalfx2)));
+            EXPECT_EQ(rVgprBool32, resultType(op(sgprBool, vgprBool32, vgprBool32)));
+
+            EXPECT_EQ(rVgprFloat, resultType(op(vgprBool, vgprFloat, vgprFloat)));
+            EXPECT_EQ(rVgprDouble, resultType(op(vgprBool, vgprDouble, vgprDouble)));
+            EXPECT_EQ(rVgprInt32, resultType(op(vgprBool, vgprInt32, vgprInt32)));
+            EXPECT_EQ(rVgprInt64, resultType(op(vgprBool, vgprInt64, vgprInt64)));
+            EXPECT_EQ(rVgprUInt32, resultType(op(vgprBool, vgprUInt32, vgprUInt32)));
+            EXPECT_EQ(rVgprHalf, resultType(op(vgprBool, vgprHalf, vgprHalf)));
+            EXPECT_EQ(rVgprHalfx2, resultType(op(vgprBool, vgprHalfx2, vgprHalfx2)));
+            EXPECT_EQ(rVgprBool32, resultType(op(vgprBool, vgprBool32, vgprBool32)));
+
+            EXPECT_EQ(rSgprFloat, resultType(op(sgprBool, sgprFloat, sgprFloat)));
+            EXPECT_EQ(rSgprDouble, resultType(op(sgprBool, sgprDouble, sgprDouble)));
+            EXPECT_EQ(rSgprInt32, resultType(op(sgprBool, sgprInt32, sgprInt32)));
+            EXPECT_EQ(rSgprInt64, resultType(op(sgprBool, sgprInt64, sgprInt64)));
+            EXPECT_EQ(rSgprUInt32, resultType(op(sgprBool, sgprUInt32, sgprUInt32)));
+            EXPECT_EQ(rSgprHalf, resultType(op(sgprBool, sgprHalf, sgprHalf)));
+            EXPECT_EQ(rSgprHalfx2, resultType(op(sgprBool, sgprHalfx2, sgprHalfx2)));
+            EXPECT_EQ(rSgprBool32, resultType(op(sgprBool, sgprBool32, sgprBool32)));
+
+            EXPECT_EQ(rVgprFloat, resultType(op(vgprBool, sgprFloat, sgprFloat)));
+            EXPECT_EQ(rVgprDouble, resultType(op(vgprBool, sgprDouble, sgprDouble)));
+            EXPECT_EQ(rVgprInt32, resultType(op(vgprBool, sgprInt32, sgprInt32)));
+            EXPECT_EQ(rVgprInt64, resultType(op(vgprBool, sgprInt64, sgprInt64)));
+            EXPECT_EQ(rVgprUInt32, resultType(op(vgprBool, sgprUInt32, sgprUInt32)));
+            EXPECT_EQ(rVgprHalf, resultType(op(vgprBool, sgprHalf, sgprHalf)));
+            EXPECT_EQ(rVgprHalfx2, resultType(op(vgprBool, sgprHalfx2, sgprHalfx2)));
+            EXPECT_EQ(rVgprBool32, resultType(op(vgprBool, sgprBool32, sgprBool32)));
+        }
     }
 
     TEST_F(ExpressionTest, EvaluateNoArgs)
@@ -2139,13 +2415,10 @@ namespace ExpressionTest
         int64_t c    = 9;
         namespace Ex = Expression;
 
-        auto r    = a > b ? b : c;
+        auto r    = a ? b : c;
         auto expr = [](Expression::ExpressionPtr a,
                        Expression::ExpressionPtr b,
-                       Expression::ExpressionPtr c) {
-            auto d = a > b;
-            return Ex::conditional(d, b, c);
-        };
+                       Expression::ExpressionPtr c) { return Ex::conditional(a, b, c); };
         basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
     }
 
@@ -2156,13 +2429,10 @@ namespace ExpressionTest
         int64_t c    = 9;
         namespace Ex = Expression;
 
-        auto r    = a < b ? b : c;
+        auto r    = a ? b : c;
         auto expr = [](Expression::ExpressionPtr a,
                        Expression::ExpressionPtr b,
-                       Expression::ExpressionPtr c) {
-            auto d = a < b;
-            return Ex::conditional(d, b, c);
-        };
+                       Expression::ExpressionPtr c) { return Ex::conditional(a, b, c); };
         basicTernaryExpression(expr, a, b, c, r, true, Register::Type::Scalar);
     }
 
