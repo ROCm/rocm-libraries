@@ -29,8 +29,9 @@
 // CUDA C++ development with NVC++, NVCC, and supported host compilers.
 // These interfaces are not guaranteed to be stable.
 
-#ifndef __NV_TARGET_H
-#define __NV_TARGET_H
+#ifndef __NV_TARGET_LIBHIPCXX_H
+#define __NV_TARGET_LIBHIPCXX_H
+
 
 #if defined(__HIPCC__) || defined(__HIPCC_RTC__)
 #  define _NV_COMPILER_HIPCC
@@ -233,4 +234,4 @@ using detail::provides;
 
 #include <nv/detail/__target_macros>
 
-#endif // __NV_TARGET_H
+#endif // __NV_TARGET_LIBHIPCXX_H

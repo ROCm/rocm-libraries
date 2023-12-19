@@ -25,8 +25,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef _NV__TARGET_MACROS
-#define _NV__TARGET_MACROS
+#ifndef _NV__TARGET_MACROS_LIBHIPCXX
+#define _NV__TARGET_MACROS_LIBHIPCXX
 
 #include <nv/detail/__preprocessor>
 
@@ -571,4 +571,4 @@
 
 #endif
 
-#endif // _NV__TARGET_MACROS
+#endif // _NV__TARGET_MACROS_LIBHIPCXX
