@@ -130,6 +130,8 @@ namespace rocRollerTest
 
     TEST_F(KernelTest, Metadata)
     {
+#ifdef ROCROLLER_TESTS_USE_YAML_CPP
+
         AssemblyKernel k(m_context, "hello_world");
 
         m_context->schedule(k.amdgpu_metadata());
@@ -158,10 +160,14 @@ amdhsa.kernels:
         )";
 
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected));
+#else
+        GTEST_SKIP() << "Skipping NormalizedYAML test (Only implemented for yaml-cpp)";
+#endif
     }
 
     TEST_F(KernelTest, ArgumentsAndRegisters)
     {
+#ifdef ROCROLLER_TESTS_USE_YAML_CPP
         AssemblyKernel k(m_context, "hello_world");
         k.addArgument({"foo", {DataType::Float}});
         k.setWorkgroupSize({16, 8, 2});
@@ -203,6 +209,9 @@ amdhsa.kernels:
 .end_amdgpu_metadata)";
 
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected));
+#else
+        GTEST_SKIP() << "Skipping NormalizedYAML test (Only implemented for yaml-cpp)";
+#endif
     }
 
     TEST_P(ARCH_KernelTest, WholeKernel)

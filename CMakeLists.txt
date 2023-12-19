@@ -7,8 +7,6 @@ option(ROCROLLER_ENABLE_TIMERS         "Enable rocRoller timer code." OFF)
 option(ROCROLLER_TESTS_SKIP_GUIDEPOSTS "Skip compiling guidepost tests." OFF)
 option(ROCROLLER_TESTS_SKIP_SLOW       "Skip slow tests (currently only Python tests)" ON)
 option(ROCROLLER_USE_HIP               "Use HIP within the rocRoller." ON)
-option(ROCROLLER_USE_LLVM              "Use LLVM for generating metadata." OFF)
-option(ROCROLLER_USE_YAML_CPP          "Use yaml-cpp for generating metadata." ON)
 option(SKIP_CPPCHECK                   "Skip CPPCHECK." ON)
 
 option(CODE_ANALYSIS                    "When building, don't query for tests etc." OFF)
@@ -16,7 +14,13 @@ option(CODE_COVERAGE                    "Build with code coverage flags (clang o
 
 option(BUILD_SHARED_LIBS                "Build using shared libraries" ON)
 
+set(YAML_BACKEND "YAML_CPP" CACHE STRING "YAML backend used for serialization")
+set_property(CACHE YAML_BACKEND PROPERTY STRINGS YAML_CPP LLVM)
+
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  if (YAML_BACKEND STREQUAL "LLVM")
+    message(FATAL_ERROR "LLVM YAML backend not supported with Clang")
+  endif()
   set(COROUTINES_COMPILE_OPTION -fcoroutines-ts)
   set(EXTRA_COMPILE_OPTIONS -stdlib=libc++)
   set(EXTRA_LINK_OPTIONS -lc++ -lm -fuse-ld=lld)
@@ -37,10 +41,6 @@ if(CODE_COVERAGE)
   set(ROCROLLER_TESTS_SKIP_SLOW OFF)
   set(EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_COMPILE_OPTIONS})
   set(EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_LINK_OPTIONS})
-endif()
-
-if((ROCROLLER_USE_LLVM AND ROCROLLER_USE_YAML_CPP) OR (NOT ROCROLLER_USE_LLVM AND NOT ROCROLLER_USE_YAML_CPP))
-  message(FATAL_ERROR "Use either LLVM or yaml-cpp backend for serialization, not both.")
 endif()
 
 include(FetchContent)
@@ -92,7 +92,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(msgpack)
 
-if(ROCROLLER_USE_YAML_CPP)
+if(YAML_BACKEND STREQUAL "YAML_CPP")
   FetchContent_Declare(
     yaml-cpp
     URL https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.7.0.zip
@@ -103,6 +103,10 @@ if(ROCROLLER_USE_YAML_CPP)
   target_link_options(yaml-cpp PUBLIC ${EXTRA_LINK_OPTIONS})
   set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
   set_property(TARGET yaml-cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-shadow")
+
+  add_definitions(-DROCROLLER_USE_YAML_CPP)
+elseif(YAML_BACKEND STREQUAL "LLVM")
+  add_definitions(-DROCROLLER_USE_LLVM)
 endif()
 
 target_compile_options(gtest PUBLIC ${EXTRA_COMPILE_OPTIONS})
@@ -395,15 +399,8 @@ target_include_directories(rocroller SYSTEM PUBLIC
 #   PUBLIC fmt::fmt
 # )
 
-if(ROCROLLER_USE_YAML_CPP)
-  target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_YAML_CPP)
+if(YAML_BACKEND STREQUAL "YAML_CPP")
   target_link_libraries(rocroller PUBLIC yaml-cpp)
-
-  target_compile_definitions(GPUArchitectureGenerator PUBLIC ROCROLLER_USE_YAML_CPP)
-endif()
-if(ROCROLLER_USE_LLVM)
-  target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLVM)
-  target_compile_definitions(GPUArchitectureGenerator PUBLIC ROCROLLER_USE_LLVM)
 endif()
 
 target_link_libraries(rocroller PRIVATE ${llvm_libs} lldELF PUBLIC msgpackc-cxx)
@@ -547,7 +544,7 @@ if(ROCROLLER_USE_HIP)
   target_compile_definitions(rocRollerTests PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
 endif()
 
-if(ROCROLLER_USE_YAML_CPP)
+if(YAML_BACKEND STREQUAL "YAML_CPP")
   target_compile_definitions(rocRollerTests PUBLIC ROCROLLER_TESTS_USE_YAML_CPP)
 endif()
 
@@ -583,13 +580,6 @@ target_link_libraries(
   gmock
   msgpackc-cxx
 )
-
-if(ROCROLLER_USE_YAML_CPP)
-  target_compile_definitions(ArchGenTests PUBLIC ROCROLLER_USE_YAML_CPP)
-endif()
-if(ROCROLLER_USE_LLVM)
-  target_compile_definitions(ArchGenTests PUBLIC ROCROLLER_USE_LLVM)
-endif()
 
 string(LENGTH "${CMAKE_CURRENT_SOURCE_DIR}" PATH_PREFIX_LENGTH)
 target_compile_definitions(rocroller PUBLIC ROCROLLER_PATH_PREFIX_LENGTH=${PATH_PREFIX_LENGTH})

@@ -96,6 +96,7 @@ inline std::string NormalizedYAML(std::string doc)
         throw std::runtime_error(emitter.GetLastError());
     return emitter.c_str();
 #else
+    // Normalization not implemented
     return doc;
 #endif
 }

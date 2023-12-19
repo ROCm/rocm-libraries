@@ -135,6 +135,7 @@ namespace rocRollerTest
 
     TEST(SourceMatcherTest, NormalizedSourceLinesYAMLDoc)
     {
+#ifdef ROCROLLER_TESTS_USE_YAML_CPP
         using ::testing::ElementsAre;
 
         std::string input = R"(
@@ -159,10 +160,14 @@ foo:
 )";
         EXPECT_THAT(Generated(NormalizedSourceLines(input, false)),
                     ElementsAre(".amdgpu_metadata", doc, ".end_amdgpu_metadata"));
+#else
+        GTEST_SKIP() << "Skipping NormalizedYAML test (Only implemented for yaml-cpp)";
+#endif
     }
 
     TEST(SourceMatcherTest, NormalizedSourceLinesUnterminatedYAMLDoc)
     {
+#ifdef ROCROLLER_TESTS_USE_YAML_CPP
         using ::testing::ElementsAre;
 
         std::string input = R"(
@@ -180,10 +185,14 @@ amdhsa.version:
 )";
         EXPECT_THAT(Generated(NormalizedSourceLines(input, false)),
                     ElementsAre(".amdgpu_metadata", doc));
+#else
+        GTEST_SKIP() << "Skipping NormalizedYAML test (Only implemented for yaml-cpp)";
+#endif
     }
 
     TEST(SourceMatcherTest, NormalizedYAML)
     {
+#ifdef ROCROLLER_TESTS_USE_YAML_CPP
         std::string input1 = "{x: 7, y: 2, a: [4,5,6]}";
         std::string input2 = R"(
 x: 7
@@ -213,6 +222,9 @@ y: 2
 
         EXPECT_EQ(NormalizedYAML(input1), NormalizedYAML(NormalizedYAML(input1)));
         EXPECT_EQ(NormalizedYAML(expected), NormalizedYAML(input1));
+#else
+        GTEST_SKIP() << "Skipping NormalizedYAML test (Only implemented for yaml-cpp)";
+#endif
     }
 
     TEST(SourceMatcherTest, MatchesSource)
