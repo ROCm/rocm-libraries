@@ -221,6 +221,14 @@ namespace rocRoller
                                                                    AlgebraicProperty::Commutative};
         };
 
+        struct LogicalOr : Binary
+        {
+            constexpr static inline auto                Type      = Category::Logical;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
+                                                                   AlgebraicProperty::Commutative};
+        };
+
         struct Ternary
         {
             ExpressionPtr lhs, r1hs, r2hs;

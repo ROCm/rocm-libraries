@@ -250,6 +250,13 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(96), 4);
 
+            co_yield generate(
+                s_c, (A < Expression::literal(0)) || (B < Expression::literal(0)), m_context);
+            co_yield m_context->copier()->copy(
+                v_c, s_c->subset({0}), "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 4);
+
             co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
             co_yield generateOp<Expression::Conditional>(v_c, s_c, v_a, v_b);
             co_yield m_context->mem()->store(
@@ -266,7 +273,7 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            size_t const result_size = 26;
+            size_t const result_size = 27;
             auto         d_result    = make_shared_device<int>(result_size);
 
             for(int a : TestValues::int32Values)
@@ -326,6 +333,7 @@ namespace ArithmeticTest
                         EXPECT_EQ(result[25], (a >= b ? a : b))
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
                         ;
+                        EXPECT_EQ(result[26], ((a < 0) || (b < 0)) ? 1 : 0);
                     }
                 }
             }
@@ -571,6 +579,24 @@ namespace ArithmeticTest
                                              Register::Value::Literal(120),
                                              4);
 
+            co_yield generate(s_c, (A <= B) || (B <= A), m_context);
+            co_yield m_context->copier()->copy(
+                v_c, s_c->subset({0}), "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(MemoryInstructions::Flat,
+                                             v_result,
+                                             v_c->subset({0}),
+                                             Register::Value::Literal(132),
+                                             4);
+            co_yield generate(
+                s_c, (A < Expression::literal(0)) || (B > Expression::literal(0)), m_context);
+            co_yield m_context->copier()->copy(
+                v_c, s_c->subset({0}), "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(MemoryInstructions::Flat,
+                                             v_result,
+                                             v_c->subset({0}),
+                                             Register::Value::Literal(136),
+                                             4);
+
             co_yield generateOp<Expression::Conditional>(s_c, s_shift, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
@@ -597,7 +623,7 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            size_t const result_count = 33;
+            size_t const result_count = 36;
             auto         d_result     = make_shared_device<int>(result_count);
 
             for(int a : TestValues::int32Values)
@@ -677,10 +703,10 @@ namespace ArithmeticTest
                         EXPECT_EQ(result[30], ((a < 0) && (b > 0)) ? 1 : 0);
                         EXPECT_EQ(result[31], shift ? a : b)
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
-                        ;
                         EXPECT_EQ(result[32], a >= b ? a : b)
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
-                        ;
+                        EXPECT_EQ(result[33], ((a <= b) || (b <= a)) ? 1 : 0);
+                        EXPECT_EQ(result[34], ((a < 0) || (b > 0)) ? 1 : 0);
                     }
                 }
             }
@@ -970,7 +996,6 @@ namespace ArithmeticTest
                             << "a: " << a << "b: " << b;
                         EXPECT_EQ(result[24], a >= b ? a : b)
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
-                        ;
                     }
                 }
             }

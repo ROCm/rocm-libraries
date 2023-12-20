@@ -1119,7 +1119,7 @@ namespace ExpressionTest
             EXPECT_ANY_THROW(resultType(op(sgprInt32, sgprInt32)));
             EXPECT_ANY_THROW(resultType(op(sgprInt64, sgprInt64)));
             EXPECT_ANY_THROW(resultType(op(sgprUInt32, sgprUInt32)));
-            // TODO: broken
+
             EXPECT_EQ(rSCC, resultType(op(sgprUInt64, sgprUInt64)));
             EXPECT_ANY_THROW(resultType(op(sgprHalf, sgprHalf)));
             EXPECT_ANY_THROW(resultType(op(sgprHalfx2, sgprHalfx2)));

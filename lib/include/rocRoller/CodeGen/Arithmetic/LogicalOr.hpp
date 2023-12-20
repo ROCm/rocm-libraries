@@ -6,18 +6,18 @@ namespace rocRoller
 {
     // GetGenerator function will return the Generator to use based on the provided arguments.
     template <>
-    std::shared_ptr<BinaryArithmeticGenerator<Expression::LogicalAnd>>
-        GetGenerator<Expression::LogicalAnd>(Register::ValuePtr dst,
-                                             Register::ValuePtr lhs,
-                                             Register::ValuePtr rhs);
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::LogicalOr>>
+        GetGenerator<Expression::LogicalOr>(Register::ValuePtr dst,
+                                            Register::ValuePtr lhs,
+                                            Register::ValuePtr rhs);
 
     // Templated Generator class based on the register type and datatype.
     template <Register::Type REGISTER_TYPE, DataType DATATYPE>
-    class LogicalAndGenerator : public BinaryArithmeticGenerator<Expression::LogicalAnd>
+    class LogicalOrGenerator : public BinaryArithmeticGenerator<Expression::LogicalOr>
     {
     public:
-        LogicalAndGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
-            : BinaryArithmeticGenerator<Expression::LogicalAnd>(c)
+        LogicalOrGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+            : BinaryArithmeticGenerator<Expression::LogicalOr>(c)
         {
         }
 
@@ -32,15 +32,11 @@ namespace rocRoller
             std::tie(ctx, registerType, dataType) = arg;
 
             if constexpr(DATATYPE == DataType::Bool32)
-            {
                 return registerType == REGISTER_TYPE
                        && (dataType == DataType::Bool || dataType == DataType::Bool32
                            || dataType == DataType::Raw32);
-            }
             else
-            {
                 return registerType == REGISTER_TYPE && dataType == DATATYPE;
-            }
         }
 
         // Build function required by Component system to return the generator.
@@ -49,7 +45,7 @@ namespace rocRoller
             if(!Match(arg))
                 return nullptr;
 
-            return std::make_shared<LogicalAndGenerator<REGISTER_TYPE, DATATYPE>>(std::get<0>(arg));
+            return std::make_shared<LogicalOrGenerator<REGISTER_TYPE, DATATYPE>>(std::get<0>(arg));
         }
 
         // Method to generate instructions
@@ -61,9 +57,9 @@ namespace rocRoller
 
     // Specializations for supported Register Type / DataType combinations
     template <>
-    Generator<Instruction> LogicalAndGenerator<Register::Type::Scalar, DataType::Bool32>::generate(
+    Generator<Instruction> LogicalOrGenerator<Register::Type::Scalar, DataType::Bool32>::generate(
         Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
     template <>
-    Generator<Instruction> LogicalAndGenerator<Register::Type::Scalar, DataType::UInt64>::generate(
+    Generator<Instruction> LogicalOrGenerator<Register::Type::Scalar, DataType::UInt64>::generate(
         Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
 }

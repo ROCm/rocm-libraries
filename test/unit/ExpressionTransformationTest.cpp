@@ -66,6 +66,10 @@ TEST_F(ExpressionTransformationTest, Simplify)
     EXPECT_EQ(Expression::toString(simplify((v < one) && False)), "0b");
     EXPECT_EQ(Expression::toString(simplify((v < one) && True)), "LessThan(v0:I, 1i)");
 
+    // logical or
+    EXPECT_EQ(Expression::toString(simplify((v < one) || True)), "1b");
+    EXPECT_EQ(Expression::toString(simplify((v < one) || False)), "LessThan(v0:I, 1i)");
+
     // shiftL
     EXPECT_EQ(Expression::toString(simplify(v << zero)), "v0:I");
     EXPECT_EQ(Expression::toString(simplify((one << one) << one)), "4i");

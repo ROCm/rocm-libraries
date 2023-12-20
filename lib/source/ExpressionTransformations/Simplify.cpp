@@ -183,6 +183,35 @@ namespace rocRoller
         };
 
         template <>
+        struct SimplifyByConstant<LogicalOr>
+        {
+            template <typename RHS>
+            requires(CBoolean<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                if(rhs == true)
+                    return literal(true);
+                if(rhs == false)
+                    return m_lhs;
+                return nullptr;
+            }
+
+            template <typename RHS>
+            requires(!CBoolean<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                return nullptr;
+            }
+
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            {
+                m_lhs = lhs;
+                return visit(*this, rhs);
+            }
+
+        private:
+            ExpressionPtr m_lhs;
+        };
+
+        template <>
         struct SimplifyByConstantLHS<LogicalAnd>
         {
             ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)

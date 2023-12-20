@@ -38,6 +38,7 @@ namespace rocRoller
         struct LessThanEqual;
         struct Equal;
         struct LogicalAnd;
+        struct LogicalOr;
 
         struct MagicMultiple;
         struct MagicShifts;
@@ -74,6 +75,7 @@ namespace rocRoller
             LessThanEqual,
             Equal,
             LogicalAnd,
+            LogicalOr,
 
             // --- Unary Operations ---
             MagicMultiple,

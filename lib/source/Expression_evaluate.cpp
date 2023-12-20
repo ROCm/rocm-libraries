@@ -326,6 +326,7 @@ namespace rocRoller
         SIMPLE_BINARY_OP(LessThanEqual, <=);
         SIMPLE_BINARY_OP(Equal, ==);
         SIMPLE_BINARY_OP(LogicalAnd, &&);
+        SIMPLE_BINARY_OP(LogicalOr, ||);
 
         template <>
         struct OperationEvaluatorVisitor<MultiplyHigh> : public BinaryEvaluatorVisitor<MultiplyHigh>
