@@ -68,6 +68,7 @@ namespace ExpressionTest
         auto expr9  = -expr2;
         auto expr10 = Expression::fuseTernary(expr1 << b);
         auto expr11 = Expression::fuseTernary((a << b) + b);
+        auto expr12 = expr6 != expr7;
 
         auto sexpr1  = Expression::toString(expr1);
         auto sexpr2  = Expression::toString(expr2);
@@ -80,6 +81,7 @@ namespace ExpressionTest
         auto sexpr9  = Expression::toString(expr9);
         auto sexpr10 = Expression::toString(expr10);
         auto sexpr11 = Expression::toString(expr11);
+        auto sexpr12 = Expression::toString(expr12);
 
         EXPECT_EQ(sexpr1, "Add(1i, 2i)");
         EXPECT_EQ(sexpr2, "Multiply(2i, Add(1i, 2i))");
@@ -92,6 +94,7 @@ namespace ExpressionTest
         EXPECT_EQ(sexpr9, "Negate(" + sexpr2 + ")");
         EXPECT_EQ(sexpr10, "AddShiftL(1i, 2i, 2i)");
         EXPECT_EQ(sexpr11, "ShiftLAdd(1i, 2i, 2i)");
+        EXPECT_EQ(sexpr12, "NotEqual(" + sexpr6 + ", " + sexpr7 + ")");
 
         Expression::EvaluationTimes expectedTimes{Expression::EvaluationTime::KernelExecute};
         EXPECT_EQ(expectedTimes, Expression::evaluationTimes(expr8));
@@ -1028,14 +1031,12 @@ namespace ExpressionTest
             EXPECT_EQ(rSgprBool32, resultType(op(sgprBool32)));
         }
 
-        constexpr std::array<binary_func_t*, 5> comparisionOps{
-            Expression::operator<,
-            Expression::operator<=,
-            Expression::operator>,
-            Expression::operator>=,
-            Expression::operator==,
-            // Expression::operator!=
-        };
+        constexpr std::array<binary_func_t*, 6> comparisionOps{Expression::operator<,
+                                                               Expression::operator<=,
+                                                               Expression::operator>,
+                                                               Expression::operator>=,
+                                                               Expression::operator==,
+                                                               Expression::operator!= };
 
         for(auto const& op : comparisionOps)
         {
@@ -1338,7 +1339,7 @@ namespace ExpressionTest
         EXPECT_EQ(true, std::get<bool>(Expression::evaluate(exprSix >= exprOne)));
         EXPECT_EQ(false, std::get<bool>(Expression::evaluate(exprSix < exprOne)));
         EXPECT_EQ(false, std::get<bool>(Expression::evaluate(exprSix <= exprOne)));
-        // EXPECT_EQ(true,  std::get<bool>(Expression::evaluate(exprSix != exprOne)));
+        EXPECT_EQ(true, std::get<bool>(Expression::evaluate(exprSix != exprOne)));
 
         EXPECT_ANY_THROW(resultType(exprSix > exprOne));
         EXPECT_ANY_THROW(resultType(exprSix >= exprOne));
@@ -1354,7 +1355,7 @@ namespace ExpressionTest
         EXPECT_EQ(true, std::get<bool>(Expression::evaluate(one <= exprOne)));
         EXPECT_EQ(true, std::get<bool>(Expression::evaluate(one == exprOne)));
         EXPECT_EQ(true, std::get<bool>(Expression::evaluate(one >= exprOne)));
-        // EXPECT_EQ(false,  std::get<bool>(Expression::evaluate(one != exprOne)));
+        EXPECT_EQ(false, std::get<bool>(Expression::evaluate(one != exprOne)));
 
         auto trueExp = std::make_shared<Expression::Expression>(true);
         EXPECT_EQ(true, std::get<bool>(Expression::evaluate(trueExp == (one >= exprOne))));

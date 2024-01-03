@@ -37,6 +37,7 @@ namespace rocRoller
         struct LessThan;
         struct LessThanEqual;
         struct Equal;
+        struct NotEqual;
         struct LogicalAnd;
         struct LogicalOr;
 
@@ -74,6 +75,7 @@ namespace rocRoller
             LessThan,
             LessThanEqual,
             Equal,
+            NotEqual,
             LogicalAnd,
             LogicalOr,
 

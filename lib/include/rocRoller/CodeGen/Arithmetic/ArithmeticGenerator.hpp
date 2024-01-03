@@ -305,6 +305,7 @@ namespace rocRoller
 #include "MultiplyAdd.hpp"
 #include "MultiplyHigh.hpp"
 #include "Negate.hpp"
+#include "NotEqual.hpp"
 #include "ShiftL.hpp"
 #include "ShiftLAdd.hpp"
 #include "Subtract.hpp"

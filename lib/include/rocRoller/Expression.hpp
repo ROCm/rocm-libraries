@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2021-2023 Advanced Micro Devices, Inc.
+ * Copyright 2021-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -207,6 +207,13 @@ namespace rocRoller
         };
 
         struct Equal : Binary
+        {
+            constexpr static inline auto                Type      = Category::Comparison;
+            constexpr static inline auto                EvalTimes = EvaluationTimes::All();
+            constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Commutative};
+        };
+
+        struct NotEqual : Binary
         {
             constexpr static inline auto                Type      = Category::Comparison;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();

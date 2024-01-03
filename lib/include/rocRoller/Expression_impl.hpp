@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2021-2023 Advanced Micro Devices, Inc.
+ * Copyright 2021-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -123,6 +123,11 @@ namespace rocRoller
         inline ExpressionPtr operator==(ExpressionPtr a, ExpressionPtr b)
         {
             return std::make_shared<Expression>(Equal{a, b});
+        }
+
+        inline ExpressionPtr operator!=(ExpressionPtr a, ExpressionPtr b)
+        {
+            return std::make_shared<Expression>(NotEqual{a, b});
         }
 
         inline ExpressionPtr operator&&(ExpressionPtr a, ExpressionPtr b)
@@ -300,6 +305,7 @@ namespace rocRoller
         EXPRESSION_INFO(LessThan);
         EXPRESSION_INFO(LessThanEqual);
         EXPRESSION_INFO(Equal);
+        EXPRESSION_INFO(NotEqual);
         EXPRESSION_INFO(LogicalAnd);
         EXPRESSION_INFO(LogicalOr);
 

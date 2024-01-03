@@ -263,6 +263,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/Convert.cpp
  lib/source/CodeGen/Arithmetic/Divide.cpp
  lib/source/CodeGen/Arithmetic/Equal.cpp
+ lib/source/CodeGen/Arithmetic/NotEqual.cpp
  lib/source/CodeGen/Arithmetic/GreaterThan.cpp
  lib/source/CodeGen/Arithmetic/GreaterThanEqual.cpp
  lib/source/CodeGen/Arithmetic/LessThan.cpp

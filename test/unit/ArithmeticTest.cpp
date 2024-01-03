@@ -250,6 +250,11 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(96), 4);
 
+            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
+            co_yield generateOp<Expression::Conditional>(v_c, s_c, v_a, v_b);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(100), 4);
+
             co_yield generate(
                 s_c, (A < Expression::literal(0)) || (B < Expression::literal(0)), m_context);
             co_yield m_context->copier()->copy(
@@ -257,10 +262,14 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 4);
 
-            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
-            co_yield generateOp<Expression::Conditional>(v_c, s_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(100), 4);
+            co_yield generateOp<Expression::NotEqual>(s_c, v_a, v_b);
+            co_yield m_context->copier()->copy(
+                v_c, s_c->subset({0}), "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(MemoryInstructions::Flat,
+                                             v_result,
+                                             v_c->subset({0}),
+                                             Register::Value::Literal(108),
+                                             4);
         };
 
         m_context->schedule(kb());
@@ -273,7 +282,7 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            size_t const result_size = 27;
+            size_t const result_size = 28;
             auto         d_result    = make_shared_device<int>(result_size);
 
             for(int a : TestValues::int32Values)
@@ -334,6 +343,7 @@ namespace ArithmeticTest
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
                         ;
                         EXPECT_EQ(result[26], ((a < 0) || (b < 0)) ? 1 : 0);
+                        EXPECT_EQ(result[27], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
                     }
                 }
             }
@@ -608,6 +618,11 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 4);
+
+            co_yield generateOp<Expression::NotEqual>(s_c, s_a, s_b);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(140), 4);
         };
 
         m_context->schedule(kb());
@@ -707,6 +722,7 @@ namespace ArithmeticTest
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
                         EXPECT_EQ(result[33], ((a <= b) || (b <= a)) ? 1 : 0);
                         EXPECT_EQ(result[34], ((a < 0) || (b > 0)) ? 1 : 0);
+                        EXPECT_EQ(result[35], (a != b ? 1 : 0));
                     }
                 }
             }
@@ -909,6 +925,11 @@ namespace ArithmeticTest
             co_yield generateOp<Expression::Conditional>(v_c, s_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(192), 8);
+
+            co_yield generateOp<Expression::NotEqual>(s_c, v_a, v_b);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(200), 8);
         };
 
         m_context->schedule(kb());
@@ -934,7 +955,7 @@ namespace ArithmeticTest
                 {
                     for(uint64_t shift : TestValues::shiftValues)
                     {
-                        std::vector<int64_t> result(25);
+                        std::vector<int64_t> result(26);
                         auto                 d_result = make_shared_device<int64_t>(result.size());
 
                         KernelArguments runtimeArgs;
@@ -996,6 +1017,7 @@ namespace ArithmeticTest
                             << "a: " << a << "b: " << b;
                         EXPECT_EQ(result[24], a >= b ? a : b)
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
+                        EXPECT_EQ(result[25], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
                     }
                 }
             }
@@ -1196,6 +1218,11 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(192), 8);
+
+            co_yield generateOp<Expression::NotEqual>(s_c, s_a, s_b);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(200), 8);
         };
 
         m_context->schedule(kb());
@@ -1211,7 +1238,7 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            size_t const result_count = 25;
+            size_t const result_count = 26;
             auto         d_result     = make_shared_device<int64_t>(result_count);
             static_assert(sizeof(int64_t) == 8);
 
@@ -1277,6 +1304,7 @@ namespace ArithmeticTest
                             << "a: " << a << ", b: " << b;
                         EXPECT_EQ(result[24], shift ? a : b)
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
+                        EXPECT_EQ(result[25], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
                     }
                 }
             }
@@ -1432,6 +1460,11 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(
                 v_r, s_r->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->storeFlat(v_cond_result, v_r->subset({0}), 16, 4);
+
+            co_yield generateOp<Expression::NotEqual>(s_r, v_a, v_b);
+            co_yield m_context->copier()->copy(
+                v_r, s_r->subset({0}), "Move result to vgpr to store.");
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_r->subset({0}), 20, 4);
         };
 
         m_context->schedule(kb());
@@ -1450,7 +1483,7 @@ namespace ArithmeticTest
             CommandKernel commandKernel(m_context);
 
             auto d_result      = make_shared_device<float>(6);
-            auto d_cond_result = make_shared_device<int>(5);
+            auto d_cond_result = make_shared_device<int>(6);
 
             for(float a : TestValues::floatValues)
             {
@@ -1475,7 +1508,7 @@ namespace ArithmeticTest
                                               hipMemcpyDefault),
                                     HasHipSuccess(0));
 
-                        std::vector<int> cond_result(5);
+                        std::vector<int> cond_result(6);
                         ASSERT_THAT(hipMemcpy(cond_result.data(),
                                               d_cond_result.get(),
                                               cond_result.size() * sizeof(int),
@@ -1499,6 +1532,7 @@ namespace ArithmeticTest
                         EXPECT_EQ(cond_result[2], (a < b ? 1 : 0));
                         EXPECT_EQ(cond_result[3], (a <= b ? 1 : 0));
                         EXPECT_EQ(cond_result[4], (a == b ? 1 : 0));
+                        EXPECT_EQ(cond_result[5], (a != b ? 1 : 0));
                     }
                 }
             }
@@ -1858,6 +1892,14 @@ namespace ArithmeticTest
                                              v_c->subset({0}),
                                              Register::Value::Literal(16),
                                              4);
+
+            co_yield generateOp<Expression::NotEqual>(s_c, v_a, v_b);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(MemoryInstructions::Flat,
+                                             v_cond_result,
+                                             v_c->subset({0}),
+                                             Register::Value::Literal(20),
+                                             4);
         };
 
         m_context->schedule(kb());
@@ -1876,7 +1918,7 @@ namespace ArithmeticTest
             CommandKernel commandKernel(m_context);
 
             auto d_result      = make_shared_device<double>(5);
-            auto d_cond_result = make_shared_device<int>(5);
+            auto d_cond_result = make_shared_device<int>(6);
 
             for(double a : TestValues::doubleValues)
             {
@@ -1897,7 +1939,7 @@ namespace ArithmeticTest
                                           hipMemcpyDefault),
                                 HasHipSuccess(0));
 
-                    std::vector<int> cond_result(5);
+                    std::vector<int> cond_result(6);
                     ASSERT_THAT(hipMemcpy(cond_result.data(),
                                           d_cond_result.get(),
                                           cond_result.size() * sizeof(int),
@@ -1914,6 +1956,7 @@ namespace ArithmeticTest
                     EXPECT_EQ(cond_result[2], (a < b ? 1 : 0));
                     EXPECT_EQ(cond_result[3], (a <= b ? 1 : 0));
                     EXPECT_EQ(cond_result[4], (a == b ? 1 : 0));
+                    EXPECT_EQ(cond_result[5], (a != b ? 1 : 0));
                 }
             }
         }
