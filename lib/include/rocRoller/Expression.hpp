@@ -376,6 +376,12 @@ namespace rocRoller
             constexpr static inline auto EvalTimes = EvaluationTimes::All();
         };
 
+        struct LogicalNot : Unary
+        {
+            constexpr static inline auto Type      = Category::Logical;
+            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+        };
+
         /**
          * @brief Register value from the coordinate graph.
          *
@@ -410,8 +416,10 @@ namespace rocRoller
         ExpressionPtr operator<=(ExpressionPtr a, ExpressionPtr b);
         ExpressionPtr operator==(ExpressionPtr a, ExpressionPtr b);
         ExpressionPtr operator&&(ExpressionPtr a, ExpressionPtr b);
+        ExpressionPtr operator||(ExpressionPtr a, ExpressionPtr b);
 
         ExpressionPtr operator-(ExpressionPtr a);
+        ExpressionPtr logicalNot(ExpressionPtr a);
 
         ExpressionPtr multiplyHigh(ExpressionPtr a, ExpressionPtr b);
 

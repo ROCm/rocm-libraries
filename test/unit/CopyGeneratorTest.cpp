@@ -94,6 +94,8 @@ namespace CopyGeneratorTest
         m_context->schedule(m_context->copier()->conditionalCopy(i32sr, i32sr));
         m_context->schedule(m_context->copier()->conditionalCopy(i32sr, literal));
 
+        m_context->schedule(m_context->copier()->copy(i32vr, m_context->getSCC()));
+
         std::string expectedOutput = R"(
             s_mov_b32 s0, s0
             s_mov_b32 s0, 20
@@ -127,6 +129,8 @@ namespace CopyGeneratorTest
 
             s_cmov_b32 s0, s0
             s_cmov_b32 s0, 20
+
+            v_mov_b32 v0, scc
             )";
 
         EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));

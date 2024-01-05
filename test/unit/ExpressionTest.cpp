@@ -1121,11 +1121,11 @@ namespace ExpressionTest
             EXPECT_ANY_THROW(resultType(op(sgprInt64, sgprInt64)));
             EXPECT_ANY_THROW(resultType(op(sgprUInt32, sgprUInt32)));
 
-            EXPECT_EQ(rSCC, resultType(op(sgprUInt64, sgprUInt64)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprUInt64, sgprUInt64)));
             EXPECT_ANY_THROW(resultType(op(sgprHalf, sgprHalf)));
             EXPECT_ANY_THROW(resultType(op(sgprHalfx2, sgprHalfx2)));
-            EXPECT_EQ(rSCC, resultType(op(sgprBool32, sgprBool32)));
-            EXPECT_EQ(rSCC, resultType(op(sgprBool, sgprBool)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprBool32, sgprBool32)));
+            EXPECT_EQ(rSgprBool, resultType(op(sgprBool, sgprBool)));
         }
 
         constexpr std::array<binary_func_t*, 5> bitwiseBinOps{// Expression::operator~,
@@ -1500,6 +1500,37 @@ namespace ExpressionTest
                           std::get<bool>(Expression::evaluate(expr_le, args)));
                 EXPECT_EQ(aVal == (aVal + bVal),
                           std::get<bool>(Expression::evaluate(expr_eq, args)));
+            }
+        }
+    }
+
+    TEST_F(ExpressionTest, EvaluateLogical)
+    {
+        auto command = std::make_shared<Command>();
+        auto ca      = command->allocateArgument({DataType::Int32, PointerType::Value});
+        auto cb      = command->allocateArgument({DataType::Int32, PointerType::Value});
+
+        auto a = std::make_shared<Expression::Expression>(ca);
+        auto b = std::make_shared<Expression::Expression>(cb);
+
+        auto vals_negate        = logicalNot(a);
+        auto vals_double_negate = logicalNot(logicalNot(a));
+        auto vals_and           = a && b;
+        auto vals_or            = a || b;
+
+        for(auto aVal : TestValues::int32Values)
+        {
+            for(auto bVal : TestValues::int32Values)
+            {
+                KernelArguments runtimeArgs;
+                runtimeArgs.append("a", aVal);
+                runtimeArgs.append("b", bVal);
+                auto args = runtimeArgs.runtimeArguments();
+
+                EXPECT_EQ(!aVal, std::get<bool>(Expression::evaluate(vals_negate, args)));
+                EXPECT_EQ(!!aVal, std::get<bool>(Expression::evaluate(vals_double_negate, args)));
+                EXPECT_EQ(aVal && bVal, std::get<bool>(Expression::evaluate(vals_and, args)));
+                EXPECT_EQ(aVal || bVal, std::get<bool>(Expression::evaluate(vals_or, args)));
             }
         }
     }

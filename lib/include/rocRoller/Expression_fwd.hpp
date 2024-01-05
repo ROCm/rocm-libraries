@@ -40,6 +40,7 @@ namespace rocRoller
         struct NotEqual;
         struct LogicalAnd;
         struct LogicalOr;
+        struct LogicalNot;
 
         struct MagicMultiple;
         struct MagicShifts;
@@ -84,6 +85,7 @@ namespace rocRoller
             MagicShifts,
             MagicSign,
             Negate,
+            LogicalNot,
 
             // --- Ternary Operations ---
             AddShiftL,

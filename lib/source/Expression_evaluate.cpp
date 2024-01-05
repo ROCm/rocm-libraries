@@ -502,6 +502,16 @@ namespace rocRoller
         };
 
         template <>
+        struct OperationEvaluatorVisitor<LogicalNot> : public UnaryEvaluatorVisitor<LogicalNot>
+        {
+            template <typename T>
+            bool evaluate(T const& arg) const
+            {
+                return !arg;
+            }
+        };
+
+        template <>
         struct OperationEvaluatorVisitor<AddShiftL> : public TernaryEvaluatorVisitor<AddShiftL>
         {
             template <typename T>

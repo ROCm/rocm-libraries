@@ -155,13 +155,19 @@ namespace rocRoller
                 }
             }
             // ACCVGPR -> Vector
-            else
+            else if(src->regType() == Register::Type::Accumulator)
             {
                 for(size_t i = 0; i < src->registerCount(); ++i)
                 {
                     co_yield_(Instruction(
                         "v_accvgpr_read", {dest->subset({i})}, {src->subset({i})}, {}, comment));
                 }
+            }
+            // SCC -> Vector
+            else
+            {
+                AssertFatal(dest->registerCount() == 1, "Untested register count");
+                co_yield_(Instruction("v_mov_b32", {dest->subset({0})}, {src}, {}, comment));
             }
         }
         // Scalar -> Scalar
