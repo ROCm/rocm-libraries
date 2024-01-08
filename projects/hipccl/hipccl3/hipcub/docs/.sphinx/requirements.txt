@@ -100,9 +100,7 @@ pygments==2.15.0
 pyjson5==1.6.2
     # via doxysphinx
 pyjwt[crypto]==2.6.0
-    # via
-    #   pygithub
-    #   pyjwt
+    # via pygithub
 pynacl==1.5.0
     # via pygithub
 pyparsing==3.0.9
@@ -118,10 +116,8 @@ requests==2.31.0
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api-reference]==0.27.0
-    # via
-    #   -r requirements.in
-    #   rocm-docs-core
+rocm-docs-core[api_reference]==0.30.3
+    # via -r requirements.in
 smmap==5.0.0
     # via gitdb
 snowballstemmer==2.2.0
