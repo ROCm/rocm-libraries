@@ -149,7 +149,7 @@ struct key_comparator<Key,
 template<class Key, class Value, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_value_comparator
 {
-    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
+    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs) const
     {
         return key_comparator<Key, Descending, StartBit, EndBit>()(lhs.first, rhs.first);
     }

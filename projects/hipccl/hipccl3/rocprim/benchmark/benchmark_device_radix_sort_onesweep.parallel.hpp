@@ -49,6 +49,8 @@ constexpr const char* radix_rank_algorithm_name(rp::block_radix_rank_algorithm a
             return "block_radix_rank_algorithm::basic_memoize";
         case rp::block_radix_rank_algorithm::match: return "block_radix_rank_algorithm::match";
     }
+
+    return ""; // unknown algorithm
 }
 
 template<typename Config>
@@ -403,7 +405,7 @@ struct device_radix_sort_onesweep_benchmark_generator
                       RadixRankAlgorithm,
                       std::enable_if_t<(!is_buildable<ItemsPerThread, RadixRankAlgorithm>())>>
     {
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>&) {}
+        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>&) const {}
     };
 
     template<rocprim::block_radix_rank_algorithm RadixRankAlgorithm>

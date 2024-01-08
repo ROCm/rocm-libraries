@@ -67,10 +67,9 @@ struct custom_test_type
 
     template<class U>
     ROCPRIM_HOST_DEVICE inline
-        custom_test_type(const custom_test_type<U>& other)
+        custom_test_type(const custom_test_type<U>& other) :
+            x(static_cast<T>(other.x)), y(static_cast<T>(other.y))
     {
-        x = static_cast<T>(other.x);
-        y = static_cast<T>(other.y);
     }
 
     ROCPRIM_HOST_DEVICE inline

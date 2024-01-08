@@ -145,7 +145,7 @@ struct static_run_valid
 {
     static void run(std::vector<T>& output,
                     std::vector<T>& output_reductions,
-                    std::vector<T>& expected_reductions,
+                    const std::vector<T>& expected_reductions,
                     T* device_output,
                     T* device_output_reductions,
                     const unsigned int valid_items,

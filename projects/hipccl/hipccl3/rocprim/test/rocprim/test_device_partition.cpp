@@ -871,11 +871,11 @@ public:
         : current_index_(0), modulo_(modulo), size_(size), incorrect_flag_(incorrect_flag)
     {}
 
-    ROCPRIM_HOST_DEVICE bool operator==(const check_modulo_iterator& rhs)
+    ROCPRIM_HOST_DEVICE bool operator==(const check_modulo_iterator& rhs) const
     {
         return current_index_ == rhs.current_index_;
     }
-    ROCPRIM_HOST_DEVICE bool operator!=(const check_modulo_iterator& rhs)
+    ROCPRIM_HOST_DEVICE bool operator!=(const check_modulo_iterator& rhs) const
     {
         return !(*this == rhs);
     }
@@ -883,16 +883,16 @@ public:
     {
         return value_type(current_index_, modulo_, size_, incorrect_flag_);
     }
-    ROCPRIM_HOST_DEVICE reference operator[](const difference_type distance) const
+    ROCPRIM_HOST_DEVICE reference operator[](const difference_type& distance) const
     {
         return *(*this + distance);
     }
-    ROCPRIM_HOST_DEVICE check_modulo_iterator& operator+=(const difference_type rhs)
+    ROCPRIM_HOST_DEVICE check_modulo_iterator& operator+=(const difference_type& rhs)
     {
         current_index_ += rhs;
         return *this;
     }
-    ROCPRIM_HOST_DEVICE check_modulo_iterator& operator-=(const difference_type rhs)
+    ROCPRIM_HOST_DEVICE check_modulo_iterator& operator-=(const difference_type& rhs)
     {
         current_index_ -= rhs;
         return *this;
@@ -901,11 +901,11 @@ public:
     {
         return current_index_ - rhs.current_index_;
     }
-    ROCPRIM_HOST_DEVICE check_modulo_iterator operator+(const difference_type rhs) const
+    ROCPRIM_HOST_DEVICE check_modulo_iterator operator+(const difference_type& rhs) const
     {
         return check_modulo_iterator(*this) += rhs;
     }
-    ROCPRIM_HOST_DEVICE check_modulo_iterator operator-(const difference_type rhs) const
+    ROCPRIM_HOST_DEVICE check_modulo_iterator operator-(const difference_type& rhs) const
     {
         return check_modulo_iterator(*this) -= rhs;
     }

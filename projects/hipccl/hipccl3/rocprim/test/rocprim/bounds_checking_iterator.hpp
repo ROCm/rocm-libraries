@@ -91,7 +91,7 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE inline
-    reference operator[](difference_type n) const
+    reference operator[](const difference_type& n) const
     {
         if(((ptr_ + n) < start_ptr_) || ((ptr_ + n) >= start_ptr_ + size_))
         {
@@ -101,28 +101,28 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE inline
-    bounds_checking_iterator operator+(difference_type distance) const
+    bounds_checking_iterator operator+(const difference_type& distance) const
     {
         auto i = ptr_ + distance;
         return bounds_checking_iterator(i, start_ptr_, out_of_bounds_flag_, size_);
     }
 
     ROCPRIM_HOST_DEVICE inline
-    bounds_checking_iterator& operator+=(difference_type distance)
+    bounds_checking_iterator& operator+=(const difference_type& distance)
     {
         ptr_ += distance;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE inline
-    bounds_checking_iterator operator-(difference_type distance) const
+    bounds_checking_iterator operator-(const difference_type& distance) const
     {
         auto i = ptr_ - distance;
         return bounds_checking_iterator(i, start_ptr_, out_of_bounds_flag_, size_);
     }
 
     ROCPRIM_HOST_DEVICE inline
-    bounds_checking_iterator& operator-=(difference_type distance)
+    bounds_checking_iterator& operator-=(const difference_type& distance)
     {
         ptr_ -= distance;
         return *this;
