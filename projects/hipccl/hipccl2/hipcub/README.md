@@ -7,7 +7,7 @@ environment, hipCUB uses the rocPRIM library as the backend.  However, on CUDA p
 
 ## Documentation
 
-Information about the library API and other user topics can be found in the [hipCUB documentation](https://hipcub.readthedocs.io/en/latest).
+Information about the library API and other user topics can be found in the [hipCUB documentation](https://rocm.docs.amd.com/projects/hipCUB/en/latest/index.html).
 
 ## Requirements
 
