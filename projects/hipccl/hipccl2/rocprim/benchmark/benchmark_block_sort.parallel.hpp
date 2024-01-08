@@ -187,11 +187,11 @@ public:
     static constexpr unsigned int warmup_size       = 5;
     static constexpr bool         debug_synchronous = false;
 
-    auto dispatch_block_sort(std::false_type /*stable_sort*/,
+    static auto dispatch_block_sort(std::false_type /*stable_sort*/,
                              size_t            size,
                              const hipStream_t stream,
                              KeyType*          d_input,
-                             KeyType*          d_output) const
+                             KeyType*          d_output)
     {
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(
@@ -204,11 +204,11 @@ public:
             d_output);
     }
 
-    auto dispatch_block_sort(std::true_type /*stable_sort*/,
+    static auto dispatch_block_sort(std::true_type /*stable_sort*/,
                              size_t            size,
                              const hipStream_t stream,
                              KeyType*          d_input,
-                             KeyType*          d_output) const
+                             KeyType*          d_output)
     {
         hipLaunchKernelGGL(HIP_KERNEL_NAME(stable_sort_kernel<KeyType,
                                                               ValueType,

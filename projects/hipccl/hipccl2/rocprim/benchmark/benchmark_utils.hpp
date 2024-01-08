@@ -467,7 +467,7 @@ public:
         static format storage = human;
         return storage;
     }
-    static void set_format(std::string argument)
+    static void set_format(const std::string& argument)
     {
         format result = human;
         if(argument == "json")

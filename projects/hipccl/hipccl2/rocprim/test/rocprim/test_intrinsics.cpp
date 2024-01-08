@@ -448,14 +448,14 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
 
             // Calculate expected results on host
             std::vector<T> expected(size, test_type_helper<T>::zero());
-            for(size_t i = 0; i < input.size()/logical_warp_size; i++)
+            for(size_t j = 0; j < input.size()/logical_warp_size; j++)
             {
-                int src_lane = src_lanes[i];
-                for(size_t j = 0; j < logical_warp_size; j++)
+                int src_lane = src_lanes[j];
+                for(size_t k = 0; k < logical_warp_size; k++)
                 {
-                    size_t index = j + logical_warp_size * i;
+                    size_t index = k + logical_warp_size * j;
                     if(src_lane >= int(logical_warp_size) || src_lane < 0) src_lane = index;
-                    expected[index] = input[src_lane + logical_warp_size * i];
+                    expected[index] = input[src_lane + logical_warp_size * j];
                 }
             }
 
@@ -493,9 +493,9 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
                 )
             );
 
-            for(size_t i = 0; i < output.size(); i++)
+            for(size_t j = 0; j < output.size(); j++)
             {
-                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+                ASSERT_EQ(output[j], expected[j]) << "where index = " << j;
             }
         }
         hipFree(device_data);
@@ -952,7 +952,7 @@ TYPED_TEST(RocprimIntrinsicsTests, WarpPermute)
 
 template<unsigned int LabelBits>
 __global__ void match_any_kernel(max_lane_mask_type* output,
-                                 unsigned int*       input,
+                                 const unsigned int* input,
                                  max_lane_mask_type  active_lanes,
                                  max_lane_mask_type  lane_predicates)
 {
@@ -1075,7 +1075,7 @@ TEST(RocprimIntrinsicsTests, MatchAny)
 }
 
 __global__ void
-    ballot_kernel(max_lane_mask_type* output, unsigned int* input, max_lane_mask_type active_lanes)
+    ballot_kernel(max_lane_mask_type* output, const unsigned int* input, max_lane_mask_type active_lanes)
 {
     const unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
 

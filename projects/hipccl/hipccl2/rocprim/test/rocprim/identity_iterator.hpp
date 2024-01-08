@@ -83,34 +83,34 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE inline
-    reference operator[](difference_type n) const
+    reference operator[](const difference_type& n) const
     {
         return *(ptr_ + n);
     }
 
     ROCPRIM_HOST_DEVICE inline
-    identity_iterator operator+(difference_type distance) const
+    identity_iterator operator+(const difference_type& distance) const
     {
         auto i = ptr_ + distance;
         return identity_iterator(i);
     }
 
     ROCPRIM_HOST_DEVICE inline
-    identity_iterator& operator+=(difference_type distance)
+    identity_iterator& operator+=(const difference_type& distance)
     {
         ptr_ += distance;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE inline
-    identity_iterator operator-(difference_type distance) const
+    identity_iterator operator-(const difference_type& distance) const
     {
         auto i = ptr_ - distance;
         return identity_iterator(i);
     }
 
     ROCPRIM_HOST_DEVICE inline
-    identity_iterator& operator-=(difference_type distance)
+    identity_iterator& operator-=(const difference_type& distance)
     {
         ptr_ -= distance;
         return *this;

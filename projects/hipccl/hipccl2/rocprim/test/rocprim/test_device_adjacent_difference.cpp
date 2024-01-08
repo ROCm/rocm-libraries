@@ -387,11 +387,11 @@ public:
         : current_index_(0), incorrect_flag_(incorrect_flag), counter_(counter)
     {}
 
-    __device__ bool operator==(const check_output_iterator& rhs)
+    __device__ bool operator==(const check_output_iterator& rhs) const
     {
         return current_index_ == rhs.current_index_;
     }
-    __device__ bool operator!=(const check_output_iterator& rhs)
+    __device__ bool operator!=(const check_output_iterator& rhs) const
     {
         return !(*this == rhs);
     }
@@ -399,7 +399,7 @@ public:
     {
         return reference(incorrect_flag_, current_index_, counter_);
     }
-    __device__ reference operator[](const difference_type distance)
+    __device__ reference operator[](const difference_type distance) const
     {
         return *(*this + distance);
     }

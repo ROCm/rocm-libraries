@@ -52,7 +52,7 @@ struct BlockedToStripedOp
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void operator()(warp_exchange_type warp_exchange,
                     T (&items)[ItemsPerThread],
-                    typename warp_exchange_type::storage_type& storage)
+                    typename warp_exchange_type::storage_type& storage) const
     {
         warp_exchange.blocked_to_striped(items, items, storage);
     }
@@ -68,7 +68,7 @@ struct StripedToBlockedOp
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void operator()(warp_exchange_type warp_exchange,
                     T (&items)[ItemsPerThread],
-                    typename warp_exchange_type::storage_type& storage)
+                    typename warp_exchange_type::storage_type& storage) const
     {
         warp_exchange.striped_to_blocked(items, items, storage);
     }
@@ -84,7 +84,7 @@ struct BlockedToStripedShuffleOp
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void operator()(warp_exchange_type warp_exchange,
                     T (&items)[ItemsPerThread],
-                    typename warp_exchange_type::storage_type& /*storage*/)
+                    typename warp_exchange_type::storage_type& /*storage*/) const
     {
         warp_exchange.blocked_to_striped_shuffle(items, items);
     }
@@ -100,7 +100,7 @@ struct StripedToBlockedShuffleOp
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void operator()(warp_exchange_type warp_exchange,
                     T (&items)[ItemsPerThread],
-                    typename warp_exchange_type::storage_type& /*storage*/)
+                    typename warp_exchange_type::storage_type& /*storage*/) const
     {
         warp_exchange.striped_to_blocked_shuffle(items, items);
     }
@@ -118,7 +118,7 @@ struct ScatterToStripedOp
     void operator()(warp_exchange_type warp_exchange,
                     T (&thread_data)[ItemsPerThread],
                     const OffsetT (&ranks)[ItemsPerThread],
-                    typename warp_exchange_type::storage_type& storage)
+                    typename warp_exchange_type::storage_type& storage) const
     {
         warp_exchange.scatter_to_striped(thread_data, thread_data, ranks, storage);
     }

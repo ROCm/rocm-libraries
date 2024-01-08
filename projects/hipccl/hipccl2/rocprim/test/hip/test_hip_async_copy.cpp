@@ -51,12 +51,12 @@ struct PinnedAllocator
         HIP_CHECK(hipHostFree(ptr));
     }
 
-    bool operator==(const PinnedAllocator&)
+    bool operator==(const PinnedAllocator&) const
     {
         return true;
     }
 
-    bool operator!=(const PinnedAllocator& other)
+    bool operator!=(const PinnedAllocator& other) const
     {
         return !(*this == other);
     }

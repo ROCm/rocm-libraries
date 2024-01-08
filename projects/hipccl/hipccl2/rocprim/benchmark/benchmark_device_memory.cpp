@@ -65,7 +65,7 @@ template<class T, unsigned int ItemsPerThread, unsigned int BlockSize>
 struct operation<no_operation, T, ItemsPerThread, BlockSize>
 {
     ROCPRIM_HOST_DEVICE inline
-    void operator()(T (&)[ItemsPerThread], void* = nullptr, unsigned int = 0, T* = nullptr)
+    void operator()(T (&)[ItemsPerThread], void* = nullptr, unsigned int = 0, T* = nullptr) const
     {
         // No operation
     }
@@ -80,7 +80,7 @@ struct operation<custom_operation, T, ItemsPerThread, BlockSize>
     ROCPRIM_HOST_DEVICE inline
     void operator()(T (&input)[ItemsPerThread],
                     void* shared_storage = nullptr, unsigned int shared_storage_size = 0,
-                    T* global_mem_output = nullptr)
+                    T* global_mem_output = nullptr) const
     {
         (void) shared_storage;
         (void) shared_storage_size;
@@ -105,7 +105,7 @@ struct operation<block_scan, T, ItemsPerThread, BlockSize>
     ROCPRIM_HOST_DEVICE inline
     void operator()(T (&input)[ItemsPerThread],
                     void* shared_storage = nullptr, unsigned int shared_storage_size = 0,
-                    T* global_mem_output = nullptr)
+                    T* global_mem_output = nullptr) const
     {
         (void) global_mem_output;
         using block_scan_type = typename rocprim::block_scan<
@@ -419,19 +419,10 @@ void run_benchmark_memcpy(benchmark::State& state,
                            size_t size,
                            const hipStream_t stream)
 {
-    std::vector<T> input;
-    if(std::is_floating_point<T>::value)
-    {
-        input = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-        input = get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
-    }
+    // Allocate device buffers
+    // Note: since this benchmark only tests performance by memcpying between device buffers,
+    // we don't really need to transfer data into these from the host - whatever happens
+    // to be in device memory will do.
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
