@@ -2,7 +2,7 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
-## (Unreleased) hipCUB-2.13.1 for ROCm 6.1.0
+## (Unreleased) hipCUB-3.1.0 for ROCm 6.1.0
 ### Changed
 - CUB backend references CUB and Thrust version 2.1.0.
 - Updated `HIPCUB_HOST_WARP_THREADS` macro definition to match `host_warp_size` changes from rocPRIM 3.0.
@@ -13,19 +13,22 @@ See README.md on how to build the hipCUB documentation using Doxygen.
 ### Added
 - Added interface `DeviceMemcpy::Batched` for batched memcpy from rocPRIM and CUB.
 
-## (Unreleased) hipCUB-2.13.1 for ROCm 5.7.0
+## hipCUB-3.0.0 for ROCm 6.0.0
+### Changed
+- Removed `DOWNLOAD_ROCPRIM`, forcing rocPRIM to download can be done with `DEPENDENCIES_FORCE_DOWNLOAD`.
+
+## hipCUB-2.13.2 for ROCm 5.7.0
 ### Changed
 - CUB backend references CUB and Thrust version 2.0.1.
 - Fixed `DeviceSegmentedReduce::ArgMin` and `DeviceSegmentedReduce::ArgMax` by returning the segment-relative index instead of the absolute one.
 - Fixed `DeviceSegmentedReduce::ArgMin` for inputs where the segment minimum is smaller than the value returned for empty segments. An equivalent fix is applied to `DeviceSegmentedReduce::ArgMax`.
-- Removed `DOWNLOAD_ROCPRIM`, forcing rocPRIM to download can be done with `DEPENDENCIES_FORCE_DOWNLOAD`.
 ### Known Issues
 - `debug_synchronous` no longer works on CUDA platform. `CUB_DEBUG_SYNC` should be used to enable those checks.
 - `DeviceReduce::Sum` does not compile on CUDA platform for mixed extended-floating-point/floating-point InputT and OutputT types.
 - `DeviceHistogram::HistogramEven` fails on CUDA platform for `[LevelT, SampleIteratorT] = [int, int]`.
 - `DeviceHistogram::MultiHistogramEven` fails on CUDA platform for `[LevelT, SampleIteratorT] = [int, int/unsigned short/float/double]` and `[LevelT, SampleIteratorT] = [float, double]`.
 
-## (Unreleased) hipCUB-2.13.1 for ROCm 5.5.0
+## hipCUB-2.13.1 for ROCm 5.5.0
 ### Added
 - Benchmarks for `BlockShuffle`, `BlockLoad`, and `BlockStore`.
 ### Changed
@@ -36,7 +39,7 @@ See README.md on how to build the hipCUB documentation using Doxygen.
 - `BlockRadixRankMatch` is currently broken under the rocPRIM backend.
 - `BlockRadixRankMatch` with a warp size that does not exactly divide the block size is broken under the CUB backend.
 
-## (Unreleased) hipCUB-2.13.0 for ROCm 5.4.0
+## hipCUB-2.13.0 for ROCm 5.4.0
 ### Added
 - CMake functionality to improve build parallelism of the test suite that splits compilation units by
 function or by parameters.
