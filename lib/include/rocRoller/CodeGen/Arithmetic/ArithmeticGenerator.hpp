@@ -287,6 +287,7 @@ namespace rocRoller
 #include "AddShiftL.hpp"
 #include "ArithmeticShiftR.hpp"
 #include "BitwiseAnd.hpp"
+#include "BitwiseNegate.hpp"
 #include "BitwiseOr.hpp"
 #include "BitwiseXor.hpp"
 #include "Conditional.hpp"

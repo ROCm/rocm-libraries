@@ -369,6 +369,12 @@ namespace rocRoller
             constexpr static inline auto EvalTimes = EvaluationTimes::All();
         };
 
+        struct BitwiseNegate : Unary
+        {
+            constexpr static inline auto Type      = Category::Arithmetic;
+            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+        };
+
         template <DataType DATATYPE>
         struct Convert : Unary
         {

@@ -1128,7 +1128,7 @@ namespace ExpressionTest
             EXPECT_EQ(rSgprBool, resultType(op(sgprBool, sgprBool)));
         }
 
-        constexpr std::array<binary_func_t*, 5> bitwiseBinOps{// Expression::operator~,
+        constexpr std::array<binary_func_t*, 6> bitwiseBinOps{[](auto arg, auto _) { return ~arg; },
                                                               Expression::operator<<,
                                                               Expression::logicalShiftR,
                                                               Expression::operator&,
@@ -1620,7 +1620,9 @@ namespace ExpressionTest
         auto a = std::make_shared<Expression::Expression>(ca);
         auto b = std::make_shared<Expression::Expression>(cb);
 
-        auto vals_and = a & b;
+        auto vals_and    = a & b;
+        auto vals_or     = a | b;
+        auto vals_negate = ~a;
 
         auto expr_and = (a + b) & b;
         auto expr_or  = (a + b) | b;
@@ -1635,6 +1637,9 @@ namespace ExpressionTest
                 auto args = runtimeArgs.runtimeArguments();
 
                 EXPECT_EQ(aVal & bVal, std::get<int>(Expression::evaluate(vals_and, args)));
+                EXPECT_EQ(aVal | bVal, std::get<int>(Expression::evaluate(vals_or, args)));
+                EXPECT_EQ(~aVal, std::get<int>(Expression::evaluate(vals_negate, args)));
+
                 EXPECT_EQ((aVal + bVal) & bVal,
                           std::get<int>(Expression::evaluate(expr_and, args)));
                 EXPECT_EQ((aVal + bVal) | bVal, std::get<int>(Expression::evaluate(expr_or, args)));

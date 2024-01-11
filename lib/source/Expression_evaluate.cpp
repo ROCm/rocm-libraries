@@ -492,6 +492,18 @@ namespace rocRoller
         };
 
         template <>
+        struct OperationEvaluatorVisitor<BitwiseNegate>
+            : public UnaryEvaluatorVisitor<BitwiseNegate>
+        {
+            template <typename T>
+            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, T>
+                evaluate(T const& arg) const
+            {
+                return ~arg;
+            }
+        };
+
+        template <>
         struct OperationEvaluatorVisitor<Negate> : public UnaryEvaluatorVisitor<Negate>
         {
             template <typename T>

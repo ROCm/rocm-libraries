@@ -262,6 +262,11 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 4);
 
+            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
+            co_yield generateOp<Expression::Conditional>(v_c, s_c, v_a, v_b);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(100), 4);
+
             co_yield generateOp<Expression::NotEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
@@ -284,6 +289,10 @@ namespace ArithmeticTest
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(116), 4);
+
+            co_yield generate(v_c, ~A, m_context);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(120), 4);
         };
 
         m_context->schedule(kb());
@@ -296,7 +305,7 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            size_t const result_size = 30;
+            size_t const result_size = 31;
             auto         d_result    = make_shared_device<int>(result_size);
 
             for(int a : TestValues::int32Values)
@@ -360,8 +369,8 @@ namespace ArithmeticTest
                         EXPECT_EQ(result[27], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
                         EXPECT_EQ(result[28], !(a < b) ? 1 : 0)
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
-                        ;
                         EXPECT_EQ(result[29], !!(a > b) ? 1 : 0);
+                        EXPECT_EQ(result[30], ~a);
                     }
                 }
             }
@@ -655,6 +664,11 @@ namespace ArithmeticTest
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(148), 4);
+
+            co_yield generate(s_c, ~A, m_context);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(152), 4);
         };
 
         m_context->schedule(kb());
@@ -670,7 +684,7 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            size_t const result_count = 38;
+            size_t const result_count = 39;
             auto         d_result     = make_shared_device<int>(result_count);
 
             for(int a : TestValues::int32Values)
@@ -757,6 +771,7 @@ namespace ArithmeticTest
                         EXPECT_EQ(result[35], (a != b ? 1 : 0));
                         EXPECT_EQ(result[36], !(a < b) ? 1 : 0);
                         EXPECT_EQ(result[37], !!(a > b) ? 1 : 0);
+                        EXPECT_EQ(result[38], ~a);
                     }
                 }
             }
@@ -964,6 +979,10 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(200), 8);
+
+            co_yield generateOp<Expression::BitwiseNegate>(v_c, v_a);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(208), 8);
         };
 
         m_context->schedule(kb());
@@ -989,7 +1008,7 @@ namespace ArithmeticTest
                 {
                     for(uint64_t shift : TestValues::shiftValues)
                     {
-                        std::vector<int64_t> result(26);
+                        std::vector<int64_t> result(27);
                         auto                 d_result = make_shared_device<int64_t>(result.size());
 
                         KernelArguments runtimeArgs;
@@ -1052,6 +1071,8 @@ namespace ArithmeticTest
                         EXPECT_EQ(result[24], a >= b ? a : b)
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
                         EXPECT_EQ(result[25], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
+                        EXPECT_EQ(result[26], ~a)
+                            << "a: " << a << ", b: " << b << ", shift: " << shift;
                     }
                 }
             }
@@ -1257,6 +1278,11 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(200), 8);
+
+            co_yield generateOp<Expression::BitwiseNegate>(s_c, s_a);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(208), 8);
         };
 
         m_context->schedule(kb());
@@ -1272,7 +1298,7 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            size_t const result_count = 26;
+            size_t const result_count = 27;
             auto         d_result     = make_shared_device<int64_t>(result_count);
             static_assert(sizeof(int64_t) == 8);
 
@@ -1339,6 +1365,8 @@ namespace ArithmeticTest
                         EXPECT_EQ(result[24], shift ? a : b)
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
                         EXPECT_EQ(result[25], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
+                        EXPECT_EQ(result[26], ~a)
+                            << "a: " << a << ", b: " << b << ", shift: " << shift;
                     }
                 }
             }

@@ -29,6 +29,7 @@ namespace rocRoller
         struct ShiftL;
         struct LogicalShiftR;
         struct ArithmeticShiftR;
+        struct BitwiseNegate;
         struct BitwiseAnd;
         struct BitwiseOr;
         struct BitwiseXor;
@@ -85,6 +86,7 @@ namespace rocRoller
             MagicShifts,
             MagicSign,
             Negate,
+            BitwiseNegate,
             LogicalNot,
 
             // --- Ternary Operations ---

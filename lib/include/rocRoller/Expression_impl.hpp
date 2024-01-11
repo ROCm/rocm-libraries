@@ -150,6 +150,11 @@ namespace rocRoller
             return std::make_shared<Expression>(Negate{a});
         }
 
+        inline ExpressionPtr operator~(ExpressionPtr a)
+        {
+            return std::make_shared<Expression>(BitwiseNegate{a});
+        }
+
         inline ExpressionPtr multiplyHigh(ExpressionPtr a, ExpressionPtr b)
         {
             return std::make_shared<Expression>(MultiplyHigh{a, b});
@@ -296,6 +301,8 @@ namespace rocRoller
         EXPRESSION_INFO(ShiftL);
         EXPRESSION_INFO(LogicalShiftR);
         EXPRESSION_INFO(ArithmeticShiftR);
+
+        EXPRESSION_INFO(BitwiseNegate);
         EXPRESSION_INFO(BitwiseAnd);
         EXPRESSION_INFO(BitwiseOr);
         EXPRESSION_INFO(BitwiseXor);
