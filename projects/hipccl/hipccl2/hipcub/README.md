@@ -1,8 +1,8 @@
 # hipCUB
 
-hipCUB is a thin wrapper library on top of [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or
+hipCUB is a thin wrapper library on top of [rocPRIM](https://github.com/ROCm/rocPRIM) or
 [CUB](https://github.com/thrust/cub). It enables developers to port a project using the CUB library to the
-[HIP](https://github.com/ROCm-Developer-Tools/HIP) layer to run on AMD hardware. In the [ROCm](https://rocm.github.io/)
+[HIP](https://github.com/ROCm/HIP) layer to run on AMD hardware. In the [ROCm](https://www.github.com/ROCm/ROCm/)
 environment, hipCUB uses the rocPRIM library as the backend.  However, on CUDA platforms it uses CUB instead.
 
 ## Documentation
@@ -14,10 +14,10 @@ Information about the library API and other user topics can be found in the [hip
 * Git
 * CMake (3.16 or later)
 * For AMD GPUs:
-  * AMD [ROCm](https://rocm.github.io/install.html) platform (1.8.0 or later)
-    * Including [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang) compiler, which must be
+  * AMD [ROCm](https://rocm.docs.amd.com/en/latest/) platform (1.8.0 or later)
+    * Including [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang) compiler, which must be
       set as C++ compiler on ROCm platform.
-  * [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library
+  * [rocPRIM](https://github.com/ROCm/rocPRIM) library
     * Automatically downloaded and built by CMake script.
     * Requires CMake 3.16.9 or later.
 * For NVIDIA GPUs:
@@ -41,7 +41,7 @@ Optional:
 ## Build And Install
 
 ```shell
-git clone https://github.com/ROCmSoftwarePlatform/hipCUB.git
+git clone https://github.com/ROCm/hipCUB.git
 
 # Go to hipCUB directory, create and go to the build directory.
 cd hipCUB; mkdir build; cd build
@@ -83,7 +83,7 @@ make package
 
 Initial support for HIP on Windows has been added.  To install, use the provided rmake.py python script:
 ```shell
-git clone https://github.com/ROCmSoftwarePlatform/hipCUB.git
+git clone https://github.com/ROCm/hipCUB.git
 cd hipCUB
 
 # the -i option will install rocPRIM to C:\hipSDK by default
@@ -197,7 +197,7 @@ python3 -m http.server
 
 ## Support
 
-Bugs and feature requests can be reported through [the issue tracker](https://github.com/ROCmSoftwarePlatform/hipCUB/issues).
+Bugs and feature requests can be reported through [the issue tracker](https://github.com/ROCm/hipCUB/issues).
 
 ## Contributions and License
 
