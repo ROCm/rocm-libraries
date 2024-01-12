@@ -9,7 +9,7 @@ develop performant GPU-accelerated code on AMD ROCm platforms.
 * CMake (3.16 or later)
 * AMD [ROCm](https://rocm.docs.amd.com/en/latest/) platform (1.8.2 or later)
   * Including
-    [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang)
+    [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang)
     compiler
 * C++14
 * Python 3.6 or higher (HIP on Windows only, required only for install script)
@@ -54,7 +54,7 @@ You can build and install rocPRIM on Linux or Windows.
 * Linux:
 
   ```shell
-  git clone https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+  git clone https://github.com/ROCm/rocPRIM.git
 
   # Go to rocPRIM directory, create and go to the build directory.
   cd rocPRIM; mkdir build; cd build
@@ -101,7 +101,7 @@ You can build and install rocPRIM on Linux or Windows.
   We've added initial support for HIP on Windows; to install, use the provided `rmake.py` python script:
 
   ```shell
-  git clone https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+  git clone https://github.com/ROCm/rocPRIM.git
   cd rocPRIM
 
   # the -i option will install rocPRIM to C:\hipSDK by default
@@ -289,17 +289,17 @@ algorithms optimized for gfx803 GCN version, or to `900` for gfx900.
 
 ## hipCUB
 
-[hipCUB](https://github.com/ROCmSoftwarePlatform/hipCUB/) is a thin wrapper library on top of
-[rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or
+[hipCUB](https://github.com/ROCm/hipCUB/) is a thin wrapper library on top of
+[rocPRIM](https://github.com/ROCm/rocPRIM) or
 [CUB](https://github.com/NVlabs/cub). You can use it to port projects that use the CUB library to the
-[HIP](https://github.com/ROCm-Developer-Tools/HIP) layer and run them on AMD hardware. In the
+[HIP](https://github.com/ROCm/HIP) layer and run them on AMD hardware. In the
 [ROCm](https://rocm.docs.amd.com/en/latest/) environment, hipCUB uses the rocPRIM library as a
 backend; on CUDA platforms, it uses CUB as a backend.
 
 ## Support
 
 You can report bugs and feature requests through our GitHub
-[issue tracker](https://github.com/ROCmSoftwarePlatform/rocPRIM/issues).
+[issue tracker](https://github.com/ROCm/rocPRIM/issues).
 
 ## Contributions and license
 
