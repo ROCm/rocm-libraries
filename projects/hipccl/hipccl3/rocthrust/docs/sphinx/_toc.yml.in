@@ -10,3 +10,6 @@ subtrees:
 - caption: API
   entries:
   - file: cpp_api
+- caption: About
+  entries:
+  - file: license
