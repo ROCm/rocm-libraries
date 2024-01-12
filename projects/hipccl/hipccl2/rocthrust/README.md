@@ -1,8 +1,8 @@
 # rocThrust
 
 Thrust is a parallel algorithm library. It has been ported to
-[HIP](https://github.com/ROCm-Developer-Tools/HIP) and [ROCm](https://rocm.github.io/), which use
-the [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library. The HIP-ported library
+[HIP](https://github.com/ROCm/HIP) and [ROCm](https://www.github.com/ROCm/ROCm), which use
+the [rocPRIM](https://github.com/ROCm/rocPRIM) library. The HIP-ported library
 works on HIP and ROCm software. Currently there is no CUDA backend in place.
 
 ## Requirements
@@ -11,9 +11,9 @@ Software requirements include:
 
 * CMake (3.5.1 or later)
 * AMD [ROCm](https://rocm.docs.amd.com) Software (1.8.0 or later)
-  * Including the [HipCC](https://github.com/ROCm-Developer-Tools/HIP) compiler, which must be set
+  * Including the [HipCC](https://github.com/ROCm/HIP) compiler, which must be set
     as your C++ compiler for ROCm
-* [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library
+* [rocPRIM](https://github.com/ROCm/rocPRIM) library
   * This is automatically downloaded and built by the CMake script
 * Python 3.6 or higher (for HIP on Windows; only required for install scripts)
 * Visual Studio 2019 with Clang support (for HIP on Windows)
@@ -27,8 +27,8 @@ Optional:
 
 For ROCm hardware requirements, refer to:
 
-* [Linux support](https://rocm.docs.amd.com/en/latest/release/gpu_os_support.html)
-* [Windows support](https://rocm.docs.amd.com/en/latest/release/windows_support.html)
+* [Linux support](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
+* [Windows support](https://rocm.docs.amd.com/projects/install-on-windows/en/latest/reference/system-requirements.html)
 
 ## Documentation
 
@@ -55,7 +55,7 @@ python3 -m http.server
 ## Build and install
 
 ```sh
-git clone https://github.com/ROCmSoftwarePlatform/rocThrust
+git clone https://github.com/ROCm/rocThrust
 
 # Go to rocThrust directory, create and go to the build directory.
 cd rocThrust; mkdir build; cd build
@@ -94,7 +94,7 @@ make package
 We've added initial support for HIP on Windows. To install, use the provided `rmake.py` Python script:
 
 ```shell
-git clone https://github.com/ROCmSoftwarePlatform/rocThrust.git
+git clone https://github.com/ROCm/rocThrust.git
 cd rocThrust
 
 # the -i option will install rocPRIM to C:\hipSDK by default
@@ -266,7 +266,7 @@ make -j4
 ## Support
 
 You can report bugs and feature requests through the GitHub
-[issue tracker](https://github.com/ROCmSoftwarePlatform/rocThrust/issues).
+[issue tracker](https://github.com/ROCm/rocThrust/issues).
 
 ## License
 
