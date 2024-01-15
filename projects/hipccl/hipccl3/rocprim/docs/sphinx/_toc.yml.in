@@ -12,3 +12,6 @@ subtrees:
     - file: iterators
     - file: intrinsics
     - file: glossary
+  - caption: About
+    entries:
+    - file: license
