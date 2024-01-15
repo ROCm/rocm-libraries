@@ -3,4 +3,7 @@
 root: index
 subtrees:
   - entries:
-    - file: .doxygen/docBin/html/index
+    - file: doxygen/html/index
+  - caption: About
+    entries:
+    - file: license
