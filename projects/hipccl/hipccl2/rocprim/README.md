@@ -37,7 +37,7 @@ To build our documentation locally, use the following code:
 cd rocPRIM; cd docs
 
 # Install Python dependencies
-python3 -m pip install -r .sphinx/requirements.txt
+python3 -m pip install -r sphinx/requirements.txt
 
 # Build the documentation
 python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
