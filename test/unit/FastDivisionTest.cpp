@@ -80,8 +80,13 @@ namespace FastDivisionTest
     {
         auto command = std::make_shared<Command>();
 
-        auto a = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto reg
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
+        auto a = reg->expression();
+
+        auto reg2
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::UInt32, 1);
+        auto a_unsigned = reg2->expression();
 
         auto b_signed = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Int32, PointerType::Value}));
@@ -91,21 +96,23 @@ namespace FastDivisionTest
 
         auto expr      = a / b_signed;
         auto expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        EXPECT_EQ(Expression::toString(expr_fast),
-                  "Subtract(BitwiseXor(ArithmeticShiftR(Add(Add(MultiplyHigh(CommandArgument(user_"
-                  "Int32_Value_0), magic_num_0), CommandArgument(user_Int32_Value_0)), "
-                  "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(CommandArgument(user_Int32_Value_0)"
-                  ", magic_num_0), CommandArgument(user_Int32_Value_0)), 31j), Add(ShiftL(1i, "
-                  "magic_shifts_0), Subtract(LogicalShiftR(BitwiseOr(Negate(magic_num_0), "
-                  "magic_num_0), 31j), 1i)))), magic_shifts_0), magic_sign_0), magic_sign_0)");
+        auto expected
+            = "Subtract(BitwiseXor(ArithmeticShiftR(Add(Add(MultiplyHigh("
+              "UNALLOCATED:I, MagicMultiple_0), "
+              "UNALLOCATED:I), "
+              "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(UNALLOCATED:I"
+              ", MagicMultiple_0), UNALLOCATED:I), 31i), Add(ShiftL(1i, "
+              "MagicShifts_1), Subtract(LogicalShiftR(BitwiseOr(Negate(MagicMultiple_0), "
+              "MagicMultiple_0), 31i), 1i)))), MagicShifts_1), MagicSign_2), MagicSign_2)";
+        EXPECT_EQ(Expression::toString(expr_fast), expected);
 
-        expr      = a / b_unsigned;
+        expr      = a_unsigned / b_unsigned;
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        EXPECT_EQ(
-            Expression::toString(expr_fast),
-            "ArithmeticShiftR(Add(ArithmeticShiftR(Subtract(CommandArgument(user_Int32_Value_0), "
-            "MultiplyHigh(CommandArgument(user_Int32_Value_0), magic_num_3)), 1i), "
-            "MultiplyHigh(CommandArgument(user_Int32_Value_0), magic_num_3)), magic_shifts_3)");
+        setComment(expr_fast, "");
+        EXPECT_EQ(Expression::toString(expr_fast),
+                  "ArithmeticShiftR(Add(ArithmeticShiftR(Subtract(UNALLOCATED:U32, "
+                  "MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3)), 1j), "
+                  "MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3)), MagicShifts_4)");
     }
 
     TEST_F(FastDivisionTest, ModuloByConstantExpressions)
@@ -164,8 +171,13 @@ namespace FastDivisionTest
     {
         auto command = std::make_shared<Command>();
 
-        auto a = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto reg
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
+        auto a = reg->expression();
+
+        auto reg2
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::UInt32, 1);
+        auto a_unsigned = reg2->expression();
 
         auto b_signed = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Int32, PointerType::Value}));
@@ -173,93 +185,82 @@ namespace FastDivisionTest
         auto b_unsigned = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::UInt32, PointerType::Value}));
 
-        auto expr      = a % b_signed;
-        auto expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        EXPECT_EQ(
-            Expression::toString(expr_fast),
-            "Subtract(CommandArgument(user_Int32_Value_0), "
-            "Multiply(Subtract(BitwiseXor(ArithmeticShiftR(Add(Add(MultiplyHigh(CommandArgument("
-            "user_Int32_Value_0), magic_num_0), CommandArgument(user_Int32_Value_0)), "
-            "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(CommandArgument(user_Int32_Value_0), "
-            "magic_num_0), CommandArgument(user_Int32_Value_0)), 31j), Add(ShiftL(1i, "
-            "magic_shifts_0), Subtract(LogicalShiftR(BitwiseOr(Negate(magic_num_0), magic_num_0), "
-            "31j), 1i)))), magic_shifts_0), magic_sign_0), magic_sign_0), "
-            "CommandArgument(user_Int32_Value_1)))");
+        auto        expr      = a % b_signed;
+        auto        expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
+        std::string expected
+            = "Subtract(UNALLOCATED:I, "
+              "Multiply(Subtract(BitwiseXor(ArithmeticShiftR(Add(Add(MultiplyHigh(UNALLOCATED:I, "
+              "MagicMultiple_0), UNALLOCATED:I), "
+              "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(UNALLOCATED:I, "
+              "MagicMultiple_0), UNALLOCATED:I), 31i), Add(ShiftL(1i, "
+              "MagicShifts_1), Subtract(LogicalShiftR(BitwiseOr(Negate(MagicMultiple_0), "
+              "MagicMultiple_0), "
+              "31i), 1i)))), MagicShifts_1), MagicSign_2), MagicSign_2), "
+              "CommandArgument(user_Int32_Value_0)))";
+        EXPECT_EQ(Expression::toString(expr_fast), expected);
 
-        expr      = a % b_unsigned;
+        expr      = a_unsigned % b_unsigned;
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        EXPECT_EQ(Expression::toString(expr_fast),
-                  "Subtract(CommandArgument(user_Int32_Value_0), "
-                  "Multiply(ArithmeticShiftR(Add(ArithmeticShiftR(Subtract(CommandArgument(user_"
-                  "Int32_Value_0), MultiplyHigh(CommandArgument(user_Int32_Value_0), "
-                  "magic_num_3)), 1i), MultiplyHigh(CommandArgument(user_Int32_Value_0), "
-                  "magic_num_3)), magic_shifts_3), CommandArgument(user_UInt32_Value_2)))");
+
+        EXPECT_THAT(
+            Expression::toString(expr_fast),
+            testing::HasSubstr("Subtract(UNALLOCATED:U32, "
+                               "Multiply(ArithmeticShiftR(Add(ArithmeticShiftR(Subtract("
+                               "UNALLOCATED:U32, MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3)), "
+                               "1j), MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3)), "
+                               "MagicShifts_4), CommandArgument(user_UInt32_Value_1)))"));
     }
 
-    class FastDivisionTestCurrentGPU : public CurrentGPUContextFixture
+    namespace GPUFastDivisionTest
     {
-    public:
-        template <typename R, typename A, typename B>
-        void executeFastDivision(bool           isModulo,
-                                 std::vector<A> numerators,
-                                 std::vector<B> denominators)
+
+        template <bool Modulo,
+                  bool Defer,
+                  typename Result,
+                  typename AType = Result,
+                  typename BType = AType>
+        struct Options
         {
+            inline static const bool IsModulo        = Modulo;
+            inline static const bool DeferExpression = Defer;
+            using R                                  = Result;
+            using A                                  = AType;
+            using B                                  = BType;
+        };
+
+        template <typename Options>
+        class FastDivisionTestCurrentGPU : public CurrentGPUContextFixture
+        {
+        };
+
+#define BoolCombinations(...)                                              \
+    Options<false, false, __VA_ARGS__>, Options<false, true, __VA_ARGS__>, \
+        Options<true, false, __VA_ARGS__>, Options<true, true, __VA_ARGS__>
+
+        using TestedOptions = ::testing::Types<BoolCombinations(int32_t),
+                                               BoolCombinations(uint32_t),
+                                               BoolCombinations(int64_t, int32_t, int64_t),
+                                               BoolCombinations(int64_t, int64_t, int32_t),
+                                               BoolCombinations(int64_t)>;
+
+#undef BoolCombinations
+
+        TYPED_TEST_SUITE(FastDivisionTestCurrentGPU, TestedOptions);
+
+        TYPED_TEST(FastDivisionTestCurrentGPU, GPU_FastDivision)
+        {
+
+            bool IsModulo        = TypeParam::IsModulo;
+            bool DeferExpression = TypeParam::DeferExpression;
+            using R              = typename TypeParam::R;
+            using A              = typename TypeParam::A;
+            using B              = typename TypeParam::B;
+
             auto command = std::make_shared<Command>();
 
-            DataType dataTypeA;
-            DataType dataTypeB;
-            DataType dataTypeResult;
-
-            if(typeid(A) == typeid(int32_t))
-            {
-                dataTypeA = DataType::Int32;
-            }
-            else if(typeid(A) == typeid(int64_t))
-            {
-                dataTypeA = DataType::Int64;
-            }
-            else if(typeid(A) == typeid(uint32_t))
-            {
-                dataTypeA = DataType::UInt32;
-            }
-            else
-            {
-                FAIL() << "Testing for unknown data type " << typeid(A).name();
-            }
-
-            if(typeid(B) == typeid(int32_t))
-            {
-                dataTypeB = DataType::Int32;
-            }
-            else if(typeid(B) == typeid(int64_t))
-            {
-                dataTypeB = DataType::Int64;
-            }
-            else if(typeid(B) == typeid(uint32_t))
-            {
-                dataTypeB = DataType::UInt32;
-            }
-            else
-            {
-                FAIL() << "Testing for unknown data type " << typeid(B).name();
-            }
-
-            if(typeid(R) == typeid(int32_t))
-            {
-                dataTypeResult = DataType::Int32;
-            }
-            else if(typeid(R) == typeid(int64_t))
-            {
-                dataTypeResult = DataType::Int64;
-            }
-            else if(typeid(R) == typeid(uint32_t))
-            {
-                dataTypeResult = DataType::UInt32;
-            }
-            else
-            {
-                FAIL() << "Testing for unknown data type " << typeid(B).name();
-            }
+            auto dataTypeA      = TypeInfo<A>::Var.dataType;
+            auto dataTypeB      = TypeInfo<B>::Var.dataType;
+            auto dataTypeResult = TypeInfo<R>::Var.dataType;
 
             auto infoResult = DataTypeInfo::Get(dataTypeResult);
 
@@ -269,71 +270,105 @@ namespace FastDivisionTest
             auto b_arg = command->allocateArgument({dataTypeB, PointerType::Value});
 
             auto result_exp = std::make_shared<Expression::Expression>(result_arg);
-            auto a_exp      = std::make_shared<Expression::Expression>(a_arg);
-            auto b_exp      = std::make_shared<Expression::Expression>(b_arg);
 
-            auto k = m_context->kernel();
+            auto k = this->m_context->kernel();
 
             k->addArgument({result_arg->name(),
                             {dataTypeResult, PointerType::PointerGlobal},
                             DataDirection::WriteOnly,
                             result_exp});
-            k->addArgument({a_arg->name(), dataTypeA, DataDirection::ReadOnly, a_exp});
-            k->addArgument({b_arg->name(), dataTypeB, DataDirection::ReadOnly, b_exp});
+            auto a_exp = k->addCommandArgument(a_arg);
+            auto b_exp = k->addCommandArgument(b_arg);
 
             auto one  = std::make_shared<Expression::Expression>(1u);
             auto zero = std::make_shared<Expression::Expression>(0u);
+
+            auto a_reg = Register::Value::Placeholder(
+                this->m_context, Register::Type::Scalar, dataTypeResult, 1);
+
+            if(dataTypeA != dataTypeResult)
+                a_exp = convert(dataTypeResult, a_exp);
+
+            if(dataTypeB != dataTypeResult)
+                b_exp = convert(dataTypeResult, b_exp);
+
+            std::shared_ptr<Expression::Expression> expr;
+
+            if(IsModulo)
+                expr = a_reg->expression() % b_exp;
+            else
+                expr = a_reg->expression() / b_exp;
+
+            if(DeferExpression)
+            {
+                enableDivideBy(b_exp, this->m_context);
+            }
+            else
+            {
+                expr = fastDivision(expr, this->m_context);
+            }
 
             k->setWorkgroupSize({1, 1, 1});
             k->setWorkitemCount({one, one, one});
             k->setDynamicSharedMemBytes(zero);
 
-            std::shared_ptr<Expression::Expression> expr;
-            if(isModulo)
-                expr = fastDivision(a_exp % b_exp, m_context);
-            else
-                expr = fastDivision(a_exp / b_exp, m_context);
-            expr = KernelGraph::cleanArguments(expr, k);
-
-            m_context->schedule(k->preamble());
-            m_context->schedule(k->prolog());
+            this->m_context->schedule(k->preamble());
+            this->m_context->schedule(k->prolog());
 
             auto kb = [&]() -> Generator<Instruction> {
                 Register::ValuePtr s_result, s_a, s_b;
-                co_yield m_context->argLoader()->getValue(result_arg->name(), s_result);
-                co_yield m_context->argLoader()->getValue(a_arg->name(), s_a);
-                co_yield m_context->argLoader()->getValue(b_arg->name(), s_b);
+                co_yield this->m_context->argLoader()->getValue(result_arg->name(), s_result);
+                co_yield this->m_context->argLoader()->getValue(a_arg->name(), s_a);
+                co_yield this->m_context->argLoader()->getValue(b_arg->name(), s_b);
+
+                co_yield generate(a_reg, a_exp, this->m_context);
 
                 auto v_result
-                    = Register::Value::Placeholder(m_context,
+                    = Register::Value::Placeholder(this->m_context,
                                                    Register::Type::Vector,
                                                    {dataTypeResult, PointerType::PointerGlobal},
                                                    1);
 
                 auto v_c = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, dataTypeResult, 1);
+                    this->m_context, Register::Type::Vector, dataTypeResult, 1);
 
                 co_yield v_result->allocate();
 
-                co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
+                co_yield this->m_context->copier()->copy(v_result, s_result, "Move pointer");
+
+                if(DeferExpression)
+                {
+                    expr = fastDivision(expr, this->m_context);
+                }
+
+                AssertFatal(!std::holds_alternative<Expression::Divide>(*expr), toString(expr));
+                AssertFatal(!std::holds_alternative<Expression::Modulo>(*expr), toString(expr));
 
                 Register::ValuePtr s_c;
-                co_yield Expression::generate(s_c, expr, m_context);
+                co_yield Expression::generate(s_c, expr, this->m_context);
+                AssertFatal(s_c->variableType() == dataTypeResult,
+                            ShowValue(s_c->variableType()),
+                            ShowValue(dataTypeResult),
+                            ShowValue(expr));
 
-                co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-                co_yield m_context->mem()->storeFlat(v_result, v_c, 0, infoResult.elementSize);
+                co_yield this->m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+                co_yield this->m_context->mem()->storeFlat(
+                    v_result, v_c, 0, infoResult.elementSize);
             };
 
-            m_context->schedule(kb());
-            m_context->schedule(k->postamble());
-            m_context->schedule(k->amdgpu_metadata());
+            this->m_context->schedule(kb());
+            this->m_context->schedule(k->postamble());
+            this->m_context->schedule(k->amdgpu_metadata());
 
             std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
-                = m_context->instructions()->getExecutableKernel();
+                = this->m_context->instructions()->getExecutableKernel();
 
             auto d_result = make_shared_device<R>();
 
-            CommandKernel commandKernel(m_context);
+            CommandKernel commandKernel(this->m_context);
+
+            auto numerators   = TestValues::ByType<A>::values;
+            auto denominators = TestValues::ByType<B>::values;
 
             for(A a : numerators)
             {
@@ -362,7 +397,7 @@ namespace FastDivisionTest
                                 &result, d_result.get(), infoResult.elementSize, hipMemcpyDefault),
                             HasHipSuccess(0));
 
-                        if(isModulo)
+                        if(IsModulo)
                         {
                             EXPECT_EQ(result, a % b) << ShowValue(a) << ShowValue(dataTypeA)
                                                      << ShowValue(b) << ShowValue(dataTypeB);
@@ -383,56 +418,6 @@ namespace FastDivisionTest
                 }
             }
         }
-    };
-
-    TEST_F(FastDivisionTestCurrentGPU, GPU_FastDivision)
-    {
-        executeFastDivision<int32_t>(false, TestValues::int32Values, TestValues::int32Values);
-    }
-
-    TEST_F(FastDivisionTestCurrentGPU, GPU_FastModulo)
-    {
-        executeFastDivision<int32_t>(true, TestValues::int32Values, TestValues::int32Values);
-    }
-
-    TEST_F(FastDivisionTestCurrentGPU, GPU_FastDivisionUnsigned)
-    {
-        executeFastDivision<uint32_t>(false, TestValues::uint32Values, TestValues::uint32Values);
-    }
-
-    TEST_F(FastDivisionTestCurrentGPU, GPU_FastModuloUnsigned)
-    {
-        executeFastDivision<uint32_t>(true, TestValues::uint32Values, TestValues::uint32Values);
-    }
-
-    TEST_F(FastDivisionTestCurrentGPU, GPU_FastDivisionMixed)
-    {
-        executeFastDivision<int64_t>(false, TestValues::int32Values, TestValues::int64Values);
-    }
-
-    TEST_F(FastDivisionTestCurrentGPU, GPU_FastModuloMixed)
-    {
-        executeFastDivision<int64_t>(true, TestValues::int32Values, TestValues::int64Values);
-    }
-
-    TEST_F(FastDivisionTestCurrentGPU, GPU_FastDivisionMixed2)
-    {
-        executeFastDivision<int64_t>(false, TestValues::int64Values, TestValues::int32Values);
-    }
-
-    TEST_F(FastDivisionTestCurrentGPU, GPU_FastModuloMixed2)
-    {
-        executeFastDivision<int64_t>(true, TestValues::int64Values, TestValues::int32Values);
-    }
-
-    TEST_F(FastDivisionTestCurrentGPU, GPU_FastDivision64)
-    {
-        executeFastDivision<int64_t>(true, TestValues::int64Values, TestValues::int64Values);
-    }
-
-    TEST_F(FastDivisionTestCurrentGPU, GPU_FastModulo64)
-    {
-        executeFastDivision<int64_t>(true, TestValues::int64Values, TestValues::int64Values);
     }
 
     class FastDivisionTestByConstantCurrentGPU : public CurrentGPUContextFixture
@@ -522,7 +507,8 @@ namespace FastDivisionTest
                 co_yield Expression::generate(s_c, expr, m_context);
 
                 co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-                co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
+                co_yield m_context->mem()->storeFlat(
+                    v_result, v_c, 0, v_c->variableType().getElementSize());
             };
 
             m_context->schedule(kb());

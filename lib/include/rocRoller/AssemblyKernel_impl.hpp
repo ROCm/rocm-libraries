@@ -7,6 +7,8 @@
 #include "Expression.hpp"
 #include "Utilities/Utils.hpp"
 
+#include "Utilities/Logging.hpp"
+
 namespace rocRoller
 {
 
@@ -69,12 +71,23 @@ namespace rocRoller
 
     inline void AssemblyKernel::clearIndexRegisters()
     {
+        Log::debug("Clearing index registers!");
         m_argumentPointer.reset();
         m_packedWorkitemIndex.reset();
         for(auto& r : m_workgroupIndex)
             r.reset();
         for(auto& r : m_workitemIndex)
             r.reset();
+    }
+
+    inline bool AssemblyKernel::startedCodeGeneration() const
+    {
+        return m_startedCodeGeneration;
+    }
+
+    inline void AssemblyKernel::startCodeGeneration()
+    {
+        m_startedCodeGeneration = true;
     }
 
     inline Register::ValuePtr AssemblyKernel::kernelStartLabel() const
@@ -170,36 +183,25 @@ namespace rocRoller
         return m_argumentSize;
     }
 
-    inline void AssemblyKernel::addArgument(AssemblyKernelArgument arg)
+    inline bool AssemblyKernel::hasArgument(std::string const& name) const
     {
-        AssertFatal(m_argumentNames.find(arg.name) == m_argumentNames.end(),
-                    "Error: Two arguments with the same name: " + arg.name);
-
-        auto const& typeInfo = DataTypeInfo::Get(arg.variableType);
-
-        if(arg.offset == -1)
-        {
-            arg.offset = RoundUpToMultiple<int>(m_argumentSize, typeInfo.alignment);
-        }
-        if(arg.size == -1)
-        {
-            arg.size = typeInfo.elementSize;
-        }
-        m_argumentSize = std::max(m_argumentSize, arg.offset + arg.size);
-
-        m_argumentNames[arg.name] = m_arguments.size();
-        m_arguments.push_back(std::move(arg));
+        return m_argumentNames.contains(name);
     }
 
     inline void AssemblyKernel::addCommandArguments(std::vector<CommandArgumentPtr> args)
     {
         for(auto arg : args)
         {
-            addArgument({arg->name(),
-                         arg->variableType(),
-                         arg->direction(),
-                         std::make_shared<Expression::Expression>(arg)});
+            addCommandArgument(arg);
         }
+    }
+
+    inline Expression::ExpressionPtr AssemblyKernel::addCommandArgument(CommandArgumentPtr arg)
+    {
+        return addArgument({arg->name(),
+                            arg->variableType(),
+                            arg->direction(),
+                            std::make_shared<Expression::Expression>(arg)});
     }
 
     inline AssemblyKernelArgument const& AssemblyKernel::findArgument(std::string const& name) const
@@ -226,10 +228,8 @@ namespace rocRoller
 
             std::string argName = concatenate("LAUNCH_WORKGROUPCOUNT_", index);
             auto        resType = Expression::resultType(exPtr);
-            addArgument({argName, resType.varType, DataDirection::ReadOnly, exPtr});
-
-            m_workgroupCount[index] = std::make_shared<Expression::Expression>(
-                std::make_shared<AssemblyKernelArgument>(findArgument(argName)));
+            m_workgroupCount[index]
+                = addArgument({argName, resType.varType, DataDirection::ReadOnly, exPtr});
         }
         return m_workgroupCount[index];
     }

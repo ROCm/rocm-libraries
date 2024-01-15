@@ -49,10 +49,10 @@ namespace rocRoller
         bool streamK        = false;
         bool streamKTwoTile = false;
 
-        std::vector<int>  loopOverOutputTilesDimensions = {};
-        std::string       loopOverOutputTilesTopLoop    = XLOOP;
-        std::vector<uint> loopOverOutputTilesCoordSizes = {};
-        uint              loopOverOutputTilesIteratedTiles;
+        std::vector<int>  loopOverOutputTilesDimensions    = {};
+        std::string       loopOverOutputTilesTopLoop       = XLOOP;
+        std::vector<uint> loopOverOutputTilesCoordSizes    = {};
+        uint              loopOverOutputTilesIteratedTiles = 0;
 
         uint numScratchTiles = 0;
 
@@ -63,6 +63,38 @@ namespace rocRoller
         bool packMultipleElementsInto1VGPR = true;
         bool enableLongDwordInstructions   = true;
         bool setNextFreeVGPRToMax          = false;
+
+        /**
+         * These two are expected to become permanently enabled;
+         */
+
+        /**
+         * If enabled, when adding a kernel argument, we will check all currently existing
+         * arguments for one with an equivalent expression. If one exists, no new argument is
+         * added and we will return the existing one instead.
+         */
+        bool deduplicateArguments = true;
+
+        /**
+         * If enabled, command arguments are not necessarily added as kernel arguments.  We
+         * instead depend on the CleanArguments and other passes to add all necessary kernel
+         * arguments.
+         */
+        bool lazyAddArguments = true;
+
+        /**
+         * The minimum complexity of an expression before we will add a kernel argument to
+         * calculate its value on the CPU before launch.  This is a very rough heuristic for
+         * now, and doesn't (yet) take into account different datatypes or different
+         * architectures.
+         *
+         * Magic division includes a subexpression of complexity 8, so if this number is <= 8,
+         * there will be a fourth kernel argument for every magic division denominator.
+         *
+         * Increasing this value could decrease SGPR pressure; decreasing it could speed up a
+         * kernel if there are enough available SGPRs.
+         */
+        int minLaunchTimeExpressionComplexity = 10;
 
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);

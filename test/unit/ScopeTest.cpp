@@ -89,7 +89,7 @@ namespace ScopeTest
             // generate(4)
             // Assign VGPR 11j(4) BEGIN
             // Assign dim(1) = 11j
-            // 11j
+            // Generate 11j into v**UNALLOCATED**
             // Allocated DataFlowTag1: 1 VGPR (Value: UInt32): v0
             v_mov_b32 v0, 11
             // Assign VGPR 11j(4) END
@@ -101,13 +101,13 @@ namespace ScopeTest
             // generate(6)
             // Assign VGPR 33j(6) BEGIN
             // Assign dim(3) = 33j
-            // 33j
+            // Generate 33j into v**UNALLOCATED**
             // Allocated DataFlowTag3: 1 VGPR (Value: UInt32): v1
             v_mov_b32 v1, 33
             // Assign VGPR 33j(6) END
             // Assign VGPR 44j(7) BEGIN
             // Assign dim(1) = 44j
-            // 44j
+            // Generate 44j into v0
             v_mov_b32 v0, 44
             // Assign VGPR 44j(7) END
             // end: generate(6)
@@ -117,7 +117,7 @@ namespace ScopeTest
             // Scope(3) END
             // Assign VGPR 22j(5) BEGIN
             // Assign dim(2) = 22j
-            // 22j
+            // Generate 22j into v**UNALLOCATED**
             // Allocated DataFlowTag2: 1 VGPR (Value: UInt32): v1
             v_mov_b32 v1, 22
             // Assign VGPR 22j(5) END

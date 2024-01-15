@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 namespace rocRoller
 {
     namespace KernelGraph
@@ -7,5 +9,7 @@ namespace rocRoller
         class KernelGraph;
         struct KernelUnrollVisitor;
         struct LoopDistributeVisitor;
+
+        using KernelGraphPtr = std::shared_ptr<KernelGraph>;
     }
 }

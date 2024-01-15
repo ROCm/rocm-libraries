@@ -10,7 +10,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
-#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+#include <rocRoller/KernelGraph/Transforms/GraphTransform_fwd.hpp>
 
 namespace rocRoller
 {
@@ -69,7 +69,7 @@ namespace rocRoller
              *
              * @param GraphTransform
             */
-            KernelGraph transform(std::shared_ptr<GraphTransform> const&);
+            KernelGraph transform(GraphTransformPtr const& transform);
         };
 
         /**
@@ -83,7 +83,7 @@ namespace rocRoller
         /*
          * Code generation
          */
-        Generator<Instruction> generate(KernelGraph, std::shared_ptr<AssemblyKernel>);
+        Generator<Instruction> generate(KernelGraph, AssemblyKernelPtr);
 
         std::string toYAML(KernelGraph const& g);
         KernelGraph fromYAML(std::string const& str);

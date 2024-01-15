@@ -29,8 +29,11 @@
 #include <typeinfo>
 #include <variant>
 
-#include "CodeGen/Instruction.hpp"
 #include "Expression.hpp"
+
+#include "AssemblyKernelArgument.hpp"
+
+#include "CodeGen/Instruction.hpp"
 #include "InstructionValues/Register.hpp"
 #include "Operations/CommandArgument.hpp"
 #include "Utilities/Component.hpp"
@@ -107,13 +110,26 @@ namespace rocRoller
             requires(!CCanEvaluateBinary<TheEvaluator, LHS, RHS>) CommandArgumentValue
                 operator()(LHS const& lhs, RHS const& rhs) const
             {
-                Throw<FatalError>("Type mismatch for expression: ",
-                                  typeid(BinaryExpr).name(),
-                                  ". Argument ",
-                                  ShowValue(LHS()),
-                                  " incompatible with ",
-                                  ShowValue(RHS()),
-                                  ").");
+                if constexpr(CHasTypeInfo<LHS> && CHasTypeInfo<RHS>)
+                {
+                    Throw<FatalError>("Type mismatch for expression: ",
+                                      typeid(BinaryExpr).name(),
+                                      ". Argument ",
+                                      ShowValue(TypeInfo<LHS>::Var),
+                                      " incompatible with ",
+                                      ShowValue(TypeInfo<RHS>::Var),
+                                      ").");
+                }
+                else
+                {
+                    Throw<FatalError>("Type mismatch for expression: ",
+                                      typeid(BinaryExpr).name(),
+                                      ". Argument ",
+                                      ShowValue(typeid(LHS).name()),
+                                      " incompatible with ",
+                                      ShowValue(typeid(RHS).name()),
+                                      ").");
+                }
             }
 
             CommandArgumentValue call(CommandArgumentValue const& lhs,
@@ -168,11 +184,11 @@ namespace rocRoller
                 Throw<FatalError>("Type mismatch for expression: ",
                                   typeid(TernaryExpr).name(),
                                   ". Incompatible arguments ",
-                                  ShowValue(LHS()),
+                                  ShowValue(typeid(LHS).name()),
                                   " ",
-                                  ShowValue(R1HS()),
+                                  ShowValue(typeid(R1HS).name()),
                                   " ",
-                                  ShowValue(R2HS()),
+                                  ShowValue(typeid(R2HS).name()),
                                   ").");
             }
 
@@ -257,10 +273,21 @@ namespace rocRoller
             requires(!CCanEvaluateUnary<TheEvaluator, ARG>) CommandArgumentValue
                 operator()(ARG const& arg) const
             {
-                Throw<FatalError>("Incompatible type ",
-                                  ShowValue(ARG()),
-                                  " for expression ",
-                                  typeid(UnaryExpr).name());
+                if constexpr(CHasTypeInfo<ARG>)
+                {
+                    Throw<FatalError>("Incompatible type ",
+                                      TypeInfo<ARG>::Name(),
+                                      " for expression ",
+                                      typeid(UnaryExpr).name());
+                }
+                else
+                {
+                    Throw<FatalError>("Incompatible type ",
+                                      ShowValue(ARG()),
+                                      typeid(ARG).name(),
+                                      " for expression ",
+                                      typeid(UnaryExpr).name());
+                }
             }
 
             CommandArgumentValue call(CommandArgumentValue const& arg) const
@@ -341,6 +368,22 @@ namespace rocRoller
                 return (lhs * (int64_t)rhs) >> 32;
             }
 
+            int evaluate(int const& lhs, unsigned int const& rhs) const
+            {
+                assertNonNullPointer(lhs);
+                assertNonNullPointer(rhs);
+
+                return (lhs * (int64_t)rhs) >> 32;
+            }
+
+            int evaluate(unsigned int const& lhs, int const& rhs) const
+            {
+                assertNonNullPointer(lhs);
+                assertNonNullPointer(rhs);
+
+                return (lhs * (int64_t)rhs) >> 32;
+            }
+
             unsigned int evaluate(unsigned int const& lhs, unsigned int const& rhs) const
             {
                 assertNonNullPointer(lhs);
@@ -375,9 +418,11 @@ namespace rocRoller
         struct OperationEvaluatorVisitor<LogicalShiftR>
             : public BinaryEvaluatorVisitor<LogicalShiftR>
         {
-            template <typename T>
-            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, T>
-                evaluate(T const& lhs, T const& rhs) const
+            template <typename T, typename U>
+            requires(std::integral<T>&&
+                         std::integral<U> && !std::same_as<T, bool> && !std::same_as<U, bool>) T
+                evaluate(T const& lhs, U const& rhs)
+            const
             {
                 return static_cast<typename std::make_unsigned<T>::type>(lhs) >> rhs;
             }
@@ -507,7 +552,8 @@ namespace rocRoller
         struct OperationEvaluatorVisitor<Negate> : public UnaryEvaluatorVisitor<Negate>
         {
             template <typename T>
-            std::enable_if_t<std::is_signed_v<T>, T> evaluate(T const& arg) const
+            requires(std::floating_point<T> || std::signed_integral<T>) T evaluate(T const& arg)
+            const
             {
                 return -arg;
             }
@@ -629,8 +675,7 @@ namespace rocRoller
 
             CommandArgumentValue operator()(AssemblyKernelArgumentPtr const& expr)
             {
-                Throw<FatalError>("Assembly kernel argument present in runtime expression",
-                                  ShowValue(expr));
+                return call(expr->expression);
             }
 
             CommandArgumentValue operator()(DataFlowTag const& expr)

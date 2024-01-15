@@ -1,6 +1,7 @@
 #pragma once
 #include <rocRoller/AssemblyKernel_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+#include <rocRoller/Operations/Command_fwd.hpp>
 
 namespace rocRoller
 {
@@ -13,8 +14,9 @@ namespace rocRoller
         class CleanArguments : public GraphTransform
         {
         public:
-            CleanArguments(std::shared_ptr<AssemblyKernel> kernel)
-                : m_kernel(kernel)
+            CleanArguments(ContextPtr context, CommandPtr command)
+                : m_context(context)
+                , m_command(command)
             {
             }
 
@@ -25,7 +27,8 @@ namespace rocRoller
             }
 
         private:
-            std::shared_ptr<AssemblyKernel> m_kernel;
+            ContextPtr m_context;
+            CommandPtr m_command;
         };
     }
 }

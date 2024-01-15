@@ -89,6 +89,7 @@
 #include <vector>
 
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
@@ -853,12 +854,12 @@ namespace rocRoller
             //
             // Compute size of global and local tile-spaces
             //
-
             auto numAccumTiles = argInfo.numTileArgExprs.back();
             auto numTotalTiles = numAccumTiles;
             for(auto d : loopInfo.dimensionIndices)
                 numTotalTiles = numTotalTiles * argInfo.numTiles.at(d);
             numTotalTiles = simplify(numTotalTiles);
+            enableDivideBy(numTotalTiles, context);
 
             auto numTilesVarType = resultType(numTotalTiles).varType;
             auto one             = Expression::literal(1, numTilesVarType);
@@ -989,7 +990,6 @@ namespace rocRoller
             auto nextNonAccumTileExpr
                 = ((argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr)) / numAccumTiles + one)
                   * numAccumTiles;
-            nextNonAccumTileExpr = Expression::fastDivision(nextNonAccumTileExpr, context);
 
             auto assignNextNonAccumTile
                 = graph.control.addElement(Assign{Register::Type::Scalar, nextNonAccumTileExpr});
@@ -1036,8 +1036,7 @@ namespace rocRoller
                 // Add send
                 auto sendTileExpr
                     = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr)) % numAccumTiles;
-                sendTileExpr = Expression::fastDivision(sendTileExpr, context);
-                sendInfo     = sendTile(graph,
+                sendInfo = sendTile(graph,
                                     sendTileExpr,
                                     storeConnections,
                                     flagsScratchTag,
@@ -1049,8 +1048,7 @@ namespace rocRoller
                 auto receiveTileExpr
                     = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr) + DF(forAccumIncr) - one)
                       % numAccumTiles;
-                receiveTileExpr = Expression::fastDivision(receiveTileExpr, context);
-                receiveInfo     = receiveTile(graph,
+                receiveInfo = receiveTile(graph,
                                           receiveTileExpr < (numAccumTiles - one),
                                           scratchTileInfo.load,
                                           loadConnections,
@@ -1179,6 +1177,8 @@ namespace rocRoller
         {
             ArgumentInfo argInfo;
 
+            auto k = context->kernel();
+
             argInfo.numTileArgExprs.resize(loopInfo.dimensionIndices.size() + 1);
 
             auto numWGsDT   = DataType::UInt32;
@@ -1186,17 +1186,12 @@ namespace rocRoller
             auto one        = Expression::literal(1, numTilesDT);
             auto zero       = Expression::literal(0, numTilesDT);
 
-            auto toUInt32 = [](ExpressionPtr expr) -> ExpressionPtr {
-                return std::make_shared<Expression::Expression>(
-                    Expression::Convert<DataType::UInt32>{expr});
-            };
-
             // On entry, numWGs is an Expression that either:
             //   1. Pulls a value from a CommandArgument
             //   2. Is a literal (for testing)
 
-            auto numWGsArg
-                = AssemblyKernelArgument{"numWGs", numWGsDT, DataDirection::ReadOnly, numWGs};
+            argInfo.numWGs = k->addArgument(
+                {"numWGs", numWGsDT, DataDirection::ReadOnly, convert(numWGsDT, numWGs)});
 
             // Fill number-of-tiles using MacroTileNumber sizes
             // from load operations (store operations are missing
@@ -1209,11 +1204,12 @@ namespace rocRoller
                     {
                         auto macTileNumber = graph.coordinates.get<MacroTileNumber>(tileNumberTag);
                         if(macTileNumber->size)
-                            argInfo.numTileArgExprs[dimension] = toUInt32(macTileNumber->size);
+                            argInfo.numTileArgExprs[dimension]
+                                = convert(numTilesDT, macTileNumber->size);
                     }
                 }
-                argInfo.numTileArgExprs.back()
-                    = toUInt32(graph.coordinates.get<ForLoop>(accumInfo.accumulatorCoord)->size);
+                argInfo.numTileArgExprs.back() = convert(
+                    numTilesDT, graph.coordinates.get<ForLoop>(accumInfo.accumulatorCoord)->size);
 
                 for(auto tileNumberTag : accumInfo.tileNumberCoords.at(dimension))
                 {
@@ -1242,18 +1238,19 @@ namespace rocRoller
             //   fro 2-tile StreamK:  ((numTiles0 * numTiles1) / numWGs - 1) * numTilesAcc
             //
 
-            std::vector<AssemblyKernelArgument> numTileArgs;
             for(auto d : loopInfo.dimensionIndices)
             {
-                numTileArgs.push_back(AssemblyKernelArgument{concatenate("numTiles", d),
-                                                             numTilesDT,
-                                                             DataDirection::ReadOnly,
-                                                             argInfo.numTileArgExprs[d]});
+                argInfo.numTiles.push_back(k->addArgument({concatenate("numTiles", d),
+                                                           numTilesDT,
+                                                           DataDirection::ReadOnly,
+                                                           argInfo.numTileArgExprs[d]}));
+                if(d > 0)
+                    enableDivideBy(argInfo.numTiles.back(), context);
             }
-            numTileArgs.push_back(AssemblyKernelArgument{"numTilesAcc",
-                                                         numTilesDT,
-                                                         DataDirection::ReadOnly,
-                                                         argInfo.numTileArgExprs.back()});
+            argInfo.numTiles.push_back(k->addArgument({"numTilesAcc",
+                                                       numTilesDT,
+                                                       DataDirection::ReadOnly,
+                                                       argInfo.numTileArgExprs.back()}));
 
             ExpressionPtr numSKTilesArgExpr, numDPTilesArgExpr;
             ExpressionPtr numSKTilesPerWGArgExpr, numDPTilesPerWGArgExpr;
@@ -1282,59 +1279,28 @@ namespace rocRoller
                 }
             }
 
-            auto numSKTilesArg = AssemblyKernelArgument{
-                "numSKTiles", numTilesDT, DataDirection::ReadOnly, numSKTilesArgExpr};
+            argInfo.numSKTiles = k->addArgument(
+                {"numSKTiles", numTilesDT, DataDirection::ReadOnly, numSKTilesArgExpr});
 
-            auto numDPTilesArg = AssemblyKernelArgument{
-                "numDPTiles", numTilesDT, DataDirection::ReadOnly, numDPTilesArgExpr};
-
-            auto numSKTilesPerWGArg = AssemblyKernelArgument{
-                "numSKTilesPerWG", numTilesDT, DataDirection::ReadOnly, numSKTilesPerWGArgExpr};
-
-            auto numDPTilesPerWGArg = AssemblyKernelArgument{
-                "numDPTilesPerWG", numTilesDT, DataDirection::ReadOnly, numDPTilesPerWGArgExpr};
-
-            // Make expressions that reference the KernelArguments.
-            // These expression are used throughout the transform.
-            auto makeArgExpr = [](AssemblyKernelArgument arg) {
-                return std::make_shared<Expression::Expression>(
-                    std::make_shared<AssemblyKernelArgument>(arg));
-            };
-            for(auto arg : numTileArgs)
-            {
-                argInfo.numTiles.push_back(makeArgExpr(arg));
-            }
-            argInfo.numSKTiles      = makeArgExpr(numSKTilesArg);
-            argInfo.numSKTilesPerWG = makeArgExpr(numSKTilesPerWGArg);
+            argInfo.numSKTilesPerWG = k->addArgument(
+                {"numSKTilesPerWG", numTilesDT, DataDirection::ReadOnly, numSKTilesPerWGArgExpr});
 
             if(twoTile)
             {
-                argInfo.numDPTiles      = makeArgExpr(numDPTilesArg);
-                argInfo.numDPTilesPerWG = makeArgExpr(numDPTilesPerWGArg);
+
+                argInfo.numDPTiles = k->addArgument(
+                    {"numDPTiles", numTilesDT, DataDirection::ReadOnly, numDPTilesArgExpr});
+
+                argInfo.numDPTilesPerWG = k->addArgument({"numDPTilesPerWG",
+                                                          numTilesDT,
+                                                          DataDirection::ReadOnly,
+                                                          numDPTilesPerWGArgExpr});
             }
             else
             {
                 argInfo.numDPTiles      = zero;
                 argInfo.numDPTilesPerWG = zero;
             }
-
-            // Add arguments to the kernel
-            auto k = context->kernel();
-            k->addArgument(numWGsArg);
-            for(auto arg : numTileArgs)
-            {
-                k->addArgument(arg);
-            }
-            k->addArgument(numSKTilesArg);
-            k->addArgument(numSKTilesPerWGArg);
-            if(twoTile)
-            {
-                k->addArgument(numDPTilesArg);
-                k->addArgument(numDPTilesPerWGArg);
-            }
-
-            // On exit, numWGs references the KernelArgument.
-            argInfo.numWGs = makeArgExpr(numWGsArg);
 
             return argInfo;
         }

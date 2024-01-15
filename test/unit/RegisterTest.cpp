@@ -232,6 +232,14 @@ TEST_F(RegisterTest, NoAllocationSubsetAndElement)
     auto r3 = r->element({1});
     EXPECT_THROW(r3->getRegisterIds().to<std::vector>(), FatalError);
 
+    auto r4 = r->subset({2});
+
+    EXPECT_TRUE(r2->sameAs(r->subset({0})));
+    EXPECT_TRUE(r2->sameAs(r2));
+    EXPECT_FALSE(r2->sameAs(r));
+    EXPECT_FALSE(r2->sameAs(r3));
+    EXPECT_FALSE(r2->sameAs(r4));
+
     r->allocateNow();
 
     auto rIDs = r->getRegisterIds().to<std::vector>();
@@ -240,6 +248,12 @@ TEST_F(RegisterTest, NoAllocationSubsetAndElement)
     EXPECT_EQ(std::vector{rIDs[0]}, r2->getRegisterIds().to<std::vector>());
 
     EXPECT_EQ((std::vector{rIDs[2], rIDs[3]}), r3->getRegisterIds().to<std::vector>());
+
+    EXPECT_TRUE(r2->sameAs(r->subset({0})));
+    EXPECT_TRUE(r2->sameAs(r2));
+    EXPECT_FALSE(r2->sameAs(r));
+    EXPECT_FALSE(r2->sameAs(r3));
+    EXPECT_FALSE(r2->sameAs(r4));
 }
 
 TEST_F(RegisterTest, AllocateAsNeededMultiLevel)
@@ -252,6 +266,11 @@ TEST_F(RegisterTest, AllocateAsNeededMultiLevel)
 
     auto r3 = r2->element({1});
     EXPECT_THROW(r3->getRegisterIds().to<std::vector>(), FatalError);
+
+    EXPECT_FALSE(r->sameAs(r2));
+    EXPECT_FALSE(r3->sameAs(r2));
+    EXPECT_TRUE(r3->sameAs(r->subset({2})));
+    EXPECT_FALSE(r3->sameAs(r->subset({0})));
 
     r3->allocateNow(); //Allocating r3 should allocate the underlying allocation, even though it's 2 levels down.
 
@@ -267,6 +286,10 @@ TEST_F(RegisterTest, AllocateAsNeededMultiLevel)
     EXPECT_EQ((std::vector{rIDs[0], rIDs[2]}), r2->getRegisterIds().to<std::vector>());
 
     EXPECT_EQ((std::vector{rIDs[2]}), r3->getRegisterIds().to<std::vector>());
+
+    EXPECT_FALSE(r->sameAs(r2));
+    EXPECT_FALSE(r3->sameAs(r2));
+    EXPECT_TRUE(r3->sameAs(r->subset({2})));
 }
 
 TEST_F(RegisterTest, SubsetOutOfBounds)

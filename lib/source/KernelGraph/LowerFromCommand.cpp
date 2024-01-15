@@ -502,8 +502,7 @@ namespace rocRoller
                 AssertFatal(parents.size() == 2, "T_MUL requires 2 inputs.");
                 for(auto const& parent : parents)
                 {
-                    auto element = m_graph.control.getElement(parent);
-                    auto node    = std::get<Operation>(m_graph.control.getElement(parent));
+                    auto node = m_graph.control.getNode(parent);
                     AssertFatal(std::holds_alternative<LoadTiled>(node),
                                 "T_MUL inputs must be tiled.");
                 }

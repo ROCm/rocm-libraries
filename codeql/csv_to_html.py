@@ -3,21 +3,26 @@
 import pandas as pd
 from collections import Counter
 
-df = pd.read_csv("codeql/build/codeql.csv")
-df = df.iloc[:, 2:]
+try:
+    df = pd.read_csv("codeql/build/codeql.csv")
+    df = df.iloc[:, 2:]
 
-titles = [
-    "Type",
-    "Description",
-    "File Path",
-    "Start Line",
-    "Start Column",
-    "End Line",
-    "End Column",
-]
-df = pd.DataFrame([df.columns.values.tolist()] + df.values.tolist(), columns=titles)
+    titles = [
+        "Type",
+        "Description",
+        "File Path",
+        "Start Line",
+        "Start Column",
+        "End Line",
+        "End Column",
+    ]
+    df = pd.DataFrame([df.columns.values.tolist()] + df.values.tolist(), columns=titles)
 
-types_count = pd.DataFrame([Counter(df.iloc[:, 0])])
+    types_count = pd.DataFrame([Counter(df.iloc[:, 0])])
+except pd.errors.EmptyDataError:
+    # No CodeQL warnings or errors!
+    df = pd.DataFrame()
+    types_count = pd.DataFrame()
 
 html = (
     "<h1>CodeQL Report</h1>\n"
@@ -41,7 +46,9 @@ markdown = """## Results Summary
 )
 
 with open("codeql/build/types_count.md", "w") as file:
+    print(file.name)
     file.write(markdown)
 
 with open("codeql/build/codeql.html", "w") as file:
+    print(file.name)
     file.write(html)

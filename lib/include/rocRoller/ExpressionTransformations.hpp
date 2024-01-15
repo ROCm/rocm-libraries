@@ -9,7 +9,20 @@ namespace rocRoller
     {
         ExpressionPtr identity(ExpressionPtr expr);
 
+        /**
+         * Transform sub-expressions of `expr` into new kernel arguments
+         *
+         * Return value should be Translate time or KernelExecute time evaluable.
+         */
         ExpressionPtr launchTimeSubExpressions(ExpressionPtr expr, ContextPtr context);
+
+        /**
+         * Restore any command arguments that have been cleaned (transformed from command
+         * arguments into kernel arguments.)
+         *
+         * Return value should be Translate time or KernelLaunch time evaluable.
+         */
+        ExpressionPtr restoreCommandArguments(ExpressionPtr expr);
 
         /**
          * @brief Attempt to replace division operations found within an expression with faster operations.
@@ -19,6 +32,13 @@ namespace rocRoller
          * @return ExpressionPtr Transformed expression
          */
         ExpressionPtr fastDivision(ExpressionPtr expr, ContextPtr context);
+
+        /**
+         * Ensures that the kernel arguments will include the magic constants required to divide/modulo
+         * by `expr`.
+         * Requires `expr` to have a type of either Int32 or Int64, and to be evaluable at kernel launch time.
+         */
+        void enableDivideBy(ExpressionPtr expr, ContextPtr context);
 
         /**
          * @brief Attempt to replace multiplication operations found within an expression with faster operations.
@@ -74,9 +94,10 @@ namespace rocRoller
         struct FastArithmetic
         {
             FastArithmetic() = delete;
-            FastArithmetic(ContextPtr);
+            explicit FastArithmetic(ContextPtr);
 
             ExpressionPtr operator()(ExpressionPtr) const;
+            ExpressionPtr call(ExpressionPtr) const;
 
         private:
             ContextPtr m_context;

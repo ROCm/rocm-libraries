@@ -63,7 +63,7 @@ namespace rocRoller
                 auto dstTag = -1;
                 for(auto const& out : outgoing_nodes)
                 {
-                    auto odim = std::get<Dimension>(graph.coordinates.getElement(out));
+                    auto odim = graph.coordinates.getNode(out);
                     if(isDimension<Workgroup>(odim))
                     {
                         dstTag = out;
@@ -117,7 +117,7 @@ namespace rocRoller
                 auto srcTag = -1;
                 for(auto const& in : incoming_nodes)
                 {
-                    auto idim = std::get<Dimension>(graph.coordinates.getElement(in));
+                    auto idim = graph.coordinates.getNode(in);
                     if(isDimension<Workgroup>(idim))
                     {
                         srcTag = in;

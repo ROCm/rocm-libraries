@@ -1,3 +1,5 @@
+#include <rocRoller/ExpressionTransformations.hpp>
+
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
 
@@ -24,62 +26,85 @@ namespace rocRoller
          * the kernel argument to the command argument.
          * TODO: Apply this to every expression by working backward from the kernel argument.
          *
-         * Challenge: Applying this to the same expression twice will add two kernel arguments.  This is inefficient.
-         * We identify expressions that already have kernel arguments and reuse them.
          */
 
         struct LaunchTimeExpressionVisitor
         {
-            LaunchTimeExpressionVisitor(ContextPtr cxt)
-                : m_context(cxt)
+            LaunchTimeExpressionVisitor(ContextPtr ctx, bool allowNewArgs)
+                : m_context(ctx)
+                , m_allowNewArgs(allowNewArgs)
+                , m_minComplexity(ctx->kernelOptions().minLaunchTimeExpressionComplexity)
             {
             }
 
-            template <typename T>
-            ExpressionPtr launchEval(T const& expr)
+            /**
+             * Return an argument for `expr`, if one exists.
+             */
+            ExpressionPtr existingLaunchEval(ExpressionPtr expr)
             {
-                ExpressionPtr exPtr  = std::make_shared<Expression>(expr);
-                auto          kernel = m_context->kernel();
-                for(auto const& arg : kernel->arguments())
+                return m_context->kernel()->findArgumentForExpression(expr);
+            }
+
+            ExpressionPtr addLaunchEval(ExpressionPtr expr)
+            {
+                auto kernel  = m_context->kernel();
+                auto varType = resultVariableType(expr);
+
+                auto argName = kernel->uniqueArgName(name(expr));
+
+                return kernel->addArgument(
+                    {.name = argName, .variableType = varType, .expression = expr});
+            }
+
+            ExpressionPtr maybeLaunchEval(ExpressionPtr expr, bool ignoreComplexity)
+            {
+                auto evalTimes = evaluationTimes(expr);
+
+                if(evalTimes[EvaluationTime::Translate] || !evalTimes[EvaluationTime::KernelLaunch])
+                    return nullptr;
+
                 {
-                    if(identical(arg.expression, exPtr))
-                    {
-                        return std::make_shared<Expression>(
-                            std::make_shared<AssemblyKernelArgument>(arg));
-                    }
+                    auto arg = existingLaunchEval(expr);
+                    if(arg)
+                        return arg;
                 }
 
-                // If no existing expressions matches:
-                std::string argName = concatenate("LAUNCH_", kernel->arguments().size());
-                auto        resType = resultType(expr);
-                kernel->addArgument({argName, resType.varType, DataDirection::ReadOnly, exPtr});
+                if(!m_allowNewArgs)
+                    return nullptr;
 
-                return std::make_shared<Expression>(
-                    std::make_shared<AssemblyKernelArgument>(kernel->findArgument(argName)));
+                LaunchTimeExpressionVisitor sub(m_context, false);
+                auto                        ex2    = sub.call(expr);
+                auto                        myComp = complexity(ex2);
+                auto                        theExp = toString(expr);
+                auto                        theEx2 = toString(ex2);
+
+                if(ignoreComplexity || complexity(expr) >= m_minComplexity)
+                    return addLaunchEval(expr);
+
+                return nullptr;
+            }
+
+            template <CExpression T>
+            ExpressionPtr maybeLaunchEval(T const& expr, bool ignoreComplexity = false)
+            {
+                return maybeLaunchEval(std::make_shared<Expression>(expr), ignoreComplexity);
             }
 
             template <CTernary Expr>
             ExpressionPtr operator()(Expr const& expr)
             {
-                if(evaluationTimes(expr)[EvaluationTime::KernelLaunch])
                 {
-                    return launchEval(expr);
+                    auto launchResult = maybeLaunchEval(expr);
+                    if(launchResult)
+                        return launchResult;
                 }
-                else
+
                 {
                     Expr cpy = expr;
-                    if(expr.lhs)
-                    {
-                        cpy.lhs = call(expr.lhs);
-                    }
-                    if(expr.r1hs)
-                    {
-                        cpy.r1hs = call(expr.r1hs);
-                    }
-                    if(expr.r2hs)
-                    {
-                        cpy.r2hs = call(expr.r2hs);
-                    }
+                    cpy.lhs  = call(expr.lhs);
+                    cpy.r1hs = call(expr.r1hs);
+                    cpy.r2hs = call(expr.r2hs);
+
                     return std::make_shared<Expression>(cpy);
                 }
             }
@@ -87,21 +112,17 @@ namespace rocRoller
             template <CBinary Expr>
             ExpressionPtr operator()(Expr const& expr)
             {
-                if(evaluationTimes(expr)[EvaluationTime::KernelLaunch])
                 {
-                    return launchEval(expr);
+                    auto launchResult = maybeLaunchEval(expr);
+                    if(launchResult)
+                        return launchResult;
                 }
-                else
+
                 {
                     Expr cpy = expr;
-                    if(expr.lhs)
-                    {
-                        cpy.lhs = call(expr.lhs);
-                    }
-                    if(expr.rhs)
-                    {
-                        cpy.rhs = call(expr.rhs);
-                    }
+                    cpy.lhs  = call(expr.lhs);
+                    cpy.rhs  = call(expr.rhs);
+
                     return std::make_shared<Expression>(cpy);
                 }
             }
@@ -109,19 +130,31 @@ namespace rocRoller
             template <CUnary Expr>
             ExpressionPtr operator()(Expr const& expr)
             {
-                if(evaluationTimes(expr)[EvaluationTime::KernelLaunch])
+
                 {
-                    return launchEval(expr);
+                    auto launchResult = maybeLaunchEval(expr);
+                    if(launchResult)
+                        return launchResult;
                 }
-                else
+
                 {
                     Expr cpy = expr;
-                    if(expr.arg)
-                    {
-                        cpy.arg = call(expr.arg);
-                    }
+                    cpy.arg  = call(expr.arg);
+
                     return std::make_shared<Expression>(cpy);
                 }
+            }
+
+            ExpressionPtr operator()(CommandArgumentPtr const& expr)
+            {
+                // For a Value, if we still have a CommandArgument, we need to
+                // convert it to a KernelArgument, regardless of complexity.
+
+                auto launchResult = maybeLaunchEval(expr, true);
+                if(launchResult)
+                    return launchResult;
+
+                return std::make_shared<Expression>(expr);
             }
 
             template <CValue Value>
@@ -140,12 +173,82 @@ namespace rocRoller
 
         private:
             ContextPtr m_context;
+            int        m_minComplexity;
+            bool       m_allowNewArgs;
         };
 
-        ExpressionPtr launchTimeSubExpressions(ExpressionPtr expr, ContextPtr cxt)
+        ExpressionPtr launchTimeSubExpressions(ExpressionPtr expr, ContextPtr ctx)
         {
-            auto visitor = LaunchTimeExpressionVisitor(cxt);
-            return visitor.call(expr);
+            auto startStr = toString(expr);
+
+            if(ctx->kernel()->startedCodeGeneration())
+            {
+                auto visitor = LaunchTimeExpressionVisitor(ctx, false);
+
+                // Since code gen has started, we can't add any new kernel arguments.  So our
+                // goal is to find the largest subexpressions that exist as kernel arguments.
+
+                // The following might exist:
+                // kernArg0: comArg0
+                // kernArg1: comArg0 / comArg1
+                // kernArg2: kernArg0 / kernArg1
+
+                // If our expression is:
+                // initial: ((kernArg0 / comArg1) + (comArg0 / kernArg1))
+                // restore: ((comArg0 / comArg1) + (comArg0 / (comArg0 / comArg1))
+                // pass  1: (kernArg1 + (kernArg0 / kernArg1))
+                // pass  2: (kernArg1 + kernArg2)
+
+                // Maybe this can be done more efficiently?
+
+                auto v0 = restoreCommandArguments(expr);
+                auto v1 = visitor.call(v0);
+                auto v2 = visitor.call(v1);
+
+                Log::debug("launchTimeSubExpressions: {} -> {} -> {} -> {}",
+                           toString(expr),
+                           toString(v0),
+                           toString(v1),
+                           toString(v2));
+
+                return v2;
+            }
+            else
+            {
+                auto v0 = restoreCommandArguments(expr);
+
+                // Challenge: Find subexpressions that are *actually* nontrivial to calculate.
+                // Example:
+                // kernArg0: comArg0 * comArg1 + comArg0 / comArg2
+
+                // If our expression is:
+                // 4 + comArg0 * comArg1 + comArg0 / comArg2
+                // Then the initial pass could gauge the complexity of the whole expression
+                // including the part that is already a kernel argument, and it will add a new
+                // argument for this whole expression.
+
+                // If we first substitute existing args without adding any new ones:
+                // 4 + kernArg0
+                // Then the complexity will be low and we won't add a new arg just to save this
+                // single addition.
+
+                // This should restore any existing subexpressions that are more complex than
+                // just a single value.
+                auto visitor1 = LaunchTimeExpressionVisitor(ctx, false);
+                auto v1       = visitor1.call(v0);
+
+                // That allows this call to have an accurate picture of complexity.
+                auto visitor2 = LaunchTimeExpressionVisitor(ctx, true);
+                auto v2       = visitor2.call(v1);
+
+                Log::debug("launchTimeSubExpressions: {} -> {} -> {} -> {}",
+                           toString(expr),
+                           toString(v0),
+                           toString(v1),
+                           toString(v2));
+
+                return v2;
+            }
         }
 
     }

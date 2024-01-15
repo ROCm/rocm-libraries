@@ -22,6 +22,6 @@ codeql database analyze codeql/build/rr-database codeql/cpp/src/rr-query-suites.
     --compilation-cache=codeql/build/.cache/ \
     --no-default-compilation-cache
 
-sarif html codeql/build/codeql.sarif --output codeql/build/codeql.html
+sarif html codeql/build/codeql.sarif --output codeql/build/codeql_report.html
 
 ./codeql/csv_to_html.py

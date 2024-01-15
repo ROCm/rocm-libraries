@@ -10,6 +10,7 @@
 #include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
@@ -35,8 +36,7 @@ namespace rocRoller
          */
         struct CodeGeneratorVisitor
         {
-            CodeGeneratorVisitor(std::shared_ptr<KernelGraph>    graph,
-                                 std::shared_ptr<AssemblyKernel> kernel)
+            CodeGeneratorVisitor(KernelGraphPtr graph, AssemblyKernelPtr kernel)
                 : m_graph(graph)
                 , m_kernel(kernel)
                 , m_context(kernel->context())
@@ -48,6 +48,8 @@ namespace rocRoller
 
             Generator<Instruction> generate()
             {
+                m_kernel->startCodeGeneration();
+
                 auto coords = Transformer(
                     std::make_shared<rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph>(
                         m_graph->coordinates),
@@ -146,7 +148,7 @@ namespace rocRoller
                     std::vector<Generator<Instruction>> generators;
                     for(auto tag : nodes)
                     {
-                        auto op = std::get<Operation>(m_graph->control.getElement(tag));
+                        auto op = m_graph->control.getNode(tag);
                         generators.push_back(call(tag, op, coords));
                     }
 
@@ -189,8 +191,7 @@ namespace rocRoller
 
                                         for(auto tag : newNodes)
                                         {
-                                            auto op = std::get<Operation>(
-                                                m_graph->control.getElement(tag));
+                                            auto op = m_graph->control.getNode(tag);
                                             generators.push_back(call(tag, op, coords));
                                         }
 
@@ -876,9 +877,10 @@ namespace rocRoller
             }
 
         private:
-            std::shared_ptr<KernelGraph>    m_graph;
-            ContextPtr                      m_context;
-            std::shared_ptr<AssemblyKernel> m_kernel;
+            KernelGraphPtr m_graph;
+
+            ContextPtr        m_context;
+            AssemblyKernelPtr m_kernel;
 
             std::set<int> m_completedControlNodes;
 
@@ -886,7 +888,7 @@ namespace rocRoller
             LoadStoreTileGenerator m_loadStoreTileGenerator;
         };
 
-        Generator<Instruction> generate(KernelGraph graph, std::shared_ptr<AssemblyKernel> kernel)
+        Generator<Instruction> generate(KernelGraph graph, AssemblyKernelPtr kernel)
         {
             TIMER(t, "KernelGraph::generate");
             auto graphPtr = std::make_shared<KernelGraph>(graph);

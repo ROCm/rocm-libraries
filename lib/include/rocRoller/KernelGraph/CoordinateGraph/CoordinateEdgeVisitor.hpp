@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdge.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 

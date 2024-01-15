@@ -3,6 +3,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 
 namespace rocRoller
 {
@@ -73,7 +74,8 @@ namespace rocRoller
 
     Generator<Instruction> AssemblyKernel::preamble()
     {
-        auto archName = m_context.lock()->targetArchitecture().target().toString();
+        m_startedCodeGeneration = true;
+        auto archName           = m_context.lock()->targetArchitecture().target().toString();
 
         co_yield Instruction::Directive(".amdgcn_target \"amdgcn-amd-amdhsa--" + archName + "\"");
         co_yield Instruction::Directive(".set .amdgcn.next_free_vgpr, 0");
@@ -195,4 +197,91 @@ namespace rocRoller
             concatenate(".amdhsa_system_vgpr_workitem_id ", m_kernelDimensions - 1));
         co_yield Instruction::Directive(".end_amdhsa_kernel");
     }
+
+    std::string AssemblyKernel::uniqueArgName(std::string const& base) const
+    {
+        int         idx = m_argumentNames.size();
+        std::string rv;
+        do
+        {
+            rv = concatenate(base, "_", idx);
+            idx++;
+        } while(m_argumentNames.contains(rv));
+
+        return std::move(rv);
+    }
+
+    Expression::ExpressionPtr
+        AssemblyKernel::findArgumentForExpression(Expression::ExpressionPtr exp,
+                                                  ptrdiff_t&                idx) const
+    {
+        idx             = -1;
+        auto simplified = simplify(exp);
+
+        auto match = [exp, simplified](auto const& arg) {
+            if(equivalent(arg.expression, exp) || equivalent(arg.expression, simplified))
+                return true;
+
+            auto simpleArg = simplify(arg.expression);
+            if(equivalent(simpleArg, exp) || equivalent(simpleArg, simplified))
+                return true;
+
+            return false;
+        };
+        auto iter = std::find_if(m_arguments.begin(), m_arguments.end(), match);
+
+        if(iter != m_arguments.end())
+        {
+            idx = iter - m_arguments.begin();
+            return Expression::fromKernelArgument(*iter);
+        }
+        return nullptr;
+    }
+    Expression::ExpressionPtr
+        AssemblyKernel::findArgumentForExpression(Expression::ExpressionPtr exp) const
+    {
+        ptrdiff_t idx;
+        return findArgumentForExpression(exp, idx);
+    }
+
+    Expression::ExpressionPtr AssemblyKernel::addArgument(AssemblyKernelArgument arg)
+    {
+        AssertFatal(m_argumentNames.find(arg.name) == m_argumentNames.end(),
+                    "Error: Two arguments with the same name: " + arg.name);
+
+        if(arg.expression)
+            AssertFatal(resultVariableType(arg.expression) == arg.variableType,
+                        ShowValue(resultVariableType(arg.expression)),
+                        ShowValue(arg.variableType),
+                        ShowValue(arg));
+
+        auto const& typeInfo = DataTypeInfo::Get(arg.variableType);
+
+        if(arg.expression && m_context.lock()->kernelOptions().deduplicateArguments)
+        {
+            ptrdiff_t idx;
+            auto      existingArg = findArgumentForExpression(arg.expression, idx);
+            if(existingArg)
+            {
+                m_argumentNames[arg.name] = idx;
+                return existingArg;
+            }
+        }
+
+        if(arg.offset == -1)
+        {
+            arg.offset = RoundUpToMultiple<int>(m_argumentSize, typeInfo.alignment);
+        }
+        if(arg.size == -1)
+        {
+            arg.size = typeInfo.elementSize;
+        }
+        m_argumentSize = std::max(m_argumentSize, arg.offset + arg.size);
+
+        m_argumentNames[arg.name] = m_arguments.size();
+        m_arguments.push_back(std::move(arg));
+
+        return Expression::fromKernelArgument(m_arguments.back());
+    }
+
 }

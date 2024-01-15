@@ -520,7 +520,6 @@ namespace rocRoller
         inline Expression::ExpressionPtr getSize(const T& x)
         {
             Expression::ExpressionPtr rv = std::visit([](auto const& a) { return a.size; }, x);
-            AssertFatal(rv, "Unable to get valid size for dimension: ", toString(x));
             return rv;
         }
 

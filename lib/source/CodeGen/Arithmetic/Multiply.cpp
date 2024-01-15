@@ -92,7 +92,7 @@ namespace rocRoller
         }
         else
         {
-            co_yield Instruction::Comment("low of low * high ommitted due to zero input.");
+            co_yield Instruction::Comment("low of low * high omitted due to zero input.");
         }
 
         if(needHL)
@@ -106,7 +106,7 @@ namespace rocRoller
         }
         else
         {
-            co_yield Instruction::Comment("low of high * low ommitted due to zero input.");
+            co_yield Instruction::Comment("low of high * low omitted due to zero input.");
         }
 
         if(needLL)

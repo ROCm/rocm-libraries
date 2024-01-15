@@ -167,7 +167,7 @@ namespace rocRoller::KernelGraph
             // Visit all the nodes we found.
             for(auto const& tag : nodes)
             {
-                auto op = std::get<Operation>(m_graph.control.getElement(tag));
+                auto op = m_graph.control.getNode(tag);
                 call(op, tag);
             }
 

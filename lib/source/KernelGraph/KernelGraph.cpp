@@ -1,5 +1,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
-#include <rocRoller/Utilities/Settings_fwd.hpp>
+#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+
+#include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {

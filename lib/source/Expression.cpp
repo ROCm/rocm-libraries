@@ -152,6 +152,11 @@ namespace rocRoller
             return visitor.call(expr);
         }
 
+        ExpressionPtr fromKernelArgument(AssemblyKernelArgument const& arg)
+        {
+            return std::make_shared<Expression>(std::make_shared<AssemblyKernelArgument>(arg));
+        }
+
         /*
          * result type
          */
@@ -200,6 +205,10 @@ namespace rocRoller
             requires(CUnary<T>&& CArithmetic<T>) ResultType operator()(T const& expr) const
             {
                 auto argVal = call(expr.arg);
+
+                if constexpr(std::same_as<T, MagicShifts>)
+                    return {argVal.regType, DataType::Int32};
+
                 return argVal;
             }
 
@@ -215,17 +224,14 @@ namespace rocRoller
             {
                 auto lhsVal = call(expr.lhs);
                 auto rhsVal = call(expr.rhs);
-                return comparison(lhsVal, rhsVal);
-            }
 
-            ResultType comparison(ResultType const& lhsVal, ResultType const& rhsVal) const
-            {
                 // Can't compare between two different types on the GPU.
                 AssertFatal(lhsVal.regType == Register::Type::Literal
                                 || rhsVal.regType == Register::Type::Literal
                                 || lhsVal.varType == rhsVal.varType,
                             ShowValue(lhsVal.varType),
-                            ShowValue(rhsVal.varType));
+                            ShowValue(rhsVal.varType),
+                            ShowValue(expr));
 
                 auto inputRegType = Register::PromoteType(lhsVal.regType, rhsVal.regType);
                 auto inputVarType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
@@ -466,12 +472,27 @@ namespace rocRoller
 
             bool operator()(CommandArgumentPtr const& a, CommandArgumentPtr const& b)
             {
+                // Need to be careful not to invoke the overloaded operators, we want to compare
+                // the pointers directly.
+                // a->expression && b->expression -> logical and of both expressions
+                if(a.get() == b.get())
+                    return true;
+
+                if(a == nullptr || b == nullptr)
+                    return false;
+
                 return (*a) == (*b);
             }
 
             bool operator()(AssemblyKernelArgumentPtr const& a, AssemblyKernelArgumentPtr const& b)
             {
-                return (*a) == (*b);
+                if(a->name == b->name)
+                    return true;
+
+                if((a->expression != nullptr) && (b->expression != nullptr))
+                    return call(a->expression, b->expression);
+
+                return false;
             }
 
             bool operator()(Register::ValuePtr const& a, Register::ValuePtr const& b)
@@ -491,7 +512,7 @@ namespace rocRoller
 
             // a & b are different operator/value classes
             template <class T, class U>
-            bool operator()(T const& a, U const& b)
+            requires(!std::same_as<T, U>) bool operator()(T const& a, U const& b)
             {
                 return false;
             }
@@ -614,7 +635,13 @@ namespace rocRoller
 
             bool operator()(AssemblyKernelArgumentPtr const& a, AssemblyKernelArgumentPtr const& b)
             {
-                return (*a) == (*b);
+                if(a->name == b->name)
+                    return true;
+
+                if((a->expression != nullptr) && (b->expression != nullptr))
+                    return call(a->expression, b->expression);
+
+                return false;
             }
 
             bool operator()(Register::ValuePtr const& a, Register::ValuePtr const& b)
@@ -634,7 +661,7 @@ namespace rocRoller
 
             // a & b are different operator/value classes
             template <class T, class U>
-            bool operator()(T const& a, U const& b)
+            requires(!std::same_as<T, U>) bool operator()(T const& a, U const& b)
             {
                 return false;
             }
@@ -671,21 +698,18 @@ namespace rocRoller
         struct ExpressionSetCommentVisitor
         {
             std::string comment;
-
-            ExpressionSetCommentVisitor(std::string input)
-                : comment(input)
-            {
-            }
+            bool        throwIfNotSupported = true;
 
             template <typename Expr>
             requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) void operator()(Expr& expr)
             {
-                expr.comment = comment;
+                expr.comment = std::move(comment);
             }
 
             void operator()(auto& expr)
             {
-                Throw<FatalError>("Cannot set a comment for a base expression.");
+                if(throwIfNotSupported)
+                    Throw<FatalError>("Cannot set a comment for a base expression.");
             }
 
             void call(Expression& expr)
@@ -696,7 +720,7 @@ namespace rocRoller
 
         void setComment(Expression& expr, std::string comment)
         {
-            auto visitor = ExpressionSetCommentVisitor(comment);
+            auto visitor = ExpressionSetCommentVisitor{std::move(comment)};
             return visitor.call(expr);
         }
 
@@ -704,12 +728,49 @@ namespace rocRoller
         {
             if(expr)
             {
-                setComment(*expr, comment);
+                setComment(*expr, std::move(comment));
             }
             else
             {
                 Throw<FatalError>("Cannot set the comment for a null expression pointer.");
             }
+        }
+
+        void copyComment(ExpressionPtr const& dst, ExpressionPtr const& src)
+        {
+            if(!dst || !src)
+                return;
+            copyComment(*dst, *src);
+        }
+
+        void copyComment(Expression& dst, ExpressionPtr const& src)
+        {
+            if(!src)
+                return;
+            copyComment(dst, *src);
+        }
+
+        void copyComment(ExpressionPtr const& dst, Expression const& src)
+        {
+            if(!dst)
+                return;
+            copyComment(*dst, src);
+        }
+
+        void copyComment(Expression& dst, Expression const& src)
+        {
+
+            if(&src == &dst)
+                return;
+
+            auto comment = getComment(src);
+            if(comment.empty())
+                return;
+
+            comment = getComment(dst) + std::move(comment);
+
+            ExpressionSetCommentVisitor vis{std::move(comment), false};
+            vis.call(dst);
         }
 
         struct ExpressionGetCommentVisitor
@@ -719,6 +780,14 @@ namespace rocRoller
                 operator()(Expr const& expr) const
             {
                 return expr.comment;
+            }
+
+            std::string operator()(Register::ValuePtr const& expr) const
+            {
+                if(expr)
+                    return expr->name();
+
+                return "";
             }
 
             std::string operator()(auto const& expr) const
@@ -790,6 +859,59 @@ namespace rocRoller
             stream << "]";
 
             return stream;
+        }
+
+        struct ExpressionComplexityVisitor
+        {
+
+            template <CUnary Expr>
+            int operator()(Expr const& expr) const
+            {
+                return Expr::Complexity + call(expr.arg);
+            }
+
+            template <CBinary Expr>
+            int operator()(Expr const& expr) const
+            {
+                return Expr::Complexity + call(expr.lhs) + call(expr.rhs);
+            }
+
+            template <CTernary Expr>
+            int operator()(Expr const& expr) const
+            {
+                return Expr::Complexity + call(expr.lhs) + call(expr.r1hs) + call(expr.r2hs);
+            }
+
+            template <CValue Value>
+            int operator()(Value const& expr) const
+            {
+                return 0;
+            }
+
+            int call(ExpressionPtr expr) const
+            {
+                if(!expr)
+                    return 0;
+
+                return call(*expr);
+            }
+
+            int call(Expression const& expr) const
+            {
+                return std::visit(*this, expr);
+            }
+
+        private:
+        };
+
+        int complexity(ExpressionPtr expr)
+        {
+            return ExpressionComplexityVisitor().call(expr);
+        }
+
+        int complexity(Expression const& expr)
+        {
+            return ExpressionComplexityVisitor().call(expr);
         }
     }
 }

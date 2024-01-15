@@ -26,6 +26,16 @@ namespace rocRoller
 
         using CTEdge = rocRoller::KernelGraph::CoordinateGraph::Edge;
 
+        // clang-format off
+        template <typename T>
+        concept CCoordinateEdgeVisitor
+            = requires(T & vis, int tag, Tile const& edge)
+        {
+            { vis.visitCoordinateEdge(tag, edge) }
+                 -> std::convertible_to<rocRoller::KernelGraph::CoordinateGraph::Edge>;
+        };
+        // clang-format on
+
         /***************************
          * KernelGraphs rewrite utils
          */
@@ -34,16 +44,30 @@ namespace rocRoller
         inline KernelGraph rewriteDimensions(KernelGraph const& k, T& visitor)
         {
             KernelGraph graph = k;
+            if constexpr(CCoordinateEdgeVisitor<T>)
+            {
+                for(auto const& tag : k.coordinates.getEdges())
+                {
+                    auto edge = k.coordinates.getEdge(tag);
+                    auto visA = [&](auto&& arg) { return visitor.visitCoordinateEdge(tag, arg); };
+                    auto visB = [&](auto&& arg) { return std::visit(visA, arg); };
+
+                    auto newEdge = std::visit(visB, edge);
+                    graph.coordinates.setElement(tag, newEdge);
+                }
+            }
+
             for(auto const& tag : k.coordinates.getNodes())
             {
-                auto x = std::get<Dimension>(k.coordinates.getElement(tag));
+                auto x = k.coordinates.getNode(tag);
                 auto y
                     = std::visit([&](auto&& arg) { return visitor.visitDimension(tag, arg); }, x);
                 graph.coordinates.setElement(tag, y);
             }
+
             for(auto const& tag : k.control.getNodes())
             {
-                auto x = std::get<Operation>(k.control.getElement(tag));
+                auto x = k.control.getNode(tag);
                 auto y = std::visit([&](auto&& arg) { return visitor.visitOperation(arg); }, x);
                 graph.control.setElement(tag, y);
             }

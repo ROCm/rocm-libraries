@@ -19,14 +19,14 @@ namespace rocRoller
             }
             ExpressionPtr orig = x;
 
-            x = simplify(x);
             x = fastDivision(x, m_context);
+            x = simplify(x);
             x = fastMultiplication(x);
             x = fuseAssociative(x);
             x = fuseTernary(x);
-            // x = launchTimeSubExpressions(x, m_context); // TODO: Add launchTimeSubExpressions
+            x = launchTimeSubExpressions(x, m_context);
 
-            if(m_context->kernelOptions().logLevel >= LogLevel::Debug)
+            if(!identical(orig, x))
             {
                 auto comment = Instruction::Comment(
                     concatenate("FastArithmetic:", ShowValue(orig), ShowValue(x)));

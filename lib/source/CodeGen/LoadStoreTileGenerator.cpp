@@ -12,6 +12,7 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
@@ -31,12 +32,12 @@ namespace rocRoller
         using namespace CoordinateGraph;
         using namespace Expression;
 
-        LoadStoreTileGenerator::LoadStoreTileGenerator(std::shared_ptr<KernelGraph> graph,
-                                                       ContextPtr                   context,
-                                                       unsigned int workgroupSizeTotal)
+        LoadStoreTileGenerator::LoadStoreTileGenerator(KernelGraphPtr graph,
+                                                       ContextPtr     context,
+                                                       unsigned int   workgroupSizeTotal)
             : m_graph(graph)
             , m_context(context)
-            , m_fastArith(context)
+            , m_fastArith(FastArithmetic(context))
             , m_workgroupSizeTotal(workgroupSizeTotal)
         {
         }

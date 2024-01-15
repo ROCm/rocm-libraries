@@ -115,9 +115,12 @@ namespace rocRoller
                 }
 
                 if(rv != nullptr)
+                {
+                    copyComment(rv, expr);
                     return rv;
+                }
 
-                return std::make_shared<Expression>(Expr({lhs, rhs}));
+                return std::make_shared<Expression>(Expr({lhs, rhs, expr.comment}));
             }
 
             template <CUnary Expr>
@@ -187,9 +190,12 @@ namespace rocRoller
                 }
 
                 if(rv != nullptr)
+                {
+                    copyComment(rv, expr);
                     return rv;
+                }
 
-                return std::make_shared<Expression>(Expr({lhs, rhs}));
+                return std::make_shared<Expression>(Expr({lhs, rhs, expr.comment}));
             }
 
             template <CValue Value>

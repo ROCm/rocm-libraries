@@ -131,6 +131,7 @@ namespace rocRollerTest
 
         AssemblyKernelArgument arg{
             "bar", {DataType::Float}, DataDirection::ReadOnly, nullptr, 4, 4};
+        kernel->addArgument(arg);
 
         m_context->schedule(kernel->allocateInitialRegisters());
 

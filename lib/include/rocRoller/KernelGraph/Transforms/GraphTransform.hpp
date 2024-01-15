@@ -39,7 +39,5 @@ namespace rocRoller
                 return {};
             }
         };
-
-        using GraphTransformPtr = std::shared_ptr<GraphTransform>;
     }
 }

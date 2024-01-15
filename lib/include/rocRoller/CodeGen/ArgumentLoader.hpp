@@ -13,6 +13,11 @@
 #include "../InstructionValues/Register_fwd.hpp"
 #include "../Utilities/Generator.hpp"
 
+namespace rocRollerTest
+{
+    class ArgumentLoaderTest_loadArgExtra_Test;
+}
+
 namespace rocRoller
 {
     /**
@@ -30,7 +35,7 @@ namespace rocRoller
     class ArgumentLoader
     {
     public:
-        ArgumentLoader(std::shared_ptr<AssemblyKernel> kernel);
+        ArgumentLoader(AssemblyKernelPtr kernel);
 
         /**
          * Loads all arguments into a single allocation of SGPRs.  Uses the widest load
@@ -47,9 +52,6 @@ namespace rocRoller
          */
         Generator<Instruction> getValue(std::string const& argName, Register::ValuePtr& value);
 
-        Generator<Instruction> loadArgument(std::string const& argName);
-        Generator<Instruction> loadArgument(AssemblyKernelArgument const& arg);
-
         void releaseArgument(std::string const& argName);
         void releaseAllArguments();
 
@@ -57,8 +59,14 @@ namespace rocRoller
             loadRange(int offset, int sizeBytes, Register::ValuePtr& value) const;
 
     private:
-        std::weak_ptr<Context>          m_context;
-        std::shared_ptr<AssemblyKernel> m_kernel;
+        friend class rocRollerTest::ArgumentLoaderTest_loadArgExtra_Test;
+
+        std::weak_ptr<Context> m_context;
+
+        AssemblyKernelPtr m_kernel;
+
+        Generator<Instruction> loadArgument(std::string const& argName);
+        Generator<Instruction> loadArgument(AssemblyKernelArgument const& arg);
 
         /// Call the one from the AssemblyKernel instead.
         Register::ValuePtr argumentPointer() const;
@@ -81,6 +89,7 @@ namespace rocRoller
      */
     template <typename Iter, typename End>
     inline int PickInstructionWidthBytes(int offset, int endOffset, Iter beginReg, End endReg);
+
 }
 
 #include "ArgumentLoader_impl.hpp"

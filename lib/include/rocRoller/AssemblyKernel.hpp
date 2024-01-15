@@ -109,16 +109,29 @@ namespace rocRoller
         std::shared_ptr<KernelGraph::KernelGraph> kernel_graph() const;
 
         AssemblyKernelArgument const& findArgument(std::string const& name) const;
+        bool                          hasArgument(std::string const& name) const;
+
+        /**
+         * If a kernel argument exists with an expression equivalent to `exp`, return an
+         * expression referencing that argument, otherwise `nullptr`.
+         */
+        Expression::ExpressionPtr findArgumentForExpression(Expression::ExpressionPtr exp) const;
 
         std::vector<AssemblyKernelArgument> const& arguments() const;
-        void                                       addArgument(AssemblyKernelArgument arg);
+
+        Expression::ExpressionPtr addArgument(AssemblyKernelArgument arg);
+
+        std::string uniqueArgName(std::string const& base) const;
 
         /**
          * Adds a vector of CommandArguments as arguments to the AssemblyKernel.
          *
          * @param args Vector of CommandArgument pointers that should be added as arguments.
          */
-        void addCommandArguments(std::vector<CommandArgumentPtr> args);
+        void                      addCommandArguments(std::vector<CommandArgumentPtr> args);
+        Expression::ExpressionPtr addCommandArgument(CommandArgumentPtr arg);
+
+        std::string args_string();
 
         /** The size in bytes of all the arguments. */
         size_t argumentSize() const;
@@ -140,6 +153,9 @@ namespace rocRoller
         Register::ValuePtr kernelStartLabel() const;
         Register::ValuePtr kernelEndLabel() const;
 
+        bool startedCodeGeneration() const;
+        void startCodeGeneration();
+
         /**
          * Clears the index register pointers, allowing the registers to be freed
          * if they are not referenced elsewhere.
@@ -147,6 +163,14 @@ namespace rocRoller
         void clearIndexRegisters();
 
     private:
+        /**
+         * If a kernel argument exists with an expression equivalent to `exp`, return an
+         * expression referencing that argument, and return its index in `idx`, otherwise return
+         * `nullptr` and set `idx` to -1.
+         */
+        Expression::ExpressionPtr findArgumentForExpression(Expression::ExpressionPtr exp,
+                                                            ptrdiff_t&                idx) const;
+
         std::weak_ptr<Context> m_context;
 
         std::string        m_kernelName;
@@ -154,6 +178,8 @@ namespace rocRoller
         Register::ValuePtr m_kernelEndLabel;
 
         int m_kernelDimensions = 3;
+
+        bool m_startedCodeGeneration = false;
 
         std::array<unsigned int, 3>              m_workgroupSize = {1, 1, 1};
         std::array<Expression::ExpressionPtr, 3> m_workitemCount;

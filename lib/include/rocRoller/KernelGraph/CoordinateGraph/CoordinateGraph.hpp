@@ -7,7 +7,6 @@
 #include <vector>
 
 #include <rocRoller/Expression.hpp>
-#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/Graph/Hypergraph.hpp>
 
 #include "CoordinateEdge.hpp"

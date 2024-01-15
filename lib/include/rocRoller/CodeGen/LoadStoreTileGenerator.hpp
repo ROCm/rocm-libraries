@@ -8,6 +8,8 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 
+#include <rocRoller/Expression_fwd.hpp>
+
 namespace rocRoller
 {
     namespace KernelGraph
@@ -21,7 +23,7 @@ namespace rocRoller
         class LoadStoreTileGenerator
         {
         public:
-            LoadStoreTileGenerator(std::shared_ptr<KernelGraph>, ContextPtr, unsigned int);
+            LoadStoreTileGenerator(KernelGraphPtr, ContextPtr, unsigned int);
 
             /**
                  * @brief Generate instructions needed to load a tile from global memory
@@ -84,11 +86,11 @@ namespace rocRoller
                                                    CoordinateGraph::Transformer      coords);
 
         private:
-            std::map<int, int>           m_baseOffsets;
-            ContextPtr                   m_context;
-            std::shared_ptr<KernelGraph> m_graph;
-            Expression::FastArithmetic   m_fastArith;
-            unsigned int                 m_workgroupSizeTotal;
+            std::map<int, int>               m_baseOffsets;
+            ContextPtr                       m_context;
+            KernelGraphPtr                   m_graph;
+            Expression::ExpressionTransducer m_fastArith;
+            unsigned int                     m_workgroupSizeTotal;
 
             // Information needed in order to load or store a tile.
             struct LoadStoreTileInfo

@@ -831,6 +831,14 @@ namespace rocRoller
             } -> std::same_as<Result>;
     };
 
+    template <typename T>
+    concept CHasTypeInfo = requires() //
+    {
+        {
+            TypeInfo<T>::Name()
+            } -> std::convertible_to<std::string>;
+    };
+
     /**
      * @}
      */

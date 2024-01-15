@@ -6,6 +6,7 @@
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>

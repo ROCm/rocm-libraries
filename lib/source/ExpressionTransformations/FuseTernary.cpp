@@ -49,8 +49,10 @@ namespace rocRoller
 
                 if(eval_lhs && eval_rhs && std::holds_alternative<ShiftL>(*lhs))
                 {
-                    auto shift = std::get<ShiftL>(*lhs);
-                    return std::make_shared<Expression>(ShiftLAdd({shift.lhs, shift.rhs, rhs}));
+                    auto shift   = std::get<ShiftL>(*lhs);
+                    auto comment = shift.comment + expr.comment;
+                    return std::make_shared<Expression>(
+                        ShiftLAdd({shift.lhs, shift.rhs, rhs, comment}));
                 }
 
                 if(std::holds_alternative<Multiply>(*lhs))
@@ -59,7 +61,7 @@ namespace rocRoller
                     return multiplyAdd(multiply.lhs, multiply.rhs, rhs);
                 }
 
-                return std::make_shared<Expression>(Add({lhs, rhs}));
+                return std::make_shared<Expression>(Add({lhs, rhs, expr.comment}));
             }
 
             ExpressionPtr operator()(ShiftL const& expr) const
@@ -72,8 +74,9 @@ namespace rocRoller
 
                 if(eval_lhs && eval_rhs && std::holds_alternative<Add>(*lhs))
                 {
-                    auto add = std::get<Add>(*lhs);
-                    return std::make_shared<Expression>(AddShiftL({add.lhs, add.rhs, rhs}));
+                    auto add     = std::get<Add>(*lhs);
+                    auto comment = add.comment + expr.comment;
+                    return std::make_shared<Expression>(AddShiftL{add.lhs, add.rhs, rhs, comment});
                 }
                 else
                 {

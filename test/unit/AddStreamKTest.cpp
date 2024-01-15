@@ -240,23 +240,10 @@ namespace AddStreamKTest
 
             KernelArguments kargs(false);
             kargs.append("result", deviceResult.get());
-            kargs.append("numWGs", numWGs);
-            kargs.append("numTiles0", numTileM);
-            kargs.append("numTiles1", numTileN);
-            kargs.append("numTilesAcc", numTileK);
-            if(twoTile)
-            {
-                kargs.append("numSKTiles", numTilesSK);
-                kargs.append("numSKTilesPerWG", (numTilesSK + numWGs - 1u) / numWGs);
-                kargs.append("numDPTiles", numTilesDP);
-                kargs.append("numDPTilesPerWG", (numTilesDP + numWGs - 1u) / numWGs);
-            }
-            else
-            {
-                kargs.append("numSKTiles", numTileM * numTileN * numTileK);
-                kargs.append("numSKTilesPerWG",
-                             (numTileM * numTileN * numTileK + numWGs - 1) / numWGs);
-            }
+
+            auto assemblyArgs = m_context->kernel()->arguments();
+            for(int i = 1; i < assemblyArgs.size(); i++)
+                kargs.append(assemblyArgs[i].name, evaluate(assemblyArgs[i].expression));
 
             KernelInvocation kinv;
             kinv.workitemCount = {numWGs, 1, 1};
@@ -445,12 +432,10 @@ namespace AddStreamKTest
             KernelArguments kargs(false);
             kargs.append("in", deviceX.get());
             kargs.append("out", deviceA.get());
-            kargs.append("numWGs", numWGs);
-            kargs.append("numTiles0", numTileM);
-            kargs.append("numTiles1", numTileN);
-            kargs.append("numTilesAcc", numTileK);
-            kargs.append("numSKTiles", numTileM * numTileN * numTileK);
-            kargs.append("numSKTilesPerWG", (numTileM * numTileN * numTileK + numWGs - 1) / numWGs);
+
+            auto assemblyArgs = m_context->kernel()->arguments();
+            for(int i = 2; i < assemblyArgs.size(); i++)
+                kargs.append(assemblyArgs[i].name, evaluate(assemblyArgs[i].expression));
 
             KernelInvocation kinv;
             kinv.workitemCount = {numWGs, 1, 1};

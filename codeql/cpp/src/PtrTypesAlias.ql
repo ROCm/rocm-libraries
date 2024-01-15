@@ -23,9 +23,9 @@ where
   not v.declaredUsingAutoType() and
   (t.getNamespace() = v.getNamespace() or t.getNamespace().getAChildNamespace() = v.getNamespace())and
   v.getUnderlyingType() = t.getUnderlyingType() and
-  v.getType().toString().regexpMatch(basicSharedPtrRegex())
+  v.getDefinition().getType().toString().regexpMatch(basicSharedPtrRegex())
 select v,
   "There exists an alias for `" + v.getUnderlyingType().toString() + "`, most likely being`" +
     v.getUnderlyingType().toString().regexpReplaceAll("^shared_ptr<", "").regexpReplaceAll(">$", "")
-    + "Ptr`, but is currently declared as `" + v.getType().toString() + "`"
+    + "Ptr`, but is currently declared as `" + v.getDefinition().getType().toString() + "`"
 // Directly logging `t.getBaseType().toString()` adds weird strings to the query

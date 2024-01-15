@@ -1,8 +1,13 @@
+#include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
+
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
+
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
-#include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+
+#include <rocRoller/Operations/Command.hpp>
 
 namespace rocRoller
 {
@@ -26,7 +31,7 @@ namespace rocRoller
          */
         struct CleanExpressionVisitor
         {
-            CleanExpressionVisitor(std::shared_ptr<AssemblyKernel> kernel)
+            CleanExpressionVisitor(AssemblyKernelPtr kernel)
                 : m_kernel(kernel)
             {
             }
@@ -100,14 +105,14 @@ namespace rocRoller
             }
 
         private:
-            std::shared_ptr<AssemblyKernel> m_kernel;
+            AssemblyKernelPtr m_kernel;
         };
 
         /**
          * Removes all CommandArgruments found within an expression with the appropriate
          * AssemblyKernel Argument.
          */
-        ExpressionPtr cleanArguments(ExpressionPtr expr, std::shared_ptr<AssemblyKernel> kernel)
+        ExpressionPtr cleanArguments(ExpressionPtr expr, AssemblyKernelPtr kernel)
         {
             auto visitor = CleanExpressionVisitor(kernel);
             return visitor.call(expr);
@@ -121,38 +126,111 @@ namespace rocRoller
          */
         struct CleanArgumentsVisitor
         {
-            CleanArgumentsVisitor(std::shared_ptr<AssemblyKernel> kernel)
-                : m_cleanArguments(kernel)
+            CleanArgumentsVisitor(KernelGraph const& graph, ContextPtr context, CommandPtr command)
+                : m_graph(graph)
+                , m_kernel(context->kernel())
+                , m_command(command)
+                , m_context(context)
             {
+            }
+
+            ExpressionPtr cleanExpr(ExpressionPtr expr)
+            {
+                return FastArithmetic(m_context)(expr);
+            }
+
+            template <CCoordinateTransformEdge T>
+            rocRoller::KernelGraph::CoordinateGraph::Edge visitCoordinateEdge(int      tag,
+                                                                              T const& edge)
+            {
+                auto divideBySize = [&](int dimTag) {
+                    using ET  = Expression::EvaluationTime;
+                    auto dim  = m_graph.coordinates.getNode(dimTag);
+                    auto size = getSize(dim);
+                    if(size && !Expression::evaluationTimes(size)[ET::Translate])
+                    {
+                        auto resultType = resultVariableType(size);
+                        if(resultType == DataType::Int32 || resultType == DataType::Int64)
+                            enableDivideBy(size, m_context);
+                    }
+                };
+                if constexpr(std::same_as<Tile, T>)
+                {
+                    auto loc = m_graph.coordinates.getLocation(tag);
+                    for(int i = 1; i < loc.outgoing.size(); i++)
+                        divideBySize(loc.outgoing[i]);
+                }
+
+                if constexpr(std::same_as<Flatten, T>)
+                {
+                    auto loc = m_graph.coordinates.getLocation(tag);
+                    for(int i = 1; i < loc.incoming.size(); i++)
+                        divideBySize(loc.incoming[i]);
+                }
+                return edge;
+            }
+
+            template <CDataFlowEdge T>
+            rocRoller::KernelGraph::CoordinateGraph::Edge visitCoordinateEdge(int      tag,
+                                                                              T const& edge)
+            {
+                return edge;
+            }
+
+            template <CCoordinateTransformEdge Dim, Graph::Direction Dir>
+            bool hasConnectedDimension(int tag)
+            {
+                auto pred
+                    = [this](int tag) { return m_graph.coordinates.get<Dim>(tag).has_value(); };
+
+                return !m_graph.coordinates.getNeighbours<Dir>(tag).filter(pred).empty();
             }
 
             template <CDimension T>
             Dimension visitDimension(int tag, T const& dim)
             {
                 auto d   = dim;
-                d.size   = m_cleanArguments.call(dim.size);
-                d.stride = m_cleanArguments.call(dim.stride);
+                d.size   = cleanExpr(dim.size);
+                d.stride = cleanExpr(dim.stride);
+                d.offset = cleanExpr(dim.offset);
+
+                if constexpr(std::same_as<User, T>)
+                {
+                    if(!m_kernel->hasArgument(dim.argumentName))
+                    {
+                        auto args  = m_command->getArguments();
+                        auto myArg = std::find_if(
+                            args.begin(), args.end(), [&dim](CommandArgumentPtr arg) {
+                                return dim.argumentName == arg->name();
+                            });
+
+                        AssertFatal(myArg != args.end(), ShowValue(dim.argumentName));
+
+                        m_kernel->addCommandArgument(*myArg);
+                    }
+                }
+
                 return d;
             }
 
             Operation visitOperation(Assign const& op)
             {
                 auto cleanOp       = op;
-                cleanOp.expression = m_cleanArguments.call(op.expression);
+                cleanOp.expression = cleanExpr(op.expression);
                 return cleanOp;
             }
 
             Operation visitOperation(ConditionalOp const& op)
             {
                 auto cleanOp      = op;
-                cleanOp.condition = m_cleanArguments.call(op.condition);
+                cleanOp.condition = cleanExpr(op.condition);
                 return cleanOp;
             }
 
             Operation visitOperation(ForLoopOp const& op)
             {
                 auto cleanOp      = op;
-                cleanOp.condition = m_cleanArguments.call(op.condition);
+                cleanOp.condition = cleanExpr(op.condition);
                 return cleanOp;
             }
 
@@ -163,8 +241,12 @@ namespace rocRoller
             }
 
         private:
-            CleanExpressionVisitor m_cleanArguments;
+            KernelGraph const& m_graph;
+            AssemblyKernelPtr  m_kernel;
+            CommandPtr         m_command;
+            ContextPtr         m_context;
         };
+        static_assert(CCoordinateEdgeVisitor<CleanArgumentsVisitor>);
 
         /**
          * Rewrite HyperGraph to make sure no more CommandArgument
@@ -174,7 +256,7 @@ namespace rocRoller
         {
             TIMER(t, "KernelGraph::cleanArguments");
             rocRoller::Log::getLogger()->debug("KernelGraph::cleanArguments()");
-            auto visitor = CleanArgumentsVisitor(m_kernel);
+            auto visitor = CleanArgumentsVisitor(k, m_context, m_command);
             return rewriteDimensions(k, visitor);
         }
 

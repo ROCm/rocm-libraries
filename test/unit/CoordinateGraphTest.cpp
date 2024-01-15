@@ -6,6 +6,7 @@
 #include "GenericContextFixture.hpp"
 
 #include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
@@ -1160,8 +1161,8 @@ namespace rocRollerTest
         auto exprs = coords.reverse({A});
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
-                  "Add(Multiply(Add(Multiply(s2:U32, 16j), 33j), 300i), "
-                  "Multiply(Add(Multiply(s3:U32, 16j), 2j), 1i))");
+                  "Add(Multiply(Add(Multiply({Workgroup Index X: s2:U32}, 16j), 33j), 300i), "
+                  "Multiply(Add(Multiply({Workgroup Index Y: s3:U32}, 16j), 2j), 1i))");
     }
 
     INSTANTIATE_TEST_SUITE_P(ARCH_CoordinateGraphTests,

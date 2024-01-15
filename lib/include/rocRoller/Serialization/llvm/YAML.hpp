@@ -152,16 +152,16 @@ namespace llvm
         template <typename T>
         struct Hide
         {
-            T& _value;
+            T& value;
 
             Hide(T& value)
-                : _value(value)
+                : value(value)
             {
             }
 
             T& operator*()
             {
-                return _value;
+                return value;
             }
         };
     } // namespace yaml

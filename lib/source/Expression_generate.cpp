@@ -3,13 +3,15 @@
 #include <algorithm>
 
 #include <rocRoller/AssemblyKernelArgument.hpp>
+#include <rocRoller/CommonSubexpressionElim.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MultiplyAdd.hpp>
-#include <rocRoller/CommonSubexpressionElim.hpp>
+#include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
@@ -389,6 +391,8 @@ namespace rocRoller
             requires(CKernelExecuteTime<T>&& CBinary<T>&& CArithmetic<T>) Generator<Instruction>
             operator()(Register::ValuePtr& dest, T const& expr)
             {
+                auto strValue = toString(expr);
+                co_yield Instruction::Comment(strValue);
                 bool                            schedulerLocked = false;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.rhs};
@@ -676,6 +680,8 @@ namespace rocRoller
             Generator<Instruction> operator()(Register::ValuePtr&       dest,
                                               Register::ValuePtr const& expr)
             {
+                expr->assertCanUseAsOperand();
+
                 if(dest == nullptr)
                 {
                     dest = expr;
@@ -775,18 +781,7 @@ namespace rocRoller
                         if(!(tree.at(i).reg
                              && tree.at(i).reg->regType() == Register::Type::Literal))
                         {
-                            if(tree.at(i).expr
-                               && std::holds_alternative<Register::ValuePtr>(*tree.at(i).expr))
-                            {
-                                auto value = std::get<Register::ValuePtr>(*tree.at(i).expr);
-                                if(value->allocationState() != Register::AllocationState::Allocated)
-                                    co_yield value->allocate();
-                            }
-                            else
-                            {
-                                schedulable.push_back(
-                                    visitor.call(tree.at(i).reg, tree.at(i).expr));
-                            }
+                            schedulable.push_back(visitor.call(tree.at(i).reg, tree.at(i).expr));
                         }
                         tmpMetDeps.insert(i);
                     }
@@ -812,11 +807,21 @@ namespace rocRoller
         Generator<Instruction>
             generate(Register::ValuePtr& dest, ExpressionPtr expr, ContextPtr context)
         {
-            co_yield Instruction::Comment(toString(expr));
+            std::string destStr = "nullptr";
+            if(dest)
+                destStr = dest->toString();
+            co_yield Instruction::Comment("Generate " + toString(expr) + " into " + destStr);
 
-            // resolve DataFlowTags and evaluate exprs with translate time source operands
-            expr = dataFlowTagPropagation(expr, context);
-            expr = simplify(expr);
+            {
+                auto fast = FastArithmetic(context);
+
+                // There may be pre-calculated values based on other kernel arguments.
+                expr = fast(expr);
+                // Resolve DataFlowTags and evaluate exprs with translate time source operands.
+                expr = dataFlowTagPropagation(expr, context);
+                // There may be additional optimizations after resolving DataFlowTags and kernel arguments.
+                expr = fast(expr);
+            }
 
             CodeGeneratorVisitor v{context};
 

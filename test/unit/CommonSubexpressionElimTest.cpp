@@ -263,8 +263,9 @@ namespace ExpressionTest
     {
         auto command = std::make_shared<Command>();
 
-        auto a = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto reg
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
+        auto a = reg->expression();
 
         auto b = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Int32, PointerType::Value}));
@@ -272,7 +273,8 @@ namespace ExpressionTest
         {
             auto expr    = Expression::fastDivision(a / b, m_context);
             auto results = consolidateSubExpressions(expr, m_context);
-            EXPECT_GT(results.size(), 3);
+            EXPECT_GT(results.size(), 3) << rocRoller::Expression::toString(a / b) << "\n"
+                                         << rocRoller::Expression::toString(expr);
             EXPECT_GE(getConsolidationCount(results), 1) << toString(results);
 
             EXPECT_TRUE(identical(expr, rebuildExpression(results)));

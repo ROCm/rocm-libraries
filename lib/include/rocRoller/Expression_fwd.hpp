@@ -115,8 +115,10 @@ namespace rocRoller
             // Available at kernel launch
             CommandArgumentPtr,
 
-            // Available at kernel execute (i.e. on the GPU)
+            // Available at kernel execute (i.e. on the GPU), and at kernel launch.
             AssemblyKernelArgumentPtr,
+
+            // Available at kernel execute (i.e. on the GPU)
             Register::ValuePtr,
             DataFlowTag,
             WaveTilePtr>;

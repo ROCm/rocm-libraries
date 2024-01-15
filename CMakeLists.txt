@@ -218,18 +218,19 @@ ADD_CUSTOM_TARGET(
 set(rocroller_src
 
  lib/source/Assembler.cpp
- lib/source/AssemblyKernel_serialization.cpp
  lib/source/AssemblyKernel.cpp
+ lib/source/AssemblyKernelArgument.cpp
+ lib/source/AssemblyKernel_serialization.cpp
  lib/source/CommandSolution.cpp
  lib/source/CommonSubexpressionElim.cpp
  lib/source/Context.cpp
  lib/source/DataTypes.cpp
  lib/source/Error.cpp
  lib/source/ExecutableKernel.cpp
+ lib/source/Expression.cpp
  lib/source/Expression_evaluate.cpp
  lib/source/Expression_generate.cpp
  lib/source/Expression_serialization.cpp
- lib/source/Expression.cpp
  lib/source/GPUArchitecture.cpp
  lib/source/GPUArchitectureLibrary.cpp
  lib/source/KernelArguments.cpp
@@ -250,6 +251,7 @@ set(rocroller_src
  lib/source/ExpressionTransformations/FuseTernary.cpp
  lib/source/ExpressionTransformations/Identity.cpp
  lib/source/ExpressionTransformations/LaunchTimeSubExpressions.cpp
+ lib/source/ExpressionTransformations/RestoreCommandArguments.cpp
  lib/source/ExpressionTransformations/Simplify.cpp
 
  lib/source/CodeGen/Arithmetic/Add.cpp
@@ -283,6 +285,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/ShiftLAdd.cpp
  lib/source/CodeGen/Arithmetic/Subtract.cpp
  lib/source/CodeGen/Arithmetic/Utility.cpp
+ lib/source/CodeGen/ArgumentLoader.cpp
  lib/source/CodeGen/Buffer.cpp
  lib/source/CodeGen/Instruction.cpp
  lib/source/CodeGen/InstructionRef.cpp
@@ -321,7 +324,7 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/AddDeallocate.cpp
  lib/source/KernelGraph/Transformations/AddLDS.cpp
  lib/source/KernelGraph/Transformations/AddStreamK.cpp
- lib/source/KernelGraph/Transformations/CleanGraph.cpp
+ lib/source/KernelGraph/Transformations/CleanArguments.cpp
  lib/source/KernelGraph/Transformations/CleanLoops.cpp
  lib/source/KernelGraph/Transformations/ConnectWorkgroups.cpp
  lib/source/KernelGraph/Transformations/FuseExpressions.cpp

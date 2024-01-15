@@ -53,15 +53,12 @@ namespace rocRoller
                 if(m_coords->getElementType(idx) != Graph::ElementType::Node)
                     return false;
 
-                auto const& node
-                    = std::get<KernelGraph::CoordinateGraph::Dimension>(m_coords->getElement(idx));
+                auto user = m_coords->get<KernelGraph::CoordinateGraph::User>(idx);
 
-                if(!std::holds_alternative<KernelGraph::CoordinateGraph::User>(node))
+                if(!user)
                     return false;
 
-                auto const& user = std::get<KernelGraph::CoordinateGraph::User>(node);
-
-                return user.argumentName == argName;
+                return user->argumentName == argName;
             };
 
             auto coords = m_coords->findElements(predicate).to<std::vector>();
@@ -92,7 +89,7 @@ namespace rocRoller
             auto             exps = m_tx.reverse(coords);
             AssertFatal(exps.size() == 1);
 
-            auto val = Expression::evaluate(exps[0]);
+            auto val = Expression::evaluate(exps[0], m_runtimeArgs.runtimeArguments());
 
             return std::visit(to_size_t, val);
         }
@@ -103,7 +100,7 @@ namespace rocRoller
             auto             exps = m_tx.forward(coords);
             AssertFatal(exps.size() == 1);
 
-            auto val = Expression::evaluate(exps[0]);
+            auto val = Expression::evaluate(exps[0], m_runtimeArgs.runtimeArguments());
 
             return std::visit(to_size_t, val);
         }

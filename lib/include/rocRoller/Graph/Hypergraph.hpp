@@ -88,10 +88,10 @@ namespace rocRoller
              */
             ElementType getElementType(int index) const;
 
-            template <typename T>
+            template <typename T = Node>
             T getNode(int index) const;
 
-            template <typename T>
+            template <typename T = Edge>
             T getEdge(int index) const;
 
             /**

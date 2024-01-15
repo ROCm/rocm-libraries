@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/LoopOverTileNumbers.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>

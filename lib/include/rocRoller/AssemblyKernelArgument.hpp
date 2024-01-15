@@ -21,6 +21,10 @@ namespace rocRoller
         int offset = -1;
         int size   = -1;
 
-        bool operator==(AssemblyKernelArgument const&) const = default;
+        bool operator==(AssemblyKernelArgument const&) const;
+
+        std::string toString() const;
     };
+
+    std::ostream& operator<<(std::ostream& stream, AssemblyKernelArgument const& arg);
 }

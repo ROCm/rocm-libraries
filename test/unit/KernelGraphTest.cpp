@@ -12,6 +12,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/Constraints.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
@@ -1640,7 +1641,7 @@ namespace KernelGraphTest
         exprs = kgraph1.coordinates.reverse(
             {block_id, thread_id}, {user0}, {block0, thread0}, fastArith);
         sexpr = Expression::toString(exprs[0]);
-        EXPECT_EQ(sexpr, "Multiply(97j, CommandArgument(Load_Linear_0_stride_0))");
+        EXPECT_EQ(sexpr, "Multiply(97j, Load_Linear_0_stride_0_1)");
     }
 
 #if 0
@@ -2116,29 +2117,51 @@ namespace KernelGraphTest
         auto example = rocRollerTest::Graphs::VectorAddNegSquare<int>();
         auto command = example.getCommand();
 
-        m_context->kernel()->addCommandArguments(command->getArguments());
-
         int workGroupSize = 64;
         m_context->kernel()->setKernelDimensions(1);
         m_context->kernel()->setWorkgroupSize({64, 1, 1});
 
-        auto cleanArgumentsTransform = std::make_shared<CleanArguments>(m_context->kernel());
+        auto cleanArgumentsTransform = std::make_shared<CleanArguments>(m_context, command);
 
         auto kgraph = translate(command);
-        kgraph      = kgraph.transform(cleanArgumentsTransform);
 
-        auto dot = kgraph.toDOT();
-        EXPECT_THAT(dot, Not(HasSubstr("SubDimension{0, CommandArgument(Load_Linear_0_size_0)}")));
-        EXPECT_THAT(dot, Not(HasSubstr("SubDimension{0, CommandArgument(Load_Linear_1_size_0)}")));
-        EXPECT_THAT(
-            dot, Not(HasSubstr("SubDimension{0, Linear{CommandArgument(Load_Linear_0_size_0)}")));
-        EXPECT_THAT(
-            dot, Not(HasSubstr("SubDimension{0, Linear{CommandArgument(Load_Linear_1_size_0)}")));
+        auto beforePredicates
+            = {HasSubstr("SubDimension{0, CommandArgument(Load_Linear_0_size_0)}"),
+               HasSubstr("SubDimension{0, CommandArgument(Load_Linear_1_size_0)}"),
+               HasSubstr("Linear{CommandArgument(Load_Linear_0_size_0)}"),
+               HasSubstr("Linear{CommandArgument(Load_Linear_1_size_0)}")};
 
-        EXPECT_THAT(dot, HasSubstr("SubDimension{0, Load_Linear_0_size_0}"));
-        EXPECT_THAT(dot, HasSubstr("SubDimension{0, Load_Linear_1_size_0}"));
-        EXPECT_THAT(dot, HasSubstr("Linear{Load_Linear_0_size_0}"));
-        EXPECT_THAT(dot, HasSubstr("Linear{Load_Linear_1_size_0}"));
+        // Note that these searches do not include the close braces ("}").  This is because the
+        // argument name will have a number appended which is subject to change
+        // (Load_Linear_0_size_0 might become Load_Linear_0_size_0_2).
+        auto afterPredicates = {
+            HasSubstr("SubDimension{0, Load_Linear_0_size_0"),
+            HasSubstr("SubDimension{0, Load_Linear_1_size_0"),
+            HasSubstr("Linear{Load_Linear_0_size_0"),
+            HasSubstr("Linear{Load_Linear_1_size_0"),
+        };
+
+        {
+            auto dot = kgraph.toDOT();
+
+            for(auto const& pred : beforePredicates)
+                EXPECT_THAT(dot, pred);
+
+            for(auto const& pred : afterPredicates)
+                EXPECT_THAT(dot, Not(pred));
+        }
+
+        kgraph = kgraph.transform(cleanArgumentsTransform);
+
+        {
+            auto dot = kgraph.toDOT();
+
+            for(auto const& pred : beforePredicates)
+                EXPECT_THAT(dot, Not(pred));
+
+            for(auto const& pred : afterPredicates)
+                EXPECT_THAT(dot, pred);
+        }
     }
 
     TEST_F(KernelGraphTest, Basic)

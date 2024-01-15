@@ -355,6 +355,14 @@ namespace rocRoller
                 return ExpressionInfo<Expr>::name();
             }
 
+            std::string operator()(CommandArgumentPtr const& expr) const
+            {
+                if(expr)
+                    return expr->name();
+
+                return ExpressionInfo<CommandArgumentPtr>::name();
+            }
+
             std::string call(Expression const& expr) const
             {
                 return std::visit(*this, expr);
@@ -418,7 +426,7 @@ namespace rocRoller
 
             EvaluationTimes operator()(AssemblyKernelArgumentPtr const& expr) const
             {
-                return {EvaluationTime::KernelExecute};
+                return {EvaluationTime::KernelLaunch, EvaluationTime::KernelExecute};
             }
 
             EvaluationTimes operator()(DataFlowTag const& expr) const

@@ -62,7 +62,7 @@ namespace rocRoller
                         {
                             keys.push_back(tag);
                         }
-                        localSrcs.emplace_back(std::get<Dimension>(getElement(tag)));
+                        localSrcs.emplace_back(getNode(tag));
                         localSrcTags.emplace_back(tag);
                     }
                     for(auto const& tag : getNeighbours<Graph::Direction::Downstream>(elemId))
@@ -75,7 +75,7 @@ namespace rocRoller
                         {
                             keys.push_back(tag);
                         }
-                        localDsts.emplace_back(std::get<Dimension>(getElement(tag)));
+                        localDsts.emplace_back(getNode(tag));
                         localDstTags.emplace_back(tag);
                     }
 
@@ -94,10 +94,21 @@ namespace rocRoller
 
             for(int const key : ends)
             {
-                AssertFatal(exprMap.contains(key),
-                            "Path not found for ",
-                            Graph::variantToString(getElement(key)),
-                            ShowValue(key));
+                if(!exprMap.contains(key))
+                {
+                    auto keys = [&exprMap]() -> Generator<int> {
+                        for(auto const& pair : exprMap)
+                            co_yield pair.first;
+                    }()
+                                                    .template to<std::vector>();
+                    std::ostringstream msg;
+                    streamJoin(msg, keys, ", ");
+                    AssertFatal(exprMap.contains(key),
+                                "Path not found for ",
+                                Graph::variantToString(getElement(key)),
+                                ShowValue(key),
+                                msg.str());
+                }
                 results.push_back(transducer ? transducer(exprMap.at(key)) : exprMap.at(key));
             }
 

@@ -86,7 +86,7 @@ namespace rocRoller
         return m_observer;
     }
 
-    inline std::shared_ptr<AssemblyKernel> Context::kernel() const
+    inline AssemblyKernelPtr Context::kernel() const
     {
         return m_kernel;
     }

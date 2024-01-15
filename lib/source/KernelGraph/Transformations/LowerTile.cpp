@@ -1391,7 +1391,7 @@ namespace rocRoller
             }
 
         private:
-            std::shared_ptr<AssemblyKernel>    m_kernel;
+            AssemblyKernelPtr                  m_kernel;
             std::shared_ptr<CommandParameters> m_params;
         };
 

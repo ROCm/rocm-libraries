@@ -133,7 +133,7 @@ namespace rocRoller
                         return rv;
                 }
 
-                return std::make_shared<Expression>(Multiply({lhs, rhs}));
+                return std::make_shared<Expression>(Multiply({lhs, rhs, expr.comment}));
             }
 
             template <CValue Value>

@@ -82,7 +82,7 @@ namespace rocRoller
 
         std::shared_ptr<Scheduling::IObserver> observer() const;
 
-        std::shared_ptr<AssemblyKernel>        kernel() const;
+        AssemblyKernelPtr                      kernel() const;
         std::shared_ptr<ArgumentLoader>        argLoader() const;
         std::shared_ptr<ScheduledInstructions> instructions() const;
         std::shared_ptr<MemoryInstructions>    mem() const;
@@ -144,7 +144,7 @@ namespace rocRoller
             m_allocators;
 
         std::shared_ptr<Scheduling::IObserver>     m_observer;
-        std::shared_ptr<AssemblyKernel>            m_kernel;
+        AssemblyKernelPtr                          m_kernel;
         std::shared_ptr<ArgumentLoader>            m_argLoader;
         std::shared_ptr<ScheduledInstructions>     m_instructions;
         std::shared_ptr<MemoryInstructions>        m_mem;

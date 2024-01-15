@@ -82,6 +82,7 @@ namespace rocRoller
         {
             return this->regType() == b->regType() && this->variableType() == b->variableType()
                    && this->registerCount() == b->registerCount()
+                   && this->allocationCoord() == b->allocationCoord()
                    && this->allocation() == b->allocation();
         }
 

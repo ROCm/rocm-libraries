@@ -1,6 +1,10 @@
+
+#include <rocRoller/ExpressionTransformations.hpp>
+
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Logging.hpp>
 
 #include <bit>
 
@@ -64,87 +68,147 @@ namespace rocRoller
 #endif
         }
 
-        ExpressionPtr magicNumberDivision(ExpressionPtr lhs, ExpressionPtr rhs, ContextPtr context)
+        void enableDivideBy(ExpressionPtr expr, ContextPtr context)
         {
-            auto rhsType = resultVariableType(rhs);
-            auto lhsType = resultVariableType(lhs);
+            expr = FastArithmetic(context)(expr);
 
-            if(!(rhsType == DataType::Int32 || rhsType == DataType::Int64
-                 || rhsType == DataType::UInt32))
+            auto resultType = resultVariableType(expr);
+            bool isSigned   = DataTypeInfo::Get(resultType).isSigned;
+
+            AssertFatal(resultType == DataType::Int32 || resultType == DataType::Int64
+                            || resultType == DataType::UInt32,
+                        ShowValue(resultType),
+                        ShowValue(expr));
+
+            auto exprTimes = evaluationTimes(expr);
+
+            if(exprTimes[EvaluationTime::Translate])
+            {
+                Log::warn(
+                    "Not adding arguments for division by {} due to translate-time evaluation.",
+                    toString(expr));
+                return;
+            }
+
+            AssertFatal(exprTimes[EvaluationTime::KernelLaunch], ShowValue(exprTimes));
+
+            auto magicExpr     = launchTimeSubExpressions(magicMultiple(expr), context);
+            auto numShiftsExpr = launchTimeSubExpressions(magicShifts(expr), context);
+
+            auto magicTimes = evaluationTimes(magicExpr);
+            auto shiftTimes = evaluationTimes(numShiftsExpr);
+
+            EvaluationTimes theTimes = magicTimes & shiftTimes;
+
+            AssertFatal(theTimes[EvaluationTime::KernelExecute],
+                        ShowValue(magicTimes),
+                        ShowValue(shiftTimes),
+                        ShowValue(magicExpr),
+                        ShowValue(numShiftsExpr));
+
+            if(isSigned)
+            {
+                auto signExpr  = launchTimeSubExpressions(magicSign(expr), context);
+                auto signTimes = evaluationTimes(signExpr);
+
+                AssertFatal(signTimes[EvaluationTime::KernelExecute],
+                            ShowValue(signTimes),
+                            ShowValue(signExpr));
+            }
+        }
+
+        ExpressionPtr magicNumberDivision(ExpressionPtr numerator,
+                                          ExpressionPtr denominator,
+                                          ContextPtr    context)
+        {
+            auto numeratorType   = resultVariableType(numerator);
+            auto denominatorType = resultVariableType(denominator);
+
+            if(!(denominatorType == DataType::Int32 || denominatorType == DataType::Int64
+                 || denominatorType == DataType::UInt32))
             {
                 // Unhandled case
                 return nullptr;
             }
 
-            auto numerator   = lhs;
-            auto denominator = rhs;
-            auto dataType    = rhsType;
+            AssertFatal(
+                numeratorType.getElementSize() == denominatorType.getElementSize(),
+                "Can't mix 32-bit and 64-bit types in fast division, use a Convert expression.",
+                ShowValue(numeratorType),
+                ShowValue(denominatorType),
+                ShowValue(numerator),
+                ShowValue(denominator));
 
-            if(DataTypeInfo::Get(rhsType).elementSize > 4
-               || DataTypeInfo::Get(lhsType).elementSize > 4)
-            {
-                numerator   = convert(DataType::Int64, lhs);
-                denominator = convert(DataType::Int64, rhs);
-                dataType    = DataType::Int64;
-            }
+            bool isSigned = DataTypeInfo::Get(denominatorType).isSigned;
 
             auto k = context->kernel();
 
-            // Create unique names for the new arguments
-            auto magicExprStr  = concatenate("magic_num_", k->arguments().size());
-            auto magicShiftStr = concatenate("magic_shifts_", k->arguments().size());
-            auto magicSignStr  = concatenate("magic_sign_", k->arguments().size());
+            auto magicExpr     = launchTimeSubExpressions(magicMultiple(denominator), context);
+            auto numShiftsExpr = launchTimeSubExpressions(magicShifts(denominator), context);
 
-            // Add the new arguments to the AssemblyKernel
-            k->addArgument(
-                {magicExprStr, dataType, DataDirection::ReadOnly, magicMultiple(denominator)});
-            k->addArgument({magicShiftStr,
-                            DataType::Int32,
-                            DataDirection::ReadOnly,
-                            magicShifts(denominator)});
-
-            // Create expressions of the new arguments
-            auto magicExpr = std::make_shared<Expression>(
-                std::make_shared<AssemblyKernelArgument>(k->findArgument(magicExprStr)));
-            auto numShiftsExpr = std::make_shared<Expression>(
-                std::make_shared<AssemblyKernelArgument>(k->findArgument(magicShiftStr)));
-
-            if(dataType == DataType::UInt32)
             {
-                auto q   = multiplyHigh(numerator, magicExpr);
-                auto t   = (arithmeticShiftR(numerator - q, literal(1))) + q;
-                auto ret = arithmeticShiftR(t, numShiftsExpr);
-                return ret;
+                EvaluationTimes evalTimes
+                    = evaluationTimes(magicExpr) & evaluationTimes(numShiftsExpr);
+
+                if(!evalTimes[EvaluationTime::KernelExecute])
+                {
+                    Log::debug("Returning nullptr from magicNumberDivision ({})",
+                               toString(evalTimes));
+                    return nullptr;
+                }
+            }
+
+            ExpressionPtr result;
+
+            auto one = literal(1, denominatorType);
+
+            if(!isSigned)
+            {
+                auto q = multiplyHigh(numerator, magicExpr);
+                auto t = (arithmeticShiftR(numerator - q, one)) + q;
+                result = arithmeticShiftR(t, numShiftsExpr);
             }
             else
             {
-                k->addArgument(
-                    {magicSignStr, dataType, DataDirection::ReadOnly, magicSign(denominator)});
-                auto signExpr = std::make_shared<Expression>(
-                    std::make_shared<AssemblyKernelArgument>(k->findArgument(magicSignStr)));
+                auto signExpr = launchTimeSubExpressions(magicSign(denominator), context);
+
+                {
+                    EvaluationTimes evalTimes = evaluationTimes(signExpr);
+
+                    if(!evalTimes[EvaluationTime::KernelExecute])
+                    {
+                        Log::debug("Returning nullptr from magicNumberDivision ({})",
+                                   toString(evalTimes));
+                        return nullptr;
+                    }
+                }
 
                 // Create expression that performs division using the new arguments
 
-                auto numBytes = DataTypeInfo::Get(dataType).elementSize;
+                auto numBytes = denominatorType.getElementSize();
 
                 auto q       = multiplyHigh(numerator, magicExpr) + numerator;
-                auto signOfQ = arithmeticShiftR(q, literal(numBytes * 8 - 1));
+                auto signOfQ = arithmeticShiftR(q, literal(numBytes * 8 - 1, denominatorType));
 
-                // auto magicIsPow2 = -(magicExpr == literal(0, dataType));
+                auto magicIsPow2 = logicalShiftR((-magicExpr) | magicExpr,
+                                                 literal(numBytes * 8 - 1, denominatorType))
+                                   - one; // 0 if != 0, -1 if equal to 0
 
-                auto magicIsPow2
-                    = logicalShiftR((-magicExpr) | magicExpr, literal(numBytes * 8 - 1))
-                      - literal(1, dataType); // 0 if != 0, -1 if equal to 0
-
-                auto handleSignOfLHS
-                    = q + (signOfQ & ((literal(1, dataType) << numShiftsExpr) + magicIsPow2));
+                auto handleSignOfLHS = q + (signOfQ & ((one << numShiftsExpr) + magicIsPow2));
 
                 auto shiftedQ = arithmeticShiftR(handleSignOfLHS, numShiftsExpr);
 
-                auto result = (shiftedQ ^ signExpr) - signExpr;
-
-                return result;
+                result = (shiftedQ ^ signExpr) - signExpr;
             }
+
+            result = launchTimeSubExpressions(result, context);
+
+            {
+                auto evalTimes = evaluationTimes(result);
+                AssertFatal(evalTimes[EvaluationTime::KernelExecute], toString(result), evalTimes);
+            }
+
+            return result;
         }
 
         template <typename T>
@@ -425,6 +489,8 @@ namespace rocRoller
                 auto rhs          = call(expr.rhs);
                 auto rhsEvalTimes = evaluationTimes(rhs);
 
+                std::string extraComment;
+
                 // Obtain a CommandArgumentValue from rhs. If there is one,
                 // attempt to replace the division with faster operations.
                 if(rhsEvalTimes[EvaluationTime::Translate])
@@ -435,23 +501,24 @@ namespace rocRoller
                 }
 
                 auto rhsType = resultVariableType(rhs);
-                if(rhsEvalTimes[EvaluationTime::KernelLaunch]
-                   && (rhsType == DataType::Int32 || rhsType == DataType::Int64
-                       || rhsType == DataType::UInt32))
+                if(rhsEvalTimes[EvaluationTime::KernelLaunch])
                 {
                     auto div = magicNumberDivision(lhs, rhs, m_context);
                     if(div)
                         return div;
+
+                    extraComment = " (magicNumberDivision returned nullptr)";
                 }
-                return std::make_shared<Expression>(Divide({lhs, rhs}));
+                return std::make_shared<Expression>(Divide{lhs, rhs, expr.comment + extraComment});
             }
 
             ExpressionPtr operator()(Modulo const& expr) const
             {
 
-                auto lhs          = call(expr.lhs);
-                auto rhs          = call(expr.rhs);
-                auto rhsEvalTimes = evaluationTimes(rhs);
+                auto        lhs          = call(expr.lhs);
+                auto        rhs          = call(expr.rhs);
+                auto        rhsEvalTimes = evaluationTimes(rhs);
+                std::string extraComment;
 
                 // Obtain a CommandArgumentValue from rhs. If there is one,
                 // attempt to replace the modulo with faster operations.
@@ -464,16 +531,16 @@ namespace rocRoller
 
                 auto rhsType = resultVariableType(rhs);
 
-                if(rhsEvalTimes[EvaluationTime::KernelLaunch]
-                   && (rhsType == DataType::Int32 || rhsType == DataType::Int64
-                       || rhsType == DataType::UInt32))
+                if(rhsEvalTimes[EvaluationTime::KernelLaunch])
                 {
                     auto div = magicNumberDivision(lhs, rhs, m_context);
                     if(div)
                         return lhs - (div * rhs);
+
+                    extraComment = " (modulo: magicNumberDivision returned nullptr)";
                 }
 
-                return std::make_shared<Expression>(Modulo({lhs, rhs}));
+                return std::make_shared<Expression>(Modulo{lhs, rhs, expr.comment + extraComment});
             }
 
             template <CValue Value>

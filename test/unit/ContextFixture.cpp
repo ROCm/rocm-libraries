@@ -63,10 +63,6 @@ std::string ContextFixture::testKernelName(std::string const& suffix) const
     if(type)
         rv += type;
 
-    char const* value = info->type_param();
-    if(value)
-        rv += value;
-
     rv += "_kernel";
     rv += suffix;
 

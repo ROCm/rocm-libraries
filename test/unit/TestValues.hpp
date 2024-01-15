@@ -85,4 +85,40 @@ namespace TestValues
                                                12344.0,
                                                12981.0,
                                                42e5};
+
+    template <typename T>
+    struct ByType
+    {
+    };
+
+    template <>
+    struct ByType<uint32_t>
+    {
+        inline const static auto values = uint32Values;
+    };
+
+    template <>
+    struct ByType<int32_t>
+    {
+        inline const static auto values = int32Values;
+    };
+
+    template <>
+    struct ByType<int64_t>
+    {
+        inline const static auto values = int64Values;
+    };
+
+    template <>
+    struct ByType<float>
+    {
+        inline const static auto values = floatValues;
+    };
+
+    template <>
+    struct ByType<double>
+    {
+        inline const static auto values = doubleValues;
+    };
+
 }

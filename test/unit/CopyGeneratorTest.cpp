@@ -4,6 +4,7 @@
 
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
+#include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/KernelArguments.hpp>
@@ -97,10 +98,10 @@ namespace CopyGeneratorTest
         m_context->schedule(m_context->copier()->copy(i32vr, m_context->getSCC()));
 
         std::string expectedOutput = R"(
-            s_mov_b32 s0, s0
+            // s_mov_b32 s0, s0         Omitted due to same registers
             s_mov_b32 s0, 20
-            v_mov_b32 v0, v0
-            v_accvgpr_mov_b32 a0, a0
+            // v_mov_b32 v0, v0         Omitted due to same registers
+            // v_accvgpr_mov_b32 a0, a0 Omitted due to same registers
             v_accvgpr_read v0, a0
             v_mov_b32 v0, s0
             v_mov_b32 v0, 20

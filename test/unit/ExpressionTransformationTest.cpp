@@ -2,8 +2,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/Operations/Command.hpp>
 
 #include "GenericContextFixture.hpp"
 
@@ -99,7 +101,7 @@ TEST_F(ExpressionTransformationTest, Simplify)
     EXPECT_EQ(Expression::toString(simplify(Expression::fuseTernary(a + b << one + one))),
               "AddShiftL(33i, 100i, 2i)");
 
-    EXPECT_EQ(Expression::simplify(nullptr), nullptr);
+    EXPECT_EQ(Expression::simplify(nullptr).get(), nullptr);
 }
 
 TEST_F(ExpressionTransformationTest, FuseAssociative)
@@ -156,7 +158,7 @@ TEST_F(ExpressionTransformationTest, FuseAssociative)
                      Expression::Multiply{nullptr, nullptr})),
                  FatalError);
 
-    EXPECT_EQ(Expression::fuseAssociative(nullptr), nullptr);
+    EXPECT_EQ(Expression::fuseAssociative(nullptr).get(), nullptr);
 }
 
 TEST_F(ExpressionTransformationTest, FuseTernary)
@@ -188,7 +190,7 @@ TEST_F(ExpressionTransformationTest, FuseTernary)
                      Expression::Multiply{nullptr, nullptr})),
                  FatalError);
 
-    EXPECT_THROW(Expression::fuseTernary(nullptr), FatalError);
+    EXPECT_THROW(Expression::fuseTernary(nullptr).get(), FatalError);
 }
 
 TEST_F(ExpressionTransformationTest, Fast)
@@ -200,6 +202,47 @@ TEST_F(ExpressionTransformationTest, Fast)
     auto c    = Expression::literal(12.f);
 
     Expression::FastArithmetic fastArith(m_context);
-    EXPECT_EQ(fastArith(nullptr), nullptr);
+    EXPECT_EQ(fastArith(nullptr).get(), nullptr);
     EXPECT_EQ(Expression::toString(fastArith(c * zero)), "0.00000f");
+}
+
+TEST_F(ExpressionTransformationTest, LaunchTimeSubExpressions)
+{
+    auto command = std::make_shared<Command>();
+
+    auto arg1 = command->allocateArgument(DataType::Int32, DataDirection::ReadOnly, "arg1");
+    auto arg2 = command->allocateArgument(DataType::Int32, DataDirection::ReadOnly, "arg2");
+    auto arg3 = command->allocateArgument(DataType::Int64, DataDirection::ReadOnly, "arg3");
+
+    auto arg1e = arg1->expression();
+    auto arg2e = arg2->expression();
+    auto arg3e = arg3->expression();
+
+    auto reg1e = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1)
+                     ->expression();
+    auto reg2e = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int64, 1)
+                     ->expression();
+
+    auto ex1 = (arg1e * Expression::literal(5)) * arg2e * arg3e;
+
+    auto origStr = toString(ex1);
+
+    auto ex1_launch = launchTimeSubExpressions(ex1, m_context);
+
+    EXPECT_EQ(toString(ex1_launch), "Multiply_0");
+
+    auto restored = restoreCommandArguments(ex1_launch);
+
+    EXPECT_EQ(origStr, toString(restored));
+
+    auto ex2 = ex1 + arg1e;
+
+    auto ex2_launch = launchTimeSubExpressions(ex2, m_context);
+    EXPECT_EQ(toString(ex2_launch), "Add(Multiply_0, arg1_1)");
+
+    std::vector<AssemblyKernelArgument> expectedArgs{
+        {"Multiply_0", DataType::Int64, DataDirection::ReadOnly, ex1, 0, 8},
+        {"arg1_1", DataType::Int32, DataDirection::ReadOnly, arg1e, 8, 4}};
+
+    EXPECT_EQ(expectedArgs, m_context->kernel()->arguments());
 }

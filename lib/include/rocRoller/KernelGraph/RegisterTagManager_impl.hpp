@@ -45,7 +45,8 @@ namespace rocRoller
             {
                 AssertFatal(reg->variableType() == varType,
                             ShowValue(varType),
-                            ShowValue(reg->variableType()));
+                            ShowValue(reg->variableType()),
+                            ShowValue(tag));
                 AssertFatal(reg->valueCount() == valueCount,
                             ShowValue(valueCount),
                             ShowValue(reg->valueCount()));

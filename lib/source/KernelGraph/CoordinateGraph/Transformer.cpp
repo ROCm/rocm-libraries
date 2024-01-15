@@ -33,7 +33,7 @@ namespace rocRoller
             auto const& kernelWorkitemIndexes  = m_context->kernel()->workitemIndex();
             for(auto const& tag : m_graph->getNodes())
             {
-                auto dimension = std::get<Dimension>(m_graph->getElement(tag));
+                auto dimension = m_graph->getNode(tag);
                 if(std::holds_alternative<Workgroup>(dimension))
                 {
                     auto dimensionWorkgroup = std::get<Workgroup>(dimension);

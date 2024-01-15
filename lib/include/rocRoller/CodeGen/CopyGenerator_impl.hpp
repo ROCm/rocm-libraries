@@ -69,6 +69,16 @@ namespace rocRoller
             Throw<FatalError>("Can not copy vector register into scalar register");
         }
 
+        if(src->sameAs(dest))
+        {
+            if(Settings::Get(Settings::LogLvl) >= LogLevel::Debug)
+                co_yield Instruction::Comment("Omitting copy to same register: " + dest->toString()
+                                              + ", " + src->toString());
+            if(!comment.empty())
+                co_yield Instruction::Comment(comment);
+            co_return;
+        }
+
         if(src->regType() == Register::Type::Literal && dest->regType() == Register::Type::Vector)
         {
             if(dest->variableType().getElementSize() == 4)

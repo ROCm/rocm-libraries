@@ -375,6 +375,18 @@ namespace rocRoller
             template <CUnary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
+                if constexpr(Expr::Type == Category::Conversion)
+                {
+                    if(expr.arg)
+                    {
+                        auto resultType = resultVariableType(expr.arg);
+                        if(Expr::DestinationType == resultType)
+                        {
+                            return call(expr.arg);
+                        }
+                    }
+                }
+
                 Expr cpy = expr;
                 if(expr.arg)
                 {
@@ -416,7 +428,10 @@ namespace rocRoller
                 }
 
                 if(rv != nullptr)
+                {
+                    copyComment(rv, expr);
                     return rv;
+                }
 
                 return std::make_shared<Expression>(Expr({lhs, rhs, expr.comment}));
             }
@@ -451,7 +466,8 @@ namespace rocRoller
                 if(!expr)
                     return expr;
 
-                return std::visit(*this, *expr);
+                auto rv = std::visit(*this, *expr);
+                return rv;
             }
         };
 

@@ -8,4 +8,5 @@
 namespace rocRoller
 {
     class AssemblyKernel;
+    using AssemblyKernelPtr = std::shared_ptr<AssemblyKernel>;
 }

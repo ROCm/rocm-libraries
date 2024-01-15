@@ -102,7 +102,9 @@ namespace rocRoller
                                                      variableType(value),
                                                      " doesn't match expected type ",
                                                      arg.variableType,
-                                                     " for argument ",
+                                                     ", Expression: ",
+                                                     toString(arg.expression),
+                                                     ", name: ",
                                                      arg.name));
             }
 
@@ -231,7 +233,8 @@ namespace rocRoller
         auto zero = std::make_shared<Expression::Expression>(0u);
         m_context->kernel()->setDynamicSharedMemBytes(zero);
 
-        m_context->kernel()->addCommandArguments(m_command->getArguments());
+        if(!m_context->kernelOptions().lazyAddArguments)
+            m_context->kernel()->addCommandArguments(m_command->getArguments());
 
         m_kernelGraph = KernelGraph::translate(m_command);
 
@@ -295,7 +298,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocate>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
-        transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context->kernel()));
+        transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
         if(m_postParameters)
         {
             transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_postParameters));

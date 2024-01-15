@@ -36,6 +36,11 @@ namespace rocRoller
            << std::endl;
         os << "  enableLongDwordInstructions:\t\t" << input.enableLongDwordInstructions
            << std::endl;
+        os << "  deduplicateArguments:\t\t" << input.deduplicateArguments << std::endl;
+        os << "  lazyAddArguments:\t\t" << input.lazyAddArguments << std::endl;
+        os << "  minLaunchTimeExpressionComplexity:\t\t" << input.minLaunchTimeExpressionComplexity
+           << std::endl;
+
         return os;
     }
 

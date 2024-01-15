@@ -89,12 +89,17 @@ namespace rocRoller
             requires std::derived_from<T, Binary>;
         };
 
+        // Complexity is a heuristic that estimates the relative cost of computing different
+        // expressions. See the KernelOption minLaunchTimeExpressionComplexity for a more
+        // in-depth description.
+
         struct Add : Binary
         {
             constexpr static inline auto                Type      = Category::Arithmetic;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
                                                                    AlgebraicProperty::Commutative};
+            constexpr static inline int                 Complexity = 2;
         };
 
         struct Subtract : Binary
@@ -102,6 +107,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Arithmetic;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 2;
         };
 
         struct Multiply : Binary
@@ -110,6 +116,7 @@ namespace rocRoller
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
                                                                    AlgebraicProperty::Commutative};
+            constexpr static inline int                 Complexity = 4;
         };
 
         struct MultiplyHigh : Binary
@@ -117,6 +124,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Arithmetic;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Commutative};
+            constexpr static inline int                 Complexity = 4;
         };
 
         struct Divide : Binary
@@ -124,6 +132,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Arithmetic;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 50;
         };
 
         struct Modulo : Binary
@@ -131,6 +140,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Arithmetic;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 50;
         };
 
         struct ShiftL : Binary
@@ -138,6 +148,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Arithmetic;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 1;
         };
 
         struct LogicalShiftR : Binary
@@ -145,6 +156,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Arithmetic;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 1;
         };
 
         struct ArithmeticShiftR : Binary
@@ -152,6 +164,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Arithmetic;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 1;
         };
 
         struct BitwiseAnd : Binary
@@ -160,6 +173,7 @@ namespace rocRoller
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
                                                                    AlgebraicProperty::Commutative};
+            constexpr static inline int                 Complexity = 1;
         };
 
         struct BitwiseOr : Binary
@@ -168,6 +182,7 @@ namespace rocRoller
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
                                                                    AlgebraicProperty::Commutative};
+            constexpr static inline int                 Complexity = 1;
         };
 
         struct BitwiseXor : Binary
@@ -176,6 +191,7 @@ namespace rocRoller
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
                                                                    AlgebraicProperty::Commutative};
+            constexpr static inline int                 Complexity = 1;
         };
 
         struct GreaterThan : Binary
@@ -183,6 +199,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Comparison;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 2;
         };
 
         struct GreaterThanEqual : Binary
@@ -190,6 +207,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Comparison;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 2;
         };
 
         struct LessThan : Binary
@@ -197,6 +215,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Comparison;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 2;
         };
 
         struct LessThanEqual : Binary
@@ -204,6 +223,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Comparison;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 2;
         };
 
         struct Equal : Binary
@@ -211,6 +231,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Comparison;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Commutative};
+            constexpr static inline int                 Complexity = 2;
         };
 
         struct NotEqual : Binary
@@ -218,6 +239,7 @@ namespace rocRoller
             constexpr static inline auto                Type      = Category::Comparison;
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Commutative};
+            constexpr static inline int                 Complexity = 1;
         };
 
         struct LogicalAnd : Binary
@@ -226,6 +248,7 @@ namespace rocRoller
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
                                                                    AlgebraicProperty::Commutative};
+            constexpr static inline int                 Complexity = 1;
         };
 
         struct LogicalOr : Binary
@@ -234,6 +257,7 @@ namespace rocRoller
             constexpr static inline auto                EvalTimes = EvaluationTimes::All();
             constexpr static inline AlgebraicProperties Properties{AlgebraicProperty::Associative,
                                                                    AlgebraicProperty::Commutative};
+            constexpr static inline int                 Complexity = 1;
         };
 
         struct Ternary
@@ -267,6 +291,7 @@ namespace rocRoller
         {
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
+            constexpr static inline int             Complexity = 2;
         };
 
         /*
@@ -278,6 +303,7 @@ namespace rocRoller
         {
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
+            constexpr static inline int             Complexity = 2;
         };
 
         /**
@@ -305,6 +331,7 @@ namespace rocRoller
 
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
+            constexpr static inline int             Complexity = 20;
         };
 
         /**
@@ -313,8 +340,9 @@ namespace rocRoller
         */
         struct Conditional : Ternary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type       = Category::Arithmetic;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 4;
         };
 
         /**
@@ -328,6 +356,7 @@ namespace rocRoller
             constexpr static inline auto EvalTimes   = EvaluationTimes::All();
             constexpr static inline bool Associative = false;
             constexpr static inline bool Commutative = false;
+            constexpr static inline int  Complexity  = 4;
         };
 
         struct Unary
@@ -347,6 +376,7 @@ namespace rocRoller
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate,
                                                               EvaluationTime::KernelLaunch};
+            constexpr static inline int             Complexity = 50;
         };
 
         struct MagicShifts : Unary
@@ -354,6 +384,7 @@ namespace rocRoller
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate,
                                                               EvaluationTime::KernelLaunch};
+            constexpr static inline int             Complexity = 50;
         };
 
         struct MagicSign : Unary
@@ -361,31 +392,37 @@ namespace rocRoller
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate,
                                                               EvaluationTime::KernelLaunch};
+            constexpr static inline int             Complexity = 50;
         };
 
         struct Negate : Unary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type       = Category::Arithmetic;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 1;
         };
 
         struct BitwiseNegate : Unary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type       = Category::Arithmetic;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 1;
         };
 
         template <DataType DATATYPE>
         struct Convert : Unary
         {
-            constexpr static inline auto Type      = Category::Conversion;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto DestinationType = DATATYPE;
+            constexpr static inline auto Type            = Category::Conversion;
+            constexpr static inline auto EvalTimes       = EvaluationTimes::All();
+            constexpr static inline int  Complexity      = 2;
         };
 
         struct LogicalNot : Unary
         {
-            constexpr static inline auto Type      = Category::Logical;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type       = Category::Logical;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 1;
         };
 
         /**
@@ -444,6 +481,8 @@ namespace rocRoller
 
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value);
+
+        ExpressionPtr fromKernelArgument(AssemblyKernelArgument const& arg);
 
         /**
          * @brief Create an Expression representing a literal value with a
@@ -643,11 +682,21 @@ namespace rocRoller
         std::string getComment(ExpressionPtr const& expr);
         std::string getComment(Expression const& expr);
 
+        /**
+         * Copies any comments from src into dst.  If dst is not of a type that allows
+         * comments, does nothing.
+         */
+        void copyComment(ExpressionPtr const& dst, ExpressionPtr const& src);
+        void copyComment(Expression& dst, ExpressionPtr const& src);
+        void copyComment(ExpressionPtr const& dst, Expression const& src);
+        void copyComment(Expression& dst, Expression const& src);
+
         void appendComment(ExpressionPtr& expr, std::string comment);
         void appendComment(Expression& expr, std::string comment);
 
         /**
-         * Evaluate an expression whose evaluationTime is Translate.  Will throw an exception otherwise.
+         * Evaluate an expression whose evaluationTime is Translate.  Will throw an exception
+         * otherwise.
          */
         CommandArgumentValue evaluate(ExpressionPtr const& expr);
         CommandArgumentValue evaluate(Expression const& expr);
@@ -655,10 +704,19 @@ namespace rocRoller
         bool canEvaluateTo(CommandArgumentValue val, ExpressionPtr const& expr);
 
         /**
-         * Evaluate an expression whose evaluationTime is Translate or KernelLaunch.  Will throw an exception if it contains any Register values.
+         * Evaluate an expression whose evaluationTime is Translate or KernelLaunch.  Will throw
+         * an exception if it contains any Register values.
          */
         CommandArgumentValue evaluate(ExpressionPtr const& expr, RuntimeArguments const& args);
         CommandArgumentValue evaluate(Expression const& expr, RuntimeArguments const& args);
+
+        /**
+         * Returns an approximate total complexity for an expression, to be used as a heuristic.
+         * See the KernelOption minLaunchTimeExpressionComplexity for a more in-depth
+         * description.
+         */
+        int complexity(ExpressionPtr expr);
+        int complexity(Expression const& expr);
 
         Generator<Instruction>
             generate(Register::ValuePtr& dest, ExpressionPtr expr, ContextPtr context);

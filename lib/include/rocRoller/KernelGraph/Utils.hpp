@@ -137,8 +137,7 @@ namespace rocRoller
          * Removes all CommandArgruments found within an expression
          * with the appropriate AssemblyKernel Argument.
          */
-        Expression::ExpressionPtr cleanArguments(Expression::ExpressionPtr,
-                                                 std::shared_ptr<AssemblyKernel>);
+        Expression::ExpressionPtr cleanArguments(Expression::ExpressionPtr, AssemblyKernelPtr);
 
         /**
          * @brief Get ForLoop and increment (Linear) dimensions
