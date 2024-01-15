@@ -1,15 +1,27 @@
 #pragma once
 
+#include "Assembler.hpp"
+
 #include "GPUArchitecture/GPUArchitectureTarget.hpp"
 #include <vector>
 
 namespace rocRoller
 {
-    class Assembler
+    class InProcessAssembler : public Assembler
     {
     public:
-        Assembler();
-        ~Assembler();
+        InProcessAssembler();
+        ~InProcessAssembler();
+
+        using Base = Assembler;
+
+        static const std::string Name;
+
+        static bool Match(Argument arg);
+
+        static AssemblerPtr Build(Argument arg);
+
+        std::string name() const override;
         /**
          * @brief Assemble a string of machine code. The resulting object code will be returned
          * as a vector of charaters.
@@ -25,10 +37,10 @@ namespace rocRoller
          */
         std::vector<char> assembleMachineCode(const std::string&           machineCode,
                                               const GPUArchitectureTarget& target,
-                                              const std::string&           kernelName);
+                                              const std::string&           kernelName) override;
 
         std::vector<char> assembleMachineCode(const std::string&           machineCode,
-                                              const GPUArchitectureTarget& target);
+                                              const GPUArchitectureTarget& target) override;
 
     private:
         static void assemble(const char* machineCode,
@@ -38,5 +50,3 @@ namespace rocRoller
         static void link(const char* input, const char* output);
     };
 }
-
-#include "Assembler_impl.hpp"

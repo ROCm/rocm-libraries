@@ -444,7 +444,8 @@ namespace rocRoller
             // Yoda-expression is a workaround for an issue in
             // GreaterThan.  A more natural condtion would be:
             //   DF(sendTileRegister) > zero.
-            auto sendTileTag = graph.control.addElement(ConditionalOp{zero < DF(sendTileRegister)});
+            auto sendTileTag
+                = graph.control.addElement(ConditionalOp{zero < DF(sendTileRegister), "Send Tile"});
             auto barrierTag  = graph.control.addElement(Barrier());
             auto waitZeroTag = graph.control.addElement(WaitZero());
 
@@ -512,7 +513,8 @@ namespace rocRoller
             auto workgroup = graph.coordinates.addElement(Workgroup(0, one));
 
             // Read tile
-            auto receiveTileTag = graph.control.addElement(ConditionalOp{receiveTileExpr});
+            auto receiveTileTag
+                = graph.control.addElement(ConditionalOp{receiveTileExpr, "Receive Tile"});
 
             auto loadTileTag = graph.control.addElement(LoadTiled(dataType));
             for(auto const& c : loadConnections)
@@ -529,9 +531,9 @@ namespace rocRoller
             auto flagRegister = graph.coordinates.addElement(VGPR());
             auto loadFlagTag  = graph.control.addElement(LoadSGPR(DataType::UInt32, true));
 
-            auto numScratch = Expression::literal(context->kernelOptions().numScratchTiles);
-            auto boundsCheckTag
-                = graph.control.addElement(ConditionalOp{(DF(workgroup) + one < numScratch)});
+            auto numScratch     = Expression::literal(context->kernelOptions().numScratchTiles);
+            auto boundsCheckTag = graph.control.addElement(
+                ConditionalOp{(DF(workgroup) + one < numScratch), "Bounds Check"});
 
             graph.mapper.connect<User>(loadFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(loadFlagTag, flagRegister);
@@ -1058,8 +1060,8 @@ namespace rocRoller
                                           accumInfo.accumulatorVarType.dataType,
                                           context);
 
-                postAccumulationCond
-                    = graph.control.addElement(ConditionalOp{zero >= DF(sendInfo.sendBoolSGPR)});
+                postAccumulationCond = graph.control.addElement(ConditionalOp{
+                    zero >= DF(sendInfo.sendBoolSGPR), "Post-accumulation Condition"});
             }
             else
             {

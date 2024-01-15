@@ -26,11 +26,12 @@
 #include <iostream>
 #include <vector>
 
-#include "Assembler.hpp"
+#include <rocRoller/Assemblers/InProcessAssembler.hpp>
 
 namespace rocRoller
 {
-    Assembler::Assembler()
+
+    InProcessAssembler::InProcessAssembler()
     {
         LLVMInitializeAMDGPUTarget();
         LLVMInitializeAMDGPUTargetInfo();
@@ -40,12 +41,12 @@ namespace rocRoller
         LLVMInitializeAMDGPUAsmPrinter();
     }
 
-    Assembler::~Assembler() {}
+    InProcessAssembler::~InProcessAssembler() {}
 
-    void Assembler::assemble(const char* machineCode,
-                             const char* target,
-                             const char* featureString,
-                             const char* output)
+    void InProcessAssembler::assemble(const char* machineCode,
+                                      const char* target,
+                                      const char* featureString,
+                                      const char* output)
     {
         const std::string triple = "amdgcn-amd-amdhsa";
 
@@ -119,7 +120,7 @@ namespace rocRoller
             throw std::runtime_error("Error assembling machine code");
     }
 
-    void Assembler::link(const char* input, const char* output)
+    void InProcessAssembler::link(const char* input, const char* output)
     {
         llvm::opt::ArgStringList LLDArgs;
         LLDArgs.push_back("lld");

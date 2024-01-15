@@ -1,5 +1,5 @@
 #include "ScheduledInstructions.hpp"
-#include "Assembler.hpp"
+#include "Assemblers/Assembler.hpp"
 #include "AssemblyKernel.hpp"
 #include "Context.hpp"
 
@@ -33,9 +33,10 @@ namespace rocRoller
 
     std::vector<char> ScheduledInstructions::assemble() const
     {
-        auto      context = m_context.lock();
-        Assembler assembler;
-        return assembler.assembleMachineCode(
+        auto context   = m_context.lock();
+        auto assembler = Assembler::Get();
+
+        return assembler->assembleMachineCode(
             toString(), context->targetArchitecture().target(), context->kernel()->kernelName());
     }
 

@@ -7,12 +7,15 @@
 #include <string>
 #include <vector>
 
+#include <rocRoller/Utilities/LazySingleton.hpp>
+#include <rocRoller/Utilities/Settings_fwd.hpp>
+
+#include <rocRoller/Assemblers/Assembler_fwd.hpp>
+
 #include <rocRoller/Scheduling/Costs/Cost_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduler_fwd.hpp>
 
 #include <rocRoller/Utilities/Concepts.hpp>
-#include <rocRoller/Utilities/LazySingleton.hpp>
-#include <rocRoller/Utilities/Settings_fwd.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
@@ -155,6 +158,9 @@ namespace rocRoller
 
         static inline const SettingsOption<bool> LogGraphs{
             "ROCROLLER_LOG_GRAPHS", "Whether to log graphs after each lowering stage.", true, -1};
+
+        static inline const SettingsOption<AssemblerType> KernelAssembler{
+            "ROCROLLER_ASSEMBLER", "Which assembler method to use", AssemblerType::Subprocess, -1};
 
         static inline const std::string BitfieldName = "ROCROLLER_DEBUG";
 

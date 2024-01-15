@@ -77,6 +77,7 @@ std::string ContextFixture::testKernelName(std::string const& suffix) const
 void ContextFixture::setKernelOptions(rocRoller::KernelOptions const& kernelOption)
 {
     m_context->m_kernelOptions = kernelOption;
+    m_kernelOptions            = kernelOption;
 }
 
 bool ContextFixture::isLocalDevice() const

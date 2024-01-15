@@ -5,7 +5,7 @@
 
 #include <rocRoller/Utilities/Error.hpp>
 
-#include "Assembler.hpp"
+#include "Assemblers/Assembler.hpp"
 #include "ExecutableKernel.hpp"
 #include "Utilities/HipUtils.hpp"
 
@@ -50,9 +50,10 @@ namespace rocRoller
                                       const GPUArchitectureTarget& target,
                                       std::string const&           kernelName)
     {
-        Assembler         assembler;
+        auto assembler = Assembler::Get();
+
         std::vector<char> kernelObject
-            = assembler.assembleMachineCode(instructions, target, kernelName);
+            = assembler->assembleMachineCode(instructions, target, kernelName);
 
         if(instructions.size())
         {

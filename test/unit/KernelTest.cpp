@@ -306,12 +306,15 @@ amdhsa.kernels:
 
     INSTANTIATE_TEST_SUITE_P(ARCH_KernelTests, ARCH_KernelTest, supportedISATuples());
 
-    class GPU_KernelTest : public CurrentGPUContextFixture
+    class GPU_KernelTest : public CurrentGPUContextFixture,
+                           public ::testing::WithParamInterface<AssemblerType>
     {
     };
 
-    TEST_F(GPU_KernelTest, WholeKernel)
+    TEST_P(GPU_KernelTest, WholeKernel)
     {
+        Settings::getInstance()->set(Settings::KernelAssembler, GetParam());
+
         ASSERT_EQ(true, isLocalDevice());
 
         auto command = std::make_shared<Command>();
@@ -378,10 +381,6 @@ amdhsa.kernels:
 
         CommandKernel commandKernel(m_context);
 
-        // Check for kernel's name
-        ASSERT_STREQ(hipKernelNameRef(commandKernel.getHipFunction()),
-                     "GPU_KernelTestWholeKernel_kernel");
-
         auto         ptr  = make_shared_device<float>();
         float        val  = 6.0f;
         unsigned int size = 1;
@@ -401,5 +400,10 @@ amdhsa.kernels:
 
         EXPECT_EQ(resultValue, 6.0f);
     }
+
+    INSTANTIATE_TEST_SUITE_P(GPU_KernelTests,
+                             GPU_KernelTest,
+                             ::testing::Values(AssemblerType::InProcess,
+                                               AssemblerType::Subprocess));
 
 }

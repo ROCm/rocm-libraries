@@ -3,7 +3,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <rocRoller/Assembler.hpp>
+#include <rocRoller/Assemblers/Assembler.hpp>
 
 using namespace rocRoller;
 
@@ -83,8 +83,9 @@ amdhsa.kernels:
 
 TEST(AssemblerTest, Basic)
 {
-    std::shared_ptr<rocRoller::Assembler> myAssembler  = std::make_shared<rocRoller::Assembler>();
-    std::vector<char>                     kernelObject = myAssembler->assembleMachineCode(
+    auto myAssembler = rocRoller::Assembler::Get();
+
+    std::vector<char> kernelObject = myAssembler->assembleMachineCode(
         simple_assembly, rocRoller::GPUArchitectureTarget("gfx90a:xnack+"));
 
     EXPECT_NE(kernelObject.size(), 0);
@@ -92,7 +93,7 @@ TEST(AssemblerTest, Basic)
 
 TEST(AssemblerTest, BadTarget)
 {
-    std::shared_ptr<rocRoller::Assembler> myAssembler = std::make_shared<rocRoller::Assembler>();
+    auto myAssembler = rocRoller::Assembler::Get();
 
     EXPECT_THROW(myAssembler->assembleMachineCode(
                      simple_assembly, rocRoller::GPUArchitectureTarget("gfx91a:xnack+")),

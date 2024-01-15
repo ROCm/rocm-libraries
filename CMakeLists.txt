@@ -24,7 +24,8 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   set(COROUTINES_COMPILE_OPTION -fcoroutines-ts)
   set(EXTRA_COMPILE_OPTIONS -stdlib=libc++)
   set(EXTRA_LINK_OPTIONS -lc++ -lm -fuse-ld=lld)
-  set_source_files_properties(lib/source/Assembler.cpp PROPERTIES COMPILE_FLAGS "-stdlib=libstdc++")
+  set(CMAKE_CXX_FLAGS -stdlib=libc++)
+  set_source_files_properties(lib/source/Assemblers/InProcessAssembler.cpp PROPERTIES COMPILE_FLAGS "-stdlib=libstdc++")
 else()
   set(COROUTINES_COMPILE_OPTION -fcoroutines)
   set(EXTRA_COMPILE_OPTIONS )
@@ -217,7 +218,8 @@ ADD_CUSTOM_TARGET(
 # rocRoller library
 set(rocroller_src
 
- lib/source/Assembler.cpp
+ lib/source/AssemblyKernel.cpp
+ lib/source/AssemblyKernel_serialization.cpp
  lib/source/AssemblyKernel.cpp
  lib/source/AssemblyKernelArgument.cpp
  lib/source/AssemblyKernel_serialization.cpp
@@ -242,6 +244,11 @@ set(rocroller_src
  lib/source/ScheduledInstructions.cpp
  lib/source/Scheduler.cpp
  lib/source/Timer.cpp
+
+ lib/source/Assemblers/Assembler.cpp
+ lib/source/Assemblers/InProcessAssembler.cpp
+ lib/source/Assemblers/InProcessAssembler_assemble.cpp
+ lib/source/Assemblers/SubprocessAssembler.cpp
 
  lib/source/ExpressionTransformations/DataFlowTagPropagation.cpp
  lib/source/ExpressionTransformations/FastArithmetic.cpp

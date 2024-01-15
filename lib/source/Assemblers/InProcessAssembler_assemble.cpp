@@ -1,22 +1,45 @@
+
+#include <cstdio>
 #include <filesystem>
-#include <fstream>
-#include <stdlib.h>
+#include <iostream>
 #include <vector>
 
-#include "Assembler.hpp"
-#include "Utilities/Timer.hpp"
+#include <rocRoller/Assemblers/InProcessAssembler.hpp>
+#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/Timer.hpp>
 
 namespace rocRoller
 {
-    inline std::vector<char> Assembler::assembleMachineCode(const std::string& machineCode,
-                                                            const GPUArchitectureTarget& target)
+    RegisterComponent(InProcessAssembler);
+    static_assert(Component::Component<InProcessAssembler>);
+
+    bool InProcessAssembler::Match(Argument arg)
+    {
+        return arg == AssemblerType::InProcess;
+    }
+
+    AssemblerPtr InProcessAssembler::Build(Argument arg)
+    {
+        if(!Match(arg))
+            return nullptr;
+
+        return std::make_shared<InProcessAssembler>();
+    }
+
+    std::string InProcessAssembler::name() const
+    {
+        return Name;
+    }
+
+    std::vector<char> InProcessAssembler::assembleMachineCode(const std::string& machineCode,
+                                                              const GPUArchitectureTarget& target)
     {
         return assembleMachineCode(machineCode, target, "");
     }
 
-    inline std::vector<char> Assembler::assembleMachineCode(const std::string& machineCode,
-                                                            const GPUArchitectureTarget& target,
-                                                            const std::string&           kernelName)
+    std::vector<char> InProcessAssembler::assembleMachineCode(const std::string& machineCode,
+                                                              const GPUArchitectureTarget& target,
+                                                              const std::string& kernelName)
     {
         // Time assembleMachineCode function
         TIMER(t, "Assembler::assembleMachineCode");
