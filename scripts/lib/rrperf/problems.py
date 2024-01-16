@@ -345,7 +345,7 @@ class TensileRun(GEMM):
 
     config: pathlib.Path = field(repr=False, default=None, hash=False)
     output: pathlib.Path = field(repr=False, default=None, hash=False)
-    tensile_commit: str = "rocm-5.6.0"
+    tensile_commit: str = "rocm-6.0.0"
 
     @property
     def group(self):
