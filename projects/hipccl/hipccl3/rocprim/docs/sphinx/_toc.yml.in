@@ -5,6 +5,7 @@ subtrees:
   - entries:
     - file: intro
     - file: ops_summary
+    - file: data-type-support
     - file: device_ops/index
     - file: block_ops/index
     - file: warp_ops/index
