@@ -1,9 +1,9 @@
 # hipCUB
 
 hipCUB is a thin wrapper library on top of
-[rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or
+[rocPRIM](https://github.com/ROCm/rocPRIM) or
 [CUB](https://github.com/thrust/cub). You can use it to port a CUB project into
-[HIP](https://github.com/ROCm-Developer-Tools/HIP) so you can use AMD hardware (and
+[HIP](https://github.com/ROCm/HIP) so you can use AMD hardware (and
 [ROCm](https://rocm.docs.amd.com/en/latest/) software).
 
 In the [ROCm](https://rocm.docs.amd.com/en/latest/)
@@ -37,10 +37,10 @@ python3 -m http.server
 * Git
 * CMake (3.16 or later)
 * For AMD GPUs:
-  * AMD [ROCm](https://rocm.github.io/install.html) software (1.8.0 or later)
+  * AMD [ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/native-install/index.html) software (1.8.0 or later)
     * The [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang) compiler (you
       must, set this as the C++ compiler for ROCm)
-  * The [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library
+  * The [rocPRIM](https://github.com/ROCm/rocPRIM) library
     * Automatically downloaded and built by the CMake script
     * Requires CMake 3.16.9 or later
 
@@ -209,7 +209,7 @@ cd hipCUB; cd build
 ## Support
 
 Bugs and feature requests can be reported through the
-[GitHub issue tracker](https://github.com/ROCmSoftwarePlatform/hipCUB/issues).
+[GitHub issue tracker](https://github.com/ROCm/hipCUB/issues).
 
 ## Contributing
 
