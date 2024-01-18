@@ -1,44 +1,68 @@
 # hipCUB
 
-hipCUB is a thin wrapper library on top of [rocPRIM](https://github.com/ROCm/rocPRIM) or
-[CUB](https://github.com/thrust/cub). It enables developers to port a project using the CUB library to the
-[HIP](https://github.com/ROCm/HIP) layer to run on AMD hardware. In the [ROCm](https://www.github.com/ROCm/ROCm/)
-environment, hipCUB uses the rocPRIM library as the backend.  However, on CUDA platforms it uses CUB instead.
+hipCUB is a thin wrapper library on top of
+[rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or
+[CUB](https://github.com/thrust/cub). You can use it to port a CUB project into
+[HIP](https://github.com/ROCm-Developer-Tools/HIP) so you can use AMD hardware (and
+[ROCm](https://rocm.docs.amd.com/en/latest/) software).
+
+In the [ROCm](https://rocm.docs.amd.com/en/latest/)
+environment, hipCUB uses the rocPRIM library as the backend. On CUDA platforms, it uses CUB as the
+backend.
 
 ## Documentation
 
-Information about the library API and other user topics can be found in the [hipCUB documentation](https://rocm.docs.amd.com/projects/hipCUB/en/latest/index.html).
+Documentation for hipCUB is available at
+[https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
+
+To build our documentation locally, run the following code:
+
+```shell
+# Go to the hipCUB docs directory
+cd hipCUB; cd docs
+
+# Install required pip packages
+python3 -m pip install -r .sphinx/requirements.txt
+
+# Build the documentation
+python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+
+# For e.g. serve the HTML docs locally
+cd _build/html
+python3 -m http.server
+```
 
 ## Requirements
 
 * Git
 * CMake (3.16 or later)
 * For AMD GPUs:
-  * AMD [ROCm](https://rocm.docs.amd.com/en/latest/) platform (1.8.0 or later)
-    * Including [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang) compiler, which must be
-      set as C++ compiler on ROCm platform.
-  * [rocPRIM](https://github.com/ROCm/rocPRIM) library
-    * Automatically downloaded and built by CMake script.
-    * Requires CMake 3.16.9 or later.
+  * AMD [ROCm](https://rocm.github.io/install.html) software (1.8.0 or later)
+    * The [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang) compiler (you
+      must, set this as the C++ compiler for ROCm)
+  * The [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library
+    * Automatically downloaded and built by the CMake script
+    * Requires CMake 3.16.9 or later
+
 * For NVIDIA GPUs:
   * CUDA Toolkit
   * CUB library
-    * Automatically downloaded and built by CMake script.
-    * Requires CMake 3.15.0 or later.
-* Python 3.6 or higher (HIP on Windows only, only required for install scripts)
-* Visual Studio 2019 with clang support (HIP on Windows only)
+    * Automatically downloaded and built by the CMake script
+    * Requires CMake 3.15.0 or later
+* Python 3.6 or higher (for HIP on Windows only; this is only required for install scripts)
+* Visual Studio 2019 with Clang support (HIP on Windows only)
 * Strawberry Perl (HIP on Windows only)
 
 Optional:
 
-* [GTest](https://github.com/google/googletest)
-  * Required only for tests. Building tests is enabled by default.
-  * It will be automatically downloaded and built by CMake script.
+* [GoogleTest](https://github.com/google/googletest)
 * [Google Benchmark](https://github.com/google/benchmark)
-  * Required only for benchmarks. Building benchmarks is off by default.
-  * It will be automatically downloaded and built by cmake script.
 
-## Build And Install
+GoogleTest and Google Benchmark are automatically downloaded and built by the CMake script.
+
+## Build and install
+
+To build and install hipCub, run the following code:
 
 ```shell
 git clone https://github.com/ROCm/hipCUB.git
@@ -81,7 +105,9 @@ make package
 
 ### HIP on Windows
 
-Initial support for HIP on Windows has been added.  To install, use the provided rmake.py python script:
+Initial support for HIP on Windows is available. You can install it using the provided `rmake.py` Python
+script:
+
 ```shell
 git clone https://github.com/ROCm/hipCUB.git
 cd hipCUB
@@ -93,10 +119,9 @@ python rmake.py -i
 python rmake.py -c
 ```
 
-### Using hipCUB In A Project
+### Using hipCUB
 
-Recommended way of including hipCUB into a CMake project is by using its package
-configuration files.
+To use hipCUB in a CMake project, we recommended using the package configuration files.
 
 ```cmake
 # On ROCm hipCUB requires rocPRIM
@@ -117,9 +142,9 @@ Include only the main header file:
 #include <hipcub/hipcub.hpp>
 ```
 
-CUB or rocPRIM headers are included by hipCUB depending on the current HIP platform.
+Depending on your current HIP platform, hipCUB includes CUB or rocPRIM headers.
 
-## Running Unit Tests
+## Running unit tests
 
 ```shell
 # Go to hipCUB build directory
@@ -132,9 +157,10 @@ ctest
 ./test/hipcub/<unit-test-name>
 ```
 
-## Using custom seeds for the tests
+### Using custom seeds for the tests
 
 Go to the `hipCUB/test/hipcub/test_seed.hpp` file.
+
 ```cpp
 //(1)
 static constexpr int random_seeds_count = 10;
@@ -146,17 +172,19 @@ static constexpr unsigned int seeds [] = {0, 2, 10, 1000};
 static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
 ```
 
-(1) defines a constant that sets how many passes over the tests will be done with runtime-generated seeds. Modify at will.
+(1) Defines a constant that sets how many passes are performed over the tests with runtime-generated
+ seeds. Modify at will.
 
-(2) defines the user generated seeds. Each of the elements of the array will be used as seed for all tests. Modify at will. If no static seeds are desired, the array should be left empty.
+(2) Defines the user-generated seeds. Each of the elements of the array are used as seeds for all tests.
+ Modify at will. If no static seeds are desired, leave the array empty.
 
-```cpp
-static constexpr unsigned int seeds [] = {};
-```
+  ```cpp
+  static constexpr unsigned int seeds [] = {};
+  ```
 
-(3) this line should never be modified.
+(3) Never modified this line.
 
-## Running Benchmarks
+## Running benchmarks
 
 ```shell
 # Go to hipCUB build directory
@@ -178,28 +206,11 @@ cd hipCUB; cd build
 ./benchmark/benchmark_device_<function_name> [--size <size>] [--trials <trials>]
 ```
 
-## Building Documentation
-
-```shell
-# Go to the hipCUB docs directory
-cd hipCUB; cd docs
-
-# Install required pip packages
-python3 -m pip install -r sphinx/requirements.txt
-
-# Build the documentation
-python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
-
-# For e.g. serve the HTML docs locally
-cd _build/html
-python3 -m http.server
-```
-
 ## Support
 
-Bugs and feature requests can be reported through [the issue tracker](https://github.com/ROCm/hipCUB/issues).
+Bugs and feature requests can be reported through the
+[GitHub issue tracker](https://github.com/ROCmSoftwarePlatform/hipCUB/issues).
 
-## Contributions and License
+## Contributing
 
-Contributions of any kind are most welcome! More details are found at [CONTRIBUTING](./CONTRIBUTING.md)
-and [LICENSE](./LICENSE.txt).
+Contributions are most welcome! Learn more at [CONTRIBUTING](./CONTRIBUTING.md).
