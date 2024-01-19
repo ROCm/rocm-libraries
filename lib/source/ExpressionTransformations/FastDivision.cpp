@@ -187,12 +187,11 @@ namespace rocRoller
 
                 auto numBytes = denominatorType.getElementSize();
 
-                auto q       = multiplyHigh(numerator, magicExpr) + numerator;
-                auto signOfQ = arithmeticShiftR(q, literal(numBytes * 8 - 1, denominatorType));
-
-                auto magicIsPow2 = logicalShiftR((-magicExpr) | magicExpr,
-                                                 literal(numBytes * 8 - 1, denominatorType))
-                                   - one; // 0 if != 0, -1 if equal to 0
+                auto q           = multiplyHigh(numerator, magicExpr) + numerator;
+                auto signOfQ     = arithmeticShiftR(q, literal(numBytes * 8 - 1, denominatorType));
+                auto magicIsPow2 = conditional(magicExpr == literal(0, denominatorType),
+                                               literal(-1, denominatorType),
+                                               literal(0, denominatorType));
 
                 auto handleSignOfLHS = q + (signOfQ & ((one << numShiftsExpr) + magicIsPow2));
 

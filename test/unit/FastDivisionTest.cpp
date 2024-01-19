@@ -96,14 +96,13 @@ namespace FastDivisionTest
 
         auto expr      = a / b_signed;
         auto expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        auto expected
-            = "Subtract(BitwiseXor(ArithmeticShiftR(Add(Add(MultiplyHigh("
-              "UNALLOCATED:I, MagicMultiple_0), "
-              "UNALLOCATED:I), "
-              "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(UNALLOCATED:I"
-              ", MagicMultiple_0), UNALLOCATED:I), 31i), Add(ShiftL(1i, "
-              "MagicShifts_1), Subtract(LogicalShiftR(BitwiseOr(Negate(MagicMultiple_0), "
-              "MagicMultiple_0), 31i), 1i)))), MagicShifts_1), MagicSign_2), MagicSign_2)";
+        auto expected  = "Subtract(BitwiseXor(ArithmeticShiftR(Add(Add(MultiplyHigh("
+                        "UNALLOCATED:I, MagicMultiple_0), "
+                        "UNALLOCATED:I), "
+                        "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(UNALLOCATED:I"
+                        ", MagicMultiple_0), UNALLOCATED:I), 31i), Add(ShiftL(1i, "
+                        "MagicShifts_1), Conditional(Equal(MagicMultiple_0, 0i), -1i, 0i)))), "
+                        "MagicShifts_1), MagicSign_2), MagicSign_2)";
         EXPECT_EQ(Expression::toString(expr_fast), expected);
 
         expr      = a_unsigned / b_unsigned;
@@ -193,9 +192,8 @@ namespace FastDivisionTest
               "MagicMultiple_0), UNALLOCATED:I), "
               "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(UNALLOCATED:I, "
               "MagicMultiple_0), UNALLOCATED:I), 31i), Add(ShiftL(1i, "
-              "MagicShifts_1), Subtract(LogicalShiftR(BitwiseOr(Negate(MagicMultiple_0), "
-              "MagicMultiple_0), "
-              "31i), 1i)))), MagicShifts_1), MagicSign_2), MagicSign_2), "
+              "MagicShifts_1), Conditional(Equal(MagicMultiple_0, 0i), -1i, 0i)))), "
+              "MagicShifts_1), MagicSign_2), MagicSign_2), "
               "CommandArgument(user_Int32_Value_0)))";
         EXPECT_EQ(Expression::toString(expr_fast), expected);
 
