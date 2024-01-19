@@ -362,13 +362,10 @@ namespace ArithmeticTest
                         if(b != 0)
                             EXPECT_EQ(result[23], LITERAL_TEST % b);
                         EXPECT_EQ(result[24], ((a < 0) && (b < 0)) ? 1 : 0);
-                        EXPECT_EQ(result[25], (a >= b ? a : b))
-                            << "a: " << a << ", b: " << b << ", shift: " << shift;
-                        ;
+                        EXPECT_EQ(result[25], (a >= b ? a : b));
                         EXPECT_EQ(result[26], ((a < 0) || (b < 0)) ? 1 : 0);
                         EXPECT_EQ(result[27], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[28], !(a < b) ? 1 : 0)
-                            << "a: " << a << ", b: " << b << ", shift: " << shift;
+                        EXPECT_EQ(result[28], !(a < b) ? 1 : 0);
                         EXPECT_EQ(result[29], !!(a > b) ? 1 : 0);
                         EXPECT_EQ(result[30], ~a);
                     }
@@ -762,10 +759,8 @@ namespace ArithmeticTest
                             EXPECT_EQ(result[28], LITERAL_TEST % b);
                         EXPECT_EQ(result[29], ((a <= b) && (b <= a)) ? 1 : 0);
                         EXPECT_EQ(result[30], ((a < 0) && (b > 0)) ? 1 : 0);
-                        EXPECT_EQ(result[31], shift ? a : b)
-                            << "a: " << a << ", b: " << b << ", shift: " << shift;
-                        EXPECT_EQ(result[32], a >= b ? a : b)
-                            << "a: " << a << ", b: " << b << ", shift: " << shift;
+                        EXPECT_EQ(result[31], shift ? a : b);
+                        EXPECT_EQ(result[32], a >= b ? a : b);
                         EXPECT_EQ(result[33], ((a <= b) || (b <= a)) ? 1 : 0);
                         EXPECT_EQ(result[34], ((a < 0) || (b > 0)) ? 1 : 0);
                         EXPECT_EQ(result[35], (a != b ? 1 : 0));
@@ -1068,11 +1063,9 @@ namespace ArithmeticTest
                         }
                         EXPECT_EQ(result[23], (int64_t)(((__int128_t)a * (__int128_t)b) >> 64))
                             << "a: " << a << "b: " << b;
-                        EXPECT_EQ(result[24], a >= b ? a : b)
-                            << "a: " << a << ", b: " << b << ", shift: " << shift;
+                        EXPECT_EQ(result[24], a >= b ? a : b) << "a: " << a << ", b: " << b;
                         EXPECT_EQ(result[25], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[26], ~a)
-                            << "a: " << a << ", b: " << b << ", shift: " << shift;
+                        EXPECT_EQ(result[26], ~a) << "a: " << a;
                     }
                 }
             }
