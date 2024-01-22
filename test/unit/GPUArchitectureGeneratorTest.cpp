@@ -23,7 +23,7 @@ TEST_F(GPUArchitectureGeneratorTest, BasicYAML)
     EXPECT_NE(generated_source, "");
 
     auto readback = rocRoller::GPUArchitecture::readYaml("output.yaml");
-    EXPECT_EQ(readback.size(), 14);
+    EXPECT_EQ(readback.size(), 17);
     for(auto& x : readback)
     {
         std::cout << x.first << ": " << x.second.target() << '\n';
@@ -43,7 +43,7 @@ TEST_F(GPUArchitectureGeneratorTest, BasicMsgpack)
     EXPECT_NE(generated_source, "");
 
     auto readback = rocRoller::GPUArchitecture::readMsgpack("output.msgpack");
-    EXPECT_EQ(readback.size(), 14);
+    EXPECT_EQ(readback.size(), 17);
     for(auto& x : readback)
     {
         std::cout << x.first << ": " << x.second.target() << '\n';

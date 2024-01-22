@@ -475,7 +475,7 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMStreamK)
     {
-        if(m_context->targetArchitecture().target().getVersionString() != "gfx90a")
+        if(m_context->targetArchitecture().target().getVersionString() == "gfx908")
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }

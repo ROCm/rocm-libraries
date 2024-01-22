@@ -195,6 +195,33 @@ TEST(GPUArchitectureTest, Validate90aInstructions)
                   ->GetInstructionInfo("gfx90a", "v_accvgpr_write")
                   .getLatency(),
               2);
+
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx90a", GPUCapability::v_mac_f32),
+        true);
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx90a", GPUCapability::v_fmac_f32),
+        true);
+}
+
+TEST(GPUArchitectureTest, Validate908Instructions)
+{
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx908", GPUCapability::v_mac_f32),
+        true);
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx908", GPUCapability::v_fmac_f32),
+        true);
+}
+
+TEST(GPUArchitectureTest, Validate94xInstructions)
+{
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx942", GPUCapability::v_mac_f32),
+        false);
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx942", GPUCapability::v_fmac_f32),
+        true);
 }
 
 TEST(GPUArchitectureTest, CheckDefFile)

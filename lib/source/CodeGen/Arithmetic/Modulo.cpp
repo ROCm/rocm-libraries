@@ -167,6 +167,8 @@ namespace rocRoller
     Generator<Instruction> ModuloGenerator<Register::Type::Scalar, DataType::Int64>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
+        auto const& architecture = m_context->targetArchitecture();
+
         // Generated using the assembly_to_instructions.py script with the following HIP code:
         //  extern "C"
         //  __global__ void hello_world(long int * ptr, long int value1, long int value2)
@@ -267,8 +269,20 @@ namespace rocRoller
                               {},
                               ""));
         co_yield m_context->copier()->copy(v_9, Register::Value::Literal(0), "");
-        co_yield_(Instruction(
-            "v_mac_f32_e32", {v_7}, {Register::Value::Literal(0x4f800000), v_8}, {}, ""));
+        if(architecture.HasCapability(GPUCapability::v_fmac_f32))
+        {
+            co_yield_(Instruction(
+                "v_fmac_f32_e32", {v_7}, {Register::Value::Literal(0x4f800000), v_8}, {}, ""));
+        }
+        else if(architecture.HasCapability(GPUCapability::v_mac_f32))
+        {
+            co_yield_(Instruction(
+                "v_mac_f32_e32", {v_7}, {Register::Value::Literal(0x4f800000), v_8}, {}, ""));
+        }
+        else
+        {
+            Throw<FatalError>("Can not generate Modulo: Neither v_fmac_f32 or v_mac_f32 known");
+        }
         co_yield_(Instruction("v_rcp_f32_e32", {v_7}, {v_7}, {}, ""));
         co_yield m_context->copier()->copy(v_10, Register::Value::Literal(0), "");
         co_yield_(Instruction(
@@ -279,8 +293,20 @@ namespace rocRoller
         co_yield_(Instruction(
             "v_mul_f32_e32", {v_8}, {Register::Value::Literal(0x2f800000), v_7}, {}, ""));
         co_yield_(Instruction("v_trunc_f32_e32", {v_8}, {v_8}, {}, ""));
-        co_yield_(Instruction(
-            "v_mac_f32_e32", {v_7}, {Register::Value::Literal(0xcf800000), v_8}, {}, ""));
+        if(architecture.HasCapability(GPUCapability::v_fmac_f32))
+        {
+            co_yield_(Instruction(
+                "v_fmac_f32_e32", {v_7}, {Register::Value::Literal(0xcf800000), v_8}, {}, ""));
+        }
+        else if(architecture.HasCapability(GPUCapability::v_mac_f32))
+        {
+            co_yield_(Instruction(
+                "v_mac_f32_e32", {v_7}, {Register::Value::Literal(0xcf800000), v_8}, {}, ""));
+        }
+        else
+        {
+            Throw<FatalError>("Can not generate Modulo: Neither v_fmac_f32 or v_mac_f32 known");
+        }
         co_yield_(Instruction("v_cvt_u32_f32_e32", {v_8}, {v_8}, {}, ""));
         co_yield_(Instruction("v_cvt_u32_f32_e32", {v_7}, {v_7}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_13}, {s_6->subset({0}), v_8}, {}, ""));
@@ -535,6 +561,8 @@ namespace rocRoller
     Generator<Instruction> ModuloGenerator<Register::Type::Vector, DataType::Int64>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
+        auto const& architecture = m_context->targetArchitecture();
+
         // Generated using the assembly_to_instructions.py script with the following HIP code:
         //  extern "C"
         //  __global__ void hello_world(long int * ptr, long int *value1, long int *value2)
@@ -647,11 +675,26 @@ namespace rocRoller
             {m_context->getVCC(), Register::Value::Literal(0), v_3, m_context->getVCC()},
             {},
             ""));
-        co_yield_(Instruction("v_mac_f32_e32",
-                              {v_4->subset({0})},
-                              {Register::Value::Literal(0x4f800000), v_4->subset({1})},
-                              {},
-                              ""));
+        if(architecture.HasCapability(GPUCapability::v_fmac_f32))
+        {
+            co_yield_(Instruction("v_fmac_f32_e32",
+                                  {v_4->subset({0})},
+                                  {Register::Value::Literal(0x4f800000), v_4->subset({1})},
+                                  {},
+                                  ""));
+        }
+        else if(architecture.HasCapability(GPUCapability::v_mac_f32))
+        {
+            co_yield_(Instruction("v_mac_f32_e32",
+                                  {v_4->subset({0})},
+                                  {Register::Value::Literal(0x4f800000), v_4->subset({1})},
+                                  {},
+                                  ""));
+        }
+        else
+        {
+            Throw<FatalError>("Can not generate Modulo: Neither v_fmac_f32 or v_mac_f32 known");
+        }
         co_yield_(Instruction("v_rcp_f32_e32", {v_4->subset({0})}, {v_4->subset({0})}, {}, ""));
         co_yield m_context->copier()->copy(v_10, Register::Value::Literal(0), "");
         co_yield m_context->copier()->copy(v_11, Register::Value::Literal(0), "");
@@ -666,11 +709,26 @@ namespace rocRoller
                               {},
                               ""));
         co_yield_(Instruction("v_trunc_f32_e32", {v_4->subset({1})}, {v_4->subset({1})}, {}, ""));
-        co_yield_(Instruction("v_mac_f32_e32",
-                              {v_4->subset({0})},
-                              {Register::Value::Literal(0xcf800000), v_4->subset({1})},
-                              {},
-                              ""));
+        if(architecture.HasCapability(GPUCapability::v_fmac_f32))
+        {
+            co_yield_(Instruction("v_fmac_f32_e32",
+                                  {v_4->subset({0})},
+                                  {Register::Value::Literal(0xcf800000), v_4->subset({1})},
+                                  {},
+                                  ""));
+        }
+        else if(architecture.HasCapability(GPUCapability::v_mac_f32))
+        {
+            co_yield_(Instruction("v_mac_f32_e32",
+                                  {v_4->subset({0})},
+                                  {Register::Value::Literal(0xcf800000), v_4->subset({1})},
+                                  {},
+                                  ""));
+        }
+        else
+        {
+            Throw<FatalError>("Can not generate Modulo: Neither v_fmac_f32 or v_mac_f32 known");
+        }
         co_yield_(Instruction("v_cvt_u32_f32_e32", {v_4->subset({1})}, {v_4->subset({1})}, {}, ""));
         co_yield_(Instruction("v_cvt_u32_f32_e32", {v_4->subset({0})}, {v_4->subset({0})}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_12}, {v_8, v_4->subset({1})}, {}, ""));

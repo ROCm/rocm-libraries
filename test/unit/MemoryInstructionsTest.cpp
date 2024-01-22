@@ -146,7 +146,11 @@ namespace MemoryInstructionsTest
 
     INSTANTIATE_TEST_SUITE_P(ScalarMemoryInstructionsTest,
                              ScalarMemoryInstructionsTest,
-                             ::testing::Combine(::testing::Values("gfx90a", "gfx908"),
+                             ::testing::Combine(::testing::Values("gfx90a",
+                                                                  "gfx908",
+                                                                  "gfx940",
+                                                                  "gfx941"
+                                                                  "gfx942"),
                                                 ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
 
     struct FlatMemoryInstructionsTest : public GPUContextFixtureParam<int>
