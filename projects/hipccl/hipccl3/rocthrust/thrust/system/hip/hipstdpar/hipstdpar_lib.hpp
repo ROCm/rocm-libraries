@@ -714,9 +714,7 @@
         inline
         void destroy(execution::parallel_unsequenced_policy, I f, I l)
         {
-            return ::thrust::for_each(f, l, [](auto& x) {
-                destroy_at(addressof(x));
-            });
+            ::thrust::for_each(f, l, [](auto& x) { destroy_at(addressof(x)); });
         }
 
         template<
@@ -740,7 +738,7 @@
         inline
         void destroy_n(execution::parallel_unsequenced_policy, I f, N n)
         {
-            return ::thrust::for_each_n(f, n, [](auto& x) {
+            ::thrust::for_each_n(f, n, [](auto& x) {
                 destroy_at(addressof(x));
             });
         }
@@ -1158,7 +1156,7 @@
         inline
         void for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
         {
-            return ::thrust::for_each(::thrust::device, f, l, ::std::move(fn));
+            ::thrust::for_each(::thrust::device, f, l, ::std::move(fn));
         }
 
         template<
@@ -3942,7 +3940,7 @@
         void uninitialized_default_construct(
             execution::parallel_unsequenced_policy, I f, I l)
         {
-            return ::thrust::for_each(::thrust::device, f, l, [](auto& x) {
+            ::thrust::for_each(::thrust::device, f, l, [](auto& x) {
                 auto p = const_cast<void*>(
                     static_cast<const volatile void*>((addressof(x))));
                 ::new (p) typename iterator_traits<I>::value_type;
@@ -3973,7 +3971,7 @@
         void uninitialized_default_construct_n(
             execution::parallel_unsequenced_policy, I f, N n)
         {
-            return ::thrust::for_each_n(::thrust::device, f, n, [](auto& x) {
+            ::thrust::for_each_n(::thrust::device, f, n, [](auto& x) {
                 auto p = const_cast<void*>(
                     static_cast<const volatile void*>((addressof(x))));
                 ::new (p) typename iterator_traits<I>::value_type;
@@ -4124,7 +4122,7 @@
         void uninitialized_value_construct(
             execution::parallel_unsequenced_policy, I f, I l)
         {
-            return ::thrust::for_each(::thrust::device, f, l, [](auto& x) {
+            ::thrust::for_each(::thrust::device, f, l, [](auto& x) {
                 auto p = const_cast<void*>(
                     static_cast<const volatile void*>((addressof(x))));
                 ::new (p) typename iterator_traits<I>::value_type{};
@@ -4155,7 +4153,7 @@
         void uninitialized_value_construct_n(
             execution::parallel_unsequenced_policy, I f, N n)
         {
-            return ::thrust::for_each_n(::thrust::device, f, n, [](auto& x) {
+            ::thrust::for_each_n(::thrust::device, f, n, [](auto& x) {
                 auto p = const_cast<void*>(
                     static_cast<const volatile void*>((addressof(x))));
                 ::new (p) typename iterator_traits<I>::value_type{};
