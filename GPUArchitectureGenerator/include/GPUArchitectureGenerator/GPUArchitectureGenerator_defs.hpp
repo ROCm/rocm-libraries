@@ -33,6 +33,7 @@ namespace GPUArchitectureGenerator
            rocRoller::GPUArchitectureTarget("gfx940"),
            rocRoller::GPUArchitectureTarget("gfx941"),
            rocRoller::GPUArchitectureTarget("gfx942"),
+           rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
            rocRoller::GPUArchitectureTarget("gfx1010"),
            rocRoller::GPUArchitectureTarget("gfx1011"),
            rocRoller::GPUArchitectureTarget("gfx1012"),
