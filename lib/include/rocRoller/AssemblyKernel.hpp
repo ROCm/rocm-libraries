@@ -258,7 +258,7 @@ namespace rocRoller
     {
         constexpr std::array<int, 2> hsa_version()
         {
-            return {1, 0};
+            return {1, 2}; // Assuming -mcode-object-version=5
         }
         std::vector<AssemblyKernel> kernels;
     };

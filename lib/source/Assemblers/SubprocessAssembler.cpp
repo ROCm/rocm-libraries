@@ -136,7 +136,7 @@ namespace rocRoller
                                              "assembler",
                                              "-target",
                                              "amdgcn-amd-amdhsa",
-                                             "-mcode-object-version=4",
+                                             "-mcode-object-version=5",
                                              concatenate("-mcpu=", target.toString()),
                                              "-mwavefrontsize64",
                                              "-c",

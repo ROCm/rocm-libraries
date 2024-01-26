@@ -31,6 +31,8 @@ namespace rocRoller
             HasLshlOr,
             HasSMulHi,
             HasCodeObjectV3,
+            HasCodeObjectV4,
+            HasCodeObjectV5,
 
             HasMFMA,
             HasMFMA_f64,

@@ -54,7 +54,9 @@ namespace GPUArchitectureGenerator
             {rocRoller::GPUCapability::HasAddLshl, {"v_add_lshl_u32 v47, v36, v34, 0x2", ""}},
             {rocRoller::GPUCapability::HasLshlOr, {"v_lshl_or_b32 v47, v36, 0x2, v34", ""}},
             {rocRoller::GPUCapability::HasSMulHi, {"s_mul_hi_u32 s47, s36, s34", ""}},
-            {rocRoller::GPUCapability::HasCodeObjectV3, {"", "-mcode-object-version=2"}},
+            {rocRoller::GPUCapability::HasCodeObjectV3, {"", "-mcode-object-version=3"}},
+            {rocRoller::GPUCapability::HasCodeObjectV4, {"", "-mcode-object-version=4"}},
+            {rocRoller::GPUCapability::HasCodeObjectV5, {"", "-mcode-object-version=5"}},
 
             {rocRoller::GPUCapability::HasMFMA,
              {"v_mfma_f32_32x32x2bf16 a[0:31], v32, v33, a[0:31]", ""}},
