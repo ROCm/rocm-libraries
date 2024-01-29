@@ -61,6 +61,11 @@ namespace rocRoller
         return isDGEMM(m_opCode);
     }
 
+    inline bool InstructionRef::isSGEMM() const
+    {
+        return isSGEMM(m_opCode);
+    }
+
     inline bool InstructionRef::isVMEM() const
     {
         return isVMEM(m_opCode);
@@ -154,6 +159,11 @@ namespace rocRoller
     inline bool InstructionRef::isDGEMM(Instruction const& inst)
     {
         return isDGEMM(inst.getOpCode());
+    }
+
+    inline bool InstructionRef::isSGEMM(Instruction const& inst)
+    {
+        return isSGEMM(inst.getOpCode());
     }
 
     inline bool InstructionRef::isVMEM(Instruction const& inst)
@@ -252,6 +262,12 @@ namespace rocRoller
     inline bool InstructionRef::isDGEMM(std::string const& opCode)
     {
         return opCode.rfind("v_mfma_f64", 0) == 0;
+    }
+
+    inline bool InstructionRef::isSGEMM(std::string const& opCode)
+    {
+        auto endPos = opCode.length() - 4;
+        return opCode.rfind("v_mfma_", 0) == 0 && opCode.rfind("f32", endPos) == 0;
     }
 
     inline bool InstructionRef::isVMEM(std::string const& opCode)

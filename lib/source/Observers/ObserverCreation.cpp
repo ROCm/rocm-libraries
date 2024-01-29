@@ -17,8 +17,10 @@
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWrite.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC908.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC90a.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/XDLWrite908.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/XDLWrite90a.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/XDLWrite94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
 namespace rocRoller
@@ -45,6 +47,13 @@ namespace rocRoller
                                                  VALUWrite,
                                                  XDLReadSrcC90a,
                                                  XDLWrite90a>;
+            using Gfx94xObservers   = MetaObserver<CMPXWriteExec,
+                                                 DGEMM4x4x4Write,
+                                                 DGEMM16x16x4Write,
+                                                 DLWrite,
+                                                 VALUWrite,
+                                                 XDLReadSrcC94x,
+                                                 XDLWrite94x>;
             using FileObservers     = MetaObserver<FileWritingObserver>;
             using AnalysisObservers = MetaObserver<RegisterLivenessObserver>;
             using ErrorObservers    = MetaObserver<SupportedInstructionObserver>;
@@ -52,6 +61,7 @@ namespace rocRoller
             static_assert(CObserver<AlwaysObservers>);
             static_assert(CObserver<Gfx908Observers>);
             static_assert(CObserver<Gfx90aObservers>);
+            static_assert(CObserver<Gfx94xObservers>);
             static_assert(CObserver<FileObservers>);
             static_assert(CObserver<AnalysisObservers>);
             static_assert(CObserver<ErrorObservers>);
@@ -61,7 +71,8 @@ namespace rocRoller
                                ErrorObservers,
                                AlwaysObservers,
                                Gfx908Observers,
-                               Gfx90aObservers>
+                               Gfx90aObservers,
+                               Gfx94xObservers>
                 potentialObservers;
             return createObserver_Conditional(ctx, potentialObservers);
         }

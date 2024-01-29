@@ -28,6 +28,7 @@ namespace rocRoller
         bool isVector() const;
         bool isVALU() const;
         bool isDGEMM() const;
+        bool isSGEMM() const;
         bool isVMEM() const;
         bool isVMEMRead() const;
         bool isVMEMWrite() const;
@@ -51,6 +52,7 @@ namespace rocRoller
         static bool isVector(Instruction const& inst);
         static bool isVALU(Instruction const& inst);
         static bool isDGEMM(Instruction const& inst);
+        static bool isSGEMM(Instruction const& inst);
         static bool isVMEM(Instruction const& inst);
         static bool isVMEMRead(Instruction const& inst);
         static bool isVMEMWrite(Instruction const& inst);
@@ -74,6 +76,7 @@ namespace rocRoller
         static bool isVector(std::string const& inst);
         static bool isVALU(std::string const& inst);
         static bool isDGEMM(std::string const& inst);
+        static bool isSGEMM(std::string const& inst);
         static bool isVMEM(std::string const& inst);
         static bool isVMEMRead(std::string const& inst);
         static bool isVMEMWrite(std::string const& inst);

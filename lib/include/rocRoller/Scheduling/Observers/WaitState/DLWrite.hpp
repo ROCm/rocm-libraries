@@ -14,6 +14,9 @@ namespace rocRoller
          * | 90a  | v_dot* write | Same opcode, read SrcC same | 0    |
          * | 90a  | v_dot* write | Same opcode, read SrcA/B    | 3    |
          * | 90a  | v_dot* write | Different opcode            | 3    |
+         * | 94x  | v_dot* write | Same opcode, read SrcC same | 0    |
+         * | 94x  | v_dot* write | Same opcode, read SrcA/B    | 3    |
+         * | 94x  | v_dot* write | Different opcode            | 3    |
          *
          */
         class DLWrite : public WaitStateObserver<DLWrite>
@@ -30,7 +33,8 @@ namespace rocRoller
 
             static bool required(ContextPtr context)
             {
-                return context->targetArchitecture().target().getVersionString() == "gfx90a";
+                auto arch = context->targetArchitecture().target().getVersionString();
+                return arch == "gfx90a" || arch == "gfx940" || arch == "gfx941" || arch == "gfx942";
             }
 
             int         getMaxNops(std::shared_ptr<InstructionRef> inst) const;

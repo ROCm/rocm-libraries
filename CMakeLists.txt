@@ -360,8 +360,10 @@ set(rocroller_src
  lib/source/Observers/VALUWrite.cpp
  lib/source/Observers/WaitcntObserver.cpp
  lib/source/Observers/XDLReadSrcC908.cpp
+ lib/source/Observers/XDLReadSrcC94x.cpp
  lib/source/Observers/XDLReadSrcC90a.cpp
  lib/source/Observers/XDLWrite908.cpp
+ lib/source/Observers/XDLWrite94x.cpp
  lib/source/Observers/XDLWrite90a.cpp
  lib/source/Observers/MFMAObserver.cpp
 

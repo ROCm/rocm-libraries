@@ -19,6 +19,14 @@ namespace rocRoller
          * | 90a  | v_mfma_f64_4x4x4f64 write | buffer* read overlapped            | 9    |
          * | 90a  | v_mfma_f64_4x4x4f64 write | ds* read overlapped                | 9    |
          * | 90a  | v_mfma_f64_4x4x4f64 write | flat* read overlapped              | 9    |
+         * | 94x  | v_mfma_f64_4x4x4f64 write | v_mfma_f64_4x4x4f64 read SrcC same | 4    |
+         * | 94x  | v_mfma_f64_4x4x4f64 write | v_mfma_*_*f64 read SrcC overlapped | 4    |
+         * | 94x  | v_mfma_f64_4x4x4f64 write | v_mfma* read SrcC overlapped       | 0    |
+         * | 94x  | v_mfma_f64_4x4x4f64 write | v_mfma_*_*f64 read SrcA/B          | 6    |
+         * | 94x  | v_mfma_f64_4x4x4f64 write | v_* read/write                     | 6    |
+         * | 94x  | v_mfma_f64_4x4x4f64 write | buffer* read overlapped            | 9    |
+         * | 94x  | v_mfma_f64_4x4x4f64 write | ds* read overlapped                | 9    |
+         * | 94x  | v_mfma_f64_4x4x4f64 write | flat* read overlapped              | 9    |
          *
          */
         class DGEMM4x4x4Write : public WaitStateObserver<DGEMM4x4x4Write>
@@ -35,7 +43,8 @@ namespace rocRoller
 
             static bool required(ContextPtr context)
             {
-                return context->targetArchitecture().target().getVersionString() == "gfx90a";
+                auto arch = context->targetArchitecture().target().getVersionString();
+                return arch == "gfx90a" || arch == "gfx940" || arch == "gfx941" || arch == "gfx942";
             }
 
             int         getMaxNops(std::shared_ptr<InstructionRef> inst) const;

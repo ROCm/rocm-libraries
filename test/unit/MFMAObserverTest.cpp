@@ -60,6 +60,22 @@ namespace rocRollerTest
         }
     };
 
+    class MFMA942ObserverTest : public GenericContextFixture
+    {
+    protected:
+        std::string targetArchitecture()
+        {
+            return "gfx942";
+        }
+
+        void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
+        {
+            auto peeked = m_context->observer()->peek(inst);
+            EXPECT_EQ(peeked.nops, expectedNops);
+            m_context->schedule(inst);
+        }
+    };
+
     TEST_F(MFMA90aObserverTest, NoWaitStates)
     {
         auto s = createRegisters(Register::Type::Scalar,
@@ -694,5 +710,185 @@ namespace rocRollerTest
             EXPECT_THAT(output(), HasSubstr("s_nop 1"));
             clearOutput();
         }
+    }
+
+    TEST_F(MFMA942ObserverTest, XDLOPThenMFMA_SrcCExact)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 4);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1, 4);
+
+        // No hazard if SrcC is exactly overlapped
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_16x16x4_f32", {a[0]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("v_mfma_f32_16x16x4_f32", {a[0]}, {v[2], v[3], a[0]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1]);
+
+            EXPECT_THAT(output(), Not(HasSubstr("s_nop")));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA942ObserverTest, XDLOPThenMFMA_Different)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 4);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1, 4);
+
+        // No register overlap should not be a hazard
+        {
+            std::vector<Instruction> insts = {Instruction("v_mfma_f32_16x16x4_f32",
+                                                          {a[0]->subset({0, 1})},
+                                                          {v[0], v[1], a[0]->subset({0, 1})},
+                                                          {},
+                                                          ""),
+                                              Instruction("v_mfma_f32_16x16x4_f32",
+                                                          {a[0]->subset({2, 3})},
+                                                          {v[2], v[3], a[0]->subset({2, 3})},
+                                                          {},
+                                                          ""),
+                                              Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1]);
+
+            EXPECT_THAT(output(), Not(HasSubstr("s_nop")));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA942ObserverTest, XDLOPThenMFMA_SrcCOverlap)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 4);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1, 4);
+
+        // If SrcC is partially overlapped
+        {
+            std::vector<Instruction> insts = {Instruction("v_mfma_f32_16x16x4_f32",
+                                                          {a[0]->subset({0, 1})},
+                                                          {v[0], v[1], a[0]->subset({0, 1})},
+                                                          {},
+                                                          ""),
+                                              Instruction("v_mfma_f32_16x16x4_f32",
+                                                          {a[0]->subset({1, 2})},
+                                                          {v[2], v[3], a[0]->subset({1, 2})},
+                                                          {},
+                                                          ""),
+                                              Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 9);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 8"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA942ObserverTest, XDLOPThenMFMA_ReadA)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2, 4);
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_16x16x4_f32", {v[2]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("v_mfma_f32_16x16x4_f32", {a[1]}, {v[2], v[3], a[1]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 11);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 10"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA942ObserverTest, XDLOPThenFlat)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2, 4);
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_16x16x4_f32", {v[2]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("flat_store_dword", {}, {v[2], v[3]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 11);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 10"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA942ObserverTest, XDLOPThenVALU_Read)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2, 4);
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_16x16x4_f32", {v[2]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("v_or_b32", {v[4]}, {v[2], v[3]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 11);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 10"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA942ObserverTest, XDLOPThenVALU_Write)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2, 4);
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_16x16x4_f32", {v[2]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("v_or_b32", {v[2]}, {v[3], v[4]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 11);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 10"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA942ObserverTest, XDLOPThenVALU_WAR)
+    {
+        auto                     v = createRegisters(Register::Type::Vector, DataType::Float, 6);
+        std::vector<Instruction> insts
+            = {Instruction("v_mfma_f32_16x16x4_f32", {v[2]}, {v[0], v[1], v[3]}, {}, ""),
+               Instruction("v_or_b32", {v[3]}, {v[4], v[5]}, {}, ""),
+               Instruction("s_endpgm", {}, {}, {}, "")};
+
+        peekAndSchedule(insts[0]);
+        peekAndSchedule(insts[1], 7);
+
+        EXPECT_THAT(output(), HasSubstr("s_nop 6"));
+    }
+
+    TEST_F(MFMA942ObserverTest, XDLOPThenVALU_WAR_Partial)
+    {
+        auto                     v = createRegisters(Register::Type::Vector, DataType::Float, 6, 4);
+        std::vector<Instruction> insts
+            = {Instruction(
+                   "v_mfma_f32_16x16x4_f32", {v[2]}, {v[0], v[1], v[3]->subset({2, 3})}, {}, ""),
+               Instruction("v_or_b32", {v[3]->subset({1, 2})}, {v[4], v[5]}, {}, ""),
+               Instruction("s_endpgm", {}, {}, {}, "")};
+
+        peekAndSchedule(insts[0]);
+        peekAndSchedule(insts[1], 7);
+
+        EXPECT_THAT(output(), HasSubstr("s_nop 6"));
+        clearOutput();
     }
 }
