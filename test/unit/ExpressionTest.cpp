@@ -2118,6 +2118,19 @@ namespace ExpressionTest
         EXPECT_THROW(Expression::convert(static_cast<DataType>(200), intExpr), FatalError);
     }
 
+    TEST_F(ExpressionTest, ComplexityTest)
+    {
+        auto intExpr = Expression::literal(1);
+
+        EXPECT_EQ(Expression::complexity(intExpr), 0);
+        EXPECT_GT(Expression::complexity(intExpr + intExpr), Expression::complexity(intExpr));
+        EXPECT_GT(Expression::complexity(intExpr + intExpr + intExpr),
+                  Expression::complexity(intExpr + intExpr));
+
+        EXPECT_GT(Expression::complexity(intExpr / intExpr),
+                  Expression::complexity(intExpr + intExpr));
+    }
+
     class ARCH_ExpressionTest : public GPUContextFixture
     {
     public:

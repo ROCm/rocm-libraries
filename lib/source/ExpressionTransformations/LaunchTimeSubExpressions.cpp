@@ -61,7 +61,9 @@ namespace rocRoller
                 auto evalTimes = evaluationTimes(expr);
 
                 if(evalTimes[EvaluationTime::Translate] || !evalTimes[EvaluationTime::KernelLaunch])
+                {
                     return nullptr;
+                }
 
                 {
                     auto arg = existingLaunchEval(expr);
@@ -75,8 +77,6 @@ namespace rocRoller
                 LaunchTimeExpressionVisitor sub(m_context, false);
                 auto                        ex2    = sub.call(expr);
                 auto                        myComp = complexity(ex2);
-                auto                        theExp = toString(expr);
-                auto                        theEx2 = toString(ex2);
 
                 if(ignoreComplexity || complexity(expr) >= m_minComplexity)
                     return addLaunchEval(expr);
