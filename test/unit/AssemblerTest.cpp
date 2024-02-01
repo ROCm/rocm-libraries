@@ -56,7 +56,7 @@ s_endpgm // End of hello_world
 ---
 amdhsa.version:
   - 1
-  - 0
+  - 2
 amdhsa.kernels:
   - .name: hello_world
     .symbol: hello_world.kd

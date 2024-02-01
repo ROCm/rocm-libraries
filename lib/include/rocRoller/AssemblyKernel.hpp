@@ -199,59 +199,6 @@ namespace rocRoller
         int m_wavefrontSize = 64;
 
         std::shared_ptr<KernelGraph::KernelGraph> m_kernelGraph;
-
-        /**
-         *
-         *   1 .amdgcn_target "amdgcn-amd-amdhsa--gfx900+xnack" // optional
-         *   2
-         *   3 .text
-         *   4 .globl hello_world
-         *   5 .p2align 8
-         *   6 .type hello_world,@function
-         *   7 hello_world:
-         *   8   s_load_dwordx2 s[0:1], s[0:1] 0x0
-         *   9   v_mov_b32 v0, 3.14159
-         *  10   s_waitcnt lgkmcnt(0)
-         *  11   v_mov_b32 v1, s0
-         *  12   v_mov_b32 v2, s1
-         *  13   flat_store_dword v[1:2], v0
-         *  14   s_endpgm
-         *  15 .Lfunc_end0:
-         *  16   .size   hello_world, .Lfunc_end0-hello_world
-         *  17
-         *  18 .rodata
-         *  19 .p2align 6
-         *  20 .amdhsa_kernel hello_world
-         *  21   .amdhsa_user_sgpr_kernarg_segment_ptr 1
-         *  22   .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr
-         *  23   .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
-         *  24 .end_amdhsa_kernel
-         *  25
-         *  26 .amdgpu_metadata
-         *  27 ---
-         *  28 amdhsa.version:
-         *  29   - 1
-         *  30   - 0
-         *  31 amdhsa.kernels:
-         *  32   - .name: hello_world
-         *  33     .symbol: hello_world.kd
-         *  34     .kernarg_segment_size: 48
-         *  35     .group_segment_fixed_size: 0
-         *  36     .private_segment_fixed_size: 0
-         *  37     .kernarg_segment_align: 4
-         *  38     .wavefront_size: 64
-         *  39     .sgpr_count: 2
-         *  40     .vgpr_count: 3
-         *  41     .max_flat_workgroup_size: 256
-         *  42     .args:
-         *  43       - .size: 8
-         *  44         .offset: 0
-         *  45         .value_kind: global_buffer
-         *  46         .address_space: global
-         *  47         .actual_access: write_only
-         *  48 //...
-         *  49 .end_amdgpu_metadata
-         */
     };
 
     struct AssemblyKernels

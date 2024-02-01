@@ -8005,7 +8005,7 @@ s_endpgm  // End of GEMM_NT_hhhhf_MT128x256x16_WG128x2_LDS111_UNROLL0x0_PF2x1_Pr
 
 .amdgpu_metadata
 ---
-amdhsa.version:  [ 1, 0 ]
+amdhsa.version:  [ 1, 2 ]
 amdhsa.kernels:
   - .name:           GEMM_NT_hhhhf_MT128x256x16_WG128x2_LDS111_UNROLL0x0_PF2x1_Priority
     .symbol:         GEMM_NT_hhhhf_MT128x256x16_WG128x2_LDS111_UNROLL0x0_PF2x1_Priority.kd

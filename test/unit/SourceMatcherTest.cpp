@@ -141,7 +141,7 @@ namespace rocRollerTest
         std::string input = R"(
 .amdgpu_metadata
 ---
-amdhsa.version: [1, 0]
+amdhsa.version: [1, 2]
 foo:
   baz: 7
   bar: 2
@@ -152,7 +152,7 @@ foo:
         std::string doc   = R"(---
 amdhsa.version:
   - 1
-  - 0
+  - 2
 foo:
   bar: 2
   baz: 7
@@ -175,12 +175,12 @@ foo:
 ---
 amdhsa.version:
   - 1
-  - 0
+  - 2
 )";
         std::string doc   = R"(---
 amdhsa.version:
   - 1
-  - 0
+  - 2
 ...
 )";
         EXPECT_THAT(Generated(NormalizedSourceLines(input, false)),
