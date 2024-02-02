@@ -25,1353 +25,427 @@
 namespace ArithmeticTest
 {
 
-    using namespace rocRoller;
-
-    class ArithmeticTest : public GPUContextFixture
+    template <typename T>
+    struct identity
     {
-    public:
-        ArithmeticTest() {}
+        using type = T;
     };
+
+    template <typename T>
+    using try_make_unsigned =
+        typename std::conditional_t<std::is_integral_v<T>, std::make_unsigned<T>, identity<T>>;
+
+    template <typename T>
+    using try_make_signed =
+        typename std::conditional_t<std::is_integral_v<T>, std::make_signed<T>, identity<T>>;
+
+    using namespace rocRoller;
 
     const int LITERAL_TEST = 227;
 
-    TEST_P(ArithmeticTest, ArithInt32)
+    struct IntegralArithmeticTest : public GPUContextFixtureParam<Register::Type>
     {
-        auto k = m_context->kernel();
-
-        k->setKernelName("ArithInt32");
-        k->setKernelDimensions(1);
-
-        auto command = std::make_shared<Command>();
-
-        auto result_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
-        auto b_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
-        auto sh_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::UInt32, PointerType::Value}));
-
-        auto one  = std::make_shared<Expression::Expression>(1u);
-        auto zero = std::make_shared<Expression::Expression>(0u);
-
-        k->addArgument({"result",
-                        {DataType::Int32, PointerType::PointerGlobal},
-                        DataDirection::WriteOnly,
-                        result_exp});
-        k->addArgument({"a", DataType::Int32, DataDirection::ReadOnly, a_exp});
-        k->addArgument({"b", DataType::Int32, DataDirection::ReadOnly, b_exp});
-        k->addArgument({"shift", DataType::UInt32, DataDirection::ReadOnly, sh_exp});
-
-        k->setWorkgroupSize({1, 1, 1});
-        k->setWorkitemCount({one, one, one});
-        k->setDynamicSharedMemBytes(zero);
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_result, s_a, s_b, s_shift;
-            co_yield m_context->argLoader()->getValue("result", s_result);
-            co_yield m_context->argLoader()->getValue("a", s_a);
-            co_yield m_context->argLoader()->getValue("b", s_b);
-            co_yield m_context->argLoader()->getValue("shift", s_shift);
-
-            auto v_result
-                = Register::Value::Placeholder(m_context,
-                                               Register::Type::Vector,
-                                               {DataType::Int32, PointerType::PointerGlobal},
-                                               1);
-
-            auto v_a = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int32, 1);
-
-            auto v_b = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int32, 1);
-
-            auto v_c = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int32, 1);
-
-            auto v_shift = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::UInt32, 1);
-
-            auto s_c = Register::Value::Placeholder(m_context,
-                                                    Register::Type::Scalar,
-                                                    {DataType::Int32, PointerType::PointerGlobal},
-                                                    1);
-
-            co_yield v_a->allocate();
-            co_yield v_b->allocate();
-            co_yield v_c->allocate();
-            co_yield v_shift->allocate();
-            co_yield s_c->allocate();
-            co_yield v_result->allocate();
-
-            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
-
-            co_yield m_context->copier()->copy(v_a, s_a, "Move value");
-            co_yield m_context->copier()->copy(v_b, s_b, "Move value");
-            co_yield m_context->copier()->copy(v_shift, s_shift, "Move value");
-
-            co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
-            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
-
-            co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(4), 4);
-
-            co_yield generateOp<Expression::Multiply>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 4);
-
-            co_yield generateOp<Expression::Divide>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(12), 4);
-
-            co_yield generateOp<Expression::Modulo>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 4);
-
-            co_yield generateOp<Expression::ShiftL>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(20), 4);
-
-            co_yield generateOp<Expression::LogicalShiftR>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 4);
-
-            co_yield generateOp<Expression::ArithmeticShiftR>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(28), 4);
-
-            co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                             v_result,
-                                             v_c->subset({0}),
-                                             Register::Value::Literal(32),
-                                             4);
-
-            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                             v_result,
-                                             v_c->subset({0}),
-                                             Register::Value::Literal(36),
-                                             4);
-
-            co_yield generateOp<Expression::LessThan>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                             v_result,
-                                             v_c->subset({0}),
-                                             Register::Value::Literal(40),
-                                             4);
-
-            co_yield generateOp<Expression::LessThanEqual>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                             v_result,
-                                             v_c->subset({0}),
-                                             Register::Value::Literal(44),
-                                             4);
-
-            co_yield generateOp<Expression::Equal>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                             v_result,
-                                             v_c->subset({0}),
-                                             Register::Value::Literal(48),
-                                             4);
-
-            co_yield generateOp<Expression::BitwiseAnd>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(52), 4);
-
-            co_yield generateOp<Expression::MultiplyHigh>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(56), 4);
-
-            co_yield generateOp<Expression::Negate>(v_c, v_a);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(60), 4);
-
-            co_yield generateOp<Expression::BitwiseXor>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(64), 4);
-
-            co_yield generateOp<Expression::AddShiftL>(v_c, v_a, v_b, v_shift);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(68), 4);
-
-            co_yield generateOp<Expression::ShiftLAdd>(v_c, v_a, v_shift, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(72), 4);
-
-            co_yield generateOp<Expression::BitwiseOr>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(76), 4);
-
-            // Check for division of literal values
-            co_yield generateOp<Expression::Divide>(
-                v_c, v_a, Register::Value::Literal(LITERAL_TEST));
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(80), 4);
-
-            co_yield generateOp<Expression::Divide>(
-                v_c, Register::Value::Literal(LITERAL_TEST), v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(84), 4);
-
-            // Check for division of literal values
-            co_yield generateOp<Expression::Modulo>(
-                v_c, v_a, Register::Value::Literal(LITERAL_TEST));
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(88), 4);
-
-            co_yield generateOp<Expression::Modulo>(
-                v_c, Register::Value::Literal(LITERAL_TEST), v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(92), 4);
-
-            // Logical
-            auto A = v_a->expression();
-            auto B = v_b->expression();
-            co_yield generate(
-                s_c, (A < Expression::literal(0)) && (B < Expression::literal(0)), m_context);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(96), 4);
-
-            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
-            co_yield generateOp<Expression::Conditional>(v_c, s_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(100), 4);
-
-            co_yield generate(
-                s_c, (A < Expression::literal(0)) || (B < Expression::literal(0)), m_context);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 4);
-
-            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
-            co_yield generateOp<Expression::Conditional>(v_c, s_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(100), 4);
-
-            co_yield generateOp<Expression::NotEqual>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                             v_result,
-                                             v_c->subset({0}),
-                                             Register::Value::Literal(108),
-                                             4);
-
-            auto s_c_lower = s_c->subset({0});
-            co_yield generate(s_c_lower, Expression::logicalNot(A < B), m_context);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(112), 4);
-
-            co_yield generate(
-                s_c_lower, Expression::logicalNot(Expression::logicalNot(A > B)), m_context);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(116), 4);
-
-            co_yield generate(v_c, ~A, m_context);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(120), 4);
-        };
-
-        m_context->schedule(kb());
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
-
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-
-        if(isLocalDevice())
+        template <typename T>
+        void testBody()
         {
-            CommandKernel commandKernel(m_context);
+            auto dataType = TypeInfo<T>::Var.dataType;
+            auto regType  = std::get<1>(GetParam());
 
-            size_t const result_size = 31;
-            auto         d_result    = make_shared_device<int>(result_size);
+            auto k = m_context->kernel();
 
-            for(int a : TestValues::int32Values)
-            {
-                for(int b : TestValues::int32Values)
+            k->setKernelName("IntegralArithmeticTest");
+            k->setKernelDimensions(1);
+
+            auto command = std::make_shared<Command>();
+
+            auto result_exp = std::make_shared<Expression::Expression>(
+                command->allocateArgument({dataType, PointerType::PointerGlobal}));
+            auto a_exp = std::make_shared<Expression::Expression>(
+                command->allocateArgument({dataType, PointerType::Value}));
+            auto b_exp = std::make_shared<Expression::Expression>(
+                command->allocateArgument({dataType, PointerType::Value}));
+            auto sh_exp = std::make_shared<Expression::Expression>(
+                command->allocateArgument({DataType::UInt32, PointerType::Value}));
+
+            auto one  = std::make_shared<Expression::Expression>(1u);
+            auto zero = std::make_shared<Expression::Expression>(0u);
+
+            k->addArgument({"result",
+                            {dataType, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly,
+                            result_exp});
+            k->addArgument({"a", dataType, DataDirection::ReadOnly, a_exp});
+            k->addArgument({"b", dataType, DataDirection::ReadOnly, b_exp});
+            k->addArgument({"shift", DataType::UInt32, DataDirection::ReadOnly, sh_exp});
+
+            k->setWorkgroupSize({1, 1, 1});
+            k->setWorkitemCount({one, one, one});
+            k->setDynamicSharedMemBytes(zero);
+
+            m_context->schedule(k->preamble());
+            m_context->schedule(k->prolog());
+
+            auto kb = [&]() -> Generator<Instruction> {
+                Register::ValuePtr s_result, s_a, s_b, s_shift;
+                co_yield m_context->argLoader()->getValue("result", s_result);
+                co_yield m_context->argLoader()->getValue("a", s_a);
+                co_yield m_context->argLoader()->getValue("b", s_b);
+                co_yield m_context->argLoader()->getValue("shift", s_shift);
+
+                auto v_result = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, {dataType, PointerType::PointerGlobal}, 1);
+
+                auto v_a
+                    = Register::Value::Placeholder(m_context, Register::Type::Vector, dataType, 1);
+
+                auto v_b
+                    = Register::Value::Placeholder(m_context, Register::Type::Vector, dataType, 1);
+
+                auto v_c
+                    = Register::Value::Placeholder(m_context, Register::Type::Vector, dataType, 1);
+
+                auto v_shift = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::UInt32, 1);
+
+                auto mask = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {dataType, PointerType::PointerGlobal}, 1);
+
+                auto s_c
+                    = Register::Value::Placeholder(m_context, Register::Type::Scalar, dataType, 1);
+
+                co_yield v_a->allocate();
+                co_yield v_b->allocate();
+                co_yield v_c->allocate();
+                co_yield v_shift->allocate();
+                co_yield mask->allocate();
+                co_yield s_c->allocate();
+                co_yield v_result->allocate();
+
+                co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
+
+                co_yield m_context->copier()->copy(v_a, s_a, "Move value");
+                co_yield m_context->copier()->copy(v_b, s_b, "Move value");
+                co_yield m_context->copier()->copy(v_shift, s_shift, "Move value");
+
+                auto const a            = regType == Register::Type::Vector ? v_a : s_a;
+                auto const b            = regType == Register::Type::Vector ? v_b : s_b;
+                auto const c            = regType == Register::Type::Vector ? v_c : s_c;
+                auto const mask_or_bool = regType == Register::Type::Vector ? mask : s_c;
+                auto const shift        = regType == Register::Type::Vector ? v_shift : s_shift;
+
+                enum LaneWise_t
                 {
-                    for(unsigned int shift : TestValues::shiftValues)
+                    LaneWise,
+                    NotLaneWise
+                };
+
+                auto store
+                    = [&](size_t idx, LaneWise_t laneWise = NotLaneWise) -> Generator<Instruction> {
+                    if(laneWise == LaneWise)
                     {
-                        KernelArguments runtimeArgs;
-                        runtimeArgs.append("result", d_result.get());
-                        runtimeArgs.append("a", a);
-                        runtimeArgs.append("b", b);
-                        runtimeArgs.append("shift", shift);
-
-                        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-
-                        std::vector<int> result(result_size);
-                        ASSERT_THAT(hipMemcpy(result.data(),
-                                              d_result.get(),
-                                              result.size() * sizeof(int),
-                                              hipMemcpyDefault),
-                                    HasHipSuccess(0));
-
-                        EXPECT_EQ(result[0], a + b);
-                        EXPECT_EQ(result[1], a - b);
-                        EXPECT_EQ(result[2], a * b);
-                        if(b != 0)
+                        // E.g. vgpr comparsion requires copying result from vcc-sized sgpr to a T-sized vgpr
+                        // E.g. sgpr comparsion requries copying result from bool sgpr to a T-sized vgpr
+                        if constexpr(sizeof(T) == 4)
                         {
-                            EXPECT_EQ(result[3], a / b);
-                            EXPECT_EQ(result[4], a % b);
+                            co_yield m_context->copier()->copy(
+                                v_c, mask->subset({0}), "Move result to vgpr to store.");
+                            co_yield m_context->mem()->store(
+                                MemoryInstructions::Flat,
+                                v_result,
+                                v_c->subset({0}),
+                                Register::Value::Literal(idx * sizeof(T)),
+                                sizeof(T));
                         }
-                        if(b < 32 && b >= 0)
+                        else
                         {
-                            EXPECT_EQ(result[5], a << b) << a << " " << b;
-                            EXPECT_EQ(result[6], static_cast<unsigned int>(a) >> b);
-                            EXPECT_EQ(result[7], a >> b);
+                            co_yield m_context->copier()->copy(
+                                v_c, mask, "Move result to vgpr to store.");
+                            co_yield m_context->mem()->store(
+                                MemoryInstructions::Flat,
+                                v_result,
+                                v_c,
+                                Register::Value::Literal(idx * sizeof(T)),
+                                sizeof(T));
                         }
-                        EXPECT_EQ(result[8], (a > b ? 1 : 0));
-                        EXPECT_EQ(result[9], (a >= b ? 1 : 0));
-                        EXPECT_EQ(result[10], (a < b ? 1 : 0));
-                        EXPECT_EQ(result[11], (a <= b ? 1 : 0));
-                        EXPECT_EQ(result[12], (a == b ? 1 : 0));
-                        EXPECT_EQ(result[13], a & b);
-                        EXPECT_EQ(result[14], (a * (int64_t)b) >> 32);
-                        EXPECT_EQ(result[15], -a);
-                        EXPECT_EQ(result[16], a ^ b);
-                        EXPECT_EQ(result[17], (a + b) << shift);
-                        EXPECT_EQ(result[18], (a << shift) + b);
-                        EXPECT_EQ(result[19], a | b);
-                        EXPECT_EQ(result[20], a / LITERAL_TEST);
-                        if(b != 0)
-                            EXPECT_EQ(result[21], LITERAL_TEST / b);
-                        EXPECT_EQ(result[22], a % LITERAL_TEST);
-                        if(b != 0)
-                            EXPECT_EQ(result[23], LITERAL_TEST % b);
-                        EXPECT_EQ(result[24], ((a < 0) && (b < 0)) ? 1 : 0);
-                        EXPECT_EQ(result[25], (a >= b ? a : b));
-                        EXPECT_EQ(result[26], ((a < 0) || (b < 0)) ? 1 : 0);
-                        EXPECT_EQ(result[27], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[28], !(a < b) ? 1 : 0);
-                        EXPECT_EQ(result[29], !!(a > b) ? 1 : 0);
-                        EXPECT_EQ(result[30], ~a);
+                    }
+                    else
+                    {
+                        if(regType == Register::Type::Scalar)
+                        {
+                            co_yield m_context->copier()->copy(
+                                v_c, s_c, "Move result to vgpr to store.");
+                        }
+                        co_yield m_context->mem()->store(MemoryInstructions::Flat,
+                                                         v_result,
+                                                         v_c,
+                                                         Register::Value::Literal(idx * sizeof(T)),
+                                                         sizeof(T));
+                    }
+                };
+
+                co_yield generateOp<Expression::Add>(c, a, b);
+                co_yield store(0);
+
+                co_yield generateOp<Expression::Subtract>(c, a, b);
+                co_yield store(1);
+
+                co_yield generateOp<Expression::Multiply>(c, a, b);
+                co_yield store(2);
+
+                co_yield generateOp<Expression::Divide>(c, a, b);
+                co_yield store(3);
+
+                co_yield generateOp<Expression::Modulo>(c, a, b);
+                co_yield store(4);
+
+                co_yield generateOp<Expression::ShiftL>(c, a, b);
+                co_yield store(5);
+
+                co_yield generateOp<Expression::LogicalShiftR>(c, a, b);
+                co_yield store(6);
+
+                co_yield generateOp<Expression::ArithmeticShiftR>(c, a, b);
+                co_yield store(7);
+
+                if(!std::is_same_v<T, uint64_t>)
+                {
+                    co_yield generateOp<Expression::GreaterThan>(mask, a, b);
+                    co_yield store(8, LaneWise);
+
+                    co_yield generateOp<Expression::GreaterThanEqual>(mask, a, b);
+                    co_yield store(9, LaneWise);
+
+                    co_yield generateOp<Expression::LessThan>(mask, a, b);
+                    co_yield store(10, LaneWise);
+
+                    co_yield generateOp<Expression::LessThanEqual>(mask, a, b);
+                    co_yield store(11, LaneWise);
+
+                    co_yield generateOp<Expression::Equal>(mask, a, b);
+                    co_yield store(12, LaneWise);
+                }
+
+                co_yield generateOp<Expression::BitwiseAnd>(c, a, b);
+                co_yield store(13);
+
+                co_yield generateOp<Expression::MultiplyHigh>(c, a, b);
+                co_yield store(14);
+
+                co_yield generateOp<Expression::Negate>(c, a);
+                co_yield store(15);
+
+                co_yield generateOp<Expression::BitwiseXor>(c, a, b);
+                co_yield store(16);
+
+                co_yield generateOp<Expression::AddShiftL>(c, a, b, shift);
+                co_yield store(17);
+
+                co_yield generateOp<Expression::ShiftLAdd>(c, a, shift, b);
+                co_yield store(18);
+
+                co_yield generateOp<Expression::BitwiseOr>(c, a, b);
+                co_yield store(19);
+
+                co_yield generateOp<Expression::Divide>(
+                    c, a, Register::Value::Literal(LITERAL_TEST));
+                co_yield store(20);
+
+                co_yield generateOp<Expression::Divide>(
+                    c, Register::Value::Literal(LITERAL_TEST), b);
+                co_yield store(21);
+
+                co_yield generateOp<Expression::Modulo>(
+                    c, a, Register::Value::Literal(LITERAL_TEST));
+                co_yield store(22);
+
+                co_yield generateOp<Expression::Modulo>(
+                    c, Register::Value::Literal(LITERAL_TEST), b);
+                co_yield store(23);
+
+                // Logical
+                auto A = regType == Register::Type::Vector ? v_a->expression() : s_a->expression();
+                auto B = regType == Register::Type::Vector ? v_b->expression() : s_b->expression();
+                if constexpr(sizeof(T) == 4)
+                {
+                    co_yield generate(mask,
+                                      (A < Expression::literal(0, dataType))
+                                          && (B < Expression::literal(0, dataType)),
+                                      m_context);
+                    co_yield store(24, LaneWise);
+
+                    co_yield generateOp<Expression::GreaterThanEqual>(mask_or_bool, a, b);
+                    co_yield generateOp<Expression::Conditional>(c, mask_or_bool, a, b);
+                    co_yield store(25);
+
+                    co_yield generate(mask,
+                                      (A < Expression::literal(0, dataType))
+                                          || (B < Expression::literal(0, dataType)),
+                                      m_context);
+                    co_yield store(26, LaneWise);
+
+                    co_yield generateOp<Expression::NotEqual>(mask, a, b);
+                    co_yield store(27, LaneWise);
+
+                    auto s_c_lower = mask->subset({0});
+                    co_yield generate(s_c_lower, Expression::logicalNot(A < B), m_context);
+                    co_yield store(28, LaneWise);
+
+                    co_yield generate(s_c_lower,
+                                      Expression::logicalNot(Expression::logicalNot(A > B)),
+                                      m_context);
+                    co_yield store(29, LaneWise);
+                }
+
+                co_yield generateOp<Expression::BitwiseNegate>(c, a);
+                co_yield store(30);
+            };
+
+            m_context->schedule(kb());
+            m_context->schedule(k->postamble());
+            m_context->schedule(k->amdgpu_metadata());
+
+            REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+            if(isLocalDevice())
+            {
+                CommandKernel commandKernel(m_context);
+
+                size_t const result_size = 31;
+                auto         d_result    = make_shared_device<T>(result_size);
+
+                for(T a : TestValues::ByType<T>::values)
+                {
+                    for(T b : TestValues::ByType<T>::values)
+                    {
+                        using T_unsigned = typename try_make_unsigned<T>::type;
+                        using T_signed   = typename try_make_signed<T>::type;
+
+                        // Signed division/modulo is used for unsigned
+                        auto withinDivisionDomain = b != 0
+                                                    && a <= std::numeric_limits<T_signed>::max()
+                                                    && b <= std::numeric_limits<T_signed>::max();
+
+                        for(uint32_t shift : TestValues::shiftValues)
+                        {
+                            KernelArguments runtimeArgs;
+                            runtimeArgs.append("result", d_result.get());
+                            runtimeArgs.append("a", a);
+                            runtimeArgs.append("b", b);
+                            runtimeArgs.append("shift", shift);
+
+                            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+
+                            std::vector<T> result(result_size);
+                            ASSERT_THAT(hipMemcpy(result.data(),
+                                                  d_result.get(),
+                                                  result.size() * sizeof(T),
+                                                  hipMemcpyDefault),
+                                        HasHipSuccess(0));
+
+                            EXPECT_EQ(result[0], a + b);
+                            EXPECT_EQ(result[1], a - b);
+                            EXPECT_EQ(result[2], a * b);
+                            if(withinDivisionDomain)
+                            {
+                                EXPECT_EQ(result[3], a / b);
+                                EXPECT_EQ(result[4], a % b);
+                            }
+                            if(b < 32 && b >= 0)
+                            {
+                                EXPECT_EQ(result[5], a << b) << a << " " << b;
+                                EXPECT_EQ(result[6], static_cast<T_unsigned>(a) >> b);
+                                EXPECT_EQ(result[7], a >> b);
+                            }
+                            if constexpr(!std::is_same_v<T, uint64_t>)
+                            {
+                                EXPECT_EQ(result[8], (a > b ? 1 : 0));
+                                EXPECT_EQ(result[9], (a >= b ? 1 : 0));
+                                EXPECT_EQ(result[10], (a < b ? 1 : 0));
+                                EXPECT_EQ(result[11], (a <= b ? 1 : 0));
+                                EXPECT_EQ(result[12], (a == b ? 1 : 0));
+                            }
+                            EXPECT_EQ(result[13], a & b);
+                            if constexpr(std::is_same_v<T_signed, int32_t>)
+                            {
+                                EXPECT_EQ(result[14],
+                                          (a * (int64_t)b)
+                                              >> std::numeric_limits<T_unsigned>::digits);
+                            }
+                            else if constexpr(std::is_same_v<T, int64_t>)
+                            {
+                                EXPECT_EQ(result[14],
+                                          (int64_t)(((__int128_t)a * (__int128_t)b)
+                                                    >> std::numeric_limits<T_unsigned>::digits));
+                            }
+                            EXPECT_EQ(result[15], -a);
+                            EXPECT_EQ(result[16], a ^ b);
+                            EXPECT_EQ(result[17], (a + b) << shift);
+                            EXPECT_EQ(result[18], (a << shift) + b);
+                            EXPECT_EQ(result[19], a | b);
+                            if(withinDivisionDomain)
+                            {
+                                EXPECT_EQ(result[20], a / LITERAL_TEST);
+                                EXPECT_EQ(result[21], LITERAL_TEST / b);
+                                EXPECT_EQ(result[22], a % LITERAL_TEST);
+                                EXPECT_EQ(result[23], LITERAL_TEST % b);
+                            }
+                            if constexpr(sizeof(T) == 4)
+                            {
+                                EXPECT_EQ(result[24], ((a < 0) && (b < 0)) ? 1 : 0);
+                                EXPECT_EQ(result[25], (a >= b ? a : b))
+                                    << "a: " << a << ", b: " << b << ", shift: " << shift;
+                                EXPECT_EQ(result[26], ((a < 0) || (b < 0)) ? 1 : 0);
+                                EXPECT_EQ(result[27], (a != b ? 1 : 0))
+                                    << "a: " << a << ", b: " << b << ", shift: " << shift;
+                                EXPECT_EQ(result[28], !(a < b) ? 1 : 0);
+                                EXPECT_EQ(result[29], !!(a > b) ? 1 : 0);
+                            }
+                            EXPECT_EQ(result[30], ~a);
+                        }
                     }
                 }
             }
-        }
-        else
-        {
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
-        }
-    }
-
-    TEST_P(ArithmeticTest, ArithInt32Scalar)
-    {
-        auto k = m_context->kernel();
-
-        k->setKernelName("ArithInt32Scalar");
-        k->setKernelDimensions(1);
-
-        auto command = std::make_shared<Command>();
-
-        auto result_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
-        auto b_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
-        auto sh_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::UInt32, PointerType::Value}));
-
-        auto one  = std::make_shared<Expression::Expression>(1u);
-        auto zero = std::make_shared<Expression::Expression>(0u);
-
-        k->addArgument({"result",
-                        {DataType::Int32, PointerType::PointerGlobal},
-                        DataDirection::WriteOnly,
-                        result_exp});
-        k->addArgument({"a", DataType::Int32, DataDirection::ReadOnly, a_exp});
-        k->addArgument({"b", DataType::Int32, DataDirection::ReadOnly, b_exp});
-        k->addArgument({"shift", DataType::UInt32, DataDirection::ReadOnly, sh_exp});
-
-        k->setWorkgroupSize({1, 1, 1});
-        k->setWorkitemCount({one, one, one});
-        k->setDynamicSharedMemBytes(zero);
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_result, s_a, s_b, s_shift;
-            co_yield m_context->argLoader()->getValue("result", s_result);
-            co_yield m_context->argLoader()->getValue("a", s_a);
-            co_yield m_context->argLoader()->getValue("b", s_b);
-            co_yield m_context->argLoader()->getValue("shift", s_shift);
-
-            auto v_result
-                = Register::Value::Placeholder(m_context,
-                                               Register::Type::Vector,
-                                               {DataType::Int32, PointerType::PointerGlobal},
-                                               1);
-
-            auto s_c = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::Int32, 1);
-
-            auto v_c = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int32, 1);
-
-            co_yield s_c->allocate();
-            co_yield v_result->allocate();
-
-            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
-
-            co_yield generateOp<Expression::Add>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
-
-            co_yield generateOp<Expression::Subtract>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(4), 4);
-
-            co_yield generateOp<Expression::Multiply>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 4);
-
-            co_yield generateOp<Expression::Divide>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(12), 4);
-
-            co_yield generateOp<Expression::Modulo>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 4);
-
-            co_yield generateOp<Expression::ShiftL>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(20), 4);
-
-            co_yield generateOp<Expression::LogicalShiftR>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 4);
-
-            co_yield generateOp<Expression::ArithmeticShiftR>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(28), 4);
-
-            co_yield generateOp<Expression::GreaterThan>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(32), 4);
-
-            co_yield generateOp<Expression::GreaterThanEqual>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(36), 4);
-
-            co_yield generateOp<Expression::LessThan>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(40), 4);
-
-            co_yield generateOp<Expression::LessThanEqual>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(44), 4);
-
-            co_yield generateOp<Expression::Equal>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 4);
-
-            co_yield generateOp<Expression::BitwiseAnd>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(52), 4);
-
-            co_yield generateOp<Expression::MultiplyHigh>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(56), 4);
-
-            co_yield generateOp<Expression::Negate>(s_c, s_a);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(60), 4);
-
-            co_yield generateOp<Expression::BitwiseXor>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(64), 4);
-
-            co_yield generateOp<Expression::AddShiftL>(s_c, s_a, s_b, s_shift);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(68), 4);
-
-            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, s_shift, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(72), 4);
-
-            auto shift1 = Register::Value::Literal(1u);
-            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, shift1, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(76), 4);
-
-            auto shift2 = Register::Value::Literal(2u);
-            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, shift2, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(80), 4);
-
-            auto shift3 = Register::Value::Literal(3u);
-            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, shift3, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(84), 4);
-
-            auto shift4 = Register::Value::Literal(4u);
-            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, shift4, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(88), 4);
-
-            auto shift5 = Register::Value::Literal(5u);
-            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, shift5, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(92), 4);
-
-            co_yield generateOp<Expression::BitwiseOr>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(96), 4);
-
-            co_yield generateOp<Expression::Divide>(
-                s_c, s_a, Register::Value::Literal(LITERAL_TEST));
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(100), 4);
-
-            co_yield generateOp<Expression::Divide>(
-                s_c, Register::Value::Literal(LITERAL_TEST), s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 4);
-
-            co_yield generateOp<Expression::Modulo>(
-                s_c, s_a, Register::Value::Literal(LITERAL_TEST));
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(108), 4);
-
-            co_yield generateOp<Expression::Modulo>(
-                s_c, Register::Value::Literal(LITERAL_TEST), s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(112), 4);
-
-            // Logical
-            auto A = s_a->expression();
-            auto B = s_b->expression();
-            co_yield generate(s_c, (A <= B) && (B <= A), m_context);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                             v_result,
-                                             v_c->subset({0}),
-                                             Register::Value::Literal(116),
-                                             4);
-            co_yield generate(
-                s_c, (A < Expression::literal(0)) && (B > Expression::literal(0)), m_context);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                             v_result,
-                                             v_c->subset({0}),
-                                             Register::Value::Literal(120),
-                                             4);
-
-            co_yield generateOp<Expression::Conditional>(s_c, s_shift, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(124), 4);
-
-            auto scc = m_context->getSCC();
-            co_yield generate(scc, A >= B, m_context);
-            co_yield generateOp<Expression::Conditional>(s_c, scc, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 4);
-
-            co_yield generate(s_c, (A <= B) || (B <= A), m_context);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                             v_result,
-                                             v_c->subset({0}),
-                                             Register::Value::Literal(132),
-                                             4);
-            co_yield generate(
-                s_c, (A < Expression::literal(0)) || (B > Expression::literal(0)), m_context);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                             v_result,
-                                             v_c->subset({0}),
-                                             Register::Value::Literal(136),
-                                             4);
-
-            co_yield generateOp<Expression::NotEqual>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(140), 4);
-
-            auto s_c_lower = s_c->subset({0});
-            co_yield generate(s_c_lower, Expression::logicalNot(A < B), m_context);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(144), 4);
-
-            co_yield generate(
-                s_c_lower, Expression::logicalNot(Expression::logicalNot(A > B)), m_context);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(148), 4);
-
-            co_yield generate(s_c, ~A, m_context);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(152), 4);
-        };
-
-        m_context->schedule(kb());
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
-
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
-
-        if(isLocalDevice())
-        {
-            CommandKernel commandKernel(m_context);
-
-            size_t const result_count = 39;
-            auto         d_result     = make_shared_device<int>(result_count);
-
-            for(int a : TestValues::int32Values)
+            else
             {
-                for(int b : TestValues::int32Values)
-                {
-                    for(unsigned int shift : TestValues::shiftValues)
-                    {
-                        KernelArguments runtimeArgs;
-                        runtimeArgs.append("result", d_result.get());
-                        runtimeArgs.append("a", a);
-                        runtimeArgs.append("b", b);
-                        runtimeArgs.append("shift", shift);
-
-                        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-
-                        std::vector<int> result(result_count);
-                        ASSERT_THAT(hipMemcpy(result.data(),
-                                              d_result.get(),
-                                              result.size() * sizeof(int),
-                                              hipMemcpyDefault),
-                                    HasHipSuccess(0));
-
-                        EXPECT_EQ(result[0], a + b);
-                        EXPECT_EQ(result[1], a - b);
-                        EXPECT_EQ(result[2], a * b);
-                        if(b != 0)
-                        {
-                            EXPECT_EQ(result[3], a / b);
-                            EXPECT_EQ(result[4], a % b);
-                        }
-                        if(b < 32 && b >= 0)
-                        {
-                            EXPECT_EQ(result[5], a << b) << a << " " << b;
-                            EXPECT_EQ(result[6], static_cast<unsigned int>(a) >> b);
-                            EXPECT_EQ(result[7], a >> b);
-                        }
-                        EXPECT_EQ(result[8], (a > b ? 1 : 0));
-                        EXPECT_EQ(result[9], (a >= b ? 1 : 0));
-                        EXPECT_EQ(result[10], (a < b ? 1 : 0));
-                        EXPECT_EQ(result[11], (a <= b ? 1 : 0));
-                        EXPECT_EQ(result[12], (a == b ? 1 : 0));
-                        EXPECT_EQ(result[13], a & b);
-                        EXPECT_EQ(result[14], (a * (int64_t)b) >> 32);
-                        EXPECT_EQ(result[15], -a);
-                        EXPECT_EQ(result[16], a ^ b);
-                        EXPECT_EQ(result[17], (a + b) << shift);
-                        EXPECT_EQ(result[18], (a << shift) + b);
-                        if(a >= 2)
-                        {
-                            EXPECT_EQ(result[19], (a << 1u) + b);
-                        }
-                        if(a >= 4)
-                        {
-                            EXPECT_EQ(result[20], (a << 2u) + b);
-                        }
-                        if(a >= 8)
-                        {
-                            EXPECT_EQ(result[21], (a << 3u) + b);
-                        }
-                        if(a >= 16)
-                        {
-                            EXPECT_EQ(result[22], (a << 4u) + b);
-                        }
-                        if(a >= 32)
-                        {
-                            EXPECT_EQ(result[23], (a << 5u) + b);
-                        }
-                        EXPECT_EQ(result[24], a | b);
-                        EXPECT_EQ(result[25], a / LITERAL_TEST);
-                        if(b != 0)
-                            EXPECT_EQ(result[26], LITERAL_TEST / b);
-                        EXPECT_EQ(result[27], a % LITERAL_TEST);
-                        if(b != 0)
-                            EXPECT_EQ(result[28], LITERAL_TEST % b);
-                        EXPECT_EQ(result[29], ((a <= b) && (b <= a)) ? 1 : 0);
-                        EXPECT_EQ(result[30], ((a < 0) && (b > 0)) ? 1 : 0);
-                        EXPECT_EQ(result[31], shift ? a : b);
-                        EXPECT_EQ(result[32], a >= b ? a : b);
-                        EXPECT_EQ(result[33], ((a <= b) || (b <= a)) ? 1 : 0);
-                        EXPECT_EQ(result[34], ((a < 0) || (b > 0)) ? 1 : 0);
-                        EXPECT_EQ(result[35], (a != b ? 1 : 0));
-                        EXPECT_EQ(result[36], !(a < b) ? 1 : 0);
-                        EXPECT_EQ(result[37], !!(a > b) ? 1 : 0);
-                        EXPECT_EQ(result[38], ~a);
-                    }
-                }
+                std::vector<char> assembledKernel = m_context->instructions()->assemble();
+                EXPECT_GT(assembledKernel.size(), 0);
             }
         }
-        else
-        {
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
-        }
-    }
+    };
 
-    TEST_P(ArithmeticTest, ArithInt64)
+    TEST_P(IntegralArithmeticTest, Int32)
     {
-        auto k = m_context->kernel();
-
-        k->setKernelName("ArithInt64");
-        k->setKernelDimensions(1);
-
-        auto command = std::make_shared<Command>();
-
-        VariableType Int64Value(DataType::Int64, PointerType::Value);
-        VariableType UInt64Value(DataType::UInt64, PointerType::Value);
-        VariableType Int64Pointer(DataType::Int64, PointerType::PointerGlobal);
-
-        auto result_exp = command->allocateArgument(Int64Pointer)->expression();
-        auto a_exp      = command->allocateArgument(Int64Value)->expression();
-        auto b_exp      = command->allocateArgument(Int64Value)->expression();
-        auto sh_exp     = command->allocateArgument(UInt64Value)->expression();
-
-        auto one  = std::make_shared<Expression::Expression>(1u);
-        auto zero = std::make_shared<Expression::Expression>(0u);
-
-        k->addArgument({"result", Int64Pointer, DataDirection::WriteOnly, result_exp});
-        k->addArgument({"a", DataType::Int64, DataDirection::ReadOnly, a_exp});
-        k->addArgument({"b", DataType::Int64, DataDirection::ReadOnly, b_exp});
-        k->addArgument({"shift", DataType::UInt64, DataDirection::ReadOnly, sh_exp});
-
-        k->setWorkgroupSize({1, 1, 1});
-        k->setWorkitemCount({one, one, one});
-        k->setDynamicSharedMemBytes(zero);
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_result, s_a, s_b, s_sh;
-            co_yield m_context->argLoader()->getValue("result", s_result);
-            co_yield m_context->argLoader()->getValue("a", s_a);
-            co_yield m_context->argLoader()->getValue("b", s_b);
-            co_yield m_context->argLoader()->getValue("shift", s_sh);
-
-            auto v_result
-                = Register::Value::Placeholder(m_context,
-                                               Register::Type::Vector,
-                                               {DataType::Int64, PointerType::PointerGlobal},
-                                               1);
-
-            auto v_a = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int64, 1);
-
-            auto v_b = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int64, 1);
-
-            auto v_c = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int64, 1);
-
-            auto v_shift = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::UInt64, 1);
-
-            auto s_c = Register::Value::Placeholder(m_context,
-                                                    Register::Type::Scalar,
-                                                    {DataType::Int64, PointerType::PointerGlobal},
-                                                    1);
-
-            co_yield v_a->allocate();
-            co_yield v_b->allocate();
-            co_yield v_c->allocate();
-            co_yield v_shift->allocate();
-            co_yield s_c->allocate();
-            co_yield v_result->allocate();
-
-            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
-
-            co_yield m_context->copier()->copy(v_a, s_a, "Move value");
-
-            co_yield m_context->copier()->copy(v_b, s_b, "Move value");
-
-            co_yield m_context->copier()->copy(v_shift, s_sh, "Move value");
-
-            co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
-            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 8);
-
-            co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 8);
-
-            co_yield generateOp<Expression::Multiply>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 8);
-
-            co_yield generateOp<Expression::Divide>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 8);
-
-            co_yield generateOp<Expression::Modulo>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(32), 8);
-
-            co_yield generateOp<Expression::ShiftL>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(40), 8);
-
-            co_yield generateOp<Expression::LogicalShiftR>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 8);
-
-            co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(56), 8);
-
-            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(64), 8);
-
-            co_yield generateOp<Expression::LessThan>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(72), 8);
-
-            co_yield generateOp<Expression::LessThanEqual>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(80), 8);
-
-            co_yield generateOp<Expression::Equal>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(88), 8);
-
-            co_yield generateOp<Expression::BitwiseAnd>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(96), 8);
-
-            co_yield generateOp<Expression::Negate>(v_c, v_a);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 8);
-
-            co_yield generateOp<Expression::BitwiseXor>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(112), 8);
-
-            co_yield generateOp<Expression::AddShiftL>(v_c, v_a, v_b, v_shift);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(120), 8);
-
-            co_yield generateOp<Expression::ShiftLAdd>(v_c, v_a, v_shift, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 8);
-
-            co_yield generateOp<Expression::ArithmeticShiftR>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(136), 8);
-
-            co_yield generateOp<Expression::BitwiseOr>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(144), 8);
-
-            co_yield generateOp<Expression::Divide>(
-                v_c, v_a, Register::Value::Literal(LITERAL_TEST));
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(152), 8);
-
-            co_yield generateOp<Expression::Divide>(
-                v_c, Register::Value::Literal(LITERAL_TEST), v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(160), 8);
-
-            co_yield generateOp<Expression::Modulo>(
-                v_c, v_a, Register::Value::Literal(LITERAL_TEST));
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(168), 8);
-
-            co_yield generateOp<Expression::Modulo>(
-                v_c, Register::Value::Literal(LITERAL_TEST), v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(176), 8);
-
-            co_yield generateOp<Expression::MultiplyHigh>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(184), 8);
-
-            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
-            co_yield generateOp<Expression::Conditional>(v_c, s_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(192), 8);
-
-            co_yield generateOp<Expression::NotEqual>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(200), 8);
-
-            co_yield generateOp<Expression::BitwiseNegate>(v_c, v_a);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(208), 8);
-        };
-
-        m_context->schedule(kb());
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
-
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
-
-        if(isLocalDevice())
-        {
-            CommandKernel commandKernel(m_context);
-
-            static_assert(sizeof(int64_t) == 8);
-            auto long_constant = 1l << 30;
-            static_assert(sizeof(long_constant) == 8);
-
-            for(int64_t a : TestValues::int64Values)
-            {
-                for(int64_t b : TestValues::int64Values)
-                {
-                    for(uint64_t shift : TestValues::shiftValues)
-                    {
-                        std::vector<int64_t> result(27);
-                        auto                 d_result = make_shared_device<int64_t>(result.size());
-
-                        KernelArguments runtimeArgs;
-                        runtimeArgs.append("result", d_result.get());
-                        runtimeArgs.append("a", a);
-                        runtimeArgs.append("b", b);
-                        runtimeArgs.append("shift", shift);
-
-                        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-
-                        ASSERT_THAT(hipMemcpy(result.data(),
-                                              d_result.get(),
-                                              result.size() * sizeof(int64_t),
-                                              hipMemcpyDefault),
-                                    HasHipSuccess(0));
-
-                        EXPECT_EQ(result[0], a + b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[1], a - b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[2], a * b) << "a: " << a << ", b: " << b;
-                        if(b != 0)
-                        {
-                            EXPECT_EQ(result[3], a / b) << "a: " << a << ", b: " << b;
-                            EXPECT_EQ(result[4], a % b) << "a: " << a << ", b: " << b;
-                        }
-                        if(b < 64 && b >= 0)
-                        {
-                            EXPECT_EQ(result[5], a << b) << "a: " << a << ", b: " << b;
-                            EXPECT_EQ(result[6], static_cast<uint64_t>(a) >> b)
-                                << "a: " << a << ", b: " << b;
-                        }
-                        EXPECT_EQ(result[7], (a > b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[8], (a >= b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[9], (a < b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[10], (a <= b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[11], (a == b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[12], a & b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[13], -a) << "a: " << a;
-                        EXPECT_EQ(result[14], a ^ b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[15], (a + b) << shift)
-                            << "a: " << a << ", b: " << b << ", shift: " << shift;
-                        EXPECT_EQ(result[16], (a << shift) + b)
-                            << "a: " << a << ", shift: " << shift << ", b: " << b;
-                        if(b < 64 && b >= 0)
-                        {
-                            EXPECT_EQ(result[17], a >> b) << "a: " << a << ", b: " << b;
-                        }
-                        EXPECT_EQ(result[18], a | b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[19], a / LITERAL_TEST) << "a: " << a;
-                        if(b != 0)
-                        {
-                            EXPECT_EQ(result[20], LITERAL_TEST / b) << "b: " << b;
-                        }
-                        EXPECT_EQ(result[21], a % LITERAL_TEST) << "a: " << a;
-                        if(b != 0)
-                        {
-                            EXPECT_EQ(result[22], LITERAL_TEST % b) << "b: " << b;
-                        }
-                        EXPECT_EQ(result[23], (int64_t)(((__int128_t)a * (__int128_t)b) >> 64))
-                            << "a: " << a << "b: " << b;
-                        EXPECT_EQ(result[24], a >= b ? a : b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[25], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[26], ~a) << "a: " << a;
-                    }
-                }
-            }
-        }
-        else
-        {
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
-        }
+        testBody<int32_t>();
     }
 
-    TEST_P(ArithmeticTest, ArithInt64Scalar)
+    TEST_P(IntegralArithmeticTest, UInt32)
     {
-        auto k = m_context->kernel();
-
-        k->setKernelName("ArithInt64Scalar");
-        k->setKernelDimensions(1);
-
-        auto command = std::make_shared<Command>();
-
-        auto result_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int64, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int64, PointerType::Value}));
-        auto b_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int64, PointerType::Value}));
-        auto sh_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::UInt32, PointerType::Value}));
-
-        auto one  = std::make_shared<Expression::Expression>(1u);
-        auto zero = std::make_shared<Expression::Expression>(0u);
-
-        k->addArgument({"result",
-                        {DataType::Int64, PointerType::PointerGlobal},
-                        DataDirection::WriteOnly,
-                        result_exp});
-        k->addArgument({"a", DataType::Int64, DataDirection::ReadOnly, a_exp});
-        k->addArgument({"b", DataType::Int64, DataDirection::ReadOnly, b_exp});
-        k->addArgument({"shift", DataType::UInt32, DataDirection::ReadOnly, sh_exp});
-
-        k->setWorkgroupSize({1, 1, 1});
-        k->setWorkitemCount({one, one, one});
-        k->setDynamicSharedMemBytes(zero);
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_result, s_a, s_b, s_shift;
-
-            co_yield m_context->argLoader()->getValue("result", s_result);
-            co_yield m_context->argLoader()->getValue("a", s_a);
-            co_yield m_context->argLoader()->getValue("b", s_b);
-            co_yield m_context->argLoader()->getValue("shift", s_shift);
-
-            auto v_c = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int64, 1);
-
-            auto v_result
-                = Register::Value::Placeholder(m_context,
-                                               Register::Type::Vector,
-                                               {DataType::Int64, PointerType::PointerGlobal},
-                                               1);
-
-            auto s_c = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::Int64, 1);
-
-            co_yield v_c->allocate();
-            co_yield s_c->allocate();
-            co_yield v_result->allocate();
-
-            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
-
-            co_yield generateOp<Expression::Add>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 8);
-
-            co_yield generateOp<Expression::Subtract>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 8);
-
-            co_yield generateOp<Expression::Multiply>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 8);
-
-            co_yield generateOp<Expression::Divide>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 8);
-
-            co_yield generateOp<Expression::Modulo>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(32), 8);
-
-            co_yield generateOp<Expression::ShiftL>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(40), 8);
-
-            co_yield generateOp<Expression::LogicalShiftR>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 8);
-
-            co_yield generateOp<Expression::GreaterThan>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(56), 8);
-
-            co_yield generateOp<Expression::GreaterThanEqual>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(64), 8);
-
-            co_yield generateOp<Expression::LessThan>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(72), 8);
-
-            co_yield generateOp<Expression::LessThanEqual>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(80), 8);
-
-            co_yield generateOp<Expression::Equal>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(88), 8);
-
-            co_yield generateOp<Expression::BitwiseAnd>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(96), 8);
-
-            co_yield generateOp<Expression::Negate>(s_c, s_a);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 8);
-
-            co_yield generateOp<Expression::BitwiseXor>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(112), 8);
-
-            co_yield generateOp<Expression::AddShiftL>(s_c, s_a, s_b, s_shift);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(120), 8);
-
-            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, s_shift, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 8);
-
-            co_yield generateOp<Expression::ArithmeticShiftR>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(136), 8);
-
-            co_yield generateOp<Expression::BitwiseOr>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(144), 8);
-
-            co_yield generateOp<Expression::Divide>(
-                s_c, s_a, Register::Value::Literal(LITERAL_TEST));
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(152), 8);
-
-            co_yield generateOp<Expression::Divide>(
-                s_c, Register::Value::Literal(LITERAL_TEST), s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(160), 8);
-
-            co_yield generateOp<Expression::Modulo>(
-                s_c, s_a, Register::Value::Literal(LITERAL_TEST));
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(168), 8);
-
-            co_yield generateOp<Expression::Modulo>(
-                s_c, Register::Value::Literal(LITERAL_TEST), s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(176), 8);
-
-            co_yield generateOp<Expression::MultiplyHigh>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(184), 8);
-
-            co_yield generateOp<Expression::Conditional>(s_c, s_shift, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(192), 8);
-
-            co_yield generateOp<Expression::NotEqual>(s_c, s_a, s_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(200), 8);
-
-            co_yield generateOp<Expression::BitwiseNegate>(s_c, s_a);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(208), 8);
-        };
-
-        m_context->schedule(kb());
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
-
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
-
-        if(isLocalDevice())
-        {
-            CommandKernel commandKernel(m_context);
-
-            size_t const result_count = 27;
-            auto         d_result     = make_shared_device<int64_t>(result_count);
-            static_assert(sizeof(int64_t) == 8);
-
-            for(int64_t a : TestValues::int64Values)
-            {
-                for(int64_t b : TestValues::int64Values)
-                {
-                    for(uint64_t shift : TestValues::shiftValues)
-                    {
-                        KernelArguments runtimeArgs;
-                        runtimeArgs.append("result", d_result.get());
-                        runtimeArgs.append("a", a);
-                        runtimeArgs.append("b", b);
-                        runtimeArgs.append("shift", shift);
-
-                        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-
-                        std::vector<int64_t> result(result_count);
-                        ASSERT_THAT(hipMemcpy(result.data(),
-                                              d_result.get(),
-                                              result.size() * sizeof(int64_t),
-                                              hipMemcpyDefault),
-                                    HasHipSuccess(0));
-
-                        EXPECT_EQ(result[0], a + b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[1], a - b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[2], a * b) << "a: " << a << ", b: " << b;
-                        if(b != 0)
-                        {
-                            EXPECT_EQ(result[3], a / b) << "a: " << a << ", b: " << b;
-                            EXPECT_EQ(result[4], a % b) << "a: " << a << ", b: " << b;
-                        }
-                        if(b < 64 && b >= 0)
-                        {
-                            EXPECT_EQ(result[5], a << b) << "a: " << a << ", b: " << b;
-                            EXPECT_EQ(result[6], static_cast<uint64_t>(a) >> b)
-                                << "a: " << a << ", b: " << b;
-                        }
-                        EXPECT_EQ(result[7], (a > b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[8], (a >= b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[9], (a < b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[10], (a <= b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[11], (a == b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[12], a & b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[13], -a) << "a: " << a;
-                        EXPECT_EQ(result[14], a ^ b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[15], (a + b) << shift)
-                            << "a: " << a << ", b: " << b << ", shift: " << shift;
-                        EXPECT_EQ(result[16], (a << shift) + b)
-                            << "a: " << a << ", shift: " << shift << ", b: " << b;
-                        if(b < 64 && b >= 0)
-                        {
-                            EXPECT_EQ(result[17], a >> b) << "a: " << a << ", b: " << b;
-                        }
-                        EXPECT_EQ(result[18], a | b) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[19], a / LITERAL_TEST) << "a: " << a;
-                        if(b != 0)
-                            EXPECT_EQ(result[20], LITERAL_TEST / b) << "b: " << b;
-                        EXPECT_EQ(result[21], a % LITERAL_TEST) << "a: " << a;
-                        if(b != 0)
-                            EXPECT_EQ(result[22], LITERAL_TEST % b) << "b: " << b;
-                        EXPECT_EQ(result[23], (int64_t)(((__int128_t)a * (__int128_t)b) >> 64))
-                            << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[24], shift ? a : b)
-                            << "a: " << a << ", b: " << b << ", shift: " << shift;
-                        EXPECT_EQ(result[25], (a != b ? 1 : 0)) << "a: " << a << ", b: " << b;
-                        EXPECT_EQ(result[26], ~a)
-                            << "a: " << a << ", b: " << b << ", shift: " << shift;
-                    }
-                }
-            }
-        }
-        else
-        {
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
-        }
+        testBody<uint32_t>();
     }
 
-    TEST_P(ArithmeticTest, ArithFloat)
+    TEST_P(IntegralArithmeticTest, Int64)
+    {
+        testBody<int64_t>();
+    }
+
+    TEST_P(IntegralArithmeticTest, UInt64)
+    {
+        testBody<uint64_t>();
+    }
+
+    INSTANTIATE_TEST_SUITE_P(NewArithmeticTests,
+                             IntegralArithmeticTest,
+                             ::testing::Combine(supportedISAValues(),
+                                                ::testing::Values(Register::Type::Vector,
+                                                                  Register::Type::Scalar)));
+
+    class FPArithmeticTest : public GPUContextFixture
+    {
+    public:
+        FPArithmeticTest() {}
+    };
+
+    TEST_P(FPArithmeticTest, ArithFloat)
     {
         auto k = m_context->kernel();
 
@@ -1531,8 +605,7 @@ namespace ArithmeticTest
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
 
-        // Only execute the kernels if running on the architecture that the kernel was built for,
-        // otherwise just assemble the instructions.
+        // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
             CommandKernel commandKernel(m_context);
@@ -1599,7 +672,7 @@ namespace ArithmeticTest
         }
     }
 
-    TEST_P(ArithmeticTest, ArithFMAMixed)
+    TEST_P(FPArithmeticTest, ArithFMAMixed)
     {
         auto k = m_context->kernel();
 
@@ -1729,8 +802,7 @@ namespace ArithmeticTest
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
 
-        // Only execute the kernels if running on the architecture that the kernel was built for,
-        // otherwise just assemble the instructions.
+        // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
             CommandKernel commandKernel(m_context);
@@ -1799,7 +871,7 @@ namespace ArithmeticTest
         }
     }
 
-    TEST_P(ArithmeticTest, ArithDouble)
+    TEST_P(FPArithmeticTest, ArithDouble)
     {
         auto k = m_context->kernel();
 
@@ -1966,8 +1038,7 @@ namespace ArithmeticTest
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
 
-        // Only execute the kernels if running on the architecture that the kernel was built for,
-        // otherwise just assemble the instructions.
+        // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
             CommandKernel commandKernel(m_context);
@@ -2022,7 +1093,7 @@ namespace ArithmeticTest
         }
     }
 
-    TEST_P(ArithmeticTest, NullChecks)
+    TEST_P(FPArithmeticTest, NullChecks)
     {
         (void)(::testing::GTEST_FLAG(death_test_style) = "threadsafe");
 
@@ -2062,6 +1133,5 @@ namespace ArithmeticTest
         ASSERT_THROW(m_context->schedule(kb_dst()), FatalError);
     }
 
-    INSTANTIATE_TEST_SUITE_P(ArithmeticTests, ArithmeticTest, supportedISATuples());
-
+    INSTANTIATE_TEST_SUITE_P(ArithmeticTests, FPArithmeticTest, supportedISATuples());
 }

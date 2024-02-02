@@ -16,6 +16,9 @@ namespace rocRoller
                                   Register::Type::Scalar,
                                   DataType::UInt32);
     RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
+                                  Register::Type::Vector,
+                                  DataType::UInt32);
+    RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
                                   Register::Type::Scalar,
                                   DataType::Int64);
     RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
@@ -97,6 +100,17 @@ namespace rocRoller
         AssertFatal(rhs != nullptr);
 
         co_yield_(Instruction("v_cmp_ge_i32", {dst}, {lhs, rhs}, {}, ""));
+    }
+
+    template <>
+    Generator<Instruction>
+        GreaterThanEqualGenerator<Register::Type::Vector, DataType::UInt32>::generate(
+            Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        co_yield_(Instruction("v_cmp_ge_u32", {dst}, {lhs, rhs}, {}, ""));
     }
 
     template <>

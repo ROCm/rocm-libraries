@@ -54,6 +54,38 @@ namespace TestValues
         1l << 40,
     };
 
+    inline std::vector<uint64_t> uint64Values = {
+        0,
+        1,
+        2,
+        4,
+        5,
+        7,
+        8,
+        12,
+        16,
+        19,
+        32,
+        33,
+        63,
+        64,
+        128,
+        256,
+        512,
+        906,
+        3017,
+        4096,
+        8000,
+        12344,
+        40221,
+        18030891251015744l,
+        1098879408657145920l,
+        1ul << 30,
+        1ul << 40,
+        1ul << 63,
+        std::numeric_limits<uint64_t>::max(),
+    };
+
     inline std::vector<float> floatValues = {-50002.0f,
                                              -14610.0f,
                                              -146.0f,
@@ -101,6 +133,12 @@ namespace TestValues
     struct ByType<int32_t>
     {
         inline const static auto values = int32Values;
+    };
+
+    template <>
+    struct ByType<uint64_t>
+    {
+        inline const static auto values = uint64Values;
     };
 
     template <>

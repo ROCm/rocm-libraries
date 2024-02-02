@@ -9,6 +9,7 @@ namespace rocRoller
     RegisterComponentTemplateSpec(LessThanEqualGenerator, Register::Type::Scalar, DataType::Int32);
     RegisterComponentTemplateSpec(LessThanEqualGenerator, Register::Type::Vector, DataType::Int32);
     RegisterComponentTemplateSpec(LessThanEqualGenerator, Register::Type::Scalar, DataType::UInt32);
+    RegisterComponentTemplateSpec(LessThanEqualGenerator, Register::Type::Vector, DataType::UInt32);
     RegisterComponentTemplateSpec(LessThanEqualGenerator, Register::Type::Scalar, DataType::Int64);
     RegisterComponentTemplateSpec(LessThanEqualGenerator, Register::Type::Vector, DataType::Int64);
     RegisterComponentTemplateSpec(LessThanEqualGenerator, Register::Type::Vector, DataType::Float);
@@ -72,6 +73,17 @@ namespace rocRoller
             co_yield m_context->copier()->copy(dst, m_context->getSCC(), "");
             co_yield(Instruction::Unlock("End Compare writing to non-SCC dest"));
         }
+    }
+
+    template <>
+    Generator<Instruction>
+        LessThanEqualGenerator<Register::Type::Vector, DataType::UInt32>::generate(
+            Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        co_yield_(Instruction("v_cmp_le_u32", {dst}, {lhs, rhs}, {}, ""));
     }
 
     template <>
