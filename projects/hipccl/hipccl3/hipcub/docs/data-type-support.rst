@@ -22,8 +22,8 @@ Data type support
     *
       - int8
       - int8_t
-      - ⚠️
-      - ⚠️
+      - ✅
+      - ✅
     *
       - float8
       - Not Supported
@@ -37,18 +37,18 @@ Data type support
     *
       - int16
       - int16_t
-      - ⚠️
-      - ⚠️
+      - ✅
+      - ✅
     *
       - float16
       - __half
-      - ⚠️
-      - ⚠️
+      - ✅
+      - ✅ [#]_
     *
       - bfloat16      
       - hip_bfloat16
-      - ⚠️
-      - ⚠️
+      - ✅
+      - ✅ [#]_
     *
       - int32
       - int
@@ -70,10 +70,6 @@ Data type support
       - ✅
       - ✅
 
-* The ⚠️ means that the data type is mostly supported, but there are some API tests, that do not work.
-   * The ``block_scan`` test fails with ``int8`` and ``int16``.
-   * The ``block_histogram``, ``device_run_length_encode``, ``device_segmented_radix_sort``, ``warp_reduce`` and ``warp_scan``  don't work with ``half`` and ``bfloat16``.
-   * The ``device_segmented_sort``, ``warp_load`` and ``warp_store`` don't work with ``half``.
-* Also NVidia can't handle certain data types on certain API calls:
-   * The ``block_adjacent_difference``, ``device_adjacenet_difference``, ``device_reduce``, ``device_scan``, ``device_segmented_reduce`` and ``device_select`` don't work with ``half`` and ``bfloat16``.
-   * The ``device_histogram`` doesn't work with bfloat16.
+.. rubric:: Footnotes
+.. [#] NVidia backend can't handle ``half`` with the following API calls: ``block_adjacent_difference``, ``device_adjacenet_difference``, ``device_reduce``, ``device_scan``, ``device_segmented_reduce`` and ``device_select``.
+.. [#] NVidia backend can't handle ``bfloat16`` with the following API calls: ``block_adjacent_difference``, ``device_adjacenet_difference``, ``device_reduce``, ``device_scan``, ``device_segmented_reduce``, ``device_select`` and ``device_histogram``.
