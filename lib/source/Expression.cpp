@@ -305,10 +305,18 @@ namespace rocRoller
                 switch(val.regType)
                 {
                 case Register::Type::Scalar:
-                    return {Register::Type::Scalar, DataType::Bool};
+                {
+                    if(!(val.varType == DataType::Bool || val.varType == DataType::Bool32
+                         || val.varType == DataType::Raw32))
+                    {
+                        Throw<FatalError>("Invalid variable type for unary logical: ",
+                                          ShowValue(val.varType));
+                    }
+                    return val;
+                }
                 default:
-                    Throw<FatalError>(
-                        "Invalid register types: ", ShowValue(val.regType), ShowValue(val.varType));
+                    Throw<FatalError>("Invalid register type for unary logical: ",
+                                      ShowValue(val.regType));
                 }
             }
 

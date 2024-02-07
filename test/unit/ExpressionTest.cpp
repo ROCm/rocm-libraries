@@ -1085,7 +1085,7 @@ namespace ExpressionTest
             EXPECT_EQ(rSgprInt32, resultType(op(sgprBool32))) << op(sgprBool32);
         }
 
-        constexpr auto comparisionOps = std::to_array({
+        constexpr auto comparisonOps = std::to_array({
             Expression::operator>,
             Expression::operator>=,
             Expression::operator<,
@@ -1093,7 +1093,7 @@ namespace ExpressionTest
             Expression::operator==,
         });
 
-        for(auto const& op : comparisionOps)
+        for(auto const& op : comparisonOps)
         {
             EXPECT_EQ(rSgprBool32, resultType(op(vgprFloat, vgprFloat)))
                 << op(vgprFloat, vgprFloat);

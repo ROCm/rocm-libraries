@@ -36,25 +36,18 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        Register::ValuePtr tmp_rhs;
-        co_yield m_context->copier()->ensureType(tmp_rhs, rhs, Register::Type::Vector);
+        if(dst != nullptr && !dst->isSCC())
+        {
+            co_yield(Instruction::Lock(Scheduling::Dependency::SCC,
+                                       "Start Compare writing to non-SCC dest"));
+        }
 
-        if(dst->registerCount() == 2)
+        co_yield_(Instruction("s_cmp_lg_u32", {}, {lhs, rhs}, {}, ""));
+
+        if(dst != nullptr && !dst->isSCC())
         {
-            co_yield_(Instruction("v_cmp_ne_i32", {dst}, {lhs, tmp_rhs}, {}, ""));
-        }
-        else if(dst->registerCount() == 1)
-        {
-            auto tmp_dst = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::UInt64, 1);
-            co_yield tmp_dst->allocate();
-            co_yield_(Instruction("v_cmp_ne_i32", {tmp_dst}, {lhs, tmp_rhs}, {}, ""));
-            co_yield m_context->copier()->copy(dst, tmp_dst->subset({0}), "");
-        }
-        else
-        {
-            Throw<FatalError>(
-                "Unsupported dst", ShowValue(dst->registerCount()), ShowValue(dst->regType()));
+            co_yield m_context->copier()->copy(dst, m_context->getSCC(), "");
+            co_yield(Instruction::Unlock("End Compare writing to non-SCC dest"));
         }
     }
 
@@ -75,10 +68,19 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        Register::ValuePtr tmp;
-        co_yield m_context->copier()->ensureType(tmp, rhs, Register::Type::Vector);
+        if(dst != nullptr && !dst->isSCC())
+        {
+            co_yield(Instruction::Lock(Scheduling::Dependency::SCC,
+                                       "Start Compare writing to non-SCC dest"));
+        }
 
-        co_yield_(Instruction("v_cmp_ne_i64", {dst}, {lhs, tmp}, {}, ""));
+        co_yield_(Instruction("s_cmp_lg_u64", {}, {lhs, rhs}, {}, ""));
+
+        if(dst != nullptr && !dst->isSCC())
+        {
+            co_yield m_context->copier()->copy(dst, m_context->getSCC(), "");
+            co_yield(Instruction::Unlock("End Compare writing to non-SCC dest"));
+        }
     }
 
     template <>

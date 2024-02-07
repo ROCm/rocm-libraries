@@ -58,7 +58,15 @@ namespace rocRoller
             Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
     template <>
     Generator<Instruction>
+        GreaterThanEqualGenerator<Register::Type::Scalar, DataType::UInt32>::generate(
+            Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+    template <>
+    Generator<Instruction>
         GreaterThanEqualGenerator<Register::Type::Vector, DataType::Int32>::generate(
+            Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+    template <>
+    Generator<Instruction>
+        GreaterThanEqualGenerator<Register::Type::Vector, DataType::UInt32>::generate(
             Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
     template <>
     Generator<Instruction>
@@ -66,7 +74,15 @@ namespace rocRoller
             Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
     template <>
     Generator<Instruction>
+        GreaterThanEqualGenerator<Register::Type::Scalar, DataType::UInt64>::generate(
+            Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+    template <>
+    Generator<Instruction>
         GreaterThanEqualGenerator<Register::Type::Vector, DataType::Int64>::generate(
+            Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+    template <>
+    Generator<Instruction>
+        GreaterThanEqualGenerator<Register::Type::Vector, DataType::UInt64>::generate(
             Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
     template <>
     Generator<Instruction>

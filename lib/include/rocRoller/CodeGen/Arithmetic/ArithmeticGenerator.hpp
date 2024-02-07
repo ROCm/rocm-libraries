@@ -55,6 +55,22 @@ namespace rocRoller
          * @return Generator<Instruction> May yield a move to VGPR instruction if needed
          */
         Generator<Instruction> swapIfRHSLiteral(Register::ValuePtr& lhs, Register::ValuePtr& rhs);
+
+        /**
+	 * @brief Use VALU to perform a scalar comparison.
+	 *
+	 * Some vectors comparison instructions (like v_cmp_le_i64)
+	 * don't have scalar equivalents.  In this case, the RHS is
+	 * copied to VGPRs and the comparison is done with the VALU.
+	 *
+	 * @param lhs LHS of comparison (stored in SGPR)
+	 * @param rhs RHS of comparison (stored in SGPR)
+	 * @param dst Destination, can be null (in which case result is in SCC).
+	 */
+        Generator<Instruction> scalarCompareThroughVALU(std::string const  instruction,
+                                                        Register::ValuePtr dst,
+                                                        Register::ValuePtr lhs,
+                                                        Register::ValuePtr rhs);
     };
 
     // Unary Arithmetic Generator. Most unary generators should be derived from

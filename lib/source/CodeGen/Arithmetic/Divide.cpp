@@ -61,32 +61,32 @@ namespace rocRoller
         co_yield_(Instruction("s_ashr_i32", {s_1}, {rhs, Register::Value::Literal(31)}, {}, ""));
         co_yield_(Instruction("s_add_i32", {s_4}, {rhs, s_1}, {}, ""));
         co_yield_(Instruction("s_xor_b32", {s_4}, {s_4, s_1}, {}, ""));
-        co_yield_(Instruction("v_cvt_f32_u32_e32", {v_1}, {s_4}, {}, ""));
+        co_yield_(Instruction("v_cvt_f32_u32", {v_1}, {s_4}, {}, ""));
         co_yield_(Instruction("s_ashr_i32", {s_2}, {lhs, Register::Value::Literal(31)}, {}, ""));
         co_yield_(Instruction("s_add_i32", {s_5}, {lhs, s_2}, {}, ""));
         co_yield_(Instruction("s_xor_b32", {s_3}, {s_2, s_1}, {}, ""));
-        co_yield_(Instruction("v_rcp_iflag_f32_e32", {v_1}, {v_1}, {}, ""));
+        co_yield_(Instruction("v_rcp_iflag_f32", {v_1}, {v_1}, {}, ""));
         co_yield_(Instruction("s_xor_b32", {s_5}, {s_5, s_2}, {}, ""));
         co_yield_(Instruction("s_sub_i32", {s_2}, {Register::Value::Literal(0), s_4}, {}, ""));
-        co_yield_(Instruction(
-            "v_mul_f32_e32", {v_1}, {Register::Value::Literal(0x4f7ffffe), v_1}, {}, ""));
-        co_yield_(Instruction("v_cvt_u32_f32_e32", {v_1}, {v_1}, {}, ""));
+        co_yield_(
+            Instruction("v_mul_f32", {v_1}, {Register::Value::Literal(0x4f7ffffe), v_1}, {}, ""));
+        co_yield_(Instruction("v_cvt_u32_f32", {v_1}, {v_1}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_2}, {s_2, v_1}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_2}, {v_1, v_2}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_1}, {v_1, v_2}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_1}, {v_1, v_2}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_1}, {s_5, v_1}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_2}, {v_1, s_4}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {v_2}, {s_5, v_2}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_3}, {Register::Value::Literal(1), v_1}, {}, ""));
-        co_yield_(Instruction("v_cmp_le_u32_e32", {m_context->getVCC()}, {s_4, v_2}, {}, ""));
-        co_yield_(Instruction("v_cndmask_b32_e32", {v_1}, {v_1, v_3, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_subrev_u32_e32", {v_3}, {s_4, v_2}, {}, ""));
-        co_yield_(Instruction("v_cndmask_b32_e32", {v_2}, {v_2, v_3, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_3}, {Register::Value::Literal(1), v_1}, {}, ""));
-        co_yield_(Instruction("v_cmp_le_u32_e32", {m_context->getVCC()}, {s_4, v_2}, {}, ""));
-        co_yield_(Instruction("v_cndmask_b32_e32", {v_1}, {v_1, v_3, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_1}, {s_3, v_1}, {}, ""));
-        co_yield_(Instruction("v_subrev_u32_e32", {v_1}, {s_3, v_1}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {v_2}, {s_5, v_2}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_3}, {Register::Value::Literal(1), v_1}, {}, ""));
+        co_yield_(Instruction("v_cmp_le_u32", {m_context->getVCC()}, {s_4, v_2}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_1}, {v_1, v_3, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_subrev_u32", {v_3}, {s_4, v_2}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_2}, {v_2, v_3, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_3}, {Register::Value::Literal(1), v_1}, {}, ""));
+        co_yield_(Instruction("v_cmp_le_u32", {m_context->getVCC()}, {s_4, v_2}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_1}, {v_1, v_3, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_1}, {s_3, v_1}, {}, ""));
+        co_yield_(Instruction("v_subrev_u32", {v_1}, {s_3, v_1}, {}, ""));
         co_yield_(Instruction(
             "v_readlane_b32", {dest}, {v_1, Register::Value::Literal(0)}, {}, "Move value"));
 
@@ -135,37 +135,35 @@ namespace rocRoller
             co_yield moveToVGPR(lhs);
         }
 
+        co_yield_(Instruction("v_ashrrev_i32", {v_1}, {Register::Value::Literal(31), rhs}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_7}, {rhs, v_1}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_7}, {v_7, v_1}, {}, ""));
+        co_yield_(Instruction("v_cvt_f32_u32", {v_2}, {v_7}, {}, ""));
+        co_yield_(Instruction("v_rcp_iflag_f32", {v_3}, {v_2}, {}, ""));
         co_yield_(
-            Instruction("v_ashrrev_i32_e32", {v_1}, {Register::Value::Literal(31), rhs}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_7}, {rhs, v_1}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_7}, {v_7, v_1}, {}, ""));
-        co_yield_(Instruction("v_cvt_f32_u32_e32", {v_2}, {v_7}, {}, ""));
-        co_yield_(Instruction("v_rcp_iflag_f32_e32", {v_3}, {v_2}, {}, ""));
-        co_yield_(Instruction(
-            "v_mul_f32_e32", {v_3}, {Register::Value::Literal(0x4f7ffffe), v_3}, {}, ""));
-        co_yield_(Instruction("v_cvt_u32_f32_e32", {v_3}, {v_3}, {}, ""));
-        co_yield_(
-            Instruction("v_ashrrev_i32_e32", {v_4}, {Register::Value::Literal(31), lhs}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_6}, {lhs, v_4}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_1}, {v_4, v_1}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_6}, {v_6, v_4}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {v_4}, {Register::Value::Literal(0), v_7}, {}, ""));
+            Instruction("v_mul_f32", {v_3}, {Register::Value::Literal(0x4f7ffffe), v_3}, {}, ""));
+        co_yield_(Instruction("v_cvt_u32_f32", {v_3}, {v_3}, {}, ""));
+        co_yield_(Instruction("v_ashrrev_i32", {v_4}, {Register::Value::Literal(31), lhs}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_6}, {lhs, v_4}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_1}, {v_4, v_1}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_6}, {v_6, v_4}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {v_4}, {Register::Value::Literal(0), v_7}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_4}, {v_4, v_3}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_4}, {v_3, v_4}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_3}, {v_3, v_4}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_3}, {v_3, v_4}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_3}, {v_6, v_3}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_4}, {v_3, v_7}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {v_6}, {v_6, v_4}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_5}, {Register::Value::Literal(1), v_3}, {}, ""));
-        co_yield_(Instruction("v_cmp_ge_u32_e32", {m_context->getVCC()}, {v_6, v_7}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {v_4}, {v_6, v_7}, {}, ""));
-        co_yield_(Instruction("v_cndmask_b32_e32", {v_3}, {v_3, v_5, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_cndmask_b32_e32", {v_6}, {v_6, v_4, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_4}, {Register::Value::Literal(1), v_3}, {}, ""));
-        co_yield_(Instruction("v_cmp_ge_u32_e32", {m_context->getVCC()}, {v_6, v_7}, {}, ""));
-        co_yield_(Instruction("v_cndmask_b32_e32", {v_6}, {v_3, v_4, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_6}, {v_6, v_1}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {dest}, {v_6, v_1}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {v_6}, {v_6, v_4}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_5}, {Register::Value::Literal(1), v_3}, {}, ""));
+        co_yield_(Instruction("v_cmp_ge_u32", {m_context->getVCC()}, {v_6, v_7}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {v_4}, {v_6, v_7}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_3}, {v_3, v_5, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_6}, {v_6, v_4, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_4}, {Register::Value::Literal(1), v_3}, {}, ""));
+        co_yield_(Instruction("v_cmp_ge_u32", {m_context->getVCC()}, {v_6, v_7}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_6}, {v_3, v_4, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_6}, {v_6, v_1}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {dest}, {v_6, v_1}, {}, ""));
 
         co_yield_(Instruction::Unlock("End of Division"));
     }
@@ -266,8 +264,8 @@ namespace rocRoller
         co_yield m_context->copier()->copy(s_6->subset({1}), s_6->subset({0}), "");
         co_yield_(Instruction("s_addc_u32", {s_0->subset({1})}, {r1, s_6->subset({0})}, {}, ""));
         co_yield_(Instruction("s_xor_b64", {s_5}, {s_0, s_6}, {}, ""));
-        co_yield_(Instruction("v_cvt_f32_u32_e32", {v_7}, {s_5->subset({0})}, {}, ""));
-        co_yield_(Instruction("v_cvt_f32_u32_e32", {v_8}, {s_5->subset({1})}, {}, ""));
+        co_yield_(Instruction("v_cvt_f32_u32", {v_7}, {s_5->subset({0})}, {}, ""));
+        co_yield_(Instruction("v_cvt_f32_u32", {v_8}, {s_5->subset({1})}, {}, ""));
         co_yield_(Instruction(
             "s_sub_u32", {s_2}, {Register::Value::Literal(0), s_5->subset({0})}, {}, ""));
         co_yield_(Instruction("s_subb_u32",
@@ -280,75 +278,72 @@ namespace rocRoller
         if(architecture.HasCapability(GPUCapability::v_fmac_f32))
         {
             co_yield_(Instruction(
-                "v_fmac_f32_e32", {v_7}, {Register::Value::Literal(0x4f800000), v_8}, {}, ""));
+                "v_fmac_f32", {v_7}, {Register::Value::Literal(0x4f800000), v_8}, {}, ""));
         }
         else if(architecture.HasCapability(GPUCapability::v_mac_f32))
         {
             co_yield_(Instruction(
-                "v_mac_f32_e32", {v_7}, {Register::Value::Literal(0x4f800000), v_8}, {}, ""));
+                "v_mac_f32", {v_7}, {Register::Value::Literal(0x4f800000), v_8}, {}, ""));
         }
         else
         {
             Throw<FatalError>("Can not generate Divide: Neither v_fmac_f32 or v_mac_f32 known");
         }
-        co_yield_(Instruction("v_rcp_f32_e32", {v_7}, {v_7}, {}, ""));
+        co_yield_(Instruction("v_rcp_f32", {v_7}, {v_7}, {}, ""));
         co_yield m_context->copier()->copy(v_11, Register::Value::Literal(0), "");
-        co_yield_(Instruction(
-            "v_mul_f32_e32", {v_7}, {Register::Value::Literal(0x5f7ffffc), v_7}, {}, ""));
-        co_yield_(Instruction(
-            "v_mul_f32_e32", {v_8}, {Register::Value::Literal(0x2f800000), v_7}, {}, ""));
-        co_yield_(Instruction("v_trunc_f32_e32", {v_8}, {v_8}, {}, ""));
+        co_yield_(
+            Instruction("v_mul_f32", {v_7}, {Register::Value::Literal(0x5f7ffffc), v_7}, {}, ""));
+        co_yield_(
+            Instruction("v_mul_f32", {v_8}, {Register::Value::Literal(0x2f800000), v_7}, {}, ""));
+        co_yield_(Instruction("v_trunc_f32", {v_8}, {v_8}, {}, ""));
         if(architecture.HasCapability(GPUCapability::v_fmac_f32))
         {
             co_yield_(Instruction(
-                "v_fmac_f32_e32", {v_7}, {Register::Value::Literal(0xcf800000), v_8}, {}, ""));
+                "v_fmac_f32", {v_7}, {Register::Value::Literal(0xcf800000), v_8}, {}, ""));
         }
         else if(architecture.HasCapability(GPUCapability::v_mac_f32))
         {
             co_yield_(Instruction(
-                "v_mac_f32_e32", {v_7}, {Register::Value::Literal(0xcf800000), v_8}, {}, ""));
+                "v_mac_f32", {v_7}, {Register::Value::Literal(0xcf800000), v_8}, {}, ""));
         }
         else
         {
             Throw<FatalError>("Can not generate Divide: Neither v_fmac_f32 or v_mac_f32 known");
         }
-        co_yield_(Instruction("v_cvt_u32_f32_e32", {v_8}, {v_8}, {}, ""));
-        co_yield_(Instruction("v_cvt_u32_f32_e32", {v_7}, {v_7}, {}, ""));
+        co_yield_(Instruction("v_cvt_u32_f32", {v_8}, {v_8}, {}, ""));
+        co_yield_(Instruction("v_cvt_u32_f32", {v_7}, {v_7}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_12}, {s_2, v_8}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_13}, {s_2, v_7}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_14}, {s_23->subset({0}), v_7}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_12}, {v_13, v_12}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_12}, {v_12, v_14}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_12}, {v_13, v_12}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_12}, {v_12, v_14}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_15}, {s_2, v_7}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_13}, {v_7, v_12}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_16}, {v_7, v_15}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_14}, {v_7, v_12}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_13}, {m_context->getVCC(), v_16, v_13}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_13}, {m_context->getVCC(), v_16, v_13}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_14},
                               {m_context->getVCC(), v_10, v_14, m_context->getVCC()},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_17}, {v_8, v_15}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_15}, {v_8, v_15}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_13}, {m_context->getVCC(), v_13, v_15}, {}, ""));
+        co_yield_(Instruction("v_add_co_u32", {v_13}, {m_context->getVCC(), v_13, v_15}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_16}, {v_8, v_12}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_14},
                               {m_context->getVCC(), v_14, v_17, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_13},
                               {m_context->getVCC(), v_16, v_11, m_context->getVCC()},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_12}, {v_8, v_12}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_12}, {m_context->getVCC(), v_14, v_12}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_12}, {m_context->getVCC(), v_14, v_12}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_14},
                               {m_context->getVCC(), v_10, v_13, m_context->getVCC()},
                               {},
@@ -358,54 +353,51 @@ namespace rocRoller
             Instruction("v_addc_co_u32", {v_12}, {m_context->getVCC(), v_8, v_14, s_0}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_13}, {s_2, v_12}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_15}, {s_2, v_7}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_13}, {v_15, v_13}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_13}, {v_15, v_13}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_15}, {s_23->subset({0}), v_7}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_13}, {v_13, v_15}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_13}, {v_13, v_15}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_16}, {s_2, v_7}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_17}, {v_12, v_16}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_18}, {v_12, v_16}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_19}, {v_7, v_13}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_16}, {v_7, v_16}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_20}, {v_7, v_13}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_16}, {m_context->getVCC(), v_16, v_19}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_16}, {m_context->getVCC(), v_16, v_19}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_20},
                               {m_context->getVCC(), v_10, v_20, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_16}, {m_context->getVCC(), v_16, v_18}, {}, ""));
+        co_yield_(Instruction("v_add_co_u32", {v_16}, {m_context->getVCC(), v_16, v_18}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_15}, {v_12, v_13}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_16},
                               {m_context->getVCC(), v_20, v_17, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_15},
                               {m_context->getVCC(), v_15, v_11, m_context->getVCC()},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_12}, {v_12, v_13}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_12}, {m_context->getVCC(), v_16, v_12}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_12}, {m_context->getVCC(), v_16, v_12}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_13},
                               {m_context->getVCC(), v_10, v_15, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_8}, {v_8, v_14}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_8}, {v_8, v_14}, {}, ""));
         co_yield_(Instruction(
             "s_ashr_i32", {s_23->subset({0})}, {l1, Register::Value::Literal(31)}, {}, ""));
         co_yield_(
             Instruction("v_addc_co_u32", {v_8}, {m_context->getVCC(), v_8, v_13, s_0}, {}, ""));
         co_yield_(Instruction("s_add_u32", {s_0->subset({0})}, {l0, s_23->subset({0})}, {}, ""));
-        co_yield_(Instruction("v_add_co_u32_e32", {v_7}, {m_context->getVCC(), v_7, v_12}, {}, ""));
+        co_yield_(Instruction("v_add_co_u32", {v_7}, {m_context->getVCC(), v_7, v_12}, {}, ""));
         co_yield m_context->copier()->copy(s_23->subset({1}), s_23->subset({0}), "");
         co_yield_(Instruction("s_addc_u32", {s_0->subset({1})}, {l1, s_23->subset({0})}, {}, ""));
         co_yield_(Instruction(
-            "v_addc_co_u32_e32",
+            "v_addc_co_u32",
             {v_8},
             {m_context->getVCC(), Register::Value::Literal(0), v_8, m_context->getVCC()},
             {},
@@ -414,44 +406,43 @@ namespace rocRoller
         co_yield_(Instruction("v_mul_lo_u32", {v_14}, {s_22->subset({0}), v_8}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_13}, {s_22->subset({0}), v_7}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_12}, {s_22->subset({0}), v_8}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_14}, {m_context->getVCC(), v_13, v_14}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_14}, {m_context->getVCC(), v_13, v_14}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_12},
                               {m_context->getVCC(), v_10, v_12, m_context->getVCC()},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_15}, {s_22->subset({1}), v_7}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_7}, {s_22->subset({1}), v_7}, {}, ""));
-        co_yield_(Instruction("v_add_co_u32_e32", {v_7}, {m_context->getVCC(), v_14, v_7}, {}, ""));
+        co_yield_(Instruction("v_add_co_u32", {v_7}, {m_context->getVCC(), v_14, v_7}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_13}, {s_22->subset({1}), v_8}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_7},
                               {m_context->getVCC(), v_12, v_15, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_12},
                               {m_context->getVCC(), v_13, v_11, m_context->getVCC()},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_8}, {s_22->subset({1}), v_8}, {}, ""));
-        co_yield_(Instruction("v_add_co_u32_e32", {v_7}, {m_context->getVCC(), v_7, v_8}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_7}, {m_context->getVCC(), v_7, v_8}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_8},
                               {m_context->getVCC(), v_10, v_12, m_context->getVCC()},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_12}, {s_5->subset({0}), v_8}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_14}, {s_5->subset({0}), v_7}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_12}, {v_14, v_12}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_12}, {v_14, v_12}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_14}, {s_5->subset({1}), v_7}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_12}, {v_12, v_14}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_12}, {v_12, v_14}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_13}, {s_5->subset({0}), v_7}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {v_14}, {s_22->subset({1}), v_12}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {v_14}, {s_22->subset({1}), v_12}, {}, ""));
         co_yield m_context->copier()->copy(v_15, s_5->subset({1}), "");
         co_yield_(Instruction(
-            "v_sub_co_u32_e32", {v_13}, {m_context->getVCC(), s_22->subset({0}), v_13}, {}, ""));
+            "v_sub_co_u32", {v_13}, {m_context->getVCC(), s_22->subset({0}), v_13}, {}, ""));
         co_yield_(
             Instruction("v_subb_co_u32", {v_14}, {s_0, v_14, v_15, m_context->getVCC()}, {}, ""));
         co_yield_(Instruction("v_subrev_co_u32", {v_15}, {s_0, s_5->subset({0}), v_13}, {}, ""));
@@ -472,13 +463,13 @@ namespace rocRoller
         co_yield_(Instruction("v_cmp_eq_u32", {s_0}, {s_5->subset({1}), v_14}, {}, ""));
         co_yield_(Instruction("v_cndmask_b32", {v_14}, {v_16, v_15, s_0}, {}, ""));
         co_yield m_context->copier()->copy(v_16, s_22->subset({1}), "");
-        co_yield_(Instruction("v_subb_co_u32_e32",
+        co_yield_(Instruction("v_subb_co_u32",
                               {v_12},
                               {m_context->getVCC(), v_16, v_12, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction(
-            "v_cmp_le_u32_e32", {m_context->getVCC()}, {s_5->subset({1}), v_12}, {}, ""));
+        co_yield_(
+            Instruction("v_cmp_le_u32", {m_context->getVCC()}, {s_5->subset({1}), v_12}, {}, ""));
         co_yield_(Instruction("v_cmp_ne_u32", {s_0}, {Register::Value::Literal(0), v_14}, {}, ""));
         co_yield_(Instruction(
             "v_cndmask_b32",
@@ -486,8 +477,8 @@ namespace rocRoller
             {Register::Value::Literal(0), Register::Value::Literal(-1), m_context->getVCC()},
             {},
             ""));
-        co_yield_(Instruction(
-            "v_cmp_le_u32_e32", {m_context->getVCC()}, {s_5->subset({0}), v_13}, {}, ""));
+        co_yield_(
+            Instruction("v_cmp_le_u32", {m_context->getVCC()}, {s_5->subset({0}), v_13}, {}, ""));
         co_yield_(Instruction("v_cndmask_b32",
                               {v_14},
                               {Register::Value::Literal(1), Register::Value::Literal(2), s_0},
@@ -499,62 +490,51 @@ namespace rocRoller
             {Register::Value::Literal(0), Register::Value::Literal(-1), m_context->getVCC()},
             {},
             ""));
-        co_yield_(Instruction(
-            "v_cmp_eq_u32_e32", {m_context->getVCC()}, {s_5->subset({1}), v_12}, {}, ""));
-        co_yield_(Instruction("v_add_co_u32", {v_14}, {s_0, v_7, v_14}, {}, ""));
         co_yield_(
-            Instruction("v_cndmask_b32_e32", {v_12}, {v_16, v_13, m_context->getVCC()}, {}, ""));
+            Instruction("v_cmp_eq_u32", {m_context->getVCC()}, {s_5->subset({1}), v_12}, {}, ""));
+        co_yield_(Instruction("v_add_co_u32", {v_14}, {s_0, v_7, v_14}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_12}, {v_16, v_13, m_context->getVCC()}, {}, ""));
         co_yield_(Instruction(
             "v_addc_co_u32", {v_15}, {s_0, Register::Value::Literal(0), v_8, s_0}, {}, ""));
-        co_yield_(Instruction("v_cmp_ne_u32_e32",
-                              {m_context->getVCC()},
-                              {Register::Value::Literal(0), v_12},
-                              {},
-                              ""));
-        co_yield_(
-            Instruction("v_cndmask_b32_e32", {v_7}, {v_7, v_14, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction(
+            "v_cmp_ne_u32", {m_context->getVCC()}, {Register::Value::Literal(0), v_12}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_7}, {v_7, v_14, m_context->getVCC()}, {}, ""));
         co_yield_(Instruction("s_xor_b64", {s_0}, {s_23, s_6}, {}, ""));
-        co_yield_(
-            Instruction("v_cndmask_b32_e32", {v_8}, {v_8, v_15, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_7}, {s_0->subset({0}), v_7}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_8}, {s_0->subset({1}), v_8}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_8}, {v_8, v_15, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_7}, {s_0->subset({0}), v_7}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_8}, {s_0->subset({1}), v_8}, {}, ""));
         co_yield m_context->copier()->copy(v_12, s_0->subset({1}), "");
         co_yield_(Instruction(
-            "v_subrev_co_u32_e32", {v_7}, {m_context->getVCC(), s_0->subset({0}), v_7}, {}, ""));
-        co_yield_(Instruction("v_subb_co_u32_e32",
-                              {v_8},
-                              {m_context->getVCC(), v_8, v_12, m_context->getVCC()},
-                              {},
-                              ""));
+            "v_subrev_co_u32", {v_7}, {m_context->getVCC(), s_0->subset({0}), v_7}, {}, ""));
+        co_yield_(Instruction(
+            "v_subb_co_u32", {v_8}, {m_context->getVCC(), v_8, v_12, m_context->getVCC()}, {}, ""));
         co_yield_(Instruction("s_cbranch_execz", {}, {label_25}, {}, ""));
         co_yield m_context->brancher()->branch(label_26);
         co_yield_(Instruction::Label(label_24));
         co_yield_(Instruction::Label(label_25));
-        co_yield_(Instruction("v_cvt_f32_u32_e32", {v_7}, {r0}, {}, ""));
+        co_yield_(Instruction("v_cvt_f32_u32", {v_7}, {r0}, {}, ""));
         co_yield_(Instruction(
             "s_sub_i32", {s_0->subset({0})}, {Register::Value::Literal(0), r0}, {}, ""));
-        co_yield_(Instruction("v_rcp_iflag_f32_e32", {v_7}, {v_7}, {}, ""));
-        co_yield_(Instruction(
-            "v_mul_f32_e32", {v_7}, {Register::Value::Literal(0x4f7ffffe), v_7}, {}, ""));
-        co_yield_(Instruction("v_cvt_u32_f32_e32", {v_7}, {v_7}, {}, ""));
+        co_yield_(Instruction("v_rcp_iflag_f32", {v_7}, {v_7}, {}, ""));
+        co_yield_(
+            Instruction("v_mul_f32", {v_7}, {Register::Value::Literal(0x4f7ffffe), v_7}, {}, ""));
+        co_yield_(Instruction("v_cvt_u32_f32", {v_7}, {v_7}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_8}, {s_0->subset({0}), v_7}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_8}, {v_7, v_8}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_7}, {v_7, v_8}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_7}, {v_7, v_8}, {}, ""));
         co_yield m_context->copier()->copy(v_8, l0, "");
         co_yield_(Instruction("v_mul_hi_u32", {v_7}, {v_8, v_7}, {}, ""));
         co_yield m_context->copier()->copy(v_12, r0, "");
         co_yield_(Instruction("v_mul_lo_u32", {v_12}, {v_7, v_12}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {v_12}, {l0, v_12}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_8}, {Register::Value::Literal(1), v_7}, {}, ""));
-        co_yield_(Instruction("v_cmp_le_u32_e32", {m_context->getVCC()}, {r0, v_12}, {}, ""));
-        co_yield_(Instruction("v_cndmask_b32_e32", {v_7}, {v_7, v_8, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_subrev_u32_e32", {v_8}, {r0, v_12}, {}, ""));
-        co_yield_(
-            Instruction("v_cndmask_b32_e32", {v_8}, {v_12, v_8, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_14}, {Register::Value::Literal(1), v_7}, {}, ""));
-        co_yield_(Instruction("v_cmp_le_u32_e32", {m_context->getVCC()}, {r0, v_8}, {}, ""));
-        co_yield_(
-            Instruction("v_cndmask_b32_e32", {v_7}, {v_7, v_14, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {v_12}, {l0, v_12}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_8}, {Register::Value::Literal(1), v_7}, {}, ""));
+        co_yield_(Instruction("v_cmp_le_u32", {m_context->getVCC()}, {r0, v_12}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_7}, {v_7, v_8, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_subrev_u32", {v_8}, {r0, v_12}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_8}, {v_12, v_8, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_14}, {Register::Value::Literal(1), v_7}, {}, ""));
+        co_yield_(Instruction("v_cmp_le_u32", {m_context->getVCC()}, {r0, v_8}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_7}, {v_7, v_14, m_context->getVCC()}, {}, ""));
         co_yield m_context->copier()->copy(v_8, Register::Value::Literal(0), "");
         co_yield_(Instruction::Label(label_26));
         co_yield_(Instruction("v_readlane_b32",
@@ -648,42 +628,39 @@ namespace rocRoller
         co_yield m_context->copier()->copy(v_7, r0, "");
         co_yield m_context->copier()->copy(v_3, r1, "");
 
-        co_yield_(Instruction("v_or_b32_e32", {dest->subset({1})}, {v_2, v_3}, {}, ""));
-        co_yield_(Instruction("v_cmp_ne_u64_e32",
-                              {m_context->getVCC()},
-                              {Register::Value::Literal(0), dest},
-                              {},
-                              ""));
+        co_yield_(Instruction("v_or_b32", {dest->subset({1})}, {v_2, v_3}, {}, ""));
+        co_yield_(Instruction(
+            "v_cmp_ne_u64", {m_context->getVCC()}, {Register::Value::Literal(0), dest}, {}, ""));
         co_yield_(Instruction("s_and_saveexec_b64", {s_5}, {m_context->getVCC()}, {}, ""));
         co_yield_(Instruction("s_xor_b64", {s_6}, {m_context->getExec(), s_5}, {}, ""));
         co_yield_(Instruction("s_cbranch_execz", {}, {label_21}, {}, ""));
         co_yield_(Instruction(
-            "v_ashrrev_i32_e32", {dest->subset({0})}, {Register::Value::Literal(31), v_3}, {}, ""));
+            "v_ashrrev_i32", {dest->subset({0})}, {Register::Value::Literal(31), v_3}, {}, ""));
         co_yield_(Instruction(
-            "v_add_co_u32_e32", {v_7}, {m_context->getVCC(), v_7, dest->subset({0})}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+            "v_add_co_u32", {v_7}, {m_context->getVCC(), v_7, dest->subset({0})}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_3},
                               {m_context->getVCC(), v_3, dest->subset({0}), m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_3}, {v_3, dest->subset({0})}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_7}, {v_7, dest->subset({0})}, {}, ""));
-        co_yield_(Instruction("v_cvt_f32_u32_e32", {dest->subset({1})}, {v_7}, {}, ""));
-        co_yield_(Instruction("v_cvt_f32_u32_e32", {v_8}, {v_3}, {}, ""));
-        co_yield_(Instruction("v_sub_co_u32_e32",
+        co_yield_(Instruction("v_xor_b32", {v_3}, {v_3, dest->subset({0})}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_7}, {v_7, dest->subset({0})}, {}, ""));
+        co_yield_(Instruction("v_cvt_f32_u32", {dest->subset({1})}, {v_7}, {}, ""));
+        co_yield_(Instruction("v_cvt_f32_u32", {v_8}, {v_3}, {}, ""));
+        co_yield_(Instruction("v_sub_co_u32",
                               {v_9},
                               {m_context->getVCC(), Register::Value::Literal(0), v_7},
                               {},
                               ""));
         co_yield_(Instruction(
-            "v_subb_co_u32_e32",
+            "v_subb_co_u32",
             {v_10},
             {m_context->getVCC(), Register::Value::Literal(0), v_3, m_context->getVCC()},
             {},
             ""));
         if(architecture.HasCapability(GPUCapability::v_fmac_f32))
         {
-            co_yield_(Instruction("v_fmac_f32_e32",
+            co_yield_(Instruction("v_fmac_f32",
                                   {dest->subset({1})},
                                   {Register::Value::Literal(0x4f800000), v_8},
                                   {},
@@ -691,7 +668,7 @@ namespace rocRoller
         }
         else if(architecture.HasCapability(GPUCapability::v_mac_f32))
         {
-            co_yield_(Instruction("v_mac_f32_e32",
+            co_yield_(Instruction("v_mac_f32",
                                   {dest->subset({1})},
                                   {Register::Value::Literal(0x4f800000), v_8},
                                   {},
@@ -702,23 +679,20 @@ namespace rocRoller
             Throw<FatalError>("Can not generate Divide: Neither v_fmac_f32 or v_mac_f32 known");
         }
 
-        co_yield_(Instruction("v_rcp_f32_e32", {dest->subset({1})}, {dest->subset({1})}, {}, ""));
+        co_yield_(Instruction("v_rcp_f32", {dest->subset({1})}, {dest->subset({1})}, {}, ""));
         co_yield m_context->copier()->copy(v_11, Register::Value::Literal(0), "");
         co_yield m_context->copier()->copy(v_12, Register::Value::Literal(0), "");
-        co_yield_(Instruction("v_mul_f32_e32",
+        co_yield_(Instruction("v_mul_f32",
                               {dest->subset({1})},
                               {Register::Value::Literal(0x5f7ffffc), dest->subset({1})},
                               {},
                               ""));
-        co_yield_(Instruction("v_mul_f32_e32",
-                              {v_8},
-                              {Register::Value::Literal(0x2f800000), dest->subset({1})},
-                              {},
-                              ""));
-        co_yield_(Instruction("v_trunc_f32_e32", {v_8}, {v_8}, {}, ""));
+        co_yield_(Instruction(
+            "v_mul_f32", {v_8}, {Register::Value::Literal(0x2f800000), dest->subset({1})}, {}, ""));
+        co_yield_(Instruction("v_trunc_f32", {v_8}, {v_8}, {}, ""));
         if(architecture.HasCapability(GPUCapability::v_fmac_f32))
         {
-            co_yield_(Instruction("v_fmac_f32_e32",
+            co_yield_(Instruction("v_fmac_f32",
                                   {dest->subset({1})},
                                   {Register::Value::Literal(0xcf800000), v_8},
                                   {},
@@ -726,7 +700,7 @@ namespace rocRoller
         }
         else if(architecture.HasCapability(GPUCapability::v_mac_f32))
         {
-            co_yield_(Instruction("v_mac_f32_e32",
+            co_yield_(Instruction("v_mac_f32",
                                   {dest->subset({1})},
                                   {Register::Value::Literal(0xcf800000), v_8},
                                   {},
@@ -736,9 +710,8 @@ namespace rocRoller
         {
             Throw<FatalError>("Can not generate Divide: Neither v_fmac_f32 or v_mac_f32 known");
         }
-        co_yield_(Instruction("v_cvt_u32_f32_e32", {v_8}, {v_8}, {}, ""));
-        co_yield_(
-            Instruction("v_cvt_u32_f32_e32", {dest->subset({1})}, {dest->subset({1})}, {}, ""));
+        co_yield_(Instruction("v_cvt_u32_f32", {v_8}, {v_8}, {}, ""));
+        co_yield_(Instruction("v_cvt_u32_f32", {dest->subset({1})}, {dest->subset({1})}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_13}, {v_9, v_8}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_14}, {v_10, dest->subset({1})}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_15}, {v_9, dest->subset({1})}, {}, ""));
@@ -747,32 +720,29 @@ namespace rocRoller
         co_yield_(Instruction("v_mul_lo_u32", {v_13}, {dest->subset({1}), v_14}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_17}, {dest->subset({1}), v_16}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_15}, {dest->subset({1}), v_14}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_13}, {m_context->getVCC(), v_17, v_13}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_13}, {m_context->getVCC(), v_17, v_13}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_15},
                               {m_context->getVCC(), v_11, v_15, m_context->getVCC()},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_18}, {v_8, v_16}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_16}, {v_8, v_16}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_13}, {m_context->getVCC(), v_13, v_16}, {}, ""));
+        co_yield_(Instruction("v_add_co_u32", {v_13}, {m_context->getVCC(), v_13, v_16}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_17}, {v_8, v_14}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_15},
                               {m_context->getVCC(), v_15, v_18, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_13},
                               {m_context->getVCC(), v_17, v_12, m_context->getVCC()},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_14}, {v_8, v_14}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_14}, {m_context->getVCC(), v_15, v_14}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_14}, {m_context->getVCC(), v_15, v_14}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_15},
                               {m_context->getVCC(), v_11, v_13, m_context->getVCC()},
                               {},
@@ -791,62 +761,56 @@ namespace rocRoller
         co_yield_(Instruction("v_mul_lo_u32", {v_19}, {dest->subset({1}), v_10}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_9}, {dest->subset({1}), v_9}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_18}, {dest->subset({1}), v_10}, {}, ""));
-        co_yield_(Instruction("v_add_co_u32_e32", {v_9}, {m_context->getVCC(), v_9, v_19}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_9}, {m_context->getVCC(), v_9, v_19}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_18},
                               {m_context->getVCC(), v_11, v_18, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction("v_add_co_u32_e32", {v_9}, {m_context->getVCC(), v_9, v_17}, {}, ""));
+        co_yield_(Instruction("v_add_co_u32", {v_9}, {m_context->getVCC(), v_9, v_17}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_13}, {v_14, v_10}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_9},
                               {m_context->getVCC(), v_18, v_16, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_13},
                               {m_context->getVCC(), v_13, v_12, m_context->getVCC()},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_10}, {v_14, v_10}, {}, ""));
-        co_yield_(Instruction("v_add_co_u32_e32", {v_9}, {m_context->getVCC(), v_9, v_10}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_9}, {m_context->getVCC(), v_9, v_10}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_10},
                               {m_context->getVCC(), v_11, v_13, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_8}, {v_8, v_15}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_8}, {v_8, v_15}, {}, ""));
         co_yield_(
             Instruction("v_addc_co_u32", {v_8}, {m_context->getVCC(), v_8, v_10, s_5}, {}, ""));
-        co_yield_(Instruction("v_add_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32",
                               {dest->subset({1})},
                               {m_context->getVCC(), dest->subset({1}), v_9},
                               {},
                               ""));
         co_yield_(Instruction(
-            "v_addc_co_u32_e32",
+            "v_addc_co_u32",
             {v_8},
             {m_context->getVCC(), Register::Value::Literal(0), v_8, m_context->getVCC()},
             {},
             ""));
-        co_yield_(
-            Instruction("v_ashrrev_i32_e32", {v_9}, {Register::Value::Literal(31), v_2}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_20}, {m_context->getVCC(), v_20, v_9}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_20}, {v_20, v_9}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
-                              {v_2},
-                              {m_context->getVCC(), v_2, v_9, m_context->getVCC()},
-                              {},
-                              ""));
+        co_yield_(Instruction("v_ashrrev_i32", {v_9}, {Register::Value::Literal(31), v_2}, {}, ""));
+        co_yield_(Instruction("v_add_co_u32", {v_20}, {m_context->getVCC(), v_20, v_9}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_20}, {v_20, v_9}, {}, ""));
+        co_yield_(Instruction(
+            "v_addc_co_u32", {v_2}, {m_context->getVCC(), v_2, v_9, m_context->getVCC()}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_14}, {v_20, v_8}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_15}, {v_20, dest->subset({1})}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_2}, {v_2, v_9}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_2}, {v_2, v_9}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_10}, {v_20, v_8}, {}, ""));
-        co_yield_(
-            Instruction("v_add_co_u32_e32", {v_14}, {m_context->getVCC(), v_15, v_14}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32", {v_14}, {m_context->getVCC(), v_15, v_14}, {}, ""));
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_10},
                               {m_context->getVCC(), v_11, v_10, m_context->getVCC()},
                               {},
@@ -854,29 +818,29 @@ namespace rocRoller
         co_yield_(Instruction("v_mul_hi_u32", {v_13}, {v_2, dest->subset({1})}, {}, ""));
         co_yield_(
             Instruction("v_mul_lo_u32", {dest->subset({1})}, {v_2, dest->subset({1})}, {}, ""));
-        co_yield_(Instruction("v_add_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32",
                               {dest->subset({1})},
                               {m_context->getVCC(), v_14, dest->subset({1})},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_15}, {v_2, v_8}, {}, ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {dest->subset({1})},
                               {m_context->getVCC(), v_10, v_13, m_context->getVCC()},
                               {},
                               ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_10},
                               {m_context->getVCC(), v_15, v_12, m_context->getVCC()},
                               {},
                               ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_8}, {v_2, v_8}, {}, ""));
-        co_yield_(Instruction("v_add_co_u32_e32",
+        co_yield_(Instruction("v_add_co_u32",
                               {dest->subset({1})},
                               {m_context->getVCC(), dest->subset({1}), v_8},
                               {},
                               ""));
-        co_yield_(Instruction("v_addc_co_u32_e32",
+        co_yield_(Instruction("v_addc_co_u32",
                               {v_8},
                               {m_context->getVCC(), v_11, v_10, m_context->getVCC()},
                               {},
@@ -886,9 +850,8 @@ namespace rocRoller
         co_yield_(Instruction("v_mul_hi_u32", {v_15}, {v_7, dest->subset({1})}, {}, ""));
         co_yield_(Instruction("v_add3_u32", {v_10}, {v_15, v_14, v_10}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_15}, {v_7, dest->subset({1})}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {v_14}, {v_2, v_10}, {}, ""));
-        co_yield_(
-            Instruction("v_sub_co_u32_e32", {v_20}, {m_context->getVCC(), v_20, v_15}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {v_14}, {v_2, v_10}, {}, ""));
+        co_yield_(Instruction("v_sub_co_u32", {v_20}, {m_context->getVCC(), v_20, v_15}, {}, ""));
         co_yield_(
             Instruction("v_subb_co_u32", {v_14}, {s_5, v_14, v_3, m_context->getVCC()}, {}, ""));
         co_yield_(Instruction("v_sub_co_u32", {v_15}, {s_5, v_20, v_7}, {}, ""));
@@ -910,14 +873,11 @@ namespace rocRoller
         co_yield_(Instruction("v_cndmask_b32", {v_14}, {v_13, v_15, s_5}, {}, ""));
         co_yield_(Instruction(
             "v_add_co_u32", {v_15}, {s_5, Register::Value::Literal(2), dest->subset({1})}, {}, ""));
-        co_yield_(Instruction("v_subb_co_u32_e32",
-                              {v_2},
-                              {m_context->getVCC(), v_2, v_10, m_context->getVCC()},
-                              {},
-                              ""));
+        co_yield_(Instruction(
+            "v_subb_co_u32", {v_2}, {m_context->getVCC(), v_2, v_10, m_context->getVCC()}, {}, ""));
         co_yield_(Instruction(
             "v_addc_co_u32", {v_13}, {s_5, Register::Value::Literal(0), v_8, s_5}, {}, ""));
-        co_yield_(Instruction("v_cmp_ge_u32_e32", {m_context->getVCC()}, {v_2, v_3}, {}, ""));
+        co_yield_(Instruction("v_cmp_ge_u32", {m_context->getVCC()}, {v_2, v_3}, {}, ""));
         co_yield_(Instruction(
             "v_add_co_u32", {v_16}, {s_5, Register::Value::Literal(1), dest->subset({1})}, {}, ""));
         co_yield_(Instruction(
@@ -926,7 +886,7 @@ namespace rocRoller
             {Register::Value::Literal(0), Register::Value::Literal(-1), m_context->getVCC()},
             {},
             ""));
-        co_yield_(Instruction("v_cmp_ge_u32_e32", {m_context->getVCC()}, {v_20, v_7}, {}, ""));
+        co_yield_(Instruction("v_cmp_ge_u32", {m_context->getVCC()}, {v_20, v_7}, {}, ""));
         co_yield_(Instruction(
             "v_addc_co_u32", {v_17}, {s_5, Register::Value::Literal(0), v_8, s_5}, {}, ""));
         co_yield_(Instruction(
@@ -935,27 +895,22 @@ namespace rocRoller
             {Register::Value::Literal(0), Register::Value::Literal(-1), m_context->getVCC()},
             {},
             ""));
-        co_yield_(Instruction("v_cmp_eq_u32_e32", {m_context->getVCC()}, {v_2, v_3}, {}, ""));
+        co_yield_(Instruction("v_cmp_eq_u32", {m_context->getVCC()}, {v_2, v_3}, {}, ""));
         co_yield_(Instruction("v_cmp_ne_u32", {s_5}, {Register::Value::Literal(0), v_14}, {}, ""));
-        co_yield_(
-            Instruction("v_cndmask_b32_e32", {v_20}, {v_10, v_20, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_cmp_ne_u32_e32",
-                              {m_context->getVCC()},
-                              {Register::Value::Literal(0), v_20},
-                              {},
-                              ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_20}, {v_10, v_20, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction(
+            "v_cmp_ne_u32", {m_context->getVCC()}, {Register::Value::Literal(0), v_20}, {}, ""));
         co_yield_(Instruction("v_cndmask_b32", {v_2}, {v_16, v_15, s_5}, {}, ""));
         co_yield_(Instruction("v_cndmask_b32", {v_14}, {v_17, v_13, s_5}, {}, ""));
         co_yield_(Instruction(
-            "v_cndmask_b32_e32", {v_2}, {dest->subset({1}), v_2, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_7}, {v_9, dest->subset({0})}, {}, ""));
-        co_yield_(
-            Instruction("v_cndmask_b32_e32", {v_20}, {v_8, v_14, m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_2}, {v_2, v_7}, {}, ""));
-        co_yield_(Instruction("v_xor_b32_e32", {v_20}, {v_20, v_7}, {}, ""));
+            "v_cndmask_b32", {v_2}, {dest->subset({1}), v_2, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_7}, {v_9, dest->subset({0})}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_20}, {v_8, v_14, m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_2}, {v_2, v_7}, {}, ""));
+        co_yield_(Instruction("v_xor_b32", {v_20}, {v_20, v_7}, {}, ""));
         co_yield_(Instruction(
-            "v_sub_co_u32_e32", {dest->subset({0})}, {m_context->getVCC(), v_2, v_7}, {}, ""));
-        co_yield_(Instruction("v_subb_co_u32_e32",
+            "v_sub_co_u32", {dest->subset({0})}, {m_context->getVCC(), v_2, v_7}, {}, ""));
+        co_yield_(Instruction("v_subb_co_u32",
                               {dest->subset({1})},
                               {m_context->getVCC(), v_20, v_7, m_context->getVCC()},
                               {},
@@ -965,31 +920,30 @@ namespace rocRoller
         co_yield_(
             Instruction("s_xor_b64", {m_context->getExec()}, {m_context->getExec(), s_5}, {}, ""));
         co_yield_(Instruction("s_cbranch_execz", {}, {label_22}, {}, ""));
-        co_yield_(Instruction("v_cvt_f32_u32_e32", {v_2}, {v_7}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {v_3}, {Register::Value::Literal(0), v_7}, {}, ""));
+        co_yield_(Instruction("v_cvt_f32_u32", {v_2}, {v_7}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {v_3}, {Register::Value::Literal(0), v_7}, {}, ""));
         co_yield m_context->copier()->copy(dest->subset({1}), Register::Value::Literal(0), "");
-        co_yield_(Instruction("v_rcp_iflag_f32_e32", {v_2}, {v_2}, {}, ""));
-        co_yield_(Instruction(
-            "v_mul_f32_e32", {v_2}, {Register::Value::Literal(0x4f7ffffe), v_2}, {}, ""));
-        co_yield_(Instruction("v_cvt_u32_f32_e32", {v_2}, {v_2}, {}, ""));
+        co_yield_(Instruction("v_rcp_iflag_f32", {v_2}, {v_2}, {}, ""));
+        co_yield_(
+            Instruction("v_mul_f32", {v_2}, {Register::Value::Literal(0x4f7ffffe), v_2}, {}, ""));
+        co_yield_(Instruction("v_cvt_u32_f32", {v_2}, {v_2}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_3}, {v_3, v_2}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_3}, {v_2, v_3}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_2}, {v_2, v_3}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_2}, {v_2, v_3}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_2}, {v_20, v_2}, {}, ""));
         co_yield_(Instruction("v_mul_lo_u32", {v_3}, {v_2, v_7}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {v_20}, {v_20, v_3}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {v_20}, {v_20, v_3}, {}, ""));
         co_yield_(Instruction(
-            "v_add_u32_e32", {dest->subset({0})}, {Register::Value::Literal(1), v_2}, {}, ""));
-        co_yield_(Instruction("v_sub_u32_e32", {v_3}, {v_20, v_7}, {}, ""));
-        co_yield_(Instruction("v_cmp_ge_u32_e32", {m_context->getVCC()}, {v_20, v_7}, {}, ""));
-        co_yield_(
-            Instruction("v_cndmask_b32_e32", {v_20}, {v_20, v_3, m_context->getVCC()}, {}, ""));
+            "v_add_u32", {dest->subset({0})}, {Register::Value::Literal(1), v_2}, {}, ""));
+        co_yield_(Instruction("v_sub_u32", {v_3}, {v_20, v_7}, {}, ""));
+        co_yield_(Instruction("v_cmp_ge_u32", {m_context->getVCC()}, {v_20, v_7}, {}, ""));
+        co_yield_(Instruction("v_cndmask_b32", {v_20}, {v_20, v_3, m_context->getVCC()}, {}, ""));
         co_yield_(Instruction(
-            "v_cndmask_b32_e32", {v_2}, {v_2, dest->subset({0}), m_context->getVCC()}, {}, ""));
-        co_yield_(Instruction("v_add_u32_e32", {v_3}, {Register::Value::Literal(1), v_2}, {}, ""));
-        co_yield_(Instruction("v_cmp_ge_u32_e32", {m_context->getVCC()}, {v_20, v_7}, {}, ""));
+            "v_cndmask_b32", {v_2}, {v_2, dest->subset({0}), m_context->getVCC()}, {}, ""));
+        co_yield_(Instruction("v_add_u32", {v_3}, {Register::Value::Literal(1), v_2}, {}, ""));
+        co_yield_(Instruction("v_cmp_ge_u32", {m_context->getVCC()}, {v_20, v_7}, {}, ""));
         co_yield_(Instruction(
-            "v_cndmask_b32_e32", {dest->subset({0})}, {v_2, v_3, m_context->getVCC()}, {}, ""));
+            "v_cndmask_b32", {dest->subset({0})}, {v_2, v_3, m_context->getVCC()}, {}, ""));
         co_yield_(Instruction::Label(label_22));
         co_yield_(
             Instruction("s_or_b64", {m_context->getExec()}, {m_context->getExec(), s_5}, {}, ""));

@@ -183,6 +183,43 @@ namespace rocRoller
         co_return;
     }
 
+    Generator<Instruction>
+        ArithmeticGenerator::scalarCompareThroughVALU(std::string const  instruction,
+                                                      Register::ValuePtr dst,
+                                                      Register::ValuePtr lhs,
+                                                      Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        Register::ValuePtr tmp;
+        if(rhs->regType() != Register::Type::Literal)
+        {
+            co_yield m_context->copier()->ensureType(tmp, rhs, Register::Type::Vector);
+        }
+        else
+        {
+            tmp = rhs;
+        }
+
+        auto wfp = Register::Value::WavefrontPlaceholder(m_context);
+
+        co_yield_(Instruction(instruction, {wfp}, {lhs, tmp}, {}, ""));
+
+        auto reduce = m_context->kernel()->wavefront_size() == 64 ? "s_and_b64" : "s_and_b32";
+        if(dst != nullptr && !dst->isSCC())
+        {
+            co_yield(Instruction::Lock(Scheduling::Dependency::SCC,
+                                       "Start Compare writing to non-SCC dest"));
+        }
+        co_yield_(Instruction(reduce, {wfp}, {wfp, m_context->getExec()}, {}, ""));
+        if(dst != nullptr && !dst->isSCC())
+        {
+            co_yield m_context->copier()->copy(dst, m_context->getSCC(), "");
+            co_yield(Instruction::Unlock("End Compare writing to non-SCC dest"));
+        }
+    }
+
     // -----------------------------
     // Helper Functions
 

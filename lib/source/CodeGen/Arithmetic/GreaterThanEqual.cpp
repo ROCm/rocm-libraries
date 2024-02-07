@@ -10,20 +10,26 @@ namespace rocRoller
                                   Register::Type::Scalar,
                                   DataType::Int32);
     RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
+                                  Register::Type::Scalar,
+                                  DataType::UInt32);
+    RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
                                   Register::Type::Vector,
                                   DataType::Int32);
     RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
-                                  Register::Type::Scalar,
-                                  DataType::UInt32);
-    RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
                                   Register::Type::Vector,
                                   DataType::UInt32);
     RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
                                   Register::Type::Scalar,
                                   DataType::Int64);
     RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
+                                  Register::Type::Scalar,
+                                  DataType::UInt64);
+    RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
                                   Register::Type::Vector,
                                   DataType::Int64);
+    RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
+                                  Register::Type::Vector,
+                                  DataType::UInt64);
     RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
                                   Register::Type::Vector,
                                   DataType::Float);
@@ -121,10 +127,18 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        Register::ValuePtr tmp;
-        co_yield m_context->copier()->ensureType(tmp, rhs, Register::Type::Vector);
+        co_yield scalarCompareThroughVALU("v_cmp_ge_i64", dst, lhs, rhs);
+    }
 
-        co_yield_(Instruction("v_cmp_ge_i64", {dst}, {lhs, tmp}, {}, ""));
+    template <>
+    Generator<Instruction>
+        GreaterThanEqualGenerator<Register::Type::Scalar, DataType::UInt64>::generate(
+            Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        co_yield scalarCompareThroughVALU("v_cmp_ge_u64", dst, lhs, rhs);
     }
 
     template <>
@@ -136,6 +150,17 @@ namespace rocRoller
         AssertFatal(rhs != nullptr);
 
         co_yield_(Instruction("v_cmp_ge_i64", {dst}, {lhs, rhs}, {}, ""));
+    }
+
+    template <>
+    Generator<Instruction>
+        GreaterThanEqualGenerator<Register::Type::Vector, DataType::UInt64>::generate(
+            Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        co_yield_(Instruction("v_cmp_ge_u64", {dst}, {lhs, rhs}, {}, ""));
     }
 
     template <>

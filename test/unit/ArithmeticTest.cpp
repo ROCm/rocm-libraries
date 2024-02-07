@@ -53,18 +53,27 @@ namespace ArithmeticTest
 
             auto k = m_context->kernel();
 
+            if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+            {
+                GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
+            }
+
+            auto numBoolRegs = k->wavefront_size() / 32;
+
             k->setKernelName("IntegralArithmeticTest");
             k->setKernelDimensions(1);
 
             auto command = std::make_shared<Command>();
 
-            auto result_exp = std::make_shared<Expression::Expression>(
+            auto resultExpr = std::make_shared<Expression::Expression>(
                 command->allocateArgument({dataType, PointerType::PointerGlobal}));
-            auto a_exp = std::make_shared<Expression::Expression>(
+            auto comparisonResultExpr = std::make_shared<Expression::Expression>(
+                command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal}));
+            auto aExpr = std::make_shared<Expression::Expression>(
                 command->allocateArgument({dataType, PointerType::Value}));
-            auto b_exp = std::make_shared<Expression::Expression>(
+            auto bExpr = std::make_shared<Expression::Expression>(
                 command->allocateArgument({dataType, PointerType::Value}));
-            auto sh_exp = std::make_shared<Expression::Expression>(
+            auto shExpr = std::make_shared<Expression::Expression>(
                 command->allocateArgument({DataType::UInt32, PointerType::Value}));
 
             auto one  = std::make_shared<Expression::Expression>(1u);
@@ -73,10 +82,14 @@ namespace ArithmeticTest
             k->addArgument({"result",
                             {dataType, PointerType::PointerGlobal},
                             DataDirection::WriteOnly,
-                            result_exp});
-            k->addArgument({"a", dataType, DataDirection::ReadOnly, a_exp});
-            k->addArgument({"b", dataType, DataDirection::ReadOnly, b_exp});
-            k->addArgument({"shift", DataType::UInt32, DataDirection::ReadOnly, sh_exp});
+                            resultExpr});
+            k->addArgument({"comparisonResult",
+                            {DataType::UInt32, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly,
+                            comparisonResultExpr});
+            k->addArgument({"a", dataType, DataDirection::ReadOnly, aExpr});
+            k->addArgument({"b", dataType, DataDirection::ReadOnly, bExpr});
+            k->addArgument({"shift", DataType::UInt32, DataDirection::ReadOnly, shExpr});
 
             k->setWorkgroupSize({1, 1, 1});
             k->setWorkitemCount({one, one, one});
@@ -86,98 +99,66 @@ namespace ArithmeticTest
             m_context->schedule(k->prolog());
 
             auto kb = [&]() -> Generator<Instruction> {
-                Register::ValuePtr s_result, s_a, s_b, s_shift;
-                co_yield m_context->argLoader()->getValue("result", s_result);
-                co_yield m_context->argLoader()->getValue("a", s_a);
-                co_yield m_context->argLoader()->getValue("b", s_b);
-                co_yield m_context->argLoader()->getValue("shift", s_shift);
+                Register::ValuePtr resultArg, comparisonResultArg, aArg, bArg, shiftArg;
+                co_yield m_context->argLoader()->getValue("result", resultArg);
+                co_yield m_context->argLoader()->getValue("comparisonResult", comparisonResultArg);
+                co_yield m_context->argLoader()->getValue("a", aArg);
+                co_yield m_context->argLoader()->getValue("b", bArg);
+                co_yield m_context->argLoader()->getValue("shift", shiftArg);
 
-                auto v_result = Register::Value::Placeholder(
+                auto resultPtr = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, {dataType, PointerType::PointerGlobal}, 1);
-
-                auto v_a
+                auto resultReg
                     = Register::Value::Placeholder(m_context, Register::Type::Vector, dataType, 1);
 
-                auto v_b
-                    = Register::Value::Placeholder(m_context, Register::Type::Vector, dataType, 1);
+                auto a     = Register::Value::Placeholder(m_context, regType, dataType, 1);
+                auto b     = Register::Value::Placeholder(m_context, regType, dataType, 1);
+                auto c     = Register::Value::Placeholder(m_context, regType, dataType, 1);
+                auto shift = Register::Value::Placeholder(m_context, regType, DataType::UInt32, 1);
+                auto boolean = (regType == Register::Type::Vector)
+                                   ? Register::Value::WavefrontPlaceholder(m_context)
+                                   : Register::Value::Placeholder(
+                                       m_context, Register::Type::Scalar, DataType::Bool, 1);
 
-                auto v_c
-                    = Register::Value::Placeholder(m_context, Register::Type::Vector, dataType, 1);
+                co_yield a->allocate();
+                co_yield b->allocate();
+                co_yield c->allocate();
+                co_yield shift->allocate();
+                co_yield boolean->allocate();
+                co_yield resultPtr->allocate();
+                co_yield resultReg->allocate();
 
-                auto v_shift = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::UInt32, 1);
+                co_yield m_context->copier()->copy(resultPtr, resultArg, "Move pointer");
+                co_yield m_context->copier()->copy(a, aArg, "Move value");
+                co_yield m_context->copier()->copy(b, bArg, "Move value");
+                co_yield m_context->copier()->copy(shift, shiftArg, "Move value");
 
-                auto mask = Register::Value::Placeholder(
-                    m_context, Register::Type::Scalar, {dataType, PointerType::PointerGlobal}, 1);
-
-                auto s_c
-                    = Register::Value::Placeholder(m_context, Register::Type::Scalar, dataType, 1);
-
-                co_yield v_a->allocate();
-                co_yield v_b->allocate();
-                co_yield v_c->allocate();
-                co_yield v_shift->allocate();
-                co_yield mask->allocate();
-                co_yield s_c->allocate();
-                co_yield v_result->allocate();
-
-                co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
-
-                co_yield m_context->copier()->copy(v_a, s_a, "Move value");
-                co_yield m_context->copier()->copy(v_b, s_b, "Move value");
-                co_yield m_context->copier()->copy(v_shift, s_shift, "Move value");
-
-                auto const a            = regType == Register::Type::Vector ? v_a : s_a;
-                auto const b            = regType == Register::Type::Vector ? v_b : s_b;
-                auto const c            = regType == Register::Type::Vector ? v_c : s_c;
-                auto const mask_or_bool = regType == Register::Type::Vector ? mask : s_c;
-                auto const shift        = regType == Register::Type::Vector ? v_shift : s_shift;
-
-                enum LaneWise_t
-                {
-                    LaneWise,
-                    NotLaneWise
-                };
-
-                auto store
-                    = [&](size_t idx, LaneWise_t laneWise = NotLaneWise) -> Generator<Instruction> {
-                    if(laneWise == LaneWise)
+                auto store = [&](size_t idx, bool logical = false) -> Generator<Instruction> {
+                    co_yield m_context->copier()->copy(
+                        resultReg, c, "Move result to VGPR to store.");
+                    if(logical && regType == Register::Type::Scalar)
                     {
-                        // E.g. vgpr comparsion requires copying result from vcc-sized sgpr to a T-sized vgpr
-                        // E.g. sgpr comparsion requries copying result from bool sgpr to a T-sized vgpr
-                        if constexpr(sizeof(T) == 4)
-                        {
-                            co_yield m_context->copier()->copy(
-                                v_c, mask->subset({0}), "Move result to vgpr to store.");
-                            co_yield m_context->mem()->store(
-                                MemoryInstructions::Flat,
-                                v_result,
-                                v_c->subset({0}),
-                                Register::Value::Literal(idx * sizeof(T)),
-                                sizeof(T));
-                        }
-                        else
-                        {
-                            co_yield m_context->copier()->copy(
-                                v_c, mask, "Move result to vgpr to store.");
-                            co_yield m_context->mem()->store(
-                                MemoryInstructions::Flat,
-                                v_result,
-                                v_c,
-                                Register::Value::Literal(idx * sizeof(T)),
-                                sizeof(T));
-                        }
+                        co_yield m_context->mem()->store(
+                            MemoryInstructions::Flat,
+                            resultPtr,
+                            resultReg,
+                            Register::Value::Literal(idx * sizeof(uint32_t)),
+                            sizeof(uint32_t));
+                    }
+                    else if(logical && regType == Register::Type::Vector)
+                    {
+                        co_yield m_context->mem()->store(
+                            MemoryInstructions::Flat,
+                            resultPtr,
+                            resultReg,
+                            Register::Value::Literal(idx * sizeof(uint32_t) * numBoolRegs),
+                            sizeof(uint32_t) * numBoolRegs);
                     }
                     else
                     {
-                        if(regType == Register::Type::Scalar)
-                        {
-                            co_yield m_context->copier()->copy(
-                                v_c, s_c, "Move result to vgpr to store.");
-                        }
                         co_yield m_context->mem()->store(MemoryInstructions::Flat,
-                                                         v_result,
-                                                         v_c,
+                                                         resultPtr,
+                                                         resultReg,
                                                          Register::Value::Literal(idx * sizeof(T)),
                                                          sizeof(T));
                     }
@@ -207,111 +188,125 @@ namespace ArithmeticTest
                 co_yield generateOp<Expression::ArithmeticShiftR>(c, a, b);
                 co_yield store(7);
 
-                if(!std::is_same_v<T, uint64_t>)
-                {
-                    co_yield generateOp<Expression::GreaterThan>(mask, a, b);
-                    co_yield store(8, LaneWise);
-
-                    co_yield generateOp<Expression::GreaterThanEqual>(mask, a, b);
-                    co_yield store(9, LaneWise);
-
-                    co_yield generateOp<Expression::LessThan>(mask, a, b);
-                    co_yield store(10, LaneWise);
-
-                    co_yield generateOp<Expression::LessThanEqual>(mask, a, b);
-                    co_yield store(11, LaneWise);
-
-                    co_yield generateOp<Expression::Equal>(mask, a, b);
-                    co_yield store(12, LaneWise);
-                }
-
                 co_yield generateOp<Expression::BitwiseAnd>(c, a, b);
-                co_yield store(13);
+                co_yield store(8);
 
                 co_yield generateOp<Expression::MultiplyHigh>(c, a, b);
-                co_yield store(14);
+                co_yield store(9);
 
                 co_yield generateOp<Expression::Negate>(c, a);
-                co_yield store(15);
+                co_yield store(10);
 
                 co_yield generateOp<Expression::BitwiseXor>(c, a, b);
-                co_yield store(16);
+                co_yield store(11);
 
                 co_yield generateOp<Expression::AddShiftL>(c, a, b, shift);
-                co_yield store(17);
+                co_yield store(12);
 
                 co_yield generateOp<Expression::ShiftLAdd>(c, a, shift, b);
-                co_yield store(18);
+                co_yield store(13);
 
                 co_yield generateOp<Expression::BitwiseOr>(c, a, b);
-                co_yield store(19);
+                co_yield store(14);
 
                 co_yield generateOp<Expression::Divide>(
                     c, a, Register::Value::Literal(LITERAL_TEST));
-                co_yield store(20);
+                co_yield store(15);
 
                 co_yield generateOp<Expression::Divide>(
                     c, Register::Value::Literal(LITERAL_TEST), b);
-                co_yield store(21);
+                co_yield store(16);
 
                 co_yield generateOp<Expression::Modulo>(
                     c, a, Register::Value::Literal(LITERAL_TEST));
-                co_yield store(22);
+                co_yield store(17);
 
                 co_yield generateOp<Expression::Modulo>(
                     c, Register::Value::Literal(LITERAL_TEST), b);
-                co_yield store(23);
-
-                // Logical
-                auto A = regType == Register::Type::Vector ? v_a->expression() : s_a->expression();
-                auto B = regType == Register::Type::Vector ? v_b->expression() : s_b->expression();
-                if constexpr(sizeof(T) == 4)
-                {
-                    co_yield generate(mask,
-                                      (A < Expression::literal(0, dataType))
-                                          && (B < Expression::literal(0, dataType)),
-                                      m_context);
-                    co_yield store(24, LaneWise);
-
-                    co_yield generateOp<Expression::GreaterThanEqual>(mask_or_bool, a, b);
-                    co_yield generateOp<Expression::Conditional>(c, mask_or_bool, a, b);
-                    co_yield store(25);
-
-                    co_yield generate(mask,
-                                      (A < Expression::literal(0, dataType))
-                                          || (B < Expression::literal(0, dataType)),
-                                      m_context);
-                    co_yield store(26, LaneWise);
-
-                    co_yield generateOp<Expression::NotEqual>(mask, a, b);
-                    co_yield store(27, LaneWise);
-
-                    auto s_c_lower = mask->subset({0});
-                    co_yield generate(s_c_lower, Expression::logicalNot(A < B), m_context);
-                    co_yield store(28, LaneWise);
-
-                    co_yield generate(s_c_lower,
-                                      Expression::logicalNot(Expression::logicalNot(A > B)),
-                                      m_context);
-                    co_yield store(29, LaneWise);
-                }
+                co_yield store(18);
 
                 co_yield generateOp<Expression::BitwiseNegate>(c, a);
-                co_yield store(30);
+                co_yield store(19);
+
+                co_yield generateOp<Expression::GreaterThanEqual>(boolean, a, b);
+                co_yield generateOp<Expression::Conditional>(c, boolean, a, b);
+                co_yield store(20);
+
+                //
+                // Logical / boolean
+                //
+                // Change result and c
+                //
+
+                resultPtr
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::Raw32, PointerType::PointerGlobal},
+                                                   1);
+                co_yield resultPtr->allocate();
+                co_yield m_context->copier()->copy(resultPtr, comparisonResultArg, "Move pointer");
+
+                resultReg = boolean->placeholder(Register::Type::Vector,
+                                                 Register::AllocationOptions::FullyContiguous());
+                co_yield resultReg->allocate();
+
+                c = boolean;
+
+                co_yield generateOp<Expression::GreaterThan>(c, a, b);
+                co_yield store(0, true);
+
+                co_yield generateOp<Expression::GreaterThanEqual>(c, a, b);
+                co_yield store(1, true);
+
+                co_yield generateOp<Expression::LessThan>(c, a, b);
+                co_yield store(2, true);
+
+                co_yield generateOp<Expression::LessThanEqual>(c, a, b);
+                co_yield store(3, true);
+
+                co_yield generateOp<Expression::Equal>(c, a, b);
+                co_yield store(4, true);
+
+                co_yield generateOp<Expression::NotEqual>(c, a, b);
+                co_yield store(5, true);
+
+                auto aExpr = a->expression();
+                auto bExpr = b->expression();
+
+                co_yield generate(c,
+                                  (aExpr < Expression::literal(0, dataType))
+                                      && (bExpr < Expression::literal(0, dataType)),
+                                  m_context);
+                co_yield store(6, true);
+
+                co_yield generate(c,
+                                  (aExpr < Expression::literal(0, dataType))
+                                      || (bExpr < Expression::literal(0, dataType)),
+                                  m_context);
+                co_yield store(7, true);
+
+                co_yield generate(c, Expression::logicalNot(aExpr < bExpr), m_context);
+                co_yield store(8, true);
+
+                co_yield generate(
+                    c, Expression::logicalNot(Expression::logicalNot(aExpr > bExpr)), m_context);
+                co_yield store(9, true);
             };
 
             m_context->schedule(kb());
             m_context->schedule(k->postamble());
             m_context->schedule(k->amdgpu_metadata());
 
-            REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-
             if(isLocalDevice())
             {
                 CommandKernel commandKernel(m_context);
 
-                size_t const result_size = 31;
-                auto         d_result    = make_shared_device<T>(result_size);
+                size_t const resultSize           = 21;
+                size_t const comparisonResultSize = 10;
+
+                auto d_result = make_shared_device<T>(resultSize);
+                auto d_comparisonResult
+                    = make_shared_device<uint32_t>(comparisonResultSize * numBoolRegs);
 
                 for(T a : TestValues::ByType<T>::values)
                 {
@@ -328,17 +323,27 @@ namespace ArithmeticTest
                         for(uint32_t shift : TestValues::shiftValues)
                         {
                             KernelArguments runtimeArgs;
+
                             runtimeArgs.append("result", d_result.get());
+                            runtimeArgs.append("comparisonResult", d_comparisonResult.get());
                             runtimeArgs.append("a", a);
                             runtimeArgs.append("b", b);
                             runtimeArgs.append("shift", shift);
 
                             commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-                            std::vector<T> result(result_size);
+                            std::vector<T> result(resultSize);
                             ASSERT_THAT(hipMemcpy(result.data(),
                                                   d_result.get(),
                                                   result.size() * sizeof(T),
+                                                  hipMemcpyDefault),
+                                        HasHipSuccess(0));
+
+                            std::vector<uint32_t> comparisonResult(comparisonResultSize
+                                                                   * numBoolRegs);
+                            ASSERT_THAT(hipMemcpy(comparisonResult.data(),
+                                                  d_comparisonResult.get(),
+                                                  comparisonResult.size() * sizeof(uint32_t),
                                                   hipMemcpyDefault),
                                         HasHipSuccess(0));
 
@@ -352,55 +357,50 @@ namespace ArithmeticTest
                             }
                             if(b < 32 && b >= 0)
                             {
-                                EXPECT_EQ(result[5], a << b) << a << " " << b;
+                                EXPECT_EQ(result[5], a << b);
                                 EXPECT_EQ(result[6], static_cast<T_unsigned>(a) >> b);
                                 EXPECT_EQ(result[7], a >> b);
                             }
-                            if constexpr(!std::is_same_v<T, uint64_t>)
-                            {
-                                EXPECT_EQ(result[8], (a > b ? 1 : 0));
-                                EXPECT_EQ(result[9], (a >= b ? 1 : 0));
-                                EXPECT_EQ(result[10], (a < b ? 1 : 0));
-                                EXPECT_EQ(result[11], (a <= b ? 1 : 0));
-                                EXPECT_EQ(result[12], (a == b ? 1 : 0));
-                            }
-                            EXPECT_EQ(result[13], a & b);
+                            EXPECT_EQ(result[8], a & b);
                             if constexpr(std::is_same_v<T_signed, int32_t>)
                             {
-                                EXPECT_EQ(result[14],
+                                EXPECT_EQ(result[9],
                                           (a * (int64_t)b)
                                               >> std::numeric_limits<T_unsigned>::digits);
                             }
                             else if constexpr(std::is_same_v<T, int64_t>)
                             {
-                                EXPECT_EQ(result[14],
+                                EXPECT_EQ(result[9],
                                           (int64_t)(((__int128_t)a * (__int128_t)b)
                                                     >> std::numeric_limits<T_unsigned>::digits));
                             }
-                            EXPECT_EQ(result[15], -a);
-                            EXPECT_EQ(result[16], a ^ b);
-                            EXPECT_EQ(result[17], (a + b) << shift);
-                            EXPECT_EQ(result[18], (a << shift) + b);
-                            EXPECT_EQ(result[19], a | b);
+                            EXPECT_EQ(result[10], -a);
+                            EXPECT_EQ(result[11], a ^ b);
+                            EXPECT_EQ(result[12], (a + b) << shift);
+                            EXPECT_EQ(result[13], (a << shift) + b);
+                            EXPECT_EQ(result[14], a | b);
                             if(withinDivisionDomain)
                             {
-                                EXPECT_EQ(result[20], a / LITERAL_TEST);
-                                EXPECT_EQ(result[21], LITERAL_TEST / b);
-                                EXPECT_EQ(result[22], a % LITERAL_TEST);
-                                EXPECT_EQ(result[23], LITERAL_TEST % b);
+                                EXPECT_EQ(result[15], a / LITERAL_TEST);
+                                EXPECT_EQ(result[16], LITERAL_TEST / b);
+                                EXPECT_EQ(result[17], a % LITERAL_TEST);
+                                EXPECT_EQ(result[18], LITERAL_TEST % b);
                             }
-                            if constexpr(sizeof(T) == 4)
-                            {
-                                EXPECT_EQ(result[24], ((a < 0) && (b < 0)) ? 1 : 0);
-                                EXPECT_EQ(result[25], (a >= b ? a : b))
-                                    << "a: " << a << ", b: " << b << ", shift: " << shift;
-                                EXPECT_EQ(result[26], ((a < 0) || (b < 0)) ? 1 : 0);
-                                EXPECT_EQ(result[27], (a != b ? 1 : 0))
-                                    << "a: " << a << ", b: " << b << ", shift: " << shift;
-                                EXPECT_EQ(result[28], !(a < b) ? 1 : 0);
-                                EXPECT_EQ(result[29], !!(a > b) ? 1 : 0);
-                            }
-                            EXPECT_EQ(result[30], ~a);
+                            EXPECT_EQ(result[19], ~a);
+                            EXPECT_EQ(result[20], (a >= b) ? a : b);
+
+                            int wm = regType == Register::Type::Vector ? numBoolRegs : 1;
+
+                            EXPECT_EQ(comparisonResult[0 * wm], (a > b ? 1 : 0));
+                            EXPECT_EQ(comparisonResult[1 * wm], (a >= b ? 1 : 0));
+                            EXPECT_EQ(comparisonResult[2 * wm], (a < b ? 1 : 0));
+                            EXPECT_EQ(comparisonResult[3 * wm], (a <= b ? 1 : 0));
+                            EXPECT_EQ(comparisonResult[4 * wm], (a == b ? 1 : 0));
+                            EXPECT_EQ(comparisonResult[5 * wm], (a != b ? 1 : 0));
+                            EXPECT_EQ(comparisonResult[6 * wm], ((a < 0) && (b < 0)) ? 1 : 0);
+                            EXPECT_EQ(comparisonResult[7 * wm], ((a < 0) || (b < 0)) ? 1 : 0);
+                            EXPECT_EQ(comparisonResult[8 * wm], !(a < b) ? 1 : 0);
+                            EXPECT_EQ(comparisonResult[9 * wm], !!(a > b) ? 1 : 0);
                         }
                     }
                 }
@@ -454,15 +454,15 @@ namespace ArithmeticTest
 
         auto command = std::make_shared<Command>();
 
-        auto result_exp = std::make_shared<Expression::Expression>(
+        auto resultExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
-        auto cond_result_exp = std::make_shared<Expression::Expression>(
+        auto cond_resultExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Int32, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
+        auto aExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Float, PointerType::Value}));
-        auto b_exp = std::make_shared<Expression::Expression>(
+        auto bExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Float, PointerType::Value}));
-        auto c_exp = std::make_shared<Expression::Expression>(
+        auto cExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Float, PointerType::Value}));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
@@ -471,14 +471,14 @@ namespace ArithmeticTest
         k->addArgument({"result",
                         {DataType::Float, PointerType::PointerGlobal},
                         DataDirection::WriteOnly,
-                        result_exp});
+                        resultExpr});
         k->addArgument({"cond_result",
                         {DataType::Int32, PointerType::PointerGlobal},
                         DataDirection::WriteOnly,
-                        cond_result_exp});
-        k->addArgument({"a", DataType::Float, DataDirection::ReadOnly, a_exp});
-        k->addArgument({"b", DataType::Float, DataDirection::ReadOnly, b_exp});
-        k->addArgument({"c", DataType::Float, DataDirection::ReadOnly, c_exp});
+                        cond_resultExpr});
+        k->addArgument({"a", DataType::Float, DataDirection::ReadOnly, aExpr});
+        k->addArgument({"b", DataType::Float, DataDirection::ReadOnly, bExpr});
+        k->addArgument({"c", DataType::Float, DataDirection::ReadOnly, cExpr});
 
         k->setWorkgroupSize({1, 1, 1});
         k->setWorkitemCount({one, one, one});
@@ -681,13 +681,13 @@ namespace ArithmeticTest
 
         auto command = std::make_shared<Command>();
 
-        auto result_exp = std::make_shared<Expression::Expression>(
+        auto resultExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
+        auto aExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Float, PointerType::Value}));
-        auto b_exp = std::make_shared<Expression::Expression>(
+        auto bExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
-        auto c_exp = std::make_shared<Expression::Expression>(
+        auto cExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
@@ -696,12 +696,12 @@ namespace ArithmeticTest
         k->addArgument({"result",
                         {DataType::Float, PointerType::PointerGlobal},
                         DataDirection::WriteOnly,
-                        result_exp});
-        k->addArgument({"a", DataType::Float, DataDirection::ReadOnly, a_exp});
+                        resultExpr});
+        k->addArgument({"a", DataType::Float, DataDirection::ReadOnly, aExpr});
         k->addArgument(
-            {"b", {DataType::Half, PointerType::PointerGlobal}, DataDirection::ReadOnly, b_exp});
+            {"b", {DataType::Half, PointerType::PointerGlobal}, DataDirection::ReadOnly, bExpr});
         k->addArgument(
-            {"c", {DataType::Float, PointerType::PointerGlobal}, DataDirection::ReadOnly, c_exp});
+            {"c", {DataType::Float, PointerType::PointerGlobal}, DataDirection::ReadOnly, cExpr});
 
         k->setWorkgroupSize({1, 1, 1});
         k->setWorkitemCount({one, one, one});
@@ -880,13 +880,13 @@ namespace ArithmeticTest
 
         auto command = std::make_shared<Command>();
 
-        auto result_exp = std::make_shared<Expression::Expression>(
+        auto resultExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Double, PointerType::PointerGlobal}));
-        auto cond_result_exp = std::make_shared<Expression::Expression>(
+        auto cond_resultExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Int32, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
+        auto aExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Double, PointerType::Value}));
-        auto b_exp = std::make_shared<Expression::Expression>(
+        auto bExpr = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Double, PointerType::Value}));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
@@ -895,13 +895,13 @@ namespace ArithmeticTest
         k->addArgument({"result",
                         {DataType::Double, PointerType::PointerGlobal},
                         DataDirection::WriteOnly,
-                        result_exp});
+                        resultExpr});
         k->addArgument({"cond_result",
                         {DataType::Int32, PointerType::PointerGlobal},
                         DataDirection::WriteOnly,
-                        cond_result_exp});
-        k->addArgument({"a", DataType::Double, DataDirection::ReadOnly, a_exp});
-        k->addArgument({"b", DataType::Double, DataDirection::ReadOnly, b_exp});
+                        cond_resultExpr});
+        k->addArgument({"a", DataType::Double, DataDirection::ReadOnly, aExpr});
+        k->addArgument({"b", DataType::Double, DataDirection::ReadOnly, bExpr});
 
         k->setWorkgroupSize({1, 1, 1});
         k->setWorkitemCount({one, one, one});
