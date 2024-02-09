@@ -29,9 +29,9 @@ def runTestCommand (platform, project)
     String sudo = auxiliary.sudo(platform.jenkinsLabel)
 
     def testCommand = "ctest --output-on-failure "
-    def testCommandExcludeRegex = /(rocprim.device_reduce_by_key|rocprim.device_radix_sort)/
+    def testCommandExcludeRegex = /(rocprim.device_scan)/
     def testCommandExclude = "--exclude-regex \"${testCommandExcludeRegex}\""
-    def hmmExcludeRegex = /(rocprim.device_scan|rocprim.device_reduce_by_key|rocprim.block_sort_bitonic|rocprim.device_merge|rocprim.device_merge_sort|rocprim.device_partition|rocprim.device_segmented_radix_sort|rocprim.device_segmented_scan)/
+    def hmmExcludeRegex = ''
     def hmmTestCommandExclude = "--exclude-regex \"${hmmExcludeRegex}\""
     def hmmTestCommand = ''
     if (platform.jenkinsLabel.contains('gfx90a'))
