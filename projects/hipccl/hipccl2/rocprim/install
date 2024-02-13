@@ -18,6 +18,7 @@ function display_help()
     echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
     echo "    [-k|--relwithdebinfo] -DCMAKE_BUILD_TYPE=RelWithDebInfo"
     echo "    [-b|--benchmark] builds and runs benchmark"
+    echo "    [-s|--static] build static libraries"
     echo "    [--codecoverage] build with code coverage profiling enabled"
     echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
     echo "    [--address-sanitizer] build with address sanitizer enabled"
@@ -33,6 +34,7 @@ build_package=false
 build_clients=false
 build_release=true
 build_release_debug=false
+build_static_libraries=false
 build_codecoverage=false
 build_type=Release
 build_hip_clang=false
@@ -99,6 +101,9 @@ while true; do
         -b|--benchmark)
             build_benchmark=true
             shift ;;
+        -s|--static)
+            build_static_libraries=true
+            shift ;;
         --codecoverage)
             build_codecoverage=true
             shift ;;
@@ -157,6 +162,10 @@ if [[ "${build_clients}" == true ]]; then
     clients="ON"
 fi
 
+if [[ "${build_static_libraries}" == true ]]; then
+    static_libs="-DBUILD_SHARED_LIBS=OFF"
+fi
+
 if [[ "${build_address_sanitizer}" == true ]]; then
     CFLAGS="${CLFAGS} -fsanitize=address -shared-libasan"
     CXXFLAGS="${CXXFLAGS} -fsanitize=address -shared-libasan"
@@ -178,16 +187,19 @@ if [[ "${build_codecoverage}" == true ]]; then
     codecoverage="ON"
 fi
 
-
 if [[ "${build_relocatable}" == true ]]; then
     CXX=${rocm_path}/bin/${compiler} ${cmake_executable} ${cmake_common_options} \
        -DCMAKE_INSTALL_PREFIX=${rocm_path} -DBUILD_BENCHMARK=${benchmark} \
        -DCMAKE_PREFIX_PATH="${rocm_path}  ${rocm_path}/hip" \
        -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} \
-       -DCMAKE_MODULE_PATH="${rocm_path}/lib/cmake/hip ${rocm_path}/hip/cmake" ../../.     # or cmake-gui ../.
+       -DCMAKE_MODULE_PATH="${rocm_path}/lib/cmake/hip ${rocm_path}/hip/cmake" \
+       "${static_libs}" \
+       ../../.     # or cmake-gui ../.
 else
     CXX=${rocm_path}/bin/${compiler} ${cmake_executable} ${cmake_common_options} -DBUILD_BENCHMARK=${benchmark} \
-       -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DBUILD_CODE_COVERAGE=${codecoverage}  ../../. # or cmake-gui ../.
+       -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DBUILD_CODE_COVERAGE=${codecoverage} \
+       "${static_libs}" \
+       ../../. # or cmake-gui ../.
 fi
 
 # Build
