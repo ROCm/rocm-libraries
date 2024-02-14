@@ -52,7 +52,7 @@ build_freorg_bkwdcomp=false
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,benchmark,package,relocatable,relwithdebinfo,codecoverage,address-sanitizer,rm-legacy-include-dir --options hicdtbpgrk -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,benchmark,package,relocatable,relwithdebinfo,static,codecoverage,address-sanitizer,rm-legacy-include-dir --options hicdtbpgrsk -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
