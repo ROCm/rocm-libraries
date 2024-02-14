@@ -768,9 +768,10 @@ namespace rocRoller
                 co_yield Expression::generate(D, matMul, m_context);
             }
 
-            Generator<Instruction> operator()(int, NOP const&, Transformer)
+            Generator<Instruction> operator()(int tag, NOP const&, Transformer coords)
             {
-                co_return;
+                auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                co_yield generate(body, coords);
             }
 
             Generator<Instruction>

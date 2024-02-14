@@ -298,6 +298,7 @@ namespace rocRoller
                                  int                                iMacX,
                                  int                                iMacY,
                                  std::array<unsigned int, 3> const& workgroupSizes,
+                                 std::vector<unsigned int> const&   jammedTiles,
                                  bool                               useSwappedAccess)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
@@ -373,8 +374,29 @@ namespace rocRoller
             connections.push_back(DC<ElementNumber>(elementNumberX, 0));
             connections.push_back(DC<ElementNumber>(elementNumberY, 1));
 
-            graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
-            graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
+            if(jammedTiles.size() > 0 && jammedTiles[0] > 1)
+            {
+                auto jammedWavetileX = graph.coordinates.addElement(
+                    JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
+                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
+                graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, jammedWavetileX, iThrX});
+            }
+            else
+            {
+                graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
+            }
+
+            if(jammedTiles.size() > 1 && jammedTiles[1] > 1)
+            {
+                auto jammedWavetileY = graph.coordinates.addElement(
+                    JammedWaveTileNumber(0, literal(jammedTiles[1]), literal(1)));
+                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
+                graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, jammedWavetileY, iThrY});
+            }
+            else
+            {
+                graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
+            }
         }
 
         /**
@@ -520,6 +542,7 @@ namespace rocRoller
                                   int                                iMacX,
                                   int                                iMacY,
                                   std::array<unsigned int, 3> const& workgroupSizes,
+                                  std::vector<unsigned int> const&   jammedTiles,
                                   bool                               useSwappedAccess)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
@@ -599,8 +622,29 @@ namespace rocRoller
                 }
             }
 
-            graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
-            graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
+            if(jammedTiles.size() > 0 && jammedTiles[0] > 1)
+            {
+                auto jammedWavetileX = graph.coordinates.addElement(
+                    JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
+                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
+                graph.coordinates.addElement(Flatten(), {nThrX, jammedWavetileX, iThrX}, {iMacX});
+            }
+            else
+            {
+                graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
+            }
+
+            if(jammedTiles.size() > 1 && jammedTiles[1] > 1)
+            {
+                auto jammedWavetileY = graph.coordinates.addElement(
+                    JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
+                connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
+                graph.coordinates.addElement(Flatten(), {nThrY, jammedWavetileY, iThrY}, {iMacY});
+            }
+            else
+            {
+                graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
+            }
         }
 
         /**
@@ -717,6 +761,7 @@ namespace rocRoller
                                 int                              userTag,
                                 int                              macTileTag,
                                 std::vector<int> const&          sdim,
+                                std::vector<unsigned int> const& jammedTiles,
                                 ContextPtr                       context)
 
         {
@@ -725,7 +770,8 @@ namespace rocRoller
             auto [nMacX, iMacX, nMacY, iMacY]
                 = addLoadMacroTileCT(graph, connections, macTileTag, sdim);
 
-            addLoadThreadTileCT(graph, connections, macTileTag, iMacX, iMacY, workgroupSizes, true);
+            addLoadThreadTileCT(
+                graph, connections, macTileTag, iMacX, iMacY, workgroupSizes, jammedTiles, true);
 
             graph.coordinates.addElement(DataFlow(), {userTag}, {macTileTag});
         }
@@ -807,6 +853,7 @@ namespace rocRoller
                                     iMacX,
                                     iMacY,
                                     workgroupSizes,
+                                    {},
                                     useSwappedAccess || !useWaveAccess);
 
                 addLDSDirection(
@@ -828,6 +875,7 @@ namespace rocRoller
                                      iMacXStoreLDS,
                                      iMacYStoreLDS,
                                      workgroupSizes,
+                                     {},
                                      useSwappedAccess || !useWaveAccess);
 
                 addLDSDirection(
@@ -869,6 +917,7 @@ namespace rocRoller
                                         iMacXLoadLDS,
                                         iMacYLoadLDS,
                                         workgroupSizes,
+                                        {},
                                         true);
                 }
 
@@ -897,6 +946,7 @@ namespace rocRoller
                                  int                              userTag,
                                  int                              macTileTag,
                                  std::vector<int> const&          sdim,
+                                 std::vector<unsigned int> const& jammedTiles,
                                  ContextPtr                       context)
 
         {
@@ -906,7 +956,7 @@ namespace rocRoller
                 = addStoreMacroTileCT(graph, connections, macTileTag, sdim);
 
             addStoreThreadTileCT(
-                graph, connections, macTileTag, iMacX, iMacY, workgroupSizes, true);
+                graph, connections, macTileTag, iMacX, iMacY, workgroupSizes, jammedTiles, true);
 
             graph.coordinates.addElement(DataFlow(), {macTileTag}, {userTag});
         }
@@ -1002,6 +1052,7 @@ namespace rocRoller
                                     iMacXLoadLDS,
                                     iMacYLoadLDS,
                                     workgroupSizes,
+                                    {},
                                     useSwappedAccess);
 
                 addLDSDirection(
@@ -1027,6 +1078,7 @@ namespace rocRoller
                                      iMacX,
                                      iMacY,
                                      workgroupSizes,
+                                     {},
                                      useSwappedAccess);
 
                 addLDSDirection(connections,
@@ -1126,6 +1178,7 @@ namespace rocRoller
                                     iMacXLoadLDS,
                                     iMacYLoadLDS,
                                     workgroupSizes,
+                                    {},
                                     useSwappedAccess);
 
                 addLDSDirection(
@@ -1178,6 +1231,7 @@ namespace rocRoller
                                      iMacXStoreGlobal,
                                      iMacYStoreGlobal,
                                      workgroupSizes,
+                                     {},
                                      useSwappedAccess);
 
                 addLDSDirection(connections,
@@ -1275,7 +1329,13 @@ namespace rocRoller
                 switch(macTile.memoryType)
                 {
                 case MemoryType::VGPR:
-                    loadMacroTile_VGPR(graph, connections, userTag, macTileTag, sdims, m_context);
+                    loadMacroTile_VGPR(graph,
+                                       connections,
+                                       userTag,
+                                       macTileTag,
+                                       sdims,
+                                       wavetilesPerWavefront,
+                                       m_context);
                     break;
                 case MemoryType::WAVE:
                     loadMacroTile_WAVE(graph,
@@ -1349,7 +1409,13 @@ namespace rocRoller
                 switch(macTile.memoryType)
                 {
                 case MemoryType::VGPR:
-                    storeMacroTile_VGPR(graph, connections, userTag, macTileTag, sdims, m_context);
+                    storeMacroTile_VGPR(graph,
+                                        connections,
+                                        userTag,
+                                        macTileTag,
+                                        sdims,
+                                        wavetilesPerWavefront,
+                                        m_context);
                     break;
                 case MemoryType::WAVE:
                     storeMacroTile_WAVE(graph,

@@ -67,6 +67,26 @@ namespace rocRoller::KernelGraph
         return {};
     }
 
+    template <typename T>
+    std::optional<int> findTopOfContainingOperation(int candidate, KernelGraph const& kgraph)
+    {
+        int lastTag       = -1;
+        int lastOperation = candidate;
+        for(auto parent : kgraph.control.depthFirstVisit(candidate, Graph::Direction::Upstream))
+        {
+            bool containing = lastTag != -1 && kgraph.control.get<CF::Body>(lastTag);
+            lastTag         = parent;
+
+            auto maybeT = kgraph.control.get<T>(parent);
+            if(maybeT && containing)
+                return lastOperation;
+
+            if(kgraph.control.getElementType(parent) == Graph::ElementType::Node)
+                lastOperation = parent;
+        }
+        return {};
+    }
+
     template <std::predicate<int> Predicate>
     std::vector<int> duplicateControlNodes(KernelGraph&                    graph,
                                            std::shared_ptr<GraphReindexer> reindexer,
@@ -132,10 +152,28 @@ namespace rocRoller::KernelGraph
                         auto duplicate
                             = graph.coordinates.getOutputNodeIndices(coord, CT::isEdge<PassThrough>)
                                   .to<std::vector>();
-                        if(duplicate.empty())
-                            graph.coordinates.addElement(PassThrough(), {dim}, {coord});
-                        else
-                            graph.coordinates.addElement(PassThrough(), {dim}, {duplicate[0]});
+
+                        auto origCoord = duplicate.empty() ? coord : duplicate[0];
+                        graph.coordinates.addElement(PassThrough(), {dim}, {origCoord});
+
+                        // Add View edges for new duplicated coordinates
+                        auto outgoingViews
+                            = graph.coordinates.getOutputNodeIndices(origCoord, CT::isEdge<View>)
+                                  .to<std::vector>();
+                        if(!outgoingViews.empty() && reindexer->coordinates.count(outgoingViews[0]))
+                        {
+                            graph.coordinates.addElement(
+                                View(), {dim}, {reindexer->coordinates[outgoingViews[0]]});
+                        }
+
+                        auto incomingViews
+                            = graph.coordinates.getInputNodeIndices(origCoord, CT::isEdge<View>)
+                                  .to<std::vector>();
+                        if(!incomingViews.empty() && reindexer->coordinates.count(incomingViews[0]))
+                        {
+                            graph.coordinates.addElement(
+                                View(), {reindexer->coordinates[incomingViews[0]]}, {dim});
+                        }
                     }
                     coord = reindexer->coordinates[c.coordinate];
                 }

@@ -173,12 +173,15 @@ namespace rocRoller
 
                         // MacroTile should always be a duplicate pointing to an "Original" MacroTile.
                         // Delete the edges from the MacroTile to the original, then delete the MacroTile.
-                        for(auto const& child :
-                            graph.coordinates.getLocation(loadMacroTile).outgoing)
+                        if(graph.mapper.getCoordinateConnections(loadMacroTile).empty())
                         {
-                            graph.coordinates.deleteElement(child);
+                            for(auto const& child :
+                                graph.coordinates.getLocation(loadMacroTile).outgoing)
+                            {
+                                graph.coordinates.deleteElement(child);
+                            }
+                            graph.coordinates.deleteElement(loadMacroTile);
                         }
-                        graph.coordinates.deleteElement(loadMacroTile);
                     }
                     else
                     {

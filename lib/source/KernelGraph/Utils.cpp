@@ -25,11 +25,16 @@ namespace rocRoller
         std::pair<int, int> rangeFor(KernelGraph&              graph,
                                      Expression::ExpressionPtr size,
                                      const std::string&        loopName,
-                                     VariableType              vtype)
+                                     VariableType              vtype,
+                                     int                       forLoopCoord)
         {
             auto unitStride = Expression::literal(1u);
             auto rangeK     = graph.coordinates.addElement(Linear(size, unitStride));
-            auto dimK       = graph.coordinates.addElement(ForLoop(size, unitStride));
+
+            int dimK = forLoopCoord;
+            if(forLoopCoord <= 0)
+                dimK = graph.coordinates.addElement(ForLoop(size, unitStride));
+
             auto sizeDataType
                 = vtype == DataType::None ? Expression::resultVariableType(size) : vtype;
             auto exprK = std::make_shared<Expression::Expression>(
@@ -51,6 +56,21 @@ namespace rocRoller
             graph.mapper.connect(incrementK, rangeK, NaryArgument::DEST);
 
             return {dimK, forK};
+        }
+
+        int cloneForLoop(KernelGraph& graph, int tag)
+        {
+            auto maybeForLoopOp = graph.control.get<ForLoopOp>(tag);
+            AssertFatal(maybeForLoopOp, "cloneForLoop is being called on a non-ForLoopOp");
+
+            auto forLoopDim = graph.mapper.get<ForLoop>(tag);
+
+            auto forLoopSize = graph.coordinates.get<ForLoop>(forLoopDim)->size;
+
+            auto clone = rangeFor(
+                graph, forLoopSize, maybeForLoopOp->loopName, DataType::None, forLoopDim);
+
+            return clone.second;
         }
 
         std::pair<int, int> getForLoopCoords(int forLoopOp, KernelGraph const& kgraph)
@@ -218,7 +238,7 @@ namespace rocRoller
 
             // If there is still a connection to the increment, a
             // similar loop exists elsewhere in the graph.
-            if(!kgraph.mapper.getCoordinateConnections(forIncr).empty())
+            if(!kgraph.mapper.getCoordinateConnections(forLoop).empty())
                 return;
 
             //

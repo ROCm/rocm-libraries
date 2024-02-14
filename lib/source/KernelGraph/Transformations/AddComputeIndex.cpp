@@ -80,6 +80,7 @@ namespace rocRoller::KernelGraph
         Graph::Direction        direction;
         int                     forLoop = -1;
         std::unordered_set<int> zeros;
+        bool                    replaceWithScope = true;
     };
 
     bool operator<(const ComputeIndexChainSpecification& a, const ComputeIndexChainSpecification& b)
@@ -117,18 +118,23 @@ namespace rocRoller::KernelGraph
      *
      * Returns -1 if the operation doesn't need a buffer descriptor.
      */
-    int getBuffer(KernelGraph& graph, int opTag, int src, int dst)
+    int getBuffer(KernelGraph&                        graph,
+                  int                                 opTag,
+                  int                                 src,
+                  int                                 dst,
+                  int                                 location,
+                  std::map<std::pair<int, int>, int>& bufferMap)
     {
         auto op = graph.control.getElement(opTag);
         if(isOperation<LoadLDSTile>(op) || isOperation<StoreLDSTile>(op))
             return -1;
 
-        for(auto neighbour : graph.coordinates.getNeighbours<GD::Upstream>(dst).to<std::vector>())
+        if(bufferMap.count({location, dst}) == 0)
         {
-            if(graph.coordinates.get<Buffer>(neighbour))
-                return neighbour;
+            bufferMap[{location, dst}] = graph.coordinates.addElement(Buffer(), {src}, {dst});
         }
-        return graph.coordinates.addElement(Buffer(), {src}, {dst});
+
+        return bufferMap[{location, dst}];
     }
 
     /**
@@ -200,8 +206,12 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Add ComputeIndexes for MATRIX_A/B from global.
      */
-    ComputeIndexChain
-        computeIndexElementMatrixAB(KernelGraph& graph, int load, int sdim, ExpressionPtr step)
+    ComputeIndexChain computeIndexElementMatrixAB(KernelGraph&                        graph,
+                                                  int                                 load,
+                                                  int                                 sdim,
+                                                  ExpressionPtr                       step,
+                                                  int                                 location,
+                                                  std::map<std::pair<int, int>, int>& bufferMap)
     {
         rocRoller::Log::getLogger()->debug(
             "KernelGraph::AddComputeIndex()::computeIndexElementMatrixAB({}, {})", load, sdim);
@@ -221,7 +231,7 @@ namespace rocRoller::KernelGraph
         auto rowStride = graph.coordinates.addElement(Stride(), {user}, {elemX});
         auto colOffset = graph.coordinates.addElement(Offset(), {user}, {elemY});
         auto colStride = graph.coordinates.addElement(Stride(), {user}, {elemY});
-        auto buffer    = getBuffer(graph, load, user, mac);
+        auto buffer    = getBuffer(graph, load, user, mac, location, bufferMap);
 
         std::vector<DeferredConnection> connections;
         connections.push_back(DC<Offset>(offsetMac, -1));
@@ -273,8 +283,13 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Add ComputeIndexes for generic MATRIX to/from global.
      */
-    ComputeIndexChain computeIndexElementMatrix(
-        KernelGraph& graph, int loadstore, int source, bool forward, std::unordered_set<int> zeros)
+    ComputeIndexChain computeIndexElementMatrix(KernelGraph&                        graph,
+                                                int                                 loadstore,
+                                                int                                 source,
+                                                bool                                forward,
+                                                std::unordered_set<int>             zeros,
+                                                int                                 location,
+                                                std::map<std::pair<int, int>, int>& bufferMap)
     {
         rocRoller::Log::getLogger()->debug(
             "KernelGraph::AddComputeIndex()::computeIndexElementMatrix({}, {}, {})",
@@ -314,7 +329,7 @@ namespace rocRoller::KernelGraph
             rowStride = graph.coordinates.addElement(Stride(), {elemX}, {source});
             colOffset = graph.coordinates.addElement(Offset(), {elemY}, {source});
             colStride = graph.coordinates.addElement(Stride(), {elemY}, {source});
-            buffer    = getBuffer(graph, loadstore, elemX, source);
+            buffer    = getBuffer(graph, loadstore, elemX, source, location, bufferMap);
         }
         else
         {
@@ -322,7 +337,7 @@ namespace rocRoller::KernelGraph
             rowStride = graph.coordinates.addElement(Stride(), {source}, {elemX});
             colOffset = graph.coordinates.addElement(Offset(), {source}, {elemY});
             colStride = graph.coordinates.addElement(Stride(), {source}, {elemY});
-            buffer    = getBuffer(graph, loadstore, source, elemX);
+            buffer    = getBuffer(graph, loadstore, source, elemX, location, bufferMap);
         }
 
         std::vector<DeferredConnection> connections;
@@ -509,8 +524,13 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Add ComputeIndexes for WAVE MATRIX_A/B from global.
      */
-    ComputeIndexChain computeIndexWaveMatrixAB(
-        KernelGraph& graph, int load, int sdim, ExpressionPtr step, std::unordered_set<int> zeros)
+    ComputeIndexChain computeIndexWaveMatrixAB(KernelGraph&                        graph,
+                                               int                                 load,
+                                               int                                 sdim,
+                                               ExpressionPtr                       step,
+                                               std::unordered_set<int>             zeros,
+                                               int                                 location,
+                                               std::map<std::pair<int, int>, int>& bufferMap)
     {
         rocRoller::Log::getLogger()->debug(
             "KernelGraph::AddComputeIndex()::computeIndexWaveMatrixAB({}, {})", load, sdim);
@@ -528,7 +548,7 @@ namespace rocRoller::KernelGraph
         auto strideWave = graph.coordinates.addElement(Stride(), {user}, {wave});
         auto offsetVgpr = graph.coordinates.addElement(Offset(), {user}, {vgpr});
         auto strideVgpr = graph.coordinates.addElement(Stride(), {user}, {vgpr});
-        auto buffer     = getBuffer(graph, load, user, mac);
+        auto buffer     = getBuffer(graph, load, user, mac, location, bufferMap);
 
         std::vector<DeferredConnection> connections;
         connections.push_back(DC<Offset>(offsetMac, -1));
@@ -606,10 +626,12 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Add ComputeIndexes for VGPR MATRIX_ACCUMULATOR from global or LDS.
      */
-    ComputeIndexChain computeIndexMatrixAccumulator(KernelGraph&                   graph,
-                                                    int                            op,
-                                                    bool                           forward,
-                                                    std::unordered_set<int> const& zeros)
+    ComputeIndexChain computeIndexMatrixAccumulator(KernelGraph&                        graph,
+                                                    int                                 op,
+                                                    bool                                forward,
+                                                    std::unordered_set<int> const&      zeros,
+                                                    int                                 location,
+                                                    std::map<std::pair<int, int>, int>& bufferMap)
     {
         rocRoller::Log::getLogger()->debug(
             "KernelGraph::AddComputeIndex()::computeIndexMatrixAccumulator({}, {})", op, forward);
@@ -649,7 +671,7 @@ namespace rocRoller::KernelGraph
             strideVgprBlock = graph.coordinates.addElement(Stride(), {vgprBlock}, {source});
             offsetVgprIndex = graph.coordinates.addElement(Offset(), {vgprIndex}, {source});
             strideVgprIndex = graph.coordinates.addElement(Stride(), {vgprIndex}, {source});
-            buffer          = getBuffer(graph, op, vgprIndex, source);
+            buffer          = getBuffer(graph, op, vgprIndex, source, location, bufferMap);
         }
         else
         {
@@ -657,7 +679,7 @@ namespace rocRoller::KernelGraph
             strideVgprBlock = graph.coordinates.addElement(Stride(), {source}, {vgprBlock});
             offsetVgprIndex = graph.coordinates.addElement(Offset(), {source}, {vgprIndex});
             strideVgprIndex = graph.coordinates.addElement(Stride(), {source}, {vgprIndex});
-            buffer          = getBuffer(graph, op, source, vgprIndex);
+            buffer          = getBuffer(graph, op, source, vgprIndex, location, bufferMap);
         }
 
         std::vector<DeferredConnection> connections;
@@ -878,32 +900,35 @@ namespace rocRoller::KernelGraph
      * @param kgraph Kernel graph to add ComputeIndex operations to.
      * @param tag Load/store operation that needs ComputeIndex operations.
      */
-    ComputeIndexChain addComputeIndex(KernelGraph&            kgraph,
-                                      int                     tag,
-                                      ComputeIndexChainType   chainType,
-                                      ExpressionPtr           step,
-                                      std::unordered_set<int> zeros)
+    ComputeIndexChain addComputeIndex(KernelGraph&                        kgraph,
+                                      int                                 tag,
+                                      ComputeIndexChainType               chainType,
+                                      ExpressionPtr                       step,
+                                      std::unordered_set<int>             zeros,
+                                      int                                 location,
+                                      std::map<std::pair<int, int>, int>& bufferMap)
     {
         auto [source, _d] = getOperationTarget(tag, kgraph);
 
         switch(chainType)
         {
         case STORE_ELEM:
-            return computeIndexElementMatrix(kgraph, tag, source, true, zeros);
+            return computeIndexElementMatrix(kgraph, tag, source, true, zeros, location, bufferMap);
         case STORE_WAVE_MATRIX_ACCUMULATOR:
-            return computeIndexMatrixAccumulator(kgraph, tag, true, zeros);
+            return computeIndexMatrixAccumulator(kgraph, tag, true, zeros, location, bufferMap);
         case LOAD_ELEM_MATRIX_A:
-            return computeIndexElementMatrixAB(kgraph, tag, 1, step);
+            return computeIndexElementMatrixAB(kgraph, tag, 1, step, location, bufferMap);
         case LOAD_ELEM_MATRIX_B:
-            return computeIndexElementMatrixAB(kgraph, tag, 0, step);
+            return computeIndexElementMatrixAB(kgraph, tag, 0, step, location, bufferMap);
         case LOAD_ELEM:
-            return computeIndexElementMatrix(kgraph, tag, source, false, zeros);
+            return computeIndexElementMatrix(
+                kgraph, tag, source, false, zeros, location, bufferMap);
         case LOAD_WAVE_MATRIX_ACCUMULATOR:
-            return computeIndexMatrixAccumulator(kgraph, tag, false, zeros);
+            return computeIndexMatrixAccumulator(kgraph, tag, false, zeros, location, bufferMap);
         case LOAD_WAVE_MATRIX_A:
-            return computeIndexWaveMatrixAB(kgraph, tag, 1, step, zeros);
+            return computeIndexWaveMatrixAB(kgraph, tag, 1, step, zeros, location, bufferMap);
         case LOAD_WAVE_MATRIX_B:
-            return computeIndexWaveMatrixAB(kgraph, tag, 0, step, zeros);
+            return computeIndexWaveMatrixAB(kgraph, tag, 0, step, zeros, location, bufferMap);
         case LOAD_LDS_MATRIX_A:
             return computeIndexWaveMatrixABLDS(kgraph, tag, 1, zeros);
         case LOAD_LDS_MATRIX_B:
@@ -977,10 +1002,12 @@ namespace rocRoller::KernelGraph
                         int                     location,
                         ComputeIndexChainType   type,
                         Graph::Direction        direction,
-                        int                     forLoop = -1,
-                        std::unordered_set<int> zeros   = {})
+                        int                     forLoop          = -1,
+                        std::unordered_set<int> zeros            = {},
+                        bool                    replaceWithScope = true)
         {
-            ComputeIndexChainSpecification spec{target, type, location, direction, forLoop, zeros};
+            ComputeIndexChainSpecification spec{
+                target, type, location, direction, forLoop, zeros, replaceWithScope};
             m_chains[spec].push_back(candidate);
         }
 
@@ -1002,45 +1029,70 @@ namespace rocRoller::KernelGraph
             }
 
             auto maybeForLoop = findContainingOperation<ForLoopOp>(candidate, kgraph);
+            auto maybeScope   = findContainingOperation<Scope>(candidate, kgraph);
             auto hasForLoop   = !forLoopCoordinates.empty();
             auto hasUnroll    = !unrollCoordinates.empty();
 
-            if(maybeForLoop)
-            {
-                log->debug("  containing for-loop: {}", *maybeForLoop);
-
-                if(!uniformForLoop(maybeForLoop, kgraph))
-                {
-                    log->debug("  forcing immediate");
-                    hasForLoop   = false;
-                    hasUnroll    = false;
-                    maybeForLoop = {};
-                }
-            }
-
             auto type = computeIndexChainType(kgraph, candidate);
             log->debug("  type: {}", toString(type));
+            auto isUniformLoop = maybeForLoop && uniformForLoop(maybeForLoop, kgraph);
 
-            if(hasForLoop)
+            if(hasForLoop && isUniformLoop)
             {
-                int location, forLoop;
-                if(maybeForLoop)
-                {
-                    location = *maybeForLoop;
-                    forLoop  = *maybeForLoop;
-                }
-                else
-                {
-                    // Prefetch; has a ForLoop dependency but occurs outside the loop.
-                    auto maybeScope = findContainingOperation<Scope>(candidate, kgraph);
-                    location        = *maybeScope;
-                    forLoop         = -1;
-                }
+                log->debug("  staged as: hasForLoop and isUniformLoop, location {} forLoopOp {}",
+                           *maybeForLoop,
+                           *maybeForLoop);
+                stageChain(target,
+                           candidate,
+                           *maybeForLoop,
+                           type,
+                           GD::Upstream,
+                           *maybeForLoop,
+                           unrollCoordinates);
+                return;
+            }
 
-                log->debug("  staged as: hasForLoop, location {} forLoopOp {}", location, forLoop);
+            // Prefetching
+            // Find all children ForLoopOps. If any forLoopCoordinates are associated with the
+            // children ForLoopOps, this is a prefetch.
+            auto allChildForLoops
+                = kgraph.control
+                      .findNodes(
+                          getTopSetCoordinate(kgraph, candidate),
+                          [&](int tag) -> bool {
+                              return isOperation<ForLoopOp>(kgraph.control.getElement(tag));
+                          },
+                          GD::Downstream)
+                      .to<std::vector>();
 
+            if(hasForLoop
+               && std::any_of(allChildForLoops.begin(), allChildForLoops.end(), [&](auto tag) {
+                      return forLoopCoordinates.count(kgraph.mapper.get<ForLoop>(tag)) > 0;
+                  }))
+            {
+                log->debug("  staged as: hasForLoop and requiresDownstreamForLoop, location {} "
+                           "forLoopOp {}",
+                           *maybeForLoop,
+                           *maybeForLoop);
                 stageChain(
-                    target, candidate, location, type, GD::Upstream, forLoop, unrollCoordinates);
+                    target, candidate, *maybeScope, type, GD::Upstream, -1, unrollCoordinates);
+                return;
+            }
+
+            if(maybeForLoop && !isUniformLoop && hasUnroll)
+            {
+                auto maybeTopOfLoop = findTopOfContainingOperation<ForLoopOp>(candidate, kgraph);
+                log->debug("  staged as: hasForLoop and not isUniformLoop, location {}, {}",
+                           *maybeForLoop,
+                           *maybeTopOfLoop);
+                stageChain(target,
+                           candidate,
+                           *maybeTopOfLoop,
+                           type,
+                           GD::Upstream,
+                           -1,
+                           unrollCoordinates,
+                           false);
                 return;
             }
 
@@ -1053,10 +1105,10 @@ namespace rocRoller::KernelGraph
                 return;
             }
 
-            if(maybeForLoop)
+            if(isUniformLoop)
             {
                 auto forLoop = *maybeForLoop;
-                log->debug("  staged as: maybeForLoop, forLoopOp {}", forLoop);
+                log->debug("  staged as: uniformForLoop, forLoopOp {}", forLoop);
 
                 stageChain(target, candidate, forLoop, type, GD::Upstream, forLoop);
                 return;
@@ -1068,8 +1120,9 @@ namespace rocRoller::KernelGraph
 
         KernelGraph commit(KernelGraph const& original) const
         {
-            auto               kgraph = original;
-            std::map<int, int> scopes;
+            auto                               kgraph = original;
+            std::map<int, int>                 scopes;
+            std::map<std::pair<int, int>, int> bufferMap;
 
             for(auto const& [spec, candidates] : m_chains)
             {
@@ -1083,7 +1136,8 @@ namespace rocRoller::KernelGraph
                 // Use first candidate to compute indexes
                 rocRoller::Log::getLogger()->debug("KernelGraph::AddComputeIndex()::commit({})",
                                                    candidates[0]);
-                auto chain = addComputeIndex(kgraph, candidates[0], spec.type, step, spec.zeros);
+                auto chain = addComputeIndex(
+                    kgraph, candidates[0], spec.type, step, spec.zeros, spec.location, bufferMap);
 
                 if(spec.direction == GD::Downstream)
                 {
@@ -1092,15 +1146,30 @@ namespace rocRoller::KernelGraph
                 }
                 else
                 {
-                    // Add ComputeIndexes in a Scope above target
-                    if(!scopes.contains(spec.location))
+                    if(spec.replaceWithScope)
                     {
-                        scopes[spec.location] = replaceWith(
-                            kgraph, spec.location, kgraph.control.addElement(Scope()), false);
+                        // Add ComputeIndexes in a Scope above target. Only the location
+                        // is within the scope.
+                        if(!scopes.contains(spec.location))
+                        {
+                            scopes[spec.location] = replaceWith(
+                                kgraph, spec.location, kgraph.control.addElement(Scope()), false);
+                        }
+                        auto scope = scopes[spec.location];
+                        kgraph.control.addElement(Body(), {scope}, {chain.top});
+                        kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
                     }
-                    auto scope = scopes[spec.location];
-                    kgraph.control.addElement(Body(), {scope}, {chain.top});
-                    kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
+                    else
+                    {
+                        // Add ComputeIndexes in a Scope above target. Everything underneath
+                        // the location is within the scope.
+                        if(!scopes.contains(spec.location))
+                        {
+                            scopes[spec.location] = kgraph.control.addElement(Scope());
+                            insertWithBody(kgraph, spec.location, scopes[spec.location]);
+                        }
+                        insertBefore(kgraph, spec.location, chain.top, chain.bottom);
+                    }
                 }
 
                 // If the chain has an update but no containing

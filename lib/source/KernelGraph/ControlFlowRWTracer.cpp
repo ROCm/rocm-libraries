@@ -377,7 +377,15 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, dst, ReadWrite::READWRITE);
     }
 
-    void ControlFlowRWTracer::operator()(NOP const& op, int tag) {}
+    void ControlFlowRWTracer::operator()(NOP const& op, int tag)
+    {
+        auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
+        for(auto const& b : body)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
+        generate(body);
+    }
 
     void ControlFlowRWTracer::operator()(Scope const& op, int tag)
     {

@@ -20,12 +20,20 @@ namespace rocRoller
         std::pair<int, int> rangeFor(KernelGraph&              graph,
                                      Expression::ExpressionPtr size,
                                      const std::string&        name,
-                                     VariableType              vtype = DataType::None);
+                                     VariableType              vtype        = DataType::None,
+                                     int                       forLoopCoord = -1);
 
         /**
          * @brief Remove a range-based for loop created by rangeFor.
          */
         void purgeFor(KernelGraph& graph, int tag);
+
+        /**
+         * @brief Create a clone of a ForLoopOp. This new ForLoopOp
+         * will use the same ForLoop Dimension as the original
+         * ForLoopOp.
+        */
+        int cloneForLoop(KernelGraph& graph, int tag);
 
         /**
          * @brief Remove a node and all of its children from the control graph
@@ -95,6 +103,14 @@ namespace rocRoller
          */
         template <typename T>
         std::optional<int> findContainingOperation(int candidate, KernelGraph const& kgraph);
+
+        /**
+         * @brief Find the operation of type T that contains the
+         * candidate load/store operation. Then return the top element of the
+         * body of that operation.
+         */
+        template <typename T>
+        std::optional<int> findTopOfContainingOperation(int candidate, KernelGraph const& kgraph);
 
         /**
          * @brief Create a new coordinate representing data within the scratch space. This will return a
@@ -255,6 +271,7 @@ namespace rocRoller
                                  int                              userTag,
                                  int                              macTileTag,
                                  std::vector<int> const&          sdim,
+                                 std::vector<unsigned int> const& jammedTiles,
                                  ContextPtr                       context);
 
         /**
@@ -266,7 +283,81 @@ namespace rocRoller
                                 int                              userTag,
                                 int                              macTileTag,
                                 std::vector<int> const&          sdim,
+                                std::vector<unsigned int> const& jammedTiles,
                                 ContextPtr                       context);
+
+        /**
+         * @brief Store version of addLoadThreadTileCT.
+         */
+        void addStoreThreadTileCT(KernelGraph&                       graph,
+                                  std::vector<DeferredConnection>&   connections,
+                                  int                                macTileTag,
+                                  int                                iMacX,
+                                  int                                iMacY,
+                                  std::array<unsigned int, 3> const& workgroupSizes,
+                                  std::vector<unsigned int> const&   jammedTiles,
+                                  bool                               useSwappedAccess);
+
+        /**
+         * @brief Store version of addLoadMacroTileCT.
+         */
+        std::tuple<int, int, int, int>
+            addStoreMacroTileCT(KernelGraph&                     graph,
+                                std::vector<DeferredConnection>& connections,
+                                int                              macTileTag,
+                                std::vector<int> const&          sdim);
+
+        /**
+         * @brief Add coordinate-transforms for tiling two
+         * SubDimension coordinates into macro number/index
+         * coordinates.
+         *
+         * The geometry of the tiling is taken from the MacroTile
+         * associated with `macTileTag`.
+         *
+         * Required (deferred) connections are appended to
+         * `connections`.
+         *
+         * @return Tuple of: row MacroTileNumber, row MacroTileIndex,
+         * column MacroTileNumber, column MacroTileIndex.
+         */
+        std::tuple<int, int, int, int>
+            addLoadMacroTileCT(KernelGraph&                     graph,
+                               std::vector<DeferredConnection>& connections,
+                               int                              macTileTag,
+                               std::vector<int> const&          sdim);
+
+        /**
+         * @brief Add coordinate-transforms for loading a ThreadTile
+         * from row/column coordinates iMacX and iMacY.
+         *
+         * The geometry of the ThreadTile is taken from the MacroTile
+         * associated with `macTileTag`.
+         *
+         * By default:
+         *
+         *   - For A/B matrix layouts, the Y thread tile number is
+         *     fast wrt the workitem/lane index and the X thread tile
+         *     number is slow.  For other layous, the X/Y thread tile
+         *     numbers are taken from the X/Y workitem index.
+         *
+         *   - The row index of a thread tile is fast wrt the VGPR
+         *     index.
+         *
+         * When `useSwappedAccess` is true, both of these orders are
+         * reversed.
+         *
+         * Required (deferred) connections are appended to
+         * `connections`.
+         */
+        void addLoadThreadTileCT(KernelGraph&                       graph,
+                                 std::vector<DeferredConnection>&   connections,
+                                 int                                macTileTag,
+                                 int                                iMacX,
+                                 int                                iMacY,
+                                 std::array<unsigned int, 3> const& workgroupSizes,
+                                 std::vector<unsigned int> const&   jammedTiles,
+                                 bool                               useSwappedAccess);
 
         /**
          * @brief Create an internal tile backed by a ThreadTile.

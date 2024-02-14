@@ -51,6 +51,8 @@ namespace GEMMDriverTest
         uint workgroupSizeX = 2 * wavefrontSize;
         uint workgroupSizeY = 2;
 
+        uint numCUs = 0;
+
         std::string transA = "N";
         std::string transB = "T";
 
@@ -93,7 +95,6 @@ namespace GEMMDriverTest
 
             hipDeviceProp_t deviceProperties;
             ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-            uint numCUs = deviceProperties.multiProcessorCount;
 
             // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
             int   M     = gemm.m;
@@ -137,7 +138,7 @@ namespace GEMMDriverTest
             }
             else if(gemm.streamK)
             {
-                numWorkgroupX = numCUs;
+                numWorkgroupX = gemm.numCUs;
                 numWorkgroupY = 1;
             }
             else
@@ -295,7 +296,8 @@ namespace GEMMDriverTest
                     "Current scratch space implementation assumes that the kernel is launched "
                     "with numWorkgroupY == 1");
 
-                kernelOptions->numScratchTiles = std::min(numCUs, numWorkgroupX * numWorkgroupY);
+                kernelOptions->numScratchTiles
+                    = std::min(gemm.numCUs, numWorkgroupX * numWorkgroupY);
 
                 kernelOptions->loopOverOutputTilesDimensions = {0, 1};
                 kernelOptions->streamK                       = true;
@@ -362,7 +364,7 @@ namespace GEMMDriverTest
 
             if(gemm.streamK)
             {
-                runtimeArgs.append("numWGs", numCUs);
+                runtimeArgs.append("numWGs", gemm.numCUs);
             }
 
             // Host result
@@ -385,6 +387,8 @@ namespace GEMMDriverTest
             for(int iteration = 0; iteration < numIters; ++iteration)
             {
                 ASSERT_THAT(hipMemset(deviceD.get(), 0, M * N * sizeof(T)), HasHipSuccess(0));
+                ASSERT_THAT(hipMemset(deviceScratch.get(), 0, scratchSpaceRequired),
+                            HasHipSuccess(0));
 
                 commandKernel.launchKernel(runtimeArgs.runtimeArguments());
                 m_context = commandKernel.getContext();
@@ -480,16 +484,16 @@ namespace GEMMDriverTest
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
 
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        uint numCUs = deviceProperties.multiProcessorCount;
-
         GEMMProblem gemm;
 
-        gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * numCUs / 2 + gemm.macN * 2;
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        gemm.numCUs = deviceProperties.multiProcessorCount;
 
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, numCUs);
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * gemm.numCUs / 2 + gemm.macN * 2;
+
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numCUs);
 
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
@@ -517,19 +521,24 @@ namespace GEMMDriverTest
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
 
+        GEMMProblem gemm;
+
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        uint numCUs = deviceProperties.multiProcessorCount;
-
-        GEMMProblem gemm;
+        gemm.numCUs = deviceProperties.multiProcessorCount;
 
         gemm.waveK = 8;
         gemm.macK  = 16;
 
-        gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * numCUs / 2 + gemm.macN * 2;
+        gemm.macM           = 128;
+        gemm.macN           = 128;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, numCUs);
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * gemm.numCUs / 2 + gemm.macN * 2;
+
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numCUs);
 
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
@@ -555,6 +564,42 @@ namespace GEMMDriverTest
                     }
                 }
             }
+        }
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16StreamKJammed1X2)
+    {
+        if(m_context->targetArchitecture().target().getVersionString() != "gfx90a")
+        {
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+        }
+
+        GEMMProblem gemm;
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        gemm.numCUs = deviceProperties.multiProcessorCount;
+
+        gemm.waveK = 8;
+        gemm.macK  = 16;
+
+        gemm.macM           = 128;
+        gemm.macN           = 128;
+        gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 2;
+
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * gemm.numCUs / 2 + gemm.macN * 2;
+
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numCUs);
+
+        gemm.streamK = true;
+        gemm.k       = gemm.macK * 8;
+
+        for(auto twoTile : {true, false})
+        {
+            gemm.streamKTwoTile = twoTile;
+            basicGEMM<Half>(m_context, gemm, 2.e-5);
         }
     }
 
