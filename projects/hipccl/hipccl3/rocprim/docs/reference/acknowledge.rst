@@ -2,11 +2,12 @@
   :description: rocPRIM documentation and API reference library
   :keywords: rocPRIM, ROCm, API, documentation
 
-.. _warp-scan:
+.. _acknowledge:
 
 ********************************************************************
- Scan
+ Acknowledgements
 ********************************************************************
 
-.. doxygenclass:: rocprim::warp_scan
-   :members:
+The following contributors helped to make this documentation better:
+
+* `v01dXYZ <https://github.com/v01dXYZ>`_ has proposed a new structure for the documentation.

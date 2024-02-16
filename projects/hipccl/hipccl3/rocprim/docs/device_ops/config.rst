@@ -1,9 +1,16 @@
-Configuring the Kernels
-=======================
+.. meta::
+  :description: rocPRIM documentation and API reference library
+  :keywords: rocPRIM, ROCm, API, documentation
+
+.. _dev-config:
+
+********************************************************************
+ Configuring the Kernels
+********************************************************************
 
 A kernel config is a way to select the grid/block dimensions, but also
 how the data will be fetched and stored (the algorithms used for
-``load``/``store`` ) for the operations using them (such as ``select``).
+``load`` and ``store``) for the operations using them (such as ``select``).
 
 .. doxygenstruct:: rocprim::kernel_config
 

@@ -1,18 +1,65 @@
-# Anywhere {branch} is used, the branch name will be substituted.
-# These comments will also be removed.
+defaults:
+  numbered: False
 root: index
 subtrees:
-  - entries:
-    - file: intro
-    - file: ops_summary
-    - file: data-type-support
-    - file: device_ops/index
-    - file: block_ops/index
-    - file: warp_ops/index
-    - file: thread_ops
-    - file: iterators
-    - file: intrinsics
-    - file: glossary
-  - caption: About
-    entries:
-    - file: license
+- entries: 
+  - file: concepts/concepts.rst
+    subtrees:
+    - entries:
+      - file: concepts/intro.rst
+      - file: concepts/glossary.rst
+  - file: reference/reference.rst
+    title: API Reference
+    subtrees:
+    - entries:
+      - file: reference/ops_summary.rst
+      - file: reference/data-type-support.rst
+      - file: device_ops/index.rst
+        subtrees:
+        - entries: 
+          - file: device_ops/config.rst
+          - file: device_ops/transform.rst
+          - file: device_ops/unique.rst
+          - file: device_ops/sort.rst
+          - file: device_ops/merge.rst
+          - file: device_ops/partition.rst
+          - file: device_ops/run_lenght_encoding.rst
+          - file: device_ops/scan.rst
+          - file: device_ops/select.rst
+          - file: device_ops/reduce.rst
+          - file: device_ops/adjacent_difference.rst
+          - file: device_ops/binary_search.rst
+          - file: device_ops/histogram.rst
+      - file: block_ops/index.rst
+        subtrees:
+        - entries: 
+          - file: block_ops/ops_classes/index.rst
+            subtrees: 
+            - entries:
+              - file: block_ops/ops_classes/load.rst
+              - file: block_ops/ops_classes/store.rst
+              - file: block_ops/ops_classes/adjacent_difference.rst
+              - file: block_ops/ops_classes/discontinuity.rst
+              - file: block_ops/ops_classes/scan.rst
+              - file: block_ops/ops_classes/reduce.rst
+              - file: block_ops/ops_classes/shuffle.rst
+              - file: block_ops/ops_classes/exchange.rst
+              - file: block_ops/ops_classes/sort.rst
+              - file: block_ops/ops_classes/histogram.rst
+          - file: block_ops/data_mov_funcs.rst
+      - file: warp_ops/index.rst
+        subtrees: 
+        - entries:
+          - file: warp_ops/load.rst
+          - file: warp_ops/store.rst
+          - file: warp_ops/reduce.rst
+          - file: warp_ops/scan.rst
+          - file: warp_ops/sort.rst
+          - file: warp_ops/shuffle.rst
+          - file: warp_ops/exchange.rst
+      - file: reference/thread_ops.rst
+      - file: reference/iterators.rst
+      - file: reference/intrinsics.rst
+      - file: reference/reorder.rst
+      - file: reference/acknowledge.rst
+  - file: license.rst

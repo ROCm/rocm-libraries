@@ -1,8 +1,15 @@
-Iterators
-=========
+.. meta::
+  :description: rocPRIM documentation and API reference library
+  :keywords: rocPRIM, ROCm, API, documentation
+
+.. _iterators:
+
+********************************************************************
+ Iterators
+********************************************************************
 
 Constant
---------
+==========
 
 .. doxygenclass:: rocprim::constant_iterator
    :members:
@@ -18,7 +25,7 @@ Constant
      ...
 
 Counting
---------
+==========
 
 .. doxygenclass:: rocprim::counting_iterator
    :members:
@@ -33,7 +40,7 @@ Counting
      ...
 
 Transform
----------
+============
 
 .. doxygenclass:: rocprim::transform_iterator
    :members:
@@ -47,7 +54,7 @@ Transform
      ...
 
 Pairing Values with Indices
----------------------------
+=============================
 
 .. doxygenclass:: rocprim::arg_index_iterator
    :members:
@@ -60,7 +67,7 @@ Pairing Values with Indices
      ...
 
 Zip
----
+==============
 
 .. doxygenclass:: rocprim::zip_iterator
    :members:
@@ -73,13 +80,13 @@ Zip
      ...
 
 Discard
--------
+==============
 
 .. doxygenclass:: rocprim::discard_iterator
    :members:
 
 Texture Cache
--------------
+================
 
 .. doxygenclass:: rocprim::texture_cache_iterator
    :members:
