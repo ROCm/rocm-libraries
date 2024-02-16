@@ -1,18 +1,20 @@
-Operation classes
------------------
+.. meta::
+  :description: rocPRIM documentation and API reference library
+  :keywords: rocPRIM, ROCm, API, documentation
 
-.. toctree::
-   load
-   store
+.. _class-index:
 
-   adjacent_difference
-   discontinuity
+********************************************************************
+ Operation classes
+********************************************************************
 
-   scan
-   reduce
-
-   shuffle
-   exchange
-   sort
-
-   histogram
+  * :ref:`blk-load`
+  * :ref:`blk-store`
+  * :ref:`blk-adjacent_difference`
+  * :ref:`blk-discontinuity`
+  * :ref:`blk-scan`
+  * :ref:`blk-reduce`
+  * :ref:`blk-shuffle`
+  * :ref:`blk-exchange`
+  * :ref:`blk-sort`
+  * :ref:`blk-histogram`

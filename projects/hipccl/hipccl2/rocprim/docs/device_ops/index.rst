@@ -1,20 +1,23 @@
-Device-Wide Operations
-======================
+.. meta::
+  :description: rocPRIM documentation and API reference library
+  :keywords: rocPRIM, ROCm, API, documentation
 
-.. toctree::
-   :maxdepth: 6
+.. _dev-index:
 
-   config
+********************************************************************
+ Device-Wide Operations
+********************************************************************
 
-   transform
-   unique
-   sort
-   merge
-   partition
-   run_length_encoding
-   scan
-   select
-   reduce
-   adjacent_difference
-   binary_search
-   histogram
+   * :ref:`dev-config`
+   * :ref:`dev-transform`
+   * :ref:`dev-unique`
+   * :ref:`dev-sort`
+   * :ref:`dev-merge`
+   * :ref:`dev-partition`
+   * :ref:`dev-run_length`
+   * :ref:`dev-scan`
+   * :ref:`dev-select`
+   * :ref:`dev-reduce`
+   * :ref:`dev-adjacent_difference`
+   * :ref:`dev-binary_search`
+   * :ref:`dev-histogram`
