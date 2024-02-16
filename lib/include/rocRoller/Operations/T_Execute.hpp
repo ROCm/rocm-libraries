@@ -98,6 +98,46 @@ namespace rocRoller
         MAKE_BINARY_XOP(E_Div)
         MAKE_BINARY_XOP(E_And)
         MAKE_BINARY_XOP(E_Or)
+        MAKE_BINARY_XOP(E_GreaterThan)
+
+        struct E_Ternary
+        {
+            E_Ternary(int dest, int a, int b, int c);
+            E_Ternary(const std::initializer_list<unsigned>&, unsigned&);
+
+            std::string             toString() const;
+            int                     getTag() const;
+            void                    setTag(int tag);
+            std::unordered_set<int> getOutputs() const;
+            std::unordered_set<int> getInputs() const;
+            virtual std::string     name() const
+            {
+                return "";
+            }
+            int dest;
+            int a;
+            int b;
+            int c;
+        };
+
+// Macro for defining a new ternary XOp
+#define MAKE_TERNARY_XOP(FUNC)                                                       \
+    struct FUNC : public E_Ternary                                                   \
+    {                                                                                \
+        FUNC(int dest, int a, int b, int c)                                          \
+            : E_Ternary(dest, a, b, c)                                               \
+        {                                                                            \
+        }                                                                            \
+        FUNC(const std::initializer_list<unsigned>& args, unsigned& dest, unsigned&) \
+            : E_Ternary(args, dest)                                                  \
+        {                                                                            \
+        }                                                                            \
+        std::string name() const                                                     \
+        {                                                                            \
+            return #FUNC;                                                            \
+        }                                                                            \
+    };
+        MAKE_TERNARY_XOP(E_Conditional)
 
         template <typename T>
         concept CXOp = requires

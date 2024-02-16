@@ -673,5 +673,4 @@ namespace rocRollerTest::Graphs
             rv[i] = x[i];
         return rv;
     }
-
 }

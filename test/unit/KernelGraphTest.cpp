@@ -1886,6 +1886,95 @@ namespace KernelGraphTest
         GPU_SAXPBY(true);
     }
 
+    TEST_F(KernelGraphTestGPU, GPU_LeakyRelu)
+    {
+        auto command = std::make_shared<rocRoller::Command>();
+
+        constexpr auto dataType = DataType::Float;
+
+        int tag = 0;
+
+        auto xTag = tag++;
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Linear(dataType, 1, xTag)));
+
+        auto alphaTag = tag++;
+        command->addOperation(
+            std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Scalar(
+                {dataType, PointerType::PointerGlobal}, alphaTag)));
+
+        // TODO: allow for literal constants
+        auto zeroTag = tag++;
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Scalar({dataType, PointerType::PointerGlobal}, zeroTag)));
+
+        auto execute = rocRoller::Operations::T_Execute();
+
+        auto condTag = tag++;
+        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
+            rocRoller::Operations::E_GreaterThan(condTag, xTag, zeroTag)));
+
+        auto productTag = tag++;
+        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
+            rocRoller::Operations::E_Mul(productTag, xTag, alphaTag)));
+
+        auto reluTag = tag++;
+        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
+            rocRoller::Operations::E_Conditional(reluTag, condTag, xTag, productTag)));
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Store_Linear(1, reluTag)));
+
+        CommandKernel commandKernel(command, "LeakyRelu");
+
+        size_t nx    = 64;
+        float  alpha = 0.9;
+        float  zero  = 0;
+
+        RandomGenerator random(135679u);
+        auto            a = random.vector<float>(nx, -5, 5);
+
+        auto d_a     = make_shared_device(a);
+        auto d_b     = make_shared_device<float>(nx);
+        auto d_alpha = make_shared_device<float>();
+        auto d_zero  = make_shared_device<float>();
+
+        std::vector<float> r(nx), x(nx);
+
+        ASSERT_THAT(hipMemcpy(d_alpha.get(), &alpha, 1 * sizeof(float), hipMemcpyDefault),
+                    HasHipSuccess(0));
+        ASSERT_THAT(hipMemcpy(d_zero.get(), &zero, 1 * sizeof(float), hipMemcpyDefault),
+                    HasHipSuccess(0));
+
+        KernelArguments runtimeArgs;
+        runtimeArgs.append("d_a", d_a.get());
+        runtimeArgs.append("d_a_limit", nx);
+        runtimeArgs.append("d_a_size", nx);
+        runtimeArgs.append("d_a_stride", (size_t)1);
+        runtimeArgs.append("alpha", d_alpha.get());
+        runtimeArgs.append("zero", d_zero.get());
+        runtimeArgs.append("d_b", d_b.get());
+        runtimeArgs.append("d_b_size", nx);
+        runtimeArgs.append("d_b_stride", (size_t)1);
+
+        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+
+        ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * sizeof(float), hipMemcpyDefault),
+                    HasHipSuccess(0));
+
+        // reference solution
+        for(size_t i = 0; i < nx; ++i)
+        {
+            x[i] = a[i] > 0 ? a[i] : alpha * a[i];
+        }
+
+        double rnorm = relativeNorm(r, x);
+
+        ASSERT_LT(rnorm, 1.e-12);
+    }
+
     TEST_F(KernelGraphTestGPU, GPU_LinearCopy)
     {
         auto command = std::make_shared<rocRoller::Command>();

@@ -356,6 +356,9 @@ namespace rocRoller
                 {
                     auto sinputs = std::visit(
                         overloaded{
+                            [](Operations::E_Ternary const& op) {
+                                return std::vector<int>{op.a, op.b, op.c};
+                            },
                             [](Operations::E_Binary const& op) {
                                 return std::vector<int>{op.a, op.b};
                             },
@@ -446,6 +449,14 @@ namespace rocRoller
                             [](Operations::E_Or const& op) -> Expression::ExpressionPtr {
                                 // TODO Implement E_Or XOp
                                 Throw<FatalError>("Not implemented yet.");
+                            },
+                            [&](Operations::E_GreaterThan const& op) -> Expression::ExpressionPtr {
+                                return std::make_shared<Expression::Expression>(
+                                    Expression::GreaterThan{dflow[0], dflow[1]});
+                            },
+                            [&](Operations::E_Conditional const& op) -> Expression::ExpressionPtr {
+                                return std::make_shared<Expression::Expression>(
+                                    Expression::Conditional{dflow[0], dflow[1], dflow[2]});
                             },
                         },
                         *xop);

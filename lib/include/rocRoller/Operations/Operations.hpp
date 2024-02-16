@@ -41,6 +41,7 @@ namespace rocRoller
             std::unordered_set<int> call(XOp const&);
             std::unordered_set<int> operator()(E_Unary const&);
             std::unordered_set<int> operator()(E_Binary const&);
+            std::unordered_set<int> operator()(E_Ternary const&);
             std::unordered_set<int> operator()(Nop const&);
         };
 
@@ -59,6 +60,7 @@ namespace rocRoller
             std::unordered_set<int> call(XOp const&);
             std::unordered_set<int> operator()(E_Unary const&);
             std::unordered_set<int> operator()(E_Binary const&);
+            std::unordered_set<int> operator()(E_Ternary const&);
             std::unordered_set<int> operator()(Nop const&);
         };
 
@@ -67,6 +69,7 @@ namespace rocRoller
             int call(XOp const&);
             int operator()(E_Unary const&);
             int operator()(E_Binary const&);
+            int operator()(E_Ternary const&);
         };
 
         struct AssignOutputs
@@ -84,6 +87,7 @@ namespace rocRoller
             std::unordered_set<int> call(XOp&, int);
             std::unordered_set<int> operator()(E_Unary&);
             std::unordered_set<int> operator()(E_Binary&);
+            std::unordered_set<int> operator()(E_Ternary&);
             std::unordered_set<int> operator()(Nop&);
 
         private:
@@ -105,6 +109,7 @@ namespace rocRoller
             std::string call(XOp const&);
             std::string operator()(E_Unary const&);
             std::string operator()(E_Binary const&);
+            std::string operator()(E_Ternary const&);
             std::string operator()(Nop const&);
 
         private:

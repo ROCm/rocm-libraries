@@ -218,8 +218,6 @@ namespace rocRollerTest
             std::vector<size_t> m_literalStrides;
             CommandPtr          m_command;
         };
-
     }
 }
-
 #include "CommonGraphs_impl.hpp"

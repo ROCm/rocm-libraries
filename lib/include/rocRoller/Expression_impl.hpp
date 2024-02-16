@@ -263,7 +263,8 @@ namespace rocRoller
             case DataType::Double:
                 return literal<double>(value);
             default:
-                Throw<FatalError>("Unsupported datatype provided to Expression::literal");
+                Throw<FatalError>(
+                    "Unsupported datatype ", v.dataType, " provided to Expression::literal");
             }
         }
 

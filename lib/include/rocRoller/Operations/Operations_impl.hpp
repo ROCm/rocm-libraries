@@ -67,6 +67,11 @@ namespace rocRoller
             return binary.getInputs();
         }
 
+        inline std::unordered_set<int> Inputs::operator()(E_Ternary const& ternary)
+        {
+            return ternary.getInputs();
+        }
+
         inline std::unordered_set<int> Inputs::operator()(Nop const& exec)
         {
             return {};
@@ -127,6 +132,11 @@ namespace rocRoller
             return binary.getOutputs();
         }
 
+        inline std::unordered_set<int> Outputs::operator()(E_Ternary const& ternary)
+        {
+            return ternary.getOutputs();
+        }
+
         inline std::unordered_set<int> Outputs::operator()(Nop const& exec)
         {
             return {};
@@ -145,6 +155,11 @@ namespace rocRoller
         inline int TagVisitor::operator()(E_Binary const& binary)
         {
             return binary.getTag();
+        }
+
+        inline int TagVisitor::operator()(E_Ternary const& ternary)
+        {
+            return ternary.getTag();
         }
 
         inline std::unordered_set<int> AssignOutputs::call(Operation& op, int nextTagValue)
@@ -225,6 +240,17 @@ namespace rocRoller
             return std::visit(*this, op);
         }
 
+        inline std::unordered_set<int> AssignOutputs::operator()(E_Ternary& ternary)
+        {
+            if(ternary.getTag() == -1)
+            {
+                ternary.setTag(m_nextTagValue);
+                m_nextTagValue++;
+            }
+
+            return {ternary.getTag()};
+        }
+
         inline std::unordered_set<int> AssignOutputs::operator()(E_Binary& binary)
         {
             if(binary.getTag() == -1)
@@ -302,6 +328,11 @@ namespace rocRoller
         inline std::string ToStringVisitor::operator()(E_Binary const& binary)
         {
             return binary.toString();
+        }
+
+        inline std::string ToStringVisitor::operator()(E_Ternary const& ternary)
+        {
+            return ternary.toString();
         }
 
         inline std::string ToStringVisitor::operator()(Nop const& exec)

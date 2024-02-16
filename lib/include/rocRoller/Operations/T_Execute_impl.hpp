@@ -96,6 +96,52 @@ namespace rocRoller
             return {a, b};
         }
 
+        inline E_Ternary::E_Ternary(int dest, int a, int b, int c)
+            : dest(dest)
+            , a(a)
+            , b(b)
+            , c(c)
+        {
+        }
+
+        inline E_Ternary::E_Ternary(const std::initializer_list<unsigned>& args, unsigned& dest)
+            : dest(dest)
+            , a(*args.begin())
+            , b(*(args.begin() + 1))
+            , c(*(args.begin() + 2))
+        {
+            AssertFatal(args.size() == 3, ShowValue(args.size()));
+        }
+
+        inline std::string E_Ternary::toString() const
+        {
+            std::ostringstream msg;
+
+            msg << name() << " " << dest << ", " << a << ", " << b;
+
+            return msg.str();
+        }
+
+        inline int E_Ternary::getTag() const
+        {
+            return dest;
+        }
+
+        inline void E_Ternary::setTag(int tag)
+        {
+            dest = tag;
+        }
+
+        inline std::unordered_set<int> E_Ternary::getOutputs() const
+        {
+            return {dest};
+        }
+
+        inline std::unordered_set<int> E_Ternary::getInputs() const
+        {
+            return {a, b, c};
+        }
+
         // ------------------------
         // T_Execute methods
         // ------------------------
