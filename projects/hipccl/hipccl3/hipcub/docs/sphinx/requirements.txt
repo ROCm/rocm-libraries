@@ -31,7 +31,7 @@ click==8.1.3
     #   sphinx-external-toc
 click-log==0.4.0
     # via doxysphinx
-cryptography==42.0.0
+cryptography==42.0.2
     # via pyjwt
 deprecated==1.2.13
     # via pygithub
