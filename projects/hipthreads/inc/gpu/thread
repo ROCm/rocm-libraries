@@ -30,7 +30,7 @@ enum {
 #elif defined(__gfx1034__)
     NUM_VCORES = 33U,
 #elif defined(__gfx1100__)
-    NUM_VCORES = 83U, // Conservative for demo
+    NUM_VCORES = 336U, // Conservative for demo
 // #elif defined(__gfx803__)
 //     NUM_VCORES = 15U,
 #elif defined(__HIP_DEVICE_COMPILE__)
