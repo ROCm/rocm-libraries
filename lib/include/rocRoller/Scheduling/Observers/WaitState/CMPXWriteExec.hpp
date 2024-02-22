@@ -17,7 +17,7 @@ namespace rocRoller
          * | 94x  | v_cmpx* write EXEC | v_mfma*         | 4    |
          *
          */
-            void observe(Instruction const& inst);
+            void observeHazard(Instruction const& inst) override;
 
             static bool required(ContextPtr context)
             {

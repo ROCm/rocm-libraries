@@ -13,7 +13,6 @@
 #include <rocRoller/Scheduling/Observers/WaitState/DGEMM16x16x4Write.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/DGEMM4x4x4Write.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/DLWrite.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/RegisterMapObserver.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWrite.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC908.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC90a.hpp>
@@ -29,32 +28,28 @@ namespace rocRoller
     {
         std::shared_ptr<Scheduling::IObserver> createObserver(ContextPtr const& ctx)
         {
-            using AlwaysObservers
-                = MetaObserver<RegisterMapObserver, // NOTE: RegisterMapObserver should be first
-                               AllocatingObserver,
-                               WaitcntObserver,
-                               MFMAObserver>;
-            using Gfx908Observers   = MetaObserver<ACCVGPRReadWrite,
+            using AlwaysObservers = MetaObserver<AllocatingObserver, WaitcntObserver, MFMAObserver>;
+            using Gfx908Observers = MetaObserver<ACCVGPRReadWrite,
                                                  ACCVGPRWriteWrite,
                                                  CMPXWriteExec,
                                                  VALUWrite,
                                                  XDLReadSrcC908,
                                                  XDLWrite908>;
-            using Gfx90aObservers   = MetaObserver<CMPXWriteExec,
+            using Gfx90aObservers = MetaObserver<CMPXWriteExec,
                                                  DGEMM4x4x4Write,
                                                  DGEMM16x16x4Write,
                                                  DLWrite,
                                                  VALUWrite,
                                                  XDLReadSrcC90a,
                                                  XDLWrite90a>;
-            using Gfx94xObservers   = MetaObserver<CMPXWriteExec,
+            using Gfx94xObservers = MetaObserver<CMPXWriteExec,
                                                  DGEMM4x4x4Write,
                                                  DGEMM16x16x4Write,
                                                  DLWrite,
                                                  VALUWrite,
                                                  XDLReadSrcC94x,
                                                  XDLWrite94x>;
-            using FileObservers     = MetaObserver<FileWritingObserver>;
+            using FileObservers   = MetaObserver<FileWritingObserver>;
             using AnalysisObservers = MetaObserver<RegisterLivenessObserver>;
             using ErrorObservers    = MetaObserver<SupportedInstructionObserver>;
 

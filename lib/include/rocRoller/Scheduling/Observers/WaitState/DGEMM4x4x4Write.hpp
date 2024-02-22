@@ -36,11 +36,6 @@ namespace rocRoller
             DGEMM4x4x4Write(ContextPtr context)
                 : WaitStateObserver<DGEMM4x4x4Write>(context){};
 
-            void observe(Instruction const& inst)
-            {
-                observe_base(inst);
-            }
-
             static bool required(ContextPtr context)
             {
                 auto arch = context->targetArchitecture().target().getVersionString();

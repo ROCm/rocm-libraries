@@ -29,13 +29,20 @@ namespace rocRoller
         }
 
         template <class DerivedObserver>
-        InstructionStatus WaitStateObserver<DerivedObserver>::observe_base(Instruction const& inst)
+        void WaitStateObserver<DerivedObserver>::observe(Instruction const& inst)
+        {
+            auto* thisDerived = static_cast<DerivedObserver*>(this);
+            thisDerived->decrementHazardCounters(inst);
+            thisDerived->observeHazard(inst);
+        }
+
+        template <class DerivedObserver>
+        void WaitStateObserver<DerivedObserver>::observeHazard(Instruction const& inst)
         {
             auto* thisDerived = static_cast<DerivedObserver*>(this);
             auto  instRef     = std::make_shared<InstructionRef>(inst);
             if(thisDerived->trigger(instRef))
             {
-                auto regMap = m_context.lock()->getRegisterHazardMap();
                 for(auto iter = (thisDerived->writeTrigger() ? inst.getDsts().begin()
                                                              : inst.getSrcs().begin());
                     iter
@@ -47,11 +54,7 @@ namespace rocRoller
                     {
                         for(auto const& regId : reg->getRegisterIds())
                         {
-                            if(!regMap->contains(regId))
-                            {
-                                (*regMap)[regId] = {};
-                            }
-                            (*regMap)[regId].push_back(
+                            (*m_hazardMap)[regId].push_back(
                                 WaitStateHazardCounter(thisDerived->getMaxNops(instRef),
                                                        instRef,
                                                        thisDerived->writeTrigger()));
@@ -59,8 +62,38 @@ namespace rocRoller
                     }
                 }
             }
+        }
 
-            return InstructionStatus::Nops(inst.getNopCount());
+        template <class DerivedObserver>
+        void WaitStateObserver<DerivedObserver>::decrementHazardCounters(Instruction const& inst)
+        {
+            // If instruction is not a comment or empty
+            if(!inst.getOpCode().empty())
+            {
+                for(auto mapIt = m_hazardMap->begin(); mapIt != m_hazardMap->end();)
+                {
+                    for(auto hazardIt = mapIt->second.begin(); hazardIt != mapIt->second.end();)
+                    {
+                        hazardIt->decrement(inst.nopCount());
+                        if(!hazardIt->stillAlive())
+                        {
+                            hazardIt = mapIt->second.erase(hazardIt);
+                        }
+                        else
+                        {
+                            hazardIt++;
+                        }
+                    }
+                    if(mapIt->second.empty())
+                    {
+                        mapIt = m_hazardMap->erase(mapIt);
+                    }
+                    else
+                    {
+                        mapIt++;
+                    }
+                }
+            }
         }
 
         template <class DerivedObserver>
@@ -85,13 +118,12 @@ namespace rocRoller
             }
 
             auto const* thisDerived = static_cast<DerivedObserver const*>(this);
-            auto        regMap      = m_context.lock()->getRegisterHazardMap();
 
             for(auto const& regId : reg->getRegisterIds())
             {
-                if(regMap->contains(regId))
+                if(m_hazardMap->contains(regId))
                 {
-                    for(auto const& hazard : regMap->at(regId))
+                    for(auto const& hazard : m_hazardMap->at(regId))
                     {
                         bool isHazardous
                             = (thisDerived->writeTrigger() && hazard.regWasWritten())

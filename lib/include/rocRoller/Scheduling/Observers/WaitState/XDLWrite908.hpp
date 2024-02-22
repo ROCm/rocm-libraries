@@ -29,11 +29,6 @@ namespace rocRoller
             XDLWrite908(ContextPtr context)
                 : WaitStateObserver<XDLWrite908>(context){};
 
-            void observe(Instruction const& inst)
-            {
-                observe_base(inst);
-            }
-
             static bool required(ContextPtr context)
             {
                 return context->targetArchitecture().target().getVersionString() == "gfx908";

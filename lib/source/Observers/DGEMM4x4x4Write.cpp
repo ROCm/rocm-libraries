@@ -29,8 +29,7 @@ namespace rocRoller
             {
                 std::optional<int> value;
 
-                auto        regMap = m_context.lock()->getRegisterHazardMap();
-                auto const& srcs   = inst.getSrcs();
+                auto const& srcs = inst.getSrcs();
 
                 // SrcC RAW
                 {
@@ -41,9 +40,9 @@ namespace rocRoller
                     AssertFatal(srcs.at(2) != nullptr, "Empty SrcC");
                     for(auto const& srcId : srcs.at(2)->getRegisterIds())
                     {
-                        if(regMap->contains(srcId))
+                        if(m_hazardMap->contains(srcId))
                         {
-                            for(auto const& hazard : regMap->at(srcId))
+                            for(auto const& hazard : m_hazardMap->at(srcId))
                             {
                                 if(hazard.regWasWritten() && trigger(hazard.getInstructionRef()))
                                 {

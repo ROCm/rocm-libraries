@@ -28,8 +28,6 @@ namespace rocRoller
                     = context->targetArchitecture().target().getVersionString() == "gfx908";
             };
 
-            void observe(Instruction const& inst);
-
             static bool required(ContextPtr context)
             {
                 auto arch = context->targetArchitecture().target().getVersionString();

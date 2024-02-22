@@ -16,7 +16,7 @@ namespace rocRoller
          * | 90a  | v_mfma* read SrcC (16 pass) | v_* write | 19   |
          *
          */
-            void observe(Instruction const& inst);
+            void observeHazard(Instruction const& inst) override;
 
             static bool required(ContextPtr context)
             {

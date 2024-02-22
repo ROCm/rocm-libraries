@@ -355,7 +355,6 @@ set(rocroller_src
  lib/source/Observers/DLWrite.cpp
  lib/source/Observers/ObserverCreation.cpp
  lib/source/Observers/RegisterLivenessObserver.cpp
- lib/source/Observers/RegisterMapObserver.cpp
  lib/source/Observers/SupportedInstructionObserver.cpp
  lib/source/Observers/VALUWrite.cpp
  lib/source/Observers/WaitcntObserver.cpp

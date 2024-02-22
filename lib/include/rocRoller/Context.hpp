@@ -33,16 +33,11 @@
 #include "KernelOptions.hpp"
 
 #include "GPUArchitecture/GPUArchitecture.hpp"
-#include "Scheduling/WaitStateHazardCounter.hpp"
 
 class ContextFixture;
 
 namespace rocRoller
 {
-    using RegisterHazardMap = std::unordered_map<Register::RegisterId,
-                                                 std::vector<Scheduling::WaitStateHazardCounter>,
-                                                 Register::RegisterIdHash>;
-
     class Context : public std::enable_shared_from_this<Context>
     {
     public:
@@ -115,8 +110,6 @@ namespace rocRoller
          */
         void allocateScratch(Expression::ExpressionPtr size);
 
-        std::shared_ptr<RegisterHazardMap> getRegisterHazardMap() const;
-
         /**
          * @brief Get register scope manager.
          */
@@ -158,9 +151,6 @@ namespace rocRoller
 
         std::string   m_assemblyFileName;
         KernelOptions m_kernelOptions;
-
-        // Represents registers and their associated wait state hazards
-        std::shared_ptr<RegisterHazardMap> m_regMap;
     };
 
     std::ostream& operator<<(std::ostream&, ContextPtr const&);

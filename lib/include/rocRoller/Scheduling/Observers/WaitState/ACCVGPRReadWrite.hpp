@@ -23,11 +23,6 @@ namespace rocRoller
             ACCVGPRReadWrite(ContextPtr context)
                 : WaitStateObserver<ACCVGPRReadWrite>(context){};
 
-            void observe(Instruction const& inst)
-            {
-                observe_base(inst);
-            }
-
             static bool required(ContextPtr context)
             {
                 return context->targetArchitecture().target().getVersionString() == "gfx908";

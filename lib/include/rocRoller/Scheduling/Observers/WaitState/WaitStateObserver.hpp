@@ -6,11 +6,17 @@
 #include <rocRoller/CodeGen/InstructionRef_fwd.hpp>
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduling.hpp>
+#include <rocRoller/Scheduling/WaitStateHazardCounter.hpp>
 
 namespace rocRoller
 {
     namespace Scheduling
     {
+        using RegisterHazardMap
+            = std::unordered_map<Register::RegisterId,
+                                 std::vector<Scheduling::WaitStateHazardCounter>,
+                                 Register::RegisterIdHash>;
+
         template <class T>
         concept CWaitStateObserver
             = requires(T obs, std::shared_ptr<InstructionRef> instRef, Instruction const& inst)
@@ -67,7 +73,7 @@ namespace rocRoller
 
             {
                 /*
-                * Get a descpritve comment string
+                * Get a descriptive comment string
                 */
                 obs.getComment()
                 } -> std::same_as<std::string>;
@@ -82,6 +88,7 @@ namespace rocRoller
             WaitStateObserver(ContextPtr context)
                 : m_context(context)
             {
+                m_hazardMap = std::make_shared<RegisterHazardMap>();
             }
 
             /**
@@ -99,18 +106,28 @@ namespace rocRoller
              */
             void modify(Instruction& inst) const;
 
-            /**
-             * @brief Common observer function.
-             * Creates hazards for all src or dst registers (depending on read/write trigger).
-             * Include in DerivedObserver::observe function to use, omit if required logic is different.
-             *
-             * @param inst Instruction to be observered for wait state hazards
-             * @return InstructionStatus with observed NOP count
-             */
-            InstructionStatus observe_base(Instruction const& inst);
+            void observe(Instruction const& inst);
 
         protected:
             std::weak_ptr<Context> m_context;
+
+            // Represents registers and their associated wait state hazards
+            std::shared_ptr<RegisterHazardMap> m_hazardMap;
+
+            /**
+             * @brief Common observer function.
+             * Creates hazards for all src or dst registers (depending on read/write trigger).
+             *
+             * @param inst Instruction to be observed for wait state hazards
+             */
+            virtual void observeHazard(Instruction const& inst);
+
+            /**
+             * @brief Observe function to decrement the Hazard Counters being tracked
+             *
+             * @param inst Instruction to be observed
+            */
+            void decrementHazardCounters(Instruction const& inst);
 
             /**
              * @brief Get the Nops for an OpCode from a map

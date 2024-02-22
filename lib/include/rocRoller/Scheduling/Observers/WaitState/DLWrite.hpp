@@ -26,11 +26,6 @@ namespace rocRoller
             DLWrite(ContextPtr context)
                 : WaitStateObserver<DLWrite>(context){};
 
-            void observe(Instruction const& inst)
-            {
-                observe_base(inst);
-            }
-
             static bool required(ContextPtr context)
             {
                 auto arch = context->targetArchitecture().target().getVersionString();

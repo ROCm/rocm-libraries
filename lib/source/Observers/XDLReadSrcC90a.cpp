@@ -6,23 +6,17 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        void XDLReadSrcC90a::observe(Instruction const& inst)
+        void XDLReadSrcC90a::observeHazard(Instruction const& inst)
         {
             auto instRef = std::make_shared<InstructionRef>(inst);
             if(trigger(instRef))
             {
-                auto regMap = m_context.lock()->getRegisterHazardMap();
-
                 auto srcC = inst.getSrcs().at(2);
                 AssertFatal(srcC != nullptr, "Empty SrcC");
 
                 for(auto const& regId : srcC->getRegisterIds())
                 {
-                    if(!regMap->contains(regId))
-                    {
-                        (*regMap)[regId] = {};
-                    }
-                    (*regMap)[regId].push_back(
+                    (*m_hazardMap)[regId].push_back(
                         WaitStateHazardCounter(getMaxNops(instRef), instRef, writeTrigger()));
                 }
             }

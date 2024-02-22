@@ -535,6 +535,27 @@ namespace rocRollerTest
         }
     }
 
+    TEST_F(MFMA90aObserverTest, DGEMM16x16x4ThenACCRead)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2, 4);
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f64_16x16x4f64", {a[1]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction::Comment("Comments shouldn't change NOP counts"),
+                   Instruction("v_accvgpr_read", {v[2]}, {a[1]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1]);
+            peekAndSchedule(insts[2], 11);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 10"));
+            clearOutput();
+        }
+    }
+
     TEST_F(MFMA90aObserverTest, DGEMM16x16x4ThenFlat)
     {
         auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
