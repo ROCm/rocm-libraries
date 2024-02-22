@@ -31,6 +31,13 @@ namespace rocRoller
             ensureType(Register::ValuePtr& dest, Register::ValuePtr src, Register::Type t) const;
 
         /**
+         * Ensures `dest` is one of the `types`. Copies if nessessary.
+         */
+        Generator<Instruction> ensureType(Register::ValuePtr&        dest,
+                                          Register::ValuePtr         src,
+                                          EnumBitset<Register::Type> types) const;
+
+        /**
          * Copy `src` registers to `dest` registers.
          */
         Generator<Instruction>

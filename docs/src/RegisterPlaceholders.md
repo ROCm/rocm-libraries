@@ -81,8 +81,8 @@ Register::ValuePtr val;
     // This will just assign the source `Register::Value` into `val` if possible.
     co_yield generate(valTmp, expression);
 
-    // This will only copy if valTmp is not a VGPR.
-    co_yield copyGen->ensureType(val, valTmp, Register::Type::Vector);
+    // This will only copy if valTmp is not a VGPR or a literal.
+    co_yield copyGen->ensureType(val, valTmp, {Register::Type::Vector, Register::Type::Literal});
 }
 
 co_yield Instruction("v_foo_u32", {dest}, {val}, {}, "");

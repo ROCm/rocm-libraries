@@ -289,12 +289,15 @@ namespace CopyGeneratorTest
 
     TEST_F(CopyGeneratorTest, EnsureType)
     {
-        auto vr = std::make_shared<Register::Value>(m_context,
+        auto vr              = std::make_shared<Register::Value>(m_context,
                                                     Register::Type::Vector,
                                                     DataType::Int32,
                                                     4,
                                                     Register::AllocationOptions::FullyContiguous());
+        auto literalRegister = Register::Value::Literal(123);
+
         vr->allocateNow();
+
         Register::ValuePtr dummy = nullptr;
 
         std::string expectedOutput = R"(
@@ -324,6 +327,30 @@ namespace CopyGeneratorTest
         EXPECT_EQ(dummy->regType(), Register::Type::Vector);
         EXPECT_EQ(dummy->valueCount(), vr->valueCount());
         EXPECT_EQ(dummy->variableType().dataType, vr->variableType().dataType);
+
+        clearOutput();
+
+        dummy = nullptr;
+
+        m_context->schedule(m_context->copier()->ensureType(
+            dummy, literalRegister, {Register::Type::Vector, Register::Type::Literal}));
+
+        EXPECT_EQ(NormalizedSource(output()), NormalizedSource(""));
+        EXPECT_EQ(dummy->regType(), Register::Type::Literal);
+        EXPECT_EQ(dummy->valueCount(), literalRegister->valueCount());
+        EXPECT_EQ(dummy->variableType().dataType, literalRegister->variableType().dataType);
+
+        clearOutput();
+
+        dummy = nullptr;
+
+        m_context->schedule(m_context->copier()->ensureType(
+            dummy, literalRegister, {Register::Type::Vector, Register::Type::Scalar}));
+
+        EXPECT_EQ(NormalizedSource(output()), NormalizedSource(R"(s_mov_b32 s0, 123)"));
+        EXPECT_EQ(dummy->regType(), Register::Type::Scalar);
+        EXPECT_EQ(dummy->valueCount(), 1);
+        EXPECT_EQ(dummy->variableType().dataType, literalRegister->variableType().dataType);
     }
 
     TEST_F(CopyGeneratorTest, NoAllocation)

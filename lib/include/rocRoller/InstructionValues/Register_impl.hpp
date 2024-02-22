@@ -783,7 +783,8 @@ namespace rocRoller
             if(options.contiguousChunkWidth != Register::MANUAL)
             {
                 AssertFatal(m_options.alignment <= m_options.contiguousChunkWidth,
-                            ShowValue(m_options));
+                            ShowValue(m_options),
+                            ShowValue(variableType));
             }
             else
             {

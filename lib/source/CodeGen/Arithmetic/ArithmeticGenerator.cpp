@@ -193,14 +193,8 @@ namespace rocRoller
         AssertFatal(rhs != nullptr);
 
         Register::ValuePtr tmp;
-        if(rhs->regType() != Register::Type::Literal)
-        {
-            co_yield m_context->copier()->ensureType(tmp, rhs, Register::Type::Vector);
-        }
-        else
-        {
-            tmp = rhs;
-        }
+        co_yield m_context->copier()->ensureType(
+            tmp, rhs, {Register::Type::Vector, Register::Type::Literal});
 
         auto wfp = Register::Value::WavefrontPlaceholder(m_context);
 

@@ -237,6 +237,9 @@ namespace rocRoller
         DataType    dataType;
         PointerType pointerType = PointerType::Value;
 
+        /**
+         * @brief Gets element size in bytes
+         */
         size_t getElementSize() const;
 
         inline bool isPointer() const

@@ -266,27 +266,54 @@ namespace rocRoller
                                                             Register::ValuePtr  src,
                                                             Register::Type      t) const
     {
-        if(src->regType() == t)
+        co_yield ensureType(dest, src, EnumBitset<Register::Type>{t});
+    }
+
+    inline Generator<Instruction> CopyGenerator::ensureType(Register::ValuePtr&        dest,
+                                                            Register::ValuePtr         src,
+                                                            EnumBitset<Register::Type> types) const
+    {
+        if(types[src->regType()])
         {
             dest = src;
             co_return;
         }
 
-        if(!(dest != nullptr && dest->regType() == t
-             && (dest->variableType() == src->variableType())
-             && (dest->valueCount() == src->valueCount())))
+        // If null or incompatible dest, create compatible dest
+        if(dest == nullptr || !types[dest->regType()])
         {
-            auto contiguousChunkWidth = src->allocation()->options().contiguousChunkWidth;
-            if(contiguousChunkWidth < CeilDivide<int>(src->variableType().getElementSize(), 4))
-            {
-                contiguousChunkWidth = Register::VALUE_CONTIGUOUS;
-            }
-            dest = Register::Value::Placeholder(src->context(),
-                                                t,
+            const auto newType = [&] {
+                // Pick least expensive type
+                if(types[Register::Type::Scalar])
+                    return Register::Type::Scalar;
+                if(types[Register::Type::Vector])
+                    return Register::Type::Vector;
+                if(types[Register::Type::Accumulator])
+                    return Register::Type::Accumulator;
+                Throw<FatalError>(
+                    "Cannot ensure valid register type: no concrete register types provided.",
+                    ShowValue(src),
+                    ShowValue(types));
+            }();
+
+            // Special cases for literals
+            auto valueCount = src->valueCount() > 0 ? src->valueCount() : 1;
+            auto context    = src->context() != nullptr ? src->context() : m_context.lock();
+
+            // Allocation ctor mutates contiguousChunkWidth, so it is not directly copyable
+            auto contiguousChunkWidth
+                = src->allocation() != nullptr
+                      ? std::max(src->allocation()->options().contiguousChunkWidth,
+                                 src->allocation()->options().alignment)
+                      : Register::VALUE_CONTIGUOUS;
+
+            dest = Register::Value::Placeholder(context,
+                                                newType,
                                                 src->variableType(),
-                                                src->valueCount(),
+                                                valueCount,
                                                 {.contiguousChunkWidth = contiguousChunkWidth});
         }
+
         co_yield copy(dest, src);
     }
 
