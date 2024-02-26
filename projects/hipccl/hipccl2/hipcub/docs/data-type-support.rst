@@ -16,57 +16,46 @@ Data type support
 
     *
       - Input/Output Types
-      - Library Data Type
       - AMD Support
       - CUDA Support
     *
       - int8
-      - int8_t
       - ✅
       - ✅
     *
       - float8
-      - Not Supported
       - ❌
       - ❌
     *
       - bfloat8
-      - Not Supported
       - ❌
       - ❌
     *
       - int16
-      - int16_t
       - ✅
       - ✅
     *
       - float16
-      - __half
       - ✅
       - ✅ [#]_
     *
       - bfloat16      
-      - hip_bfloat16
       - ✅
       - ✅ [#]_
     *
       - int32
-      - int
       - ✅
       - ✅
     *
       - tensorfloat32
-      - Not Supported
       - ❌
       - ❌
     *
       - float32
-      - float
       - ✅
       - ✅
     *
       - float64
-      - double
       - ✅
       - ✅
 
