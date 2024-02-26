@@ -4,6 +4,7 @@
 
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/Scheduling/Costs/Cost.hpp>
+#include <rocRoller/Scheduling/Costs/LinearWeightedCost.hpp>
 #include <rocRoller/Scheduling/Costs/MinNopsCost.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
@@ -189,5 +190,13 @@ namespace rocRollerTest
         EXPECT_THROW(cost
                      = Component::Get<Scheduling::Cost>(Scheduling::CostFunction::None, m_context),
                      FatalError);
+    }
+
+    TEST_F(CostTest, NonexistentSchedulerWeightsFile)
+    {
+        Settings::getInstance()->set(Settings::SchedulerWeights, "/dev/null/foo");
+        EXPECT_THROW(
+            Component::Get<Scheduling::Cost>(Scheduling::CostFunction::LinearWeighted, m_context),
+            FatalError);
     }
 }

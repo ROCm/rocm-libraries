@@ -98,7 +98,18 @@ namespace rocRoller
             auto settingsFile = Settings::getInstance()->get(Settings::SchedulerWeights);
             if(!settingsFile.empty())
             {
-                m_weights = Serialization::readYAMLFile<Weights>(settingsFile);
+                try
+                {
+                    m_weights = Serialization::readYAMLFile<Weights>(settingsFile);
+                }
+                catch(const std::exception& e)
+                {
+                    Throw<FatalError>(e.what(),
+                                      " parsing linear weighted costs file `",
+                                      settingsFile,
+                                      "` specified by ",
+                                      Settings::SchedulerWeights.help());
+                }
             }
         }
 
