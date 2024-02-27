@@ -110,6 +110,8 @@ class thread {
 typedef void (*WrappedFnPointer)(WorkNode_Header *, WorkNode_Header **);
 
 struct WorkNode_Header {
+    WrappedFnPointer wrapper_fn = nullptr;
+
     WorkNode_Header **link_to_self = nullptr; // (link_to_self == nullptr || *link_to_self = this)
     // Enables thread::detach() to copy a worknode into memory the gpu can free on its own.
     // Can be either nullptr, &workListHead, &currentWorkNode[blockIdx.x], or &(prev->next)
@@ -120,8 +122,6 @@ struct WorkNode_Header {
     uint32_t finishedOrDetached = false; // For join(). Actually operates as a bool, but in some places we use atomic functions to modify it
     uint32_t width = 1; // How many threads per block/vthread are active
     thread::id vthread_id = {}; // TODO: should this be a MAX_THREAD_WIDTH array? For now we just store the lowest id.
-
-    WrappedFnPointer wrapper_fn = nullptr;
 };
 static_assert(std::is_standard_layout_v<WorkNode_Header>);
 
@@ -418,6 +418,13 @@ static __global__ void insertWorkNodeFromHost(WorkNode_Header *worknode) {
     insertWorkNodeAtTail(worknode);
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcuda-compat" // Suppress "ignored 'inline' attribute on kernel function" warnings
+inline __global__ void insertWorkNodeFromHostV2(WorkNode_Header *worknode) {
+    insertWorkNodeAtTail(worknode);
+}
+#pragma clang diagnostic pop
+
 static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t worknodeSize) {
     WorkNode_Header *newWorkNode = static_cast<WorkNode_Header *>(::malloc(worknodeSize));
     WorkNode_Header **currentTail = lockAndFetchTail();
@@ -611,6 +618,12 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
             __LIBGPU_HIP_CHECK__(hipFreeAsync(ptr, getEnqueingStream()));
         });
     }
+
+    // Pointer to the last worknode_d we constructed that had the same Fn_t and Args_t template arguments.
+    static std::weak_ptr<WorkNode_Header> previous_worknode_weak;
+    std::shared_ptr<WorkNode_Header> previous_worknode = previous_worknode_weak.lock();
+    previous_worknode_weak = worknode_d;
+
     // Maybe we want to do this memcpy in the kernel?
     __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), worknode_h.get(), sizeof(*worknode_h), hipMemcpyHostToDevice, getEnqueingStream()));
 
@@ -618,7 +631,15 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     __LIBGPU_HIP_CHECK__(hipEventCreate(&event));
     __LIBGPU_HIP_CHECK__(hipEventRecord(event, getEnqueingStream()));
 
-    hipLaunchKernelGGL(insertWorkNodeFromHost<decltype(worknode_h->fn)>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
+    if (previous_worknode != nullptr)
+    {
+        static_assert(offsetof(WorkNode_Header, wrapper_fn) == 0);
+        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), previous_worknode.get(), sizeof(worknode_d->wrapper_fn), hipMemcpyDeviceToDevice, getEnqueingStream()));
+        hipLaunchKernelGGL(insertWorkNodeFromHostV2, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
+    }
+    else {
+        hipLaunchKernelGGL(insertWorkNodeFromHost<decltype(worknode_h->fn)>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
+    }
 
     worknodeSize = sizeof(*worknode_h);
 
