@@ -146,17 +146,16 @@ static __host__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...
     // re-use the same pinned memory every time.
     // __LIBGPU_HIP_CHECK__(hipHostRegister(worknode_ptr, sizeof(WorkNode_t), hipHostRegisterDefault));
 
-    // Use a functor so that unique_ptr doesn't have to carry a function pointer around, and can inline the destruction.
-    // Not technically needed if we aren't making a call to hipHostUnregister.
-    struct Deleter {
-        void operator()(WorkNode_t* ptr) {
-            // __LIBGPU_HIP_CHECK__(hipHostUnregister(ptr));
-            // Skip invoking the destructor for WorkNode_t because we're expecting the WorkNode to be memcpy'd to device
-            // memory. Not technically required since TriviallyCopyable implies it's trivially destructible
-            operator delete(ptr);
-        }
+    // Custom deleter - Not technically needed if we aren't making a call to hipHostUnregister.
+    // Since lambda's have a unique type, unique_ptr should be able to inline the destruction. With no captures, empty
+    // base optimization should mean the unique_ptr has the same size as a raw pointer.
+    auto deleter = [](WorkNode_t *ptr) {
+        // __LIBGPU_HIP_CHECK__(hipHostUnregister(ptr));
+        // Skip invoking the destructor for WorkNode_t because we're expecting the WorkNode to be memcpy'd to device
+        // memory. Not technically required since TriviallyCopyable implies it's trivially destructible
+        operator delete(ptr);
     };
-    return std::unique_ptr<WorkNode_t, Deleter>(worknode_ptr);
+    return std::unique_ptr<WorkNode_t, decltype(deleter)>(worknode_ptr, std::move(deleter));
 }
 template <class Fn_t, class... Args_t>
 static __device__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
