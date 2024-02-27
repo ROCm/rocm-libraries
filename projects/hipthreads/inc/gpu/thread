@@ -6,6 +6,7 @@
 #include <system_error>
 #include <iostream>
 #include <cstdint>
+#include <memory>
 
 // TODO: Define a custom assert macro for the GPU that cleans up the thread state before invoking __assert_fail(#expr,
 // __FILE__, __LINE__, __ASSERT_FUNCTION). Maybe do the cleanup work in a function that wraps around __assert_fail?
@@ -59,8 +60,12 @@ class thread {
     __host__ __device__ thread() noexcept {}
     __host__ __device__ thread(const thread &) = delete;
     __host__ __device__ thread(thread &&other) noexcept
-        : worknode_d(other.worknode_d), worknodeSize(other.worknodeSize) {
+#ifdef __HIP_DEVICE_COMPILE__
+        : worknode_d(other.worknode_d) {
         other.worknode_d = nullptr;
+#else
+        : worknode_d(std::move(other.worknode_d)), worknodeSize(other.worknodeSize) {
+#endif
     }
     __host__ __device__ thread &operator=(thread &&other) noexcept;
 
@@ -83,22 +88,23 @@ class thread {
 
     __host__ __device__ ~thread();
 
-    __device__ inline thread::id get_id(uint32_t index = 0) const;
-    __host__ inline thread::id get_id(uint32_t index = 0) const;
+    __host__ __device__ inline thread::id get_id(uint32_t index = 0) const;
     __host__ __device__ bool joinable() const noexcept { return worknode_d != nullptr; }
-    __device__ void join();
-    __host__ void join();
-    __device__ void detach();
-    __host__ void detach();
+    __host__ __device__ void join();
+    __host__ __device__ void detach();
 
     __host__ __device__ static constexpr unsigned int max_width() noexcept { return MAX_THREAD_WIDTH; }
     __device__ static constexpr unsigned int hardware_concurrency() noexcept { return NUM_VCORES; }
     __host__ static inline unsigned int hardware_concurrency() noexcept;
   private:
+#ifdef __HIP_DEVICE_COMPILE__
     // If we don't initialize worknode_d to nullptr, operator= might fail when assigning to a default constructed gpu::thread.
     WorkNode_Header *worknode_d = nullptr;
+#else
+    std::shared_ptr<WorkNode_Header> worknode_d = nullptr;
     // Stores the sizeof(WorkNode<T>), so we can do a memcpy without knowing T.
     size_t worknodeSize;
+#endif
 };
 
 typedef void (*WrappedFnPointer)(WorkNode_Header *, WorkNode_Header **);
@@ -517,21 +523,18 @@ inline __host__ unsigned int thread::hardware_concurrency() noexcept {
     }
 }
 
-__device__ inline thread::id thread::get_id(uint32_t index) const {
+__host__ __device__ inline thread::id thread::get_id(uint32_t index) const {
     if (!joinable()) {
         return {};
     }
+
+#ifdef __HIP_DEVICE_COMPILE__
     // Don't need to lock because it's illegal for gpu::thread::detach to be called at the same time as any other
     // gpu::thread method, so we know worknode_d won't change while we're in this function.
     // Also, since vthread_id doesn't change, we don't need to force a fetch from memory, a cached value is fine.
     assert(index < worknode_d->width);
     return worknode_d->vthread_id + index;
-}
-
-__host__ inline thread::id thread::get_id(uint32_t index) const {
-    if (!joinable()) {
-        return {};
-    }
+#else
     // Don't need to lock because it's illegal for gpu::thread::detach to be called at the same time as any other
     // gpu::thread method, so we know worknode_d won't change while we're in this function.
     // Also, since the memcpy happens in the same stream as the thread constructor launches insertWorkNodeFromHost, we
@@ -554,19 +557,26 @@ __host__ inline thread::id thread::get_id(uint32_t index) const {
         throw std::out_of_range("thread::get_id: index is greater than thread width");
     }
     return hdr.vthread_id + index;
+#endif // !__HIP_DEVICE_COMPILE__
 }
 
 __host__ __device__ inline thread &thread::operator=(thread &&other) noexcept {
-    if (joinable()) {
 #ifdef __HIP_DEVICE_COMPILE__
+    if (joinable()) {
         assert(!joinable() && "Attempted to assign to a gpu::thread object that still has an associated thread");
-#else
-        std::terminate();
-#endif
     }
+
     worknode_d = other.worknode_d;
     other.worknode_d = nullptr;
+    // We can skip setting worknodeSize b/c it's only needed for thread::detach in host code.
+#else
+    if (joinable()) {
+        std::terminate();
+    }
+
+    worknode_d = std::move(other.worknode_d);
     worknodeSize = other.worknodeSize;
+#endif // !__HIP_DEVICE_COMPILE__
     return *this;
 }
 
@@ -588,25 +598,39 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     // Note: Do we need to worry about non-object Fn_t's?
     static_assert(std::is_trivially_copyable_v<typename decltype(worknode_h)::element_type>);
 
-    // TODO: do we even want to move the worknode into device memory, or just leave it in pinned host memory?
-    __LIBGPU_HIP_CHECK__(hipMallocAsync(&worknode_d, sizeof(*worknode_h), getEnqueingStream()));
+#ifdef __HIP_DEVICE_COMPILE__
+    // Need to make sure that the insertWorkNodeFromHost template is always instantiated
+    hipLaunchKernelGGL(insertWorkNodeFromHost<decltype(worknode_h->fn)>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d);
+#else
+    {
+        WorkNode_Header *temp_ptr;
+        // TODO: do we even want to move the worknode into device memory, or just leave it in pinned host memory?
+        __LIBGPU_HIP_CHECK__(hipMallocAsync(&temp_ptr, sizeof(*worknode_h), getEnqueingStream()));
+        worknode_d = std::shared_ptr<WorkNode_Header>(temp_ptr, [](WorkNode_Header *ptr) {
+            // WorkNode<T> is trivially destructible (implied by std::is_trivially_copyable).
+            __LIBGPU_HIP_CHECK__(hipFreeAsync(ptr, getEnqueingStream()));
+        });
+    }
     // Maybe we want to do this memcpy in the kernel?
-    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d, worknode_h.get(), sizeof(*worknode_h), hipMemcpyHostToDevice, getEnqueingStream()));
+    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), worknode_h.get(), sizeof(*worknode_h), hipMemcpyHostToDevice, getEnqueingStream()));
+
     hipEvent_t event; // Create a synchronization point after hipMemcpyAsync, so we can make sure the copy is finished before unregistering and/or freeing worknode_h.
     __LIBGPU_HIP_CHECK__(hipEventCreate(&event));
     __LIBGPU_HIP_CHECK__(hipEventRecord(event, getEnqueingStream()));
 
-    hipLaunchKernelGGL(insertWorkNodeFromHost<decltype(worknode_h->fn)>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d);
+    hipLaunchKernelGGL(insertWorkNodeFromHost<decltype(worknode_h->fn)>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
 
     worknodeSize = sizeof(*worknode_h);
 
     // Make sure that the copy is finished before worknode_h goes out of scope and gets unregistered and/or destroyed.
     __LIBGPU_HIP_CHECK__(hipEventSynchronize(event));
     __LIBGPU_HIP_CHECK__(hipEventDestroy(event));
+#endif //!__HIP_DEVICE_COMPILE__
 }
 
 template <class Fn_t, class... Args_t>
-inline __device__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
+inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_fn [[maybe_unused]], Args_t &&...args [[maybe_unused]]) {
+#ifdef __HIP_DEVICE_COMPILE__
     assert(width <= MAX_THREAD_WIDTH);
     assert(threadIdx.x == 0);
     auto typed_worknode_ptr = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
@@ -622,6 +646,7 @@ inline __device__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...ar
     worknode_d = reinterpret_cast<WorkNode_Header *>(typed_worknode_ptr);
     // TODO: Should we bother initializing worknodeSize? It's never used in device code...
     insertWorkNodeAtTail(worknode_d);
+#endif // __HIP_DEVICE_COMPILE__
 }
 
 __host__ __device__ inline thread::~thread() {
@@ -634,7 +659,8 @@ __host__ __device__ inline thread::~thread() {
     }
 }
 
-__device__ inline void thread::join() {
+__host__ __device__ inline void thread::join() {
+#ifdef __HIP_DEVICE_COMPILE__
     // TODO: check that the user has called gpu::start(), in case they use a hip kernel launch to get here
     if (!joinable()) {
         assert(joinable() && "Attempted to join a gpu::thread object that doesn't have an associated thread");
@@ -657,9 +683,7 @@ __device__ inline void thread::join() {
     // of delete
     ::free(worknode_d);
     worknode_d = nullptr;
-}
-
-__host__ inline void thread::join() {
+#else
     if (!started) {
         throw std::logic_error("called gpu::thread::join() before calling gpu::start()");
     }
@@ -672,22 +696,18 @@ __host__ inline void thread::join() {
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
         // Maybe sleep or yield here? On the other hand, hipStreamSynchronize is a blocking call that is likely to take a while
     }
-    // WorkNode<T> is trivially destructible (implied by std::is_trivially_copyable), so we can safely use free instead
-    // of delete
-    __LIBGPU_HIP_CHECK__(hipFreeAsync(worknode_d, getEnqueingStream()));
     worknode_d = nullptr;
+#endif // !__HIP_DEVICE_COMPILE__
 }
 
-__host__ inline void thread::detach() {
+__host__ __device__ inline void thread::detach() {
+#ifndef __HIP_DEVICE_COMPILE__
     if (!joinable()) {
         throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::detach failed");
     }
-    hipLaunchKernelGGL(detachWorkNode, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d, worknodeSize);
-    __LIBGPU_HIP_CHECK__(hipFreeAsync(worknode_d, getEnqueingStream()));
+    hipLaunchKernelGGL(detachWorkNode, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get(), worknodeSize);
     worknode_d = nullptr;
-}
-
-__device__ inline void thread::detach() {
+#else
     if (!joinable()) {
         assert(joinable() && "Attempted to detach a gpu::thread object that doesn't have an associated thread");
     }
@@ -708,6 +728,7 @@ __device__ inline void thread::detach() {
         setAndUnlockTail(currentTail);
 
     worknode_d = nullptr;
+#endif // __HIP_DEVICE_COMPILE__
 }
 
 } // namespace gpu
