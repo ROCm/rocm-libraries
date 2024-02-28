@@ -204,7 +204,8 @@ static inline __device__ void setAndUnlockTail(WorkNode_Header **newTail) {
     atomicExch(reinterpret_cast<uintptr_t*>(&workListTail), reinterpret_cast<uintptr_t>(newTail));
 }
 
-// Precondition: We're still holding the lock acquired in invokeNext
+// Precondition: We're still holding the lock acquired in invokeNext. Needed to make sure detach doesn't make worknode
+// an invalid pointer before we load typed_node_ptr and width.
 template <class Callable_t>
 static __device__ void wrapper(WorkNode_Header *worknode, WorkNode_Header **currentTail) {
     static_assert(std::is_standard_layout_v<WorkNode<Callable_t>>);
