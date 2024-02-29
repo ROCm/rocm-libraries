@@ -57,37 +57,63 @@ namespace rocRoller
 
     namespace Scheduling
     {
-        Weights::Weights()
-            : fractionOfSGPRs(12042.440418691136)
-            , fractionOfVGPRs(95.71453942518029)
-            , highWaterMarkSGPRs(96.88502683536836)
-            , highWaterMarkVGPRs(53.526584801082066)
-            , isACCVGPRRead(518.2179267123564)
-            , isACCVGPRWrite(66.94359848246074)
-            , isLDSRead(305.80350680401983)
-            , isLDSWrite(374.8770913083329)
-            , isMFMA(2064.675633601412)
-            , isSALU(187.61842343063546)
-            , isSControl(52.20563014565612)
-            , isSMEM(51.73435897493539)
-            , isVALU(34.88704839783154)
-            , isVMEMRead(132.51539911592974)
-            , isVMEMWrite(211.778830039103)
-            , ldsQueueSat(514.0030224624215)
-            , lgkmQueueLen(8)
-            , lgkmcnt(57.42789675890664)
-            , newSGPRs(93.71800320620157)
-            , newVGPRs(199.44918165517117)
-            , nops(102.16064235921411)
-            , notMFMA(1126.0097472441112)
-            , outOfRegisters(1000000000.0)
-            , stallCycles(1000.0)
-            , vectorQueueSat(28.444961163165864)
-            , vmQueueLen(4)
-            , vmcnt(175.18015151123478)
-            , zeroFreeBarriers(true)
-        {
-        }
+        constexpr Weights GFX90A_WEIGHTS = {.nops               = 102.16064235921411,
+                                           .vmcnt              = 175.18015151123478,
+                                           .lgkmcnt            = 57.42789675890664,
+                                           .vmQueueLen         = 4,
+                                           .vectorQueueSat     = 28.444961163165864,
+                                           .ldsQueueSat        = 514.0030224624215,
+                                           .lgkmQueueLen       = 8,
+                                           .stallCycles        = 1000.0,
+                                           .notMFMA            = 1126.0097472441112,
+                                           .isMFMA             = 2064.675633601412,
+                                           .isSMEM             = 51.73435897493539,
+                                           .isSControl         = 52.20563014565612,
+                                           .isSALU             = 187.61842343063546,
+                                           .isVMEMRead         = 132.51539911592974,
+                                           .isVMEMWrite        = 211.778830039103,
+                                           .isLDSRead          = 305.80350680401983,
+                                           .isLDSWrite         = 374.8770913083329,
+                                           .isVALU             = 34.88704839783154,
+                                           .isACCVGPRWrite     = 66.94359848246074,
+                                           .isACCVGPRRead      = 518.2179267123564,
+                                           .newSGPRs           = 93.71800320620157,
+                                           .newVGPRs           = 199.44918165517117,
+                                           .highWaterMarkSGPRs = 96.88502683536836,
+                                           .highWaterMarkVGPRs = 53.526584801082066,
+                                           .fractionOfSGPRs    = 12042.440418691136,
+                                           .fractionOfVGPRs    = 95.71453942518029,
+                                           .outOfRegisters     = 1000000000.0,
+                                           .zeroFreeBarriers   = true};
+        constexpr Weights GFX908_WEIGHTS = {.nops               = 620.4481910898397,
+                                           .vmcnt              = 203.68521471982095,
+                                           .lgkmcnt            = 318.37307256604777,
+                                           .vmQueueLen         = 12,
+                                           .vectorQueueSat     = 35.208369484081274,
+                                           .ldsQueueSat        = 26.945053555005625,
+                                           .lgkmQueueLen       = 15,
+                                           .stallCycles        = 1000.0,
+                                           .notMFMA            = 117.91373534215671,
+                                           .isMFMA             = 59.46037213518759,
+                                           .isSMEM             = 82.61122691405645,
+                                           .isSControl         = 159.0019357312576,
+                                           .isSALU             = 86.74764292348273,
+                                           .isVMEMRead         = 161.7542358360216,
+                                           .isVMEMWrite        = 128.64699076145752,
+                                           .isLDSRead          = 144.1002026966658,
+                                           .isLDSWrite         = 66.83668795251201,
+                                           .isVALU             = 204.34498440996558,
+                                           .isACCVGPRWrite     = 59.743294671257594,
+                                           .isACCVGPRRead      = 90.37656910299161,
+                                           .newSGPRs           = 4626.184607642332,
+                                           .newVGPRs           = 73.03434870351303,
+                                           .highWaterMarkSGPRs = 162.64312780347115,
+                                           .highWaterMarkVGPRs = 21.300679968689767,
+                                           .fractionOfSGPRs    = 105.34086248489358,
+                                           .fractionOfVGPRs    = 308.3901444061333,
+                                           .outOfRegisters     = 1000000000.0,
+                                           .zeroFreeBarriers   = true};
+        constexpr Weights GFX942_WEIGHTS = GFX90A_WEIGHTS;
 
         RegisterComponent(LinearWeightedCost);
         static_assert(Component::Component<LinearWeightedCost>);
@@ -109,6 +135,24 @@ namespace rocRoller
                                       settingsFile,
                                       "` specified by ",
                                       Settings::SchedulerWeights.help());
+                }
+            }
+            else
+            {
+                const auto arch = ctx->targetArchitecture().target().getVersionString();
+                // TODO: consolidate with other arch version discriminators
+                if(arch == "gfx908")
+                    m_weights = GFX908_WEIGHTS;
+                else if(arch == "gfx90a")
+                    m_weights = GFX90A_WEIGHTS;
+                else if(arch == "gfx940" || arch == "gfx941" || arch == "gfx942")
+                    m_weights = GFX942_WEIGHTS;
+                else
+                {
+                    Log::warn("Unsupported architecture {} for linear weighted cost; defaulting to "
+                              "GFX90A weights",
+                              arch);
+                    m_weights = GFX90A_WEIGHTS;
                 }
             }
         }

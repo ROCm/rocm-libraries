@@ -21,7 +21,6 @@ namespace rocRoller
          */
         struct Weights
         {
-            Weights();
             /// Does the instruction require a nop before it?
             /// One per nop.
             float nops;

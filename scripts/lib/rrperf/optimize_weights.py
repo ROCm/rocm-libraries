@@ -118,41 +118,26 @@ def fixed_value(value):
 
 @dataclass(frozen=True, order=True, unsafe_hash=True)
 class Weights:
-    # Fix the cost of a stall cycle to provide a common reference point
-    # so that different randomly generated weights are of comparable magnitudes.
-    stallCycles: float = field(default_factory=fixed_value(1000.0))
-
-    # It doesn't make a lot of sense to allow the optimizer to choose
-    # whether to run out of registers should the opportunity arise.
-    # Therefore, fix this parameter at a high value.
-    outOfRegisters: float = field(default_factory=fixed_value(1e9))
-
     nops: float = field(default_factory=random_inv_exp())
 
     vmcnt: float = field(default_factory=random_inv_exp())
     lgkmcnt: float = field(default_factory=random_inv_exp())
 
-    newSGPRs: float = field(default_factory=random_inv_exp())
-    newVGPRs: float = field(default_factory=random_inv_exp())
-    highWaterMarkSGPRs: float = field(default_factory=random_inv_exp())
-    highWaterMarkVGPRs: float = field(default_factory=random_inv_exp())
-    notMFMA: float = field(default_factory=random_inv_exp())
-    isMFMA: float = field(default_factory=random_inv_exp())
-    fractionOfSGPRs: float = field(default_factory=random_inv_exp())
-    fractionOfVGPRs: float = field(default_factory=random_inv_exp())
-
     vmQueueLen: int = field(
         default_factory=random_int(), metadata={"isCoefficient": False}
     )
     vectorQueueSat: float = field(default_factory=random_inv_exp())
+    ldsQueueSat: float = field(default_factory=random_inv_exp())
     lgkmQueueLen: int = field(
         default_factory=random_int(), metadata={"isCoefficient": False}
     )
-    ldsQueueSat: float = field(default_factory=random_inv_exp())
 
-    zeroFreeBarriers: bool = field(
-        default_factory=random_bool(), metadata={"isCoefficient": False}
-    )
+    # Fix the cost of a stall cycle to provide a common reference point
+    # so that different randomly generated weights are of comparable magnitudes.
+    stallCycles: float = field(default_factory=fixed_value(1000.0))
+
+    notMFMA: float = field(default_factory=random_inv_exp())
+    isMFMA: float = field(default_factory=random_inv_exp())
 
     isSMEM: float = field(default_factory=random_inv_exp())
     isSControl: float = field(default_factory=random_inv_exp())
@@ -166,6 +151,22 @@ class Weights:
 
     isACCVGPRWrite: float = field(default_factory=random_inv_exp())
     isACCVGPRRead: float = field(default_factory=random_inv_exp())
+
+    newSGPRs: float = field(default_factory=random_inv_exp())
+    newVGPRs: float = field(default_factory=random_inv_exp())
+    highWaterMarkSGPRs: float = field(default_factory=random_inv_exp())
+    highWaterMarkVGPRs: float = field(default_factory=random_inv_exp())
+    fractionOfSGPRs: float = field(default_factory=random_inv_exp())
+    fractionOfVGPRs: float = field(default_factory=random_inv_exp())
+
+    # It doesn't make a lot of sense to allow the optimizer to choose
+    # whether to run out of registers should the opportunity arise.
+    # Therefore, fix this parameter at a high value.
+    outOfRegisters: float = field(default_factory=fixed_value(1e9))
+
+    zeroFreeBarriers: bool = field(
+        default_factory=random_bool(), metadata={"isCoefficient": False}
+    )
 
     @classmethod
     def Combine(cls, inputs: list, mutation: float = 0.1):
