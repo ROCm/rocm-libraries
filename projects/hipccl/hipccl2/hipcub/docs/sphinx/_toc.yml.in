@@ -4,6 +4,7 @@ root: index
 subtrees:
   - entries:
     - file: doxygen/html/index
+    - file: data-type-support
   - caption: About
     entries:
     - file: license
