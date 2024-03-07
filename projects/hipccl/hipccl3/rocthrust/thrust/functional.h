@@ -1605,7 +1605,6 @@ template<typename Predicate>
  *  There is rarely any reason to construct a <tt>binary_negate</tt> directly;
  *  it is almost always easier to use the helper function not2.
  *
- *  \see https://en.cppreference.com/w/cpp/utility/functional/binary_negate
  */
 template<typename Predicate>
 struct binary_negate
