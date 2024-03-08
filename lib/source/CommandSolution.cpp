@@ -81,6 +81,16 @@ namespace rocRoller
         return m_waveTilesPerWavefront;
     }
 
+    void CommandParameters::setSplitStoreTileIntoWaveBlocks(bool x)
+    {
+        m_splitStoreTileIntoWaveBlocks = x;
+    }
+
+    bool CommandParameters::getSplitStoreTileIntoWaveBlocks() const
+    {
+        return m_splitStoreTileIntoWaveBlocks;
+    }
+
     KernelArguments CommandKernel::getKernelArguments(RuntimeArguments const& args)
     {
         TIMER(t, "CommandKernel::getKernelArguments");
@@ -257,7 +267,8 @@ namespace rocRoller
             !m_context->kernelOptions().allowAmbiguousMemoryNodes));
         transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_preParameters));
         transforms.push_back(std::make_shared<KernelGraph::LowerLinear>(m_context));
-        transforms.push_back(std::make_shared<KernelGraph::LowerTile>(m_preParameters, m_context));
+        transforms.push_back(std::make_shared<KernelGraph::LowerTile>(
+            m_preParameters, m_context, m_preParameters->getSplitStoreTileIntoWaveBlocks()));
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_preParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());

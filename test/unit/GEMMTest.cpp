@@ -4,7 +4,7 @@
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
-#include <random>
+#include <regex>
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -78,6 +78,8 @@ namespace GEMMDriverTest
         bool loopOverTiles  = false;
         bool streamK        = false;
         bool streamKTwoTile = false;
+
+        bool splitStoreTileIntoWaveBlocks = false;
     };
 
     struct GEMMTestGPU : public CurrentGPUContextFixture
@@ -308,6 +310,7 @@ namespace GEMMDriverTest
             params->setManualKernelDimension(2);
             // TODO: Calculate these values internally based on workgroup sizes.
             params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
+            params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
 
             auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                 {gemm.macM, gemm.macK},
@@ -1153,6 +1156,53 @@ namespace GEMMDriverTest
         gemm.storeLDSD = true;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMStoreDWave)
+    {
+        GEMMProblem gemm;
+
+        auto nonZeroDSReadOffsets = [](auto s) {
+            std::regex ds_read_offset("ds_read_b128.*offset:(\\d+)");
+
+            auto begin = std::sregex_iterator(s.begin(), s.end(), ds_read_offset);
+            auto end   = std::sregex_iterator();
+
+            std::set<int> rv;
+            for(auto i = begin; i != end; ++i)
+            {
+                auto m = (*i)[1].str();
+                rv.insert(std::stoi(m));
+            }
+            return rv;
+        };
+
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
+
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
+
+        gemm.waveK = 8;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = true;
+
+        gemm.splitStoreTileIntoWaveBlocks = true;
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+        auto instructions0 = output();
+        EXPECT_EQ(nonZeroDSReadOffsets(instructions0), std::set<int>{1024});
+
+        gemm.splitStoreTileIntoWaveBlocks = false;
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+        auto instructions1 = output();
+        EXPECT_EQ(nonZeroDSReadOffsets(instructions1), std::set<int>{64});
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16AllLDSDebug)

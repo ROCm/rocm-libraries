@@ -68,6 +68,15 @@ namespace rocRoller
          */
         std::vector<unsigned int> getWaveTilesPerWavefront() const;
 
+        /**
+         * @brief Enable/disable wave-storage strategy.
+	 *
+	 * When storing through LDS; the LDS traffic is done following
+	 * the MFMA accumulator layout intead of straight threads.
+         */
+        void setSplitStoreTileIntoWaveBlocks(bool);
+        bool getSplitStoreTileIntoWaveBlocks() const;
+
     private:
         std::map<int, KernelGraph::CoordinateGraph::Dimension>  m_dimInfo;
         std::optional<std::array<unsigned int, 3>>              m_workgroupSize;
@@ -77,6 +86,8 @@ namespace rocRoller
         int m_kernelDimension = 0;
 
         std::vector<unsigned int> m_waveTilesPerWavefront;
+
+        bool m_splitStoreTileIntoWaveBlocks = true;
     };
 
     class CommandKernel

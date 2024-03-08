@@ -400,6 +400,148 @@ namespace rocRoller
         }
 
         /**
+         * @brief Add coordinate-transforms for loading a
+         * MATRIX_ACCUMULATOR tile from row/column coordinates iMacX
+         * and iMacY.
+         *
+         * Required (deferred) connections are appended to
+         * `connections`.
+         */
+        void addLoadAccumulatorTileCT(KernelGraph&                       graph,
+                                      std::vector<DeferredConnection>&   connections,
+                                      int                                macTileTag,
+                                      int                                iMacX,
+                                      int                                iMacY,
+                                      int                                wavefrontSize,
+                                      std::array<unsigned int, 3> const& workgroupSizes)
+        {
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+            auto thrTile = ThreadTile(macTile);
+
+            auto nThrX
+                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thrTile.wsizes.at(0))));
+            auto nThrY
+                = graph.coordinates.addElement(ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+            auto iThrX
+                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thrTile.sizes.at(0))));
+            auto iThrY
+                = graph.coordinates.addElement(ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
+
+            auto workitemX
+                = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+
+            auto elementNumberX
+                = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(1))));
+            auto elementNumberY
+                = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(0))));
+
+            // fast dim : iThrX, slow dim : iThrY
+            graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberY});
+            graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberX});
+            // fast dim : nThrX, slow dim : nThrY
+            graph.coordinates.addElement(Flatten(), {nThrY, nThrX}, {workitemX});
+
+            connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+            connections.push_back(DC<ElementNumber>(elementNumberY, 1));
+
+            graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
+
+            auto numXWorkitems        = thrTile.wsizes.at(0);
+            auto numYWorkitemsPerWave = wavefrontSize / numXWorkitems;
+            auto numYWorkitems        = thrTile.wsizes.at(1);
+            if(numYWorkitemsPerWave > 1 && numYWorkitems > numYWorkitemsPerWave)
+            {
+                auto numYElements = thrTile.sizes.at(1);
+                auto waveNumber   = graph.coordinates.addElement(
+                    Adhoc("waveNumber",
+                          literal(static_cast<uint>(numYWorkitems / numYWorkitemsPerWave)),
+                          nullptr));
+                auto workitemYPerWave = graph.coordinates.addElement(Adhoc(
+                    "workitemYPerWave", literal(static_cast<uint>(numYWorkitemsPerWave)), nullptr));
+                auto waveBlock        = graph.coordinates.addElement(
+                    Adhoc("waveBlock",
+                          literal(static_cast<uint>(numYWorkitemsPerWave * numYElements)),
+                          nullptr));
+
+                graph.coordinates.addElement(Tile(), {iMacY}, {waveNumber, waveBlock});
+                graph.coordinates.addElement(Tile(), {waveBlock}, {iThrY, workitemYPerWave});
+                graph.coordinates.addElement(Flatten(), {waveNumber, workitemYPerWave}, {nThrY});
+            }
+            else
+            {
+                graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
+            }
+        }
+
+        /**
+         * @brief Store version of addLoadAccumulatorTileCT.
+         */
+        void addStoreAccumulatorTileCT(KernelGraph&                       graph,
+                                       std::vector<DeferredConnection>&   connections,
+                                       int                                macTileTag,
+                                       int                                iMacX,
+                                       int                                iMacY,
+                                       int                                wavefrontSize,
+                                       std::array<unsigned int, 3> const& workgroupSizes)
+        {
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+
+            auto thrTile = ThreadTile(macTile);
+
+            auto nThrX
+                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thrTile.wsizes.at(0))));
+            auto nThrY
+                = graph.coordinates.addElement(ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+            auto iThrX
+                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thrTile.sizes.at(0))));
+            auto iThrY
+                = graph.coordinates.addElement(ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
+
+            auto workitemX
+                = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+
+            auto elementNumberX
+                = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(1))));
+            auto elementNumberY
+                = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(0))));
+
+            connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+            connections.push_back(DC<ElementNumber>(elementNumberY, 1));
+
+            graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, nThrX});
+            graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrY});
+            graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrX});
+
+            graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
+
+            auto numXWorkitems        = thrTile.wsizes.at(0);
+            auto numYWorkitemsPerWave = wavefrontSize / numXWorkitems;
+            auto numYWorkitems        = thrTile.wsizes.at(1);
+            if(numYWorkitemsPerWave > 1 && numYWorkitems > numYWorkitemsPerWave)
+            {
+                auto numYElements = thrTile.sizes.at(1);
+                auto waveNumber   = graph.coordinates.addElement(
+                    Adhoc("waveNumber",
+                          literal(static_cast<uint>(numYWorkitems / numYWorkitemsPerWave)),
+                          nullptr));
+                auto workitemYPerWave = graph.coordinates.addElement(Adhoc(
+                    "workitemYPerWave", literal(static_cast<uint>(numYWorkitemsPerWave)), nullptr));
+                auto waveBlock        = graph.coordinates.addElement(
+                    Adhoc("waveBlock",
+                          literal(static_cast<uint>(numYWorkitemsPerWave * numYElements)),
+                          nullptr));
+
+                graph.coordinates.addElement(Tile(), {nThrY}, {waveNumber, workitemYPerWave});
+                graph.coordinates.addElement(Flatten(), {iThrY, workitemYPerWave}, {waveBlock});
+                graph.coordinates.addElement(Flatten(), {waveNumber, waveBlock}, {iMacY});
+            }
+            else
+            {
+                graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
+            }
+        }
+
+        /**
          * @brief Store version of addLoadMacroTileCT.
          */
         std::tuple<int, int, int, int>
@@ -1112,7 +1254,8 @@ namespace rocRoller
                                             int                              macTileTag,
                                             std::vector<int> const&          sdim,
                                             std::vector<unsigned int> const& jammedTiles,
-                                            ContextPtr                       context)
+                                            bool       splitStoreTileIntoWaveBlocks,
+                                            ContextPtr context)
 
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
@@ -1172,14 +1315,23 @@ namespace rocRoller
             {
                 std::vector<DeferredConnection> ldsConnections;
 
-                addLoadThreadTileCT(graph,
-                                    ldsConnections,
-                                    internalMacTileTag,
-                                    iMacXLoadLDS,
-                                    iMacYLoadLDS,
-                                    workgroupSizes,
-                                    {},
-                                    useSwappedAccess);
+                if(splitStoreTileIntoWaveBlocks)
+                    addLoadAccumulatorTileCT(graph,
+                                             ldsConnections,
+                                             internalMacTileTag,
+                                             iMacXLoadLDS,
+                                             iMacYLoadLDS,
+                                             wavefrontSize,
+                                             workgroupSizes);
+                else
+                    addLoadThreadTileCT(graph,
+                                        ldsConnections,
+                                        internalMacTileTag,
+                                        iMacXLoadLDS,
+                                        iMacYLoadLDS,
+                                        workgroupSizes,
+                                        {},
+                                        useSwappedAccess);
 
                 addLDSDirection(
                     connections, ldsConnections, Connections::LDSLoadStore::LOAD_FROM_LDS);
@@ -1225,14 +1377,23 @@ namespace rocRoller
                     graph.coordinates.addElement(PassThrough(), {iMacYStoreGlobal}, {iMacY});
                 }
 
-                addStoreThreadTileCT(graph,
-                                     ldsConnections,
-                                     internalMacTileTag,
-                                     iMacXStoreGlobal,
-                                     iMacYStoreGlobal,
-                                     workgroupSizes,
-                                     {},
-                                     useSwappedAccess);
+                if(splitStoreTileIntoWaveBlocks)
+                    addStoreAccumulatorTileCT(graph,
+                                              ldsConnections,
+                                              internalMacTileTag,
+                                              iMacXStoreGlobal,
+                                              iMacYStoreGlobal,
+                                              wavefrontSize,
+                                              workgroupSizes);
+                else
+                    addStoreThreadTileCT(graph,
+                                         ldsConnections,
+                                         internalMacTileTag,
+                                         iMacXStoreGlobal,
+                                         iMacYStoreGlobal,
+                                         workgroupSizes,
+                                         {},
+                                         useSwappedAccess);
 
                 addLDSDirection(connections,
                                 ldsConnections,
@@ -1262,10 +1423,13 @@ namespace rocRoller
             using BaseGraphVisitor::visitEdge;
             using BaseGraphVisitor::visitOperation;
 
-            LowerTileVisitor(std::shared_ptr<CommandParameters> params, ContextPtr context)
+            LowerTileVisitor(std::shared_ptr<CommandParameters> params,
+                             ContextPtr                         context,
+                             bool                               splitStoreTileIntoWaveBlocks)
                 : BaseGraphVisitor(context)
                 , m_params(params)
                 , m_kernel(context->kernel())
+                , m_splitStoreTileIntoWaveBlocks(splitStoreTileIntoWaveBlocks)
             {
             }
 
@@ -1444,6 +1608,7 @@ namespace rocRoller
                                                    macTileTag,
                                                    sdims,
                                                    wavetilesPerWavefront,
+                                                   m_splitStoreTileIntoWaveBlocks,
                                                    m_context);
                     break;
                 default:
@@ -1459,12 +1624,13 @@ namespace rocRoller
         private:
             AssemblyKernelPtr                  m_kernel;
             std::shared_ptr<CommandParameters> m_params;
+            bool                               m_splitStoreTileIntoWaveBlocks;
         };
 
         KernelGraph LowerTile::apply(KernelGraph const& graph)
         {
             TIMER(t, "KernelGraph::lowerTile");
-            auto visitor = LowerTileVisitor(m_params, m_context);
+            auto visitor = LowerTileVisitor(m_params, m_context, m_splitStoreTileIntoWaveBlocks);
             return rewrite(graph, visitor);
         }
     }
