@@ -24,6 +24,8 @@ Optional:
 * [GoogleTest](https://github.com/google/googletest)
   * Required only for tests; building tests is enabled by default
   * This is automatically downloaded and built by the CMake script
+* [doxygen](https://www.doxygen.nl/)
+  * Required for building the documentation
 
 For ROCm hardware requirements, refer to:
 

@@ -9,7 +9,9 @@ subtrees:
   - file: setup/installing
 - caption: API
   entries:
+  - file: data-type-support
   - file: cpp_api
 - caption: About
   entries:
   - file: license
+  
