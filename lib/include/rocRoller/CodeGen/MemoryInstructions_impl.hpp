@@ -568,6 +568,20 @@ namespace rocRoller
                     "Operation doesn't support hi argument for sizes of "
                         + std::to_string(numBytes));
 
+        auto               ctx        = m_context.lock();
+        Register::ValuePtr newAddr    = addr;
+        auto               maxLiteral = m_context.lock()
+                              ->targetArchitecture()
+                              .GetInstructionInfo("buffer_load_dword")
+                              .maxLiteralValue();
+        if(offset > maxLiteral || offset < 0)
+        {
+            newAddr = Register::Value::Placeholder(ctx, addr->regType(), DataType::UInt32, 1);
+            co_yield ctx->copier()->copy(newAddr, Register::Value::Literal(offset), "");
+            co_yield generateOp<Expression::Add>(newAddr, addr, newAddr);
+            offset = 0;
+        }
+
         std::string offsetModifier = "", glc = "", slc = "", lds = "";
         if(buffOpts.getOffen() || offset == 0)
         {
@@ -590,7 +604,6 @@ namespace rocRoller
             lds += "lds";
         }
         auto sgprSrd = buffDesc->allRegisters();
-        auto ctx     = m_context.lock();
 
         if(numBytes < m_wordSize)
         {
@@ -608,7 +621,7 @@ namespace rocRoller
             }
             co_yield_(Instruction("buffer_load_" + opEnd,
                                   {dest},
-                                  {addr, sgprSrd, Register::Value::Literal(0)},
+                                  {newAddr, sgprSrd, Register::Value::Literal(0)},
                                   {"offen", offsetModifier, glc, slc, lds},
                                   "Load value"));
         }
@@ -625,7 +638,7 @@ namespace rocRoller
                 co_yield_(Instruction(
                     concatenate("buffer_load_dword", width == 1 ? "" : "x" + std::to_string(width)),
                     {dest->subset(Generated(iota(count, count + width)))},
-                    {addr, sgprSrd, Register::Value::Literal(0)},
+                    {newAddr, sgprSrd, Register::Value::Literal(0)},
                     {"offen", offsetModifier, glc, slc, lds},
                     "Load value"));
                 count += width;
@@ -654,6 +667,20 @@ namespace rocRoller
                         && ((numBytes < m_wordSize && numBytes != 3) || numBytes % m_wordSize == 0),
                     "Invalid number of bytes");
 
+        auto               ctx        = m_context.lock();
+        Register::ValuePtr newAddr    = addr;
+        auto               maxLiteral = m_context.lock()
+                              ->targetArchitecture()
+                              .GetInstructionInfo("buffer_store_dword")
+                              .maxLiteralValue();
+        if(offset > maxLiteral || offset < 0)
+        {
+            newAddr = Register::Value::Placeholder(ctx, addr->regType(), DataType::UInt64, 1);
+            co_yield ctx->copier()->copy(newAddr, Register::Value::Literal(offset), "");
+            co_yield generateOp<Expression::Add>(newAddr, addr, newAddr);
+            offset = 0;
+        }
+
         std::string offsetModifier = "", glc = "", slc = "", lds = "";
         if(buffOpts.getOffen() || offset == 0)
         {
@@ -676,7 +703,6 @@ namespace rocRoller
             lds += "lds";
         }
         auto sgprSrd = buffDesc->allRegisters();
-        auto ctx     = m_context.lock();
 
         // TODO Use UInt32 offset register for StoreTiled operations
         // that use an offset modifier.
@@ -686,7 +712,7 @@ namespace rocRoller
         // by a ComputeIndex operation for a StoreTiled operation is
         // 64bit.
         if(!offsetModifier.empty())
-            addr = addr->subset({0});
+            newAddr = newAddr->subset({0});
 
         if(numBytes < m_wordSize)
         {
@@ -704,7 +730,7 @@ namespace rocRoller
             }
             co_yield_(Instruction("buffer_store_" + opEnd,
                                   {},
-                                  {data, addr, sgprSrd, Register::Value::Literal(0)},
+                                  {data, newAddr, sgprSrd, Register::Value::Literal(0)},
                                   {"offen", offsetModifier, glc, slc, lds},
                                   "Store value"));
         }
@@ -736,7 +762,7 @@ namespace rocRoller
                 co_yield_(Instruction(concatenate("buffer_store_dword",
                                                   width == 1 ? "" : "x" + std::to_string(width)),
                                       {},
-                                      {dataSubset, addr, sgprSrd, Register::Value::Literal(0)},
+                                      {dataSubset, newAddr, sgprSrd, Register::Value::Literal(0)},
                                       {"offen", offsetModifier, glc, slc, lds},
                                       "Store value"));
                 count += width;

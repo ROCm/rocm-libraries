@@ -413,6 +413,15 @@ namespace rocRoller
          * @param ordered If true, all orderings will be nodes[i-1] -> nodes[i].
          */
         void orderMemoryNodes(KernelGraph& graph, std::vector<int> const& nodes, bool ordered);
+
+        /**
+         * Replace the use of an old macrotile in the given control
+         * nodes with a new macrotile.
+         */
+        void replaceMacroTile(KernelGraph&                   graph,
+                              std::unordered_set<int> const& ops,
+                              int                            oldMacTileTag,
+                              int                            newMacTileTag);
     }
 }
 

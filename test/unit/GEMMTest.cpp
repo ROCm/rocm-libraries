@@ -534,9 +534,9 @@ namespace GEMMDriverTest
         gemm.macK  = 16;
 
         gemm.macM           = 128;
-        gemm.macN           = 128;
+        gemm.macN           = 256;
         gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
-        gemm.workgroupSizeY = 4;
+        gemm.workgroupSizeY = 2;
 
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numCUs / 2 + gemm.macN * 2;
@@ -570,7 +570,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16StreamKJammed1X2)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
         if(m_context->targetArchitecture().target().getVersionString() != "gfx90a")
         {
@@ -581,18 +581,18 @@ namespace GEMMDriverTest
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numCUs = deviceProperties.multiProcessorCount;
+        gemm.numCUs = 3;
 
         gemm.waveK = 8;
         gemm.macK  = 16;
 
         gemm.macM           = 128;
         gemm.macN           = 128;
-        gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
-        gemm.workgroupSizeY = 2;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
-        gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * gemm.numCUs / 2 + gemm.macN * 2;
+        gemm.m = 4 * gemm.macM;
+        gemm.n = 4 * gemm.macN;
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numCUs);
 

@@ -654,5 +654,80 @@ namespace rocRoller
             }
             orderMemoryNodes(graph, pairs, ordered);
         }
+
+        void replaceMacroTile(KernelGraph&                   graph,
+                              std::unordered_set<int> const& ops,
+                              int                            oldMacTileTag,
+                              int                            newMacTileTag)
+        {
+            for(auto const& opTag : ops)
+            {
+                auto element = graph.control.getElement(opTag);
+                visit(
+                    rocRoller::overloaded{
+                        [&](StoreTiled store) {
+                            auto macroTile = graph.mapper.get<MacroTile>(opTag);
+                            if(macroTile == oldMacTileTag)
+                            {
+                                graph.mapper.disconnect<MacroTile>(opTag, oldMacTileTag);
+                                graph.mapper.connect<MacroTile>(opTag, newMacTileTag);
+
+                                // update the data flow in the coordinate graph
+                                auto dstTag = graph.mapper.get<User>(opTag);
+                                auto df     = *only(
+                                    graph.coordinates.getNeighbours<Graph::Direction::Upstream>(
+                                        dstTag));
+                                graph.coordinates.deleteElement(df);
+                                graph.coordinates.addElement(DataFlow(),
+                                                             std::vector<int>{newMacTileTag},
+                                                             std::vector<int>{dstTag});
+                            }
+                        },
+                        [&](Assign assign) {
+                            GraphReindexer reindexer;
+                            reindexer.coordinates.emplace(oldMacTileTag, newMacTileTag);
+                            reindexExpressions(graph, opTag, reindexer);
+
+                            // update the data flow in the coordinate graph
+                            auto assignConnection = only(graph.mapper.getConnections(opTag));
+                            AssertFatal(assignConnection,
+                                        "There should be exactly one connection for an assignment");
+                            auto             dstTag = assignConnection->coordinate;
+                            std::vector<int> srcTags;
+                            for(auto const& edgeTag :
+                                graph.coordinates.getNeighbours<Graph::Direction::Upstream>(dstTag))
+                            {
+                                auto df = graph.coordinates.get<DataFlow>(edgeTag);
+                                if(!df)
+                                    continue;
+                                auto srcs
+                                    = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(
+                                        edgeTag);
+                                for(auto const src : srcs)
+                                {
+                                    if(src == oldMacTileTag)
+                                        srcTags.push_back(newMacTileTag);
+                                    else
+                                        srcTags.push_back(src);
+                                }
+                                graph.coordinates.deleteElement(edgeTag);
+                            }
+                            graph.coordinates.addElement(
+                                DataFlow(),
+                                srcTags,
+                                std::vector<int>{dstTag == oldMacTileTag ? newMacTileTag : dstTag});
+
+                            if(dstTag == oldMacTileTag)
+                            {
+                                graph.mapper.disconnect(opTag,
+                                                        assignConnection->coordinate,
+                                                        assignConnection->connection);
+                                graph.mapper.connect(opTag, newMacTileTag, NaryArgument::DEST);
+                            }
+                        },
+                        [&](auto op) { Throw<FatalError>("Not handled yet."); }},
+                    std::get<Operation>(element));
+            }
+        }
     }
 }

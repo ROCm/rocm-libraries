@@ -29,14 +29,16 @@ namespace rocRoller
                                                   int                                  waitcnt,
                                                   std::vector<GPUWaitQueueType> const& waitQueues,
                                                   int                                  latency,
-                                                  bool implicitAccess,
-                                                  bool branch)
+                                                  bool         implicitAccess,
+                                                  bool         branch,
+                                                  unsigned int maxLiteralValue)
         : m_instruction(instruction)
         , m_waitCount(waitcnt)
         , m_waitQueues(waitQueues)
         , m_latency(latency)
         , m_implicitAccess(implicitAccess)
         , m_isBranch(branch)
+        , m_maxLiteralValue(maxLiteralValue)
     {
     }
 
@@ -67,6 +69,11 @@ namespace rocRoller
     inline bool GPUInstructionInfo::isBranch() const
     {
         return m_isBranch;
+    }
+
+    inline unsigned int GPUInstructionInfo::maxLiteralValue() const
+    {
+        return m_maxLiteralValue;
     }
 
     //--GPUWaitQueue

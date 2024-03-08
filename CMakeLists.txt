@@ -488,6 +488,7 @@ set(
   test/unit/KernelArgumentsTest.cpp
   test/unit/KernelGraphTest.cpp
   test/unit/KernelGraphTest/Simplify.cpp
+  test/unit/KernelGraphTest/KernelGraphUtils.cpp
   test/unit/KernelIndexTest.cpp
   test/unit/KernelOptionsTest.cpp
   test/unit/KernelTest.cpp

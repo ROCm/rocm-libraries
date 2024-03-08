@@ -185,6 +185,14 @@ namespace rocRoller
                                      Direction dir = Direction::Downstream) const;
 
             /**
+             * @brief Yields node indices connected in the specified direction to start, that satisfy the node selector.
+             */
+            template <CForwardRangeOf<int> Range, std::predicate<int> Predicate>
+            Generator<int> findNodes(Range const& starts,
+                                     Predicate    nodeSelector,
+                                     Direction    dir = Direction::Downstream) const;
+
+            /**
              * @brief Yields node indices that satisfy the node selector.
              */
             template <std::predicate<int> Predicate>

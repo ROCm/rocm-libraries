@@ -216,7 +216,11 @@ namespace GPUArchitectureGenerator
                             isaVersion,
                             rocRoller::GPUInstructionInfo(instruction,
                                                           std::get<1>(std::get<1>(group)),
-                                                          std::get<2>(std::get<1>(group))));
+                                                          std::get<2>(std::get<1>(group)),
+                                                          -1,
+                                                          false,
+                                                          false,
+                                                          std::get<3>(std::get<1>(group))));
                     }
                 }
             }

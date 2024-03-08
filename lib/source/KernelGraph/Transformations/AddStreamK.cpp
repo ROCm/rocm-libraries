@@ -173,65 +173,17 @@ namespace rocRoller
         // Helpers
         //
 
-        /**
-         * Replace the use of an old macrotile in the given control
-         * nodes with a new macrotile.
-         */
-        void replaceMacroTile(KernelGraph&                   graph,
-                              std::unordered_set<int> const& ops,
-                              int                            oldMacTileTag,
-                              int                            newMacTileTag)
+        auto makeFindLoopPredicate(KernelGraph const& graph, std::string const& loopName)
         {
-            for(auto const& opTag : ops)
-            {
-                auto element = graph.control.getElement(opTag);
-                visit(
-                    rocRoller::overloaded{
-                        [&](StoreTiled store) {
-                            graph.mapper.connect<MacroTile>(opTag, oldMacTileTag);
-
-                            // update the data flow in the coordinate graph
-                            auto dstTag = graph.mapper.get<User>(opTag);
-                            auto df
-                                = *only(graph.coordinates.getNeighbours<Graph::Direction::Upstream>(
-                                    dstTag));
-                            graph.coordinates.deleteElement(df);
-                            graph.coordinates.addElement(DataFlow(),
-                                                         std::vector<int>{newMacTileTag},
-                                                         std::vector<int>{dstTag});
-                        },
-                        [&](Assign assign) {
-                            GraphReindexer contractionReindexer;
-                            contractionReindexer.coordinates.emplace(oldMacTileTag, newMacTileTag);
-                            reindexExpressions(graph, opTag, contractionReindexer);
-
-                            // update the data flow in the coordinate graph
-                            auto dstTag = only(graph.mapper.getConnections(opTag))->coordinate;
-                            std::vector<int> srcTags;
-                            for(auto const& edgeTag :
-                                graph.coordinates.getNeighbours<Graph::Direction::Upstream>(dstTag))
-                            {
-                                auto df = graph.coordinates.get<DataFlow>(edgeTag);
-                                if(!df)
-                                    continue;
-                                auto srcs
-                                    = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(
-                                        edgeTag);
-                                for(auto const src : srcs)
-                                {
-                                    if(src == oldMacTileTag)
-                                        srcTags.push_back(newMacTileTag);
-                                    else
-                                        srcTags.push_back(src);
-                                }
-                                graph.coordinates.deleteElement(edgeTag);
-                            }
-                            graph.coordinates.addElement(
-                                DataFlow(), srcTags, std::vector<int>{dstTag});
-                        },
-                        [&](auto op) { Throw<FatalError>("Not handled yet."); }},
-                    std::get<Operation>(element));
-            }
+            auto findLoopPredicate = [&](int tag) -> bool {
+                auto maybeForLoop = graph.control.get<ForLoopOp>(tag);
+                if(!maybeForLoop)
+                    return false;
+                if(maybeForLoop->loopName == loopName)
+                    return true;
+                return false;
+            };
+            return findLoopPredicate;
         }
 
         /**
@@ -413,27 +365,6 @@ namespace rocRoller
         }
 
         /**
-         * Create Assign operation to copy tiles.
-         */
-        int copyAssign(KernelGraph& graph,
-                       int          srcMacTileTag,
-                       int          destMacTileTag,
-                       DataType     dataType,
-                       uint         numRegisters)
-        {
-            auto srcExpr = std::make_shared<Expression::Expression>(
-                Expression::DataFlowTag{srcMacTileTag, Register::Type::Accumulator, dataType});
-
-            auto copyAssignTag
-                = graph.control.addElement(Assign{Register::Type::Vector, srcExpr, numRegisters});
-
-            graph.coordinates.addElement(DataFlow(), {srcMacTileTag}, {destMacTileTag});
-            graph.mapper.connect(copyAssignTag, destMacTileTag, NaryArgument::DEST);
-
-            return copyAssignTag;
-        }
-
-        /**
          * Create send-tile block, which is roughly:
          *
          *     WaitZero()
@@ -544,6 +475,7 @@ namespace rocRoller
                              int                                    accumulatorTileTag,
                              std::unordered_set<int> const&         usesAccumulatorTile,
                              DataType                               dataType,
+                             std::vector<int> const&                epilogueOperations,
                              LoopInfo const&                        loopInfo,
                              ContextPtr                             context)
         {
@@ -583,24 +515,11 @@ namespace rocRoller
             auto doWhileTag = graph.control.addElement(
                 DoWhileOp{(DF(flagRegister) == zero), "Global sync spin loop"});
 
-            // Copy AGPRs to VGPRs before adding fixup
-
-            auto copyForX = cloneForLoop(graph, loopInfo.xLoop);
-            auto copyForY = cloneForLoop(graph, loopInfo.yLoop);
-
             auto accumulatorTile = graph.coordinates.get<MacroTile>(accumulatorTileTag);
             uint numRegisters    = accumulatorTile->elements()
                                 / (product(context->kernel()->workgroupSize()) * loopInfo.xLoopSize
                                    * loopInfo.yLoopSize);
             auto fullyAccumulatedTileTag = graph.coordinates.addElement(MacroTile());
-            auto copyAssignTag           = copyAssign(
-                graph, accumulatorTileTag, fullyAccumulatedTileTag, dataType, numRegisters);
-
-            replaceMacroTile(
-                graph, usesAccumulatorTile, accumulatorTileTag, fullyAccumulatedTileTag);
-
-            graph.control.addElement(Body(), {copyForX}, {copyForY});
-            graph.control.addElement(Body(), {copyForY}, {copyAssignTag});
 
             // Read tile
             int loadAddForX = cloneForLoop(graph, loopInfo.xLoop);
@@ -623,7 +542,7 @@ namespace rocRoller
                     PassThrough(), {jammedY}, {graph.mapper.get<ForLoop>(loadAddForY)});
 
             auto fixupTag = addFixup(graph,
-                                     fullyAccumulatedTileTag,
+                                     accumulatorTileTag,
                                      scratchTileTag,
                                      fullyAccumulatedTileTag,
                                      dataType,
@@ -631,11 +550,38 @@ namespace rocRoller
 
             graph.control.addElement(Sequence(), {loadTileTag}, {fixupTag});
 
+            // Attach epilogue operations after the fixup
+            auto epilogueYLoop = only(graph.control.findNodes(
+                epilogueOperations, makeFindLoopPredicate(graph, rocRoller::YLOOP)));
+            AssertFatal(epilogueYLoop, "Must have exactly one Y loop in the epilogue");
+            auto reindexer       = std::make_shared<GraphReindexer>();
+            auto newEpilogueBody = duplicateControlNodes(
+                graph,
+                reindexer,
+                graph.control.getOutputNodeIndices<Body>(*epilogueYLoop).to<std::vector>(),
+                [](int x) { return false; });
+
+            // Replace accumulatorTileTag with fullyAccumulatedTileTag in the epilogue
+            {
+                GraphReindexer expressionReindexer;
+                expressionReindexer.coordinates.emplace(accumulatorTileTag,
+                                                        fullyAccumulatedTileTag);
+                for(auto const& node : graph.control.depthFirstVisit(newEpilogueBody))
+                {
+                    reindexExpressions(graph, node, expressionReindexer);
+                }
+            }
+
+            for(auto const& epilogueBody : newEpilogueBody)
+            {
+                graph.control.addElement(Sequence(), {fixupTag}, {epilogueBody});
+            }
+
             // Add to control
             auto preWaitZeroTag  = graph.control.addElement(WaitZero());
             auto postWaitZeroTag = graph.control.addElement(WaitZero());
 
-            graph.control.chain<Sequence>(preWaitZeroTag, copyForX, receiveTileTag);
+            graph.control.chain<Sequence>(preWaitZeroTag, receiveTileTag);
 
             graph.control.addElement(Body(), {receiveTileTag}, {boundsCheckTag});
             graph.control.addElement(Body(), {boundsCheckTag}, {doWhileTag});
@@ -1131,11 +1077,14 @@ namespace rocRoller
                                           accumInfo.accumulatorTile,
                                           accumInfo.usesAccumulatorTile,
                                           accumInfo.accumulatorVarType.dataType,
+                                          epilogueOperations,
                                           loopInfo,
                                           context);
 
                 postAccumulationCond = graph.control.addElement(ConditionalOp{
                     zero >= DF(sendInfo.sendBoolSGPR), "Post-accumulation Condition"});
+
+                graph.control.addElement(Else(), {receiveInfo.receiveCond}, {postAccumulationCond});
             }
             else
             {
@@ -1151,6 +1100,8 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {sendInfo.preWaitZero}, {sendInfo.sendCond});
                 graph.control.addElement(
                     Sequence(), {receiveInfo.preWaitZero}, {receiveInfo.receiveCond});
+                graph.control.addElement(
+                    Sequence(), {receiveInfo.receiveCond}, {postAccumulationCond});
             }
 
             //
@@ -1186,18 +1137,19 @@ namespace rocRoller
                 Sequence(), {sendInfo.assignSendBoolSGPR}, {sendInfo.preWaitZero});
             graph.control.addElement(Sequence(), {sendInfo.sendCond}, {receiveInfo.preWaitZero});
 
-            graph.control.addElement(Sequence(), {receiveInfo.receiveCond}, {postAccumulationCond});
-
             if(twoTile)
             {
-                auto scope = graph.control.addElement(Scope());
-                graph.control.addElement(Sequence(), {forTileSKOp}, {scope});
+                auto scopeSK
+                    = replaceWith(graph, forTileSKOp, graph.control.addElement(Scope()), false);
+                auto scopeDP = graph.control.addElement(Scope());
+                graph.control.addElement(Body(), {scopeSK}, {forTileSKOp});
+                graph.control.addElement(Sequence(), {scopeSK}, {scopeDP});
 
                 //
                 // Set SK/DP selectors to select DP
                 //
                 auto lastInit = initializeCoordinates(graph,
-                                                      scope,
+                                                      scopeDP,
                                                       {forwardInfo.selector, reverseInfo.selector},
                                                       one,
                                                       {forTileIncr, forAccumIncr},
@@ -1388,23 +1340,11 @@ namespace rocRoller
 
             loopInfo.dimensionIndices = m_dimensionIndices;
 
-            auto makeFindLoopPredicate = [&](std::string loopName) -> std::function<bool(int)> {
-                auto findLoopPredicate = [&](int tag) -> bool {
-                    auto maybeForLoop = original.control.get<ForLoopOp>(tag);
-                    if(!maybeForLoop)
-                        return false;
-                    if(maybeForLoop->loopName == loopName)
-                        return true;
-                    return false;
-                };
-                return findLoopPredicate;
-            };
-
             auto kernel = *original.control.roots().begin();
 
             // Find the loop control nodes
             auto maybeTopLoopOp
-                = original.control.findNodes(kernel, makeFindLoopPredicate(m_topLoop))
+                = original.control.findNodes(kernel, makeFindLoopPredicate(original, m_topLoop))
                       .take(1)
                       .only();
             if(!maybeTopLoopOp)
@@ -1416,8 +1356,8 @@ namespace rocRoller
             }
             loopInfo.topLoopOp = *maybeTopLoopOp;
 
-            auto maybeAccumLoopOp
-                = only(original.control.findElements(makeFindLoopPredicate(m_accumulatorLoop)));
+            auto maybeAccumLoopOp = only(
+                original.control.findElements(makeFindLoopPredicate(original, m_accumulatorLoop)));
             if(!maybeAccumLoopOp)
             {
                 rocRoller::Log::warn("Unable to find ForLoop '{}' during AddStreamK pass.  "
@@ -1442,7 +1382,8 @@ namespace rocRoller
             };
 
             auto maybeXLoopOp
-                = original.control.findNodes(kernel, makeFindLoopPredicate(rocRoller::XLOOP))
+                = original.control
+                      .findNodes(kernel, makeFindLoopPredicate(original, rocRoller::XLOOP))
                       .take(1)
                       .only();
             if(maybeXLoopOp)
@@ -1452,7 +1393,8 @@ namespace rocRoller
             }
 
             auto maybeYLoopOp
-                = original.control.findNodes(kernel, makeFindLoopPredicate(rocRoller::YLOOP))
+                = original.control
+                      .findNodes(kernel, makeFindLoopPredicate(original, rocRoller::YLOOP))
                       .take(1)
                       .only();
             if(maybeYLoopOp)

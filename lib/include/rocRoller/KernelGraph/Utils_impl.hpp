@@ -158,7 +158,7 @@ namespace rocRoller::KernelGraph
 
                         // Add View edges for new duplicated coordinates
                         auto outgoingViews
-                            = graph.coordinates.getOutputNodeIndices(origCoord, CT::isEdge<View>)
+                            = graph.coordinates.getOutputNodeIndices(coord, CT::isEdge<View>)
                                   .to<std::vector>();
                         if(!outgoingViews.empty() && reindexer->coordinates.count(outgoingViews[0]))
                         {

@@ -36,20 +36,9 @@ namespace rocRoller
                 if(evaluate(rhs) != evaluate(forLoopDim))
                     continue;
 
-                // Replace ForLoop with Scope if there are loads or stores within the loop,
-                // otherwise replace with a NOP; ideally would reconnect but OK for now
-                int numComputeIndexCandidates = 0;
-                for(auto const& body : k.control.getOutputNodeIndices<Body>(loop))
-                    numComputeIndexCandidates += findComputeIndexCandidates(k, body).size();
+                // Replace ForLoop with Scope; ideally would reconnect but OK for now
+                auto scope = replaceWith(k, loop, k.control.addElement(Scope()));
 
-                if(numComputeIndexCandidates == 0)
-                {
-                    replaceWith(k, loop, k.control.addElement(NOP()));
-                }
-                else
-                {
-                    replaceWith(k, loop, k.control.addElement(Scope()));
-                }
                 purgeFor(k, loop);
             }
 

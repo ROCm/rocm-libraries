@@ -8,13 +8,20 @@ using namespace rocRoller;
 
 TEST(GPUInstructionInfoTest, BasicTest)
 {
-    GPUInstructionInfo Test("test", 0, {GPUWaitQueueType::LGKMDSQueue, GPUWaitQueueType::VMQueue});
+    GPUInstructionInfo Test("test",
+                            0,
+                            {GPUWaitQueueType::LGKMDSQueue, GPUWaitQueueType::VMQueue},
+                            16,
+                            true,
+                            false,
+                            8192);
     EXPECT_EQ(Test.getInstruction(), "test");
     EXPECT_EQ(Test.getWaitQueues().size(), 2);
     EXPECT_EQ(Test.getWaitQueues()[0], GPUWaitQueueType::LGKMDSQueue);
     EXPECT_EQ(Test.getWaitQueues()[1], GPUWaitQueueType::VMQueue);
     EXPECT_EQ(Test.getWaitCount(), 0);
-    EXPECT_EQ(Test.getLatency(), 0);
+    EXPECT_EQ(Test.getLatency(), 16);
+    EXPECT_EQ(Test.maxLiteralValue(), 8192);
 }
 
 TEST(GPUInstructionInfoTest, BasicTestLatency)

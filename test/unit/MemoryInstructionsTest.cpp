@@ -606,7 +606,7 @@ namespace MemoryInstructionsTest
 
     INSTANTIATE_TEST_SUITE_P(BufferMemoryInstructionsTest,
                              BufferMemoryInstructionsTest,
-                             ::testing::Combine(supportedISAValues(),
+                             ::testing::Combine(mfmaSupportedISAValues(),
                                                 ::testing::Values(1, 2, 3, 4, 8, 16, 20, 44, 47)));
 
     TEST_P(MemoryInstructionsTest, ExecuteBufDescriptor)

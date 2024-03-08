@@ -217,9 +217,11 @@ namespace GPUArchitectureGenerator
 
     };
     // This is the way to add a set of instructions that have the same wait value and wait queues.
-    const std::vector<std::tuple<
-        std::vector<rocRoller::GPUArchitectureTarget>,
-        std::tuple<std::vector<std::string>, int, std::vector<rocRoller::GPUWaitQueueType>>>>
+    const std::vector<std::tuple<std::vector<rocRoller::GPUArchitectureTarget>,
+                                 std::tuple<std::vector<std::string>,
+                                            int,
+                                            std::vector<rocRoller::GPUWaitQueueType>,
+                                            unsigned int>>>
         GroupedInstructionInfos
         = {{gfx9ISAs(),
             {{
@@ -312,7 +314,14 @@ namespace GPUArchitectureGenerator
                  "image_store",
                  "image_store_mip",
                  "image_store_mip_pck",
-                 "image_store_pck",
+                 "image_store_pck" // clang-format on
+             },
+             1,
+             {rocRoller::GPUWaitQueueType::VMQueue},
+             0}},
+           {gfx9ISAs(),
+            {{
+                 // clang-format off
                  "tbuffer_load_format_d16_x",
                  "tbuffer_load_format_d16_xy",
                  "tbuffer_load_format_d16_xyz",
@@ -401,7 +410,8 @@ namespace GPUArchitectureGenerator
                  // clang-format on
              },
              1,
-             {rocRoller::GPUWaitQueueType::VMQueue}}},
+             {rocRoller::GPUWaitQueueType::VMQueue},
+             (1 << 12) - 1}},
            {gfx9ISAs(),
             {{
                  // clang-format off
@@ -456,7 +466,8 @@ namespace GPUArchitectureGenerator
                  // clang-format on
              },
              0,
-             {rocRoller::GPUWaitQueueType::VMQueue, rocRoller::GPUWaitQueueType::LGKMDSQueue}}},
+             {rocRoller::GPUWaitQueueType::VMQueue, rocRoller::GPUWaitQueueType::LGKMDSQueue},
+             (1 << 13) - 1}},
            {gfx9ISAs(),
             {{
                  // clang-format off
@@ -497,7 +508,8 @@ namespace GPUArchitectureGenerator
                  // clang-format on
              },
              1,
-             {rocRoller::GPUWaitQueueType::LGKMDSQueue}}},
+             {rocRoller::GPUWaitQueueType::LGKMDSQueue},
+             (1 << 8) - 1}},
            {gfx9ISAs(),
             {{
                  // clang-format off
@@ -574,7 +586,8 @@ namespace GPUArchitectureGenerator
                  // clang-format on
              },
              0,
-             {rocRoller::GPUWaitQueueType::VMQueue}}},
+             {rocRoller::GPUWaitQueueType::VMQueue},
+             (1 << 13) - 1}},
            {gfx9ISAs(),
             {{
                  // clang-format off
@@ -680,7 +693,8 @@ namespace GPUArchitectureGenerator
                  // clang-format on
              },
              -1,
-             {}}}};
+             {},
+             0}}};
 
     // Tuple mapping a <Vector of GPUInstructionInfo> to a <Vector of GPUArchitectureTarget>
     const std::vector<std::tuple<std::vector<rocRoller::GPUArchitectureTarget>,
