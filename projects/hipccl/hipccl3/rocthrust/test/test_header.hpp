@@ -195,7 +195,7 @@ typedef ::testing::Types<Params<short>,
                          Params<double>>
     NumericalTestsParams;
 
-// Scalar interger types
+// Scalar integer types
 typedef ::testing::Types<Params<short>,
                          Params<int>,
                          Params<long long>,
@@ -204,11 +204,11 @@ typedef ::testing::Types<Params<short>,
                          Params<unsigned long long>>
     IntegerTestsParams;
 
-// Scalar signed interger types
+// Scalar signed integer types
 typedef ::testing::Types<Params<short>, Params<int>, Params<long long>> SignedIntegerTestsParams;
 
 #if defined(_WIN32) && defined(__HIP__)
-// Scalar unsigned interger types of all lengths
+// Scalar unsigned integer types of all lengths
 typedef ::testing::Types<Params<thrust::detail::uint16_t>,
                          Params<thrust::detail::uint32_t>,
                          Params<thrust::detail::uint64_t>>
@@ -225,14 +225,14 @@ typedef ::testing::Types<Params<short>,
                          Params<thrust::detail::uint64_t>>
     AllIntegerTestsParams;
 #else
-// Scalar unsigned interger types of all lengths
+// Scalar unsigned integer types of all lengths
 typedef ::testing::Types<Params<thrust::detail::uint8_t>,
                          Params<thrust::detail::uint16_t>,
                          Params<thrust::detail::uint32_t>,
                          Params<thrust::detail::uint64_t>>
     UnsignedIntegerTestsParams;
 
-// Scalar all interger types
+// Scalar all integer types
 typedef ::testing::Types<Params<short>,
                          Params<int>,
                          Params<long long>,

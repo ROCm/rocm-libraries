@@ -36,7 +36,7 @@
 THRUST_NAMESPACE_BEGIN
 
 /** \addtogroup memory_resources Memory Resources
- *  \ingroup memory_management_classes
+ *  \ingroup memory_management
  *  \{
  */
 
