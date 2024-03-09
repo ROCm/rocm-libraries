@@ -6,6 +6,7 @@
 
 #include <rocRoller/Assemblers/SubprocessAssembler.hpp>
 #include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 namespace rocRoller
@@ -128,7 +129,7 @@ namespace rocRoller
             file << machineCode;
         }
 
-        std::string assemblerPath = "/opt/rocm/llvm/bin/clang++";
+        std::string assemblerPath = Settings::getInstance()->get(Settings::SubprocessAssemblerPath);
 
         {
             std::vector<std::string> args = {assemblerPath,

@@ -162,6 +162,12 @@ namespace rocRoller
         static inline const SettingsOption<AssemblerType> KernelAssembler{
             "ROCROLLER_ASSEMBLER", "Which assembler method to use", AssemblerType::Subprocess, -1};
 
+        static inline const SettingsOption<std::string> SubprocessAssemblerPath{
+            "ROCROLLER_SUBPROCESS_ASSEMBLER_PATH",
+            "Path to subprocess assembler",
+            "/opt/rocm/llvm/bin/clang++",
+            -1};
+
         static inline const std::string BitfieldName = "ROCROLLER_DEBUG";
 
         /**
@@ -184,6 +190,16 @@ namespace rocRoller
          */
         template <typename Option>
         typename Option::Type get(Option const& opt);
+
+        /**
+         * @brief Gets the default value of a SettingsOption.
+         *
+         * @tparam Option A SettingsOption templated by its defaultValue type.
+         * @param opt The SettingsOption we are getting.
+         * @return A value of type Option::Type is defaulted to.
+         */
+        template <typename Option>
+        static typename Option::Type getDefault(Option const& opt);
 
         /**
          * Static convenience function to get a settings value.

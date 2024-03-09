@@ -4,6 +4,9 @@
 #include <gtest/gtest.h>
 
 #include <rocRoller/Assemblers/Assembler.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
+
+#include "GenericContextFixture.hpp"
 
 using namespace rocRoller;
 
@@ -81,13 +84,19 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 )"};
 
-TEST(AssemblerTest, Basic)
+auto assemble()
 {
     auto myAssembler = rocRoller::Assembler::Get();
 
     std::vector<char> kernelObject = myAssembler->assembleMachineCode(
         simple_assembly, rocRoller::GPUArchitectureTarget("gfx90a:xnack+"));
 
+    return kernelObject;
+}
+
+TEST(AssemblerTest, Basic)
+{
+    auto kernelObject = assemble();
     EXPECT_NE(kernelObject.size(), 0);
 }
 
@@ -98,4 +107,29 @@ TEST(AssemblerTest, BadTarget)
     EXPECT_THROW(myAssembler->assembleMachineCode(
                      simple_assembly, rocRoller::GPUArchitectureTarget("gfx91a:xnack+")),
                  std::runtime_error);
+}
+
+namespace rocRollerTest
+{
+    class SubassemblerPathTest : public GenericContextFixture
+    {
+    };
+
+    TEST(SubassemblerPathTest, VersionedROCM)
+    {
+        auto path = static_cast<std::string>(
+            std::filesystem::canonical(Settings::getDefault(Settings::SubprocessAssemblerPath)));
+        // Ensure symbolic link expanded to include version number
+        EXPECT_TRUE(path.find("rocm-") != std::string::npos);
+        Settings::getInstance()->set(Settings::SubprocessAssemblerPath, path);
+        EXPECT_NE(assemble().size(), 0);
+    }
+
+    TEST(SubassemblerPathTest, MissingPath)
+    {
+        Settings::getInstance()->set(
+            Settings::SubprocessAssemblerPath,
+            static_cast<std::string>(std::filesystem::temp_directory_path() / "foo"));
+        EXPECT_THROW(assemble(), FatalError);
+    }
 }

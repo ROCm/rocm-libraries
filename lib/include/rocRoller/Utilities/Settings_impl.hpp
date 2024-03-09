@@ -32,6 +32,12 @@ namespace rocRoller
     }
 
     template <typename Option>
+    typename Option::Type Settings::getDefault(Option const& opt)
+    {
+        return std::any_cast<typename Option::Type>(opt.getDefault());
+    }
+
+    template <typename Option>
     typename Option::Type Settings::Get(Option const& opt)
     {
         return getInstance()->get(opt);
