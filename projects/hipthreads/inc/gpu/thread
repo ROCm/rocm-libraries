@@ -149,7 +149,7 @@ struct WorkNode {
 };
 
 template <class Fn_t, class... Args_t>
-static __host__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
+__host__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     // Ideally, we would also forward args in the capture (...args = std::forward<Args_t>(args)) to avoid an extra copy,
     // but that requires C++20
     auto lambda = [typed_fn = std::forward<Fn_t>(typed_fn), args...] __device__() {
@@ -165,7 +165,7 @@ static __host__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...
     return std::unique_ptr<WorkNode_t>(worknode_ptr);
 }
 template <class Fn_t, class... Args_t>
-static __device__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
+__device__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     // These will give a more user-friendly error message when the lambda is not move-constructible.
     static_assert(std::is_move_constructible_v<Fn_t>);
     static_assert((std::is_move_constructible_v<Args_t> && ...));
@@ -234,7 +234,7 @@ static inline __device__ void setAndUnlockTail(WorkNode_Header **newTail) {
 // Precondition: We're still holding the lock acquired in invokeNext. Needed to make sure detach doesn't make worknode
 // an invalid pointer before we load typed_node_ptr and width.
 template <class Callable_t>
-static __device__ void wrapper(WorkNode_Header *worknode, WorkNode_Header **currentTail) {
+__device__ void wrapper(WorkNode_Header *worknode, WorkNode_Header **currentTail) {
     static_assert(std::is_standard_layout_v<WorkNode<Callable_t>>);
     // TODO: Part of C++20, not yet implemented in libc++. See https://libcxx.llvm.org/Status/Cxx20.html -> P0466R5
     // static_assert(std::is_pointer_interconvertible_with_class(WorkNode<Callable_t>::header));
@@ -436,10 +436,10 @@ static inline __device__ uint32_t getActiveVcoreCount() {
 //      KERNELS
 //====================================================================================================================//
 
-// TODO: should these all be static? This creates duplicate copies in each compilation unit that includes this header
-// Maybe they should be declared inline instead (to avoid multiple definition errors)
-// Note that we need to disable -Wcuda-compat for this section using a pragma if we do this
-static __global__ void threading_main() {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcuda-compat" // Suppress "ignored 'inline' attribute on kernel function" warnings
+
+inline __global__ void threading_main() {
     for (bool workFound = true; workFound || !finishing || getActiveVcoreCount() != 0;) {
         // TODO: why do we need this when blockDim.x == MAX_THREAD_WIDTH == warpSize?
         __syncthreads();
@@ -450,14 +450,14 @@ static __global__ void threading_main() {
 }
 
 template <class Callable_t>
-static __global__ void insertWorkNodeFromHost(WorkNode_Header *worknode) {
+__global__ void insertWorkNodeFromHost(WorkNode_Header *worknode) {
     worknode->wrapper_fn = wrapper<Callable_t>;
     WorkNode_Header **currentTail = lockAndFetchTail();
     insertWorkNode(currentTail, worknode);
     setAndUnlockTail(&(worknode->next));
 }
 
-static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t worknodeSize) {
+inline __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t worknodeSize) {
     WorkNode_Header *newWorkNode = static_cast<WorkNode_Header *>(::malloc(worknodeSize));
     WorkNode_Header **currentTail = lockAndFetchTail();
 
@@ -485,6 +485,8 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t wor
         setAndUnlockTail(currentTail);
     }
 }
+
+#pragma clang diagnostic pop
 
 } // namespace internal
 
