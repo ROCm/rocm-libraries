@@ -693,9 +693,12 @@ class Configuration(object):
         pre_sm_90a = True
         pre_gfx90a = True
         pre_gfx908 = True
+        # TODO(HIP/AMD): does it make sense to add variants for gfx941 and gfx942?
+        pre_gfx940 = True
         if compute_archs and (self.cxx.type == 'nvcc' or self.cxx.type == 'clang' or self.cxx.type == 'nvrtcc'):
             pre_gfx90a = False
             pre_gfx908 = False
+            pre_gfx940 = False
             pre_sm_32 = False
             pre_sm_60 = False
             pre_sm_70 = False
@@ -731,6 +734,7 @@ class Configuration(object):
         elif compute_archs and self.cxx.type == 'hipcc':
             pre_gfx90a = False
             pre_gfx908 = False
+            pre_gfx940 = False
             pre_sm_32  = False
             pre_sm_60  = False
             pre_sm_70  = False
@@ -738,16 +742,20 @@ class Configuration(object):
             pre_sm_90  = False
             compute_archs = [a for a in sorted(shlex.split(compute_archs))]
             for arch in compute_archs:
-                if arch == "gfx908": pre_gfx90a = True
-                elif arch != "gfx90a":
-                    pre_gfx908 = True
-                if arch == "gfx908" or arch == "gfx90a":
+                if arch == "gfx908": 
+                    pre_gfx90a = True
+                    pre_gfx940 = True
+                elif arch == "gfx90a":
+                    pre_gfx940 = True
+                if arch in ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942"]:
                   arch_flag = '--offload-arch={0}'.format(arch)
                   self.cxx.compile_flags += [arch_flag]
         if pre_gfx908:
             self.config.available_features.add("pre-gfx908")
         if pre_gfx90a:
             self.config.available_features.add("pre-gfx90a")
+        if pre_gfx940:
+            self.config.available_features.add("pre-gfx940")
         if pre_sm_32:
             self.config.available_features.add("pre-sm-32")
         if pre_sm_60:
