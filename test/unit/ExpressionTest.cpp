@@ -2,6 +2,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <memory>
 
 #include <rocRoller/AssemblyKernel.hpp>
@@ -1868,6 +1869,26 @@ namespace ExpressionTest
                           std::get<unsigned int>(Expression::evaluate(expr2, args)))
                     << ShowValue(aVal) << ShowValue(bVal);
             }
+        }
+    }
+
+    TEST_F(ExpressionTest, EvaluateExponential2)
+    {
+        auto command = std::make_shared<Command>();
+        auto ca      = command->allocateArgument({DataType::Float, PointerType::Value});
+
+        auto a = std::make_shared<Expression::Expression>(ca);
+
+        auto expr = exp2(a);
+
+        for(auto aVal : TestValues::floatValues)
+        {
+
+            KernelArguments runtimeArgs;
+            runtimeArgs.append("a", aVal);
+            auto args = runtimeArgs.runtimeArguments();
+
+            EXPECT_EQ(std::exp2(aVal), std::get<float>(Expression::evaluate(expr, args)));
         }
     }
 

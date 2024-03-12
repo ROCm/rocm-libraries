@@ -310,6 +310,7 @@ namespace rocRoller
 #include "Convert.hpp"
 #include "Divide.hpp"
 #include "Equal.hpp"
+#include "Exponential2.hpp"
 #include "GreaterThan.hpp"
 #include "GreaterThanEqual.hpp"
 #include "LessThan.hpp"

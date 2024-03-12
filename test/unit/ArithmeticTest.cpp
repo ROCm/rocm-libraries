@@ -2,6 +2,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <memory>
 
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
@@ -476,6 +477,7 @@ namespace ArithmeticTest
                         {DataType::Int32, PointerType::PointerGlobal},
                         DataDirection::WriteOnly,
                         cond_resultExpr});
+
         k->addArgument({"a", DataType::Float, DataDirection::ReadOnly, aExpr});
         k->addArgument({"b", DataType::Float, DataDirection::ReadOnly, bExpr});
         k->addArgument({"c", DataType::Float, DataDirection::ReadOnly, cExpr});
@@ -491,6 +493,7 @@ namespace ArithmeticTest
             Register::ValuePtr s_result, s_cond_result, s_a, s_b, s_c;
             co_yield m_context->argLoader()->getValue("result", s_result);
             co_yield m_context->argLoader()->getValue("cond_result", s_cond_result);
+
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
             co_yield m_context->argLoader()->getValue("c", s_c);
@@ -647,10 +650,12 @@ namespace ArithmeticTest
                         EXPECT_EQ(result[1], a - b);
                         EXPECT_EQ(result[2], a * b);
                         EXPECT_EQ(result[3], -a);
-                        float fma = a * b + c;
+                        float fma = std::fma(a, b, c);
                         if(fma != 0.0)
                         {
-                            EXPECT_LT((result[4] - fma) / fma, 5.e-7);
+                            EXPECT_LT((result[4] - fma) / fma, 5.e-7)
+                                << "a: " << a << ", b: " << b << ", c: " << c;
+                            ;
                         }
                         EXPECT_EQ(result[5], c >= a ? a : b)
                             << "a: " << a << ", b: " << b << ", c: " << c;
@@ -663,6 +668,110 @@ namespace ArithmeticTest
                         EXPECT_EQ(cond_result[5], (a != b ? 1 : 0));
                     }
                 }
+            }
+        }
+        else
+        {
+            std::vector<char> assembledKernel = m_context->instructions()->assemble();
+            EXPECT_GT(assembledKernel.size(), 0);
+        }
+    }
+
+    TEST_P(FPArithmeticTest, ArithUnaryFloat)
+    {
+        auto k = m_context->kernel();
+
+        k->setKernelName("ArithUnaryFloat");
+        k->setKernelDimensions(1);
+
+        auto command = std::make_shared<Command>();
+
+        auto resultExpr = std::make_shared<Expression::Expression>(
+            command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
+
+        auto aExpr = std::make_shared<Expression::Expression>(
+            command->allocateArgument({DataType::Float, PointerType::Value}));
+
+        auto one  = std::make_shared<Expression::Expression>(1u);
+        auto zero = std::make_shared<Expression::Expression>(0u);
+
+        k->addArgument({"result",
+                        {DataType::Float, PointerType::PointerGlobal},
+                        DataDirection::WriteOnly,
+                        resultExpr});
+
+        k->addArgument({"a", DataType::Float, DataDirection::ReadOnly, aExpr});
+
+        k->setWorkgroupSize({1, 1, 1});
+        k->setWorkitemCount({one, one, one});
+        k->setDynamicSharedMemBytes(zero);
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        auto kb = [&]() -> Generator<Instruction> {
+            Register::ValuePtr s_result, s_a;
+            co_yield m_context->argLoader()->getValue("result", s_result);
+            co_yield m_context->argLoader()->getValue("a", s_a);
+
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Float, PointerType::PointerGlobal},
+                                               1);
+
+            auto v_a = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Float, 1);
+
+            auto v_r = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Float, 1);
+
+            co_yield v_a->allocate();
+            co_yield v_r->allocate();
+            co_yield v_result->allocate();
+
+            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
+
+            co_yield m_context->copier()->copy(v_a, s_a, "Move value");
+
+            co_yield generateOp<Expression::Exponential2>(v_r, v_a);
+            co_yield m_context->mem()->store(MemoryInstructions::Flat, v_result, v_r, 0, 4);
+        };
+
+        m_context->schedule(kb());
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        {
+            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
+        }
+
+        // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
+        if(isLocalDevice())
+        {
+            CommandKernel commandKernel(m_context);
+
+            auto d_result = make_shared_device<float>(1);
+
+            for(float a : TestValues::floatValues)
+            {
+
+                KernelArguments runtimeArgs;
+                runtimeArgs.append("result", d_result.get());
+                runtimeArgs.append("a", a);
+
+                commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+
+                std::vector<float> result(1);
+                ASSERT_THAT(hipMemcpy(result.data(),
+                                      d_result.get(),
+                                      result.size() * sizeof(float),
+                                      hipMemcpyDefault),
+                            HasHipSuccess(0));
+
+                EXPECT_EQ(result[0], (a > -126.0) ? std::exp2(a) : 0) << "a: " << a;
+                ;
             }
         }
         else

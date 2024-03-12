@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <cmath>
 #include <memory>
 #include <stack>
 #include <typeinfo>
@@ -545,6 +546,16 @@ namespace rocRoller
                 evaluate(T const& arg) const
             {
                 return ~arg;
+            }
+        };
+
+        template <>
+        struct OperationEvaluatorVisitor<Exponential2> : public UnaryEvaluatorVisitor<Exponential2>
+        {
+            template <typename T>
+            std::enable_if_t<std::is_floating_point_v<T>, T> evaluate(T const& arg) const
+            {
+                return std::exp2(arg);
             }
         };
 

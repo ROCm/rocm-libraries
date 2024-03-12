@@ -155,6 +155,11 @@ namespace rocRoller
             return std::make_shared<Expression>(BitwiseNegate{a});
         }
 
+        inline ExpressionPtr exp2(ExpressionPtr a)
+        {
+            return std::make_shared<Expression>(Exponential2{a});
+        }
+
         inline ExpressionPtr multiplyHigh(ExpressionPtr a, ExpressionPtr b)
         {
             return std::make_shared<Expression>(MultiplyHigh{a, b});
@@ -307,6 +312,7 @@ namespace rocRoller
         EXPRESSION_INFO(BitwiseAnd);
         EXPRESSION_INFO(BitwiseOr);
         EXPRESSION_INFO(BitwiseXor);
+        EXPRESSION_INFO(Exponential2);
 
         EXPRESSION_INFO(ShiftLAdd);
         EXPRESSION_INFO(AddShiftL);

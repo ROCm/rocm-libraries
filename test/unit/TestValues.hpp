@@ -86,22 +86,10 @@ namespace TestValues
         std::numeric_limits<uint64_t>::max(),
     };
 
-    inline std::vector<float> floatValues = {-50002.0f,
-                                             -14610.0f,
-                                             -146.0f,
-                                             -1.5f,
-                                             -1.0f,
-                                             0.0f,
-                                             1.0f,
-                                             2.5f,
-                                             16.0f,
-                                             17.25f,
-                                             192.0f,
-                                             12344.0f,
-                                             12981.0f,
-                                             42e5f,
-                                             3.14159f,
-                                             2.7182818f};
+    inline std::vector<float> floatValues
+        = {-50002.0f, -14610.0f, -146.0f,  -104.6f, -73.5f,   -1.5f,     -1.0f, -0.5f,
+           0.0f,      1.0f,      2.0f,     2.5f,    16.0f,    17.25f,    41.4f, 192.0f,
+           1024.0f,   12344.0f,  12981.0f, 42e5f,   3.14159f, 2.7182818f};
 
     inline std::vector<double> doubleValues = {-50002.0,
                                                -14610.0,
