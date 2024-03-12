@@ -1357,16 +1357,23 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 
 #  ifndef _LIBCUDACXX_SYS_CLOCK_DURATION
 #    define _LIBCUDACXX_SYS_CLOCK_DURATION nanoseconds
-#    if defined(__HIP_DEVICE_COMPILE__)
+#    if defined(__HIP_DEVICE_COMPILE__) || defined(__HIPCC_RTC__)
 // 25 MHz TSC for wall_clock64 -> 1*1e9/25*1e6 ns/cycle = 40 ns/cycle (gfx90a and gfx908 only!)
 // FIXME(hip): Other devices (e.g., from NVIDIA) may have a different clock rate for wall_clock64 and are currently not supported with HIP.
 // We may need to hardcode their clock rate at compile time or find a way to query it at runtime.
-#      define _LIBCUDACXX_HIP_TSC_CLOCKRATE 25000000
-#      define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 40 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE) 
+// gfx90a and gfx908: 25 MHz TSC for wall_clock64 -> 1*1e9/25*1e6 ns/cycle = 40 ns/cycle
+#      if defined(__gfx908__) || defined(__gfx90a__)
+#        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 25000000
+#        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 40 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)  
+// gfx940 gfx941 and gfx942: 100 MHz TSC for wall_clock64 -> 1*1e9/100*1e6 ns/cycle = 10 ns/cycle
+#      else if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#        define _LIBCUDACXX_HIP_TSC_CLOCKRATE 100000000
+#        define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 10 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)  
+#      endif
 #      define _LIBCUDACXX_SYS_CLOCK_DURATION duration<long long, std::ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>
 #    else
 #      define _LIBCUDACXX_SYS_CLOCK_DURATION nanoseconds
-#    endif
+#    endif // defined(__HIP_DEVICE_COMPILE__) || defined(__HIPCC_RTC__)
 #  endif // _LIBCUDACXX_SYS_CLOCK_DURATION
 
 // There are a handful of public standard library types that are intended to
