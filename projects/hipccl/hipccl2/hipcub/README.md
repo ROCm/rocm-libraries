@@ -43,7 +43,6 @@ python3 -m http.server
   * The [rocPRIM](https://github.com/ROCm/rocPRIM) library
     * Automatically downloaded and built by the CMake script
     * Requires CMake 3.16.9 or later
-
 * For NVIDIA GPUs:
   * CUDA Toolkit
   * CUB library

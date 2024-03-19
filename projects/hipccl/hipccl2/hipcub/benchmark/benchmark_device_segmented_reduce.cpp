@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -89,8 +89,6 @@ void run_benchmark(benchmark::State& state,
 
     OutputT * d_aggregates_output;
     HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(OutputT)));
-
-    hipcub::Sum reduce_op;
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;

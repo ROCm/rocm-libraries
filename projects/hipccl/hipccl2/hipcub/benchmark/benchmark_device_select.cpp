@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -386,8 +386,8 @@ void run_unique_by_key_benchmark(benchmark::State& state,
         }
     }
 
-    const auto input_values = benchmark_utils::get_random_data<ValueT>(size, ValueT(-1000), ValueT(1000));
-    unsigned int selected_count_output = 0;
+    const auto input_values
+        = benchmark_utils::get_random_data<ValueT>(size, ValueT(-1000), ValueT(1000));
 
     KeyT* d_keys_input;
     ValueT* d_values_input;
@@ -399,7 +399,7 @@ void run_unique_by_key_benchmark(benchmark::State& state,
     HIP_CHECK(hipMalloc(&d_values_input, input_values.size() * sizeof(input_values[0])));
     HIP_CHECK(hipMalloc(&d_keys_output, input_keys.size() * sizeof(input_keys[0])));
     HIP_CHECK(hipMalloc(&d_values_output, input_values.size() * sizeof(input_values[0])));
-    HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(selected_count_output)));
+    HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(*d_selected_count_output)));
 
     HIP_CHECK(
         hipMemcpy(

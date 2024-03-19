@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -98,26 +98,30 @@ set(NVGPU_TARGETS "${DEFAULT_NVGPU_TARGETS}"
     CACHE STRING "List of NVIDIA GPU targets (compute capabilities), for example \"35;50\""
 )
 set(CMAKE_CUDA_ARCHITECTURES ${NVGPU_TARGETS})
-# Generate compiler flags based on targeted CUDA architectures if CMake doesn't. (Controlled by policy CP0104, on by default after 3.18)
-if(CMAKE_VERSION VERSION_LESS "3.18")
-    foreach(CUDA_ARCH ${NVGPU_TARGETS})
-        list(APPEND HIP_NVCC_FLAGS "--generate-code arch=compute_${CUDA_ARCH},code=sm_${CUDA_ARCH} ")
-        list(APPEND HIP_NVCC_FLAGS "--generate-code arch=compute_${CUDA_ARCH},code=compute_${CUDA_ARCH} ")
-    endforeach()
+
+if (NOT _HIPCUB_HIP_NVCC_FLAGS_SET)
+    execute_process(
+        COMMAND ${HIP_HIPCONFIG_EXECUTABLE} --cpp_config
+        OUTPUT_VARIABLE HIP_CPP_CONFIG_FLAGS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_STRIP_TRAILING_WHITESPACE
+    )
+
+    # Generate compiler flags based on targeted CUDA architectures if CMake doesn't. (Controlled by policy CP0104, on by default after 3.18)
+    if(CMAKE_VERSION VERSION_LESS "3.18")
+        foreach(CUDA_ARCH ${NVGPU_TARGETS})
+            list(APPEND HIP_NVCC_FLAGS "--generate-code" "arch=compute_${CUDA_ARCH},code=sm_${CUDA_ARCH}")
+            list(APPEND HIP_NVCC_FLAGS "--generate-code" "arch=compute_${CUDA_ARCH},code=compute_${CUDA_ARCH}")
+        endforeach()
+    endif()
+
+    # Update list parameter
+    list(JOIN HIP_NVCC_FLAGS " " HIP_NVCC_FLAGS)
+
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${HIP_CPP_CONFIG_FLAGS} ${HIP_NVCC_FLAGS}"
+        CACHE STRING "Cuda compile flags" FORCE)
+    set(_HIPCUB_HIP_NVCC_FLAGS_SET ON CACHE INTERNAL "")
 endif()
-
-execute_process(
-    COMMAND ${HIP_HIPCONFIG_EXECUTABLE} --cpp_config
-    OUTPUT_VARIABLE HIP_CPP_CONFIG_FLAGS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-)
-
-# Update list parameter
-string(REPLACE ";" " " HIP_NVCC_FLAGS ${HIP_NVCC_FLAGS})
-
-set(CMAKE_CUDA_FLAGS "${HIP_CPP_CONFIG_FLAGS} ${HIP_NVCC_FLAGS}"
-    CACHE STRING "Cuda compile flags" FORCE)
 
 # Ignore warnings about #pragma unroll
 # and about deprecated CUDA function(s) used in hip/nvcc_detail/hip_runtime_api.h

@@ -1,5 +1,5 @@
 #!/usr/bin/env groovy
-// This shared library is available at https://github.com/ROCmSoftwarePlatform/rocJENKINS/
+// This shared library is available at https://github.com/ROCm/rocJENKINS/
 @Library('rocJenkins@pong') _
 
 // This file is for internal AMD use.
