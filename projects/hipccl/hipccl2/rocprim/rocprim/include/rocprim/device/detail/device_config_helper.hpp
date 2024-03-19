@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -255,7 +255,7 @@ namespace detail
 {
 
 template<class Value>
-struct default_reduce_config_base_helper
+struct default_reduce_config_base
 {
     static constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -264,10 +264,6 @@ struct default_reduce_config_base_helper
                                ::rocprim::max(1u, 16u / item_scale),
                                ::rocprim::block_reduce_algorithm::using_warp_reduce>;
 };
-
-template<class Value>
-struct default_reduce_config_base : default_reduce_config_base_helper<Value>::type
-{};
 
 struct scan_config_tag
 {};
@@ -337,7 +333,7 @@ struct scan_by_key_config_tag
 {};
 
 template<class Value>
-struct default_scan_config_base_helper
+struct default_scan_config_base
 {
     static constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -348,10 +344,6 @@ struct default_scan_config_base_helper
                              ::rocprim::block_store_method::block_store_transpose,
                              ::rocprim::block_scan_algorithm::using_warp_scan>;
 };
-
-template<class Value>
-struct default_scan_config_base : default_scan_config_base_helper<Value>::type
-{};
 
 /// \brief Provides the kernel parameters for exclusive_scan_by_key and inclusive_scan_by_key based
 ///        on autotuned configurations or user-provided configurations.
@@ -415,7 +407,7 @@ namespace detail
 {
 
 template<class Key, class Value>
-struct default_scan_by_key_config_base_helper
+struct default_scan_by_key_config_base
 {
     static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
         sizeof(Key) + sizeof(Value), 2 * sizeof(int));
@@ -428,16 +420,209 @@ struct default_scan_by_key_config_base_helper
         ::rocprim::block_scan_algorithm::using_warp_scan>;
 };
 
-template<class Key, class Value>
-struct default_scan_by_key_config_base : default_scan_by_key_config_base_helper<Key, Value>::type
-{};
-
 struct transform_config_tag
 {};
 
 struct transform_config_params
 {
     kernel_config_params kernel_config{};
+};
+
+} // namespace detail
+
+namespace detail
+{
+struct segmented_radix_sort_config_tag
+{};
+
+struct warp_sort_config_params
+{
+    /// \brief Allow the partitioning of batches by size for processing via size-optimized kernels.
+    bool partitioning_allowed = false;
+    /// \brief The number of threads in the logical warp in the small segment processing kernel.
+    unsigned int logical_warp_size_small = 0;
+    /// \brief The number of items processed by a thread in the small segment processing kernel.
+    unsigned int items_per_thread_small = 0;
+    /// \brief The number of threads per block in the small segment processing kernel.
+    unsigned int block_size_small = 0;
+    /// \brief If the number of segments is at least \p partitioning_threshold, then the segments are partitioned into
+    /// small and large segment groups, and each group is handled by a different, specialized kernel.
+    unsigned int partitioning_threshold = 0;
+    /// \brief The number of threads in the logical warp in the medium segment processing kernel.
+    unsigned int logical_warp_size_medium = 0;
+    /// \brief The number of items processed by a thread in the medium segment processing kernel.
+    unsigned int items_per_thread_medium = 0;
+    /// \brief The number of threads per block in the medium segment processing kernel.
+    unsigned int block_size_medium = 0;
+};
+
+struct segmented_radix_sort_config_params
+{
+    /// \brief Kernel start parameters.
+    kernel_config_params kernel_config{};
+    /// \brief Number of bits in long iterations.
+    unsigned int long_radix_bits = 0;
+    /// \brief Number of bits in short iterations.
+    unsigned int short_radix_bits = 0;
+    /// \brief If set to \p true, warp sort can be used to sort the small segments, even if no partitioning happens.
+    bool enable_unpartitioned_warp_sort = true;
+    /// \brief Warp sort config params
+    warp_sort_config_params warp_sort_config{};
+};
+
+} // namespace detail
+
+/// \brief Configuration of the warp sort part of the device segmented radix sort operation.
+/// Short enough segments are processed on warp level.
+///
+/// \tparam LogicalWarpSizeSmall - number of threads in the logical warp of the kernel
+/// that processes small segments.
+/// \tparam ItemsPerThreadSmall - number of items processed by a thread in the kernel that processes
+/// small segments.
+/// \tparam BlockSizeSmall - number of threads per block in the kernel which processes the small segments.
+/// \tparam PartitioningThreshold - if the number of segments is at least this threshold, the
+/// segments are partitioned to a small, a medium and a large segment collection. Both collections
+/// are sorted by different kernels. Otherwise, all segments are sorted by a single kernel.
+/// \tparam EnableUnpartitionedWarpSort - If set to \p true, warp sort can be used to sort
+/// the small segments, even if the total number of segments is below \p PartitioningThreshold.
+/// \tparam LogicalWarpSizeMedium - number of threads in the logical warp of the kernel
+/// that processes medium segments.
+/// \tparam ItemsPerThreadMedium - number of items processed by a thread in the kernel that processes
+/// medium segments.
+/// \tparam BlockSizeMedium - number of threads per block in the kernel which processes the medium segments.
+template<unsigned int LogicalWarpSizeSmall,
+         unsigned int ItemsPerThreadSmall,
+         unsigned int BlockSizeSmall        = 256,
+         unsigned int PartitioningThreshold = 3000,
+         unsigned int LogicalWarpSizeMedium = std::max(32u, LogicalWarpSizeSmall),
+         unsigned int ItemsPerThreadMedium  = std::max(4u, ItemsPerThreadSmall),
+         unsigned int BlockSizeMedium       = 256>
+struct WarpSortConfig
+{
+    static_assert(LogicalWarpSizeSmall * ItemsPerThreadSmall
+                      <= LogicalWarpSizeMedium * ItemsPerThreadMedium,
+                  "The number of items processed by a small warp cannot be larger than the number "
+                  "of items processed by a medium warp");
+
+    /// \brief Allow the partitioning of batches by size for processing via size-optimized kernels.
+    static constexpr bool partitioning_allowed = true;
+    /// \brief The number of threads in the logical warp in the small segment processing kernel.
+    static constexpr unsigned int logical_warp_size_small = LogicalWarpSizeSmall;
+    /// \brief The number of items processed by a thread in the small segment processing kernel.
+    static constexpr unsigned int items_per_thread_small = ItemsPerThreadSmall;
+    /// \brief The number of threads per block in the small segment processing kernel.
+    static constexpr unsigned int block_size_small = BlockSizeSmall;
+    /// \brief If the number of segments is at least \p partitioning_threshold, then the segments are partitioned into
+    /// small and large segment groups, and each group is handled by a different, specialized kernel.
+    static constexpr unsigned int partitioning_threshold = PartitioningThreshold;
+    /// \brief The number of threads in the logical warp in the medium segment processing kernel.
+    static constexpr unsigned int logical_warp_size_medium = LogicalWarpSizeMedium;
+    /// \brief The number of items processed by a thread in the medium segment processing kernel.
+    static constexpr unsigned int items_per_thread_medium = ItemsPerThreadMedium;
+    /// \brief The number of threads per block in the medium segment processing kernel.
+    static constexpr unsigned int block_size_medium = BlockSizeMedium;
+};
+
+/// \brief Indicates if the warp level sorting is disabled in the
+/// device segmented radix sort configuration.
+struct DisabledWarpSortConfig
+{
+    /// \brief Allow the partitioning of batches by size for processing via size-optimized kernels.
+    static constexpr bool partitioning_allowed = false;
+    /// \brief The number of threads in the logical warp in the small segment processing kernel.
+    static constexpr unsigned int logical_warp_size_small = 1;
+    /// \brief The number of items processed by a thread in the small segment processing kernel.
+    static constexpr unsigned int items_per_thread_small = 1;
+    /// \brief The number of threads per block in the small segment processing kernel.
+    static constexpr unsigned int block_size_small = 1;
+    /// \brief If the number of segments is at least \p partitioning_threshold, then the segments are partitioned into
+    /// small and large segment groups, and each group is handled by a different, specialized kernel.
+    static constexpr unsigned int partitioning_threshold = 0;
+    /// \brief The number of threads in the logical warp in the medium segment processing kernel.
+    static constexpr unsigned int logical_warp_size_medium = 1;
+    /// \brief The number of items processed by a thread in the medium segment processing kernel.
+    static constexpr unsigned int items_per_thread_medium = 1;
+    /// \brief The number of threads per block in the medium segment processing kernel.
+    static constexpr unsigned int block_size_medium = 1;
+};
+
+/// \brief Configuration for the device-level segmented radix sort operation.
+/// \tparam LongRadixBits .
+/// \tparam ShortRadixBits .
+/// \tparam BlockSize Number of threads in a block.
+/// \tparam ItemsPerThread Number of items processed by each thread.
+/// \tparam SizeLimit Limit on the number of items for a single kernel launch.
+template<unsigned int LongRadixBits,
+         unsigned int ShortRadixBits,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         bool         EnableUnpartitionedWarpSort = true,
+         class WarpSortConfig                     = DisabledWarpSortConfig,
+         unsigned int SizeLimit                   = ROCPRIM_GRID_SIZE_LIMIT>
+struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_params
+{
+    /// \brief Identifies the algorithm associated to the config.
+    /// \brief Identifies the algorithm associated to the config.
+    using tag = detail::segmented_radix_sort_config_tag;
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+    /// \brief Number of bits in long iterations.
+    static constexpr unsigned int long_radix_bits = LongRadixBits;
+
+    /// \brief Number of bits in short iterations.
+    static constexpr unsigned int short_radix_bits = ShortRadixBits;
+
+    /// \brief Number of threads in a block.
+    static constexpr unsigned int block_size = BlockSize;
+
+    /// \brief Number of items processed by each thread.
+    static constexpr unsigned int items_per_thread = ItemsPerThread;
+
+    /// \brief If set to \p true, warp sort can be used to sort the small segments, even if no partitioning happens.
+    static constexpr bool enable_unpartitioned_warp_sort = EnableUnpartitionedWarpSort;
+
+    /// \brief Limit on the number of items for a single kernel launch.
+    static constexpr unsigned int size_limit = SizeLimit;
+
+    using warp_sort_config = WarpSortConfig;
+
+    constexpr segmented_radix_sort_config()
+        : detail::segmented_radix_sort_config_params{
+            {BlockSize, ItemsPerThread, SizeLimit},
+            LongRadixBits,
+            ShortRadixBits,
+            EnableUnpartitionedWarpSort,
+            {warp_sort_config::partitioning_allowed,
+             warp_sort_config::logical_warp_size_small,
+             warp_sort_config::items_per_thread_small,
+             warp_sort_config::block_size_small,
+             warp_sort_config::partitioning_threshold,
+             warp_sort_config::logical_warp_size_medium,
+             warp_sort_config::items_per_thread_medium,
+             warp_sort_config::block_size_medium}
+    }
+    {}
+#endif
+};
+
+namespace detail
+{
+/// \brief Default segmented_radix_sort kernel configurations, such that the maximum shared memory is not exceeded.
+///
+/// \tparam LongRadixBits - Long bits used during the sorting.
+/// \tparam ShortRadixBits - Short bits used during the sorting.
+/// \tparam ItemsPerThread - Items per thread when type Key has size 1.
+template<unsigned int LongRadixBits, unsigned int ShortRadixBits>
+struct default_segmented_radix_sort_config_base
+{
+    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
+        sizeof(unsigned int) + sizeof(unsigned int), sizeof(int));
+    using type = segmented_radix_sort_config<LongRadixBits,
+                                             ShortRadixBits,
+                                             128,
+                                             17u,
+                                             true,
+                                             WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>>;
 };
 
 } // namespace detail
@@ -476,17 +661,13 @@ namespace detail
 {
 
 template<class Value>
-struct default_transform_config_base_helper
+struct default_transform_config_base
 {
     static constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
 };
-
-template<class Value>
-struct default_transform_config_base : default_transform_config_base_helper<Value>::type
-{};
 
 struct binary_search_config_tag : public transform_config_tag
 {};
@@ -597,7 +778,7 @@ namespace detail
 {
 
 template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct default_histogram_config_base_helper
+struct default_histogram_config_base
 {
     static constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
@@ -605,11 +786,6 @@ struct default_histogram_config_base_helper
     using type
         = histogram_config<kernel_config<256, ::rocprim::max(8u / Channels / item_scale, 1u)>>;
 };
-
-template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct default_histogram_config_base
-    : default_histogram_config_base_helper<Sample, Channels, ActiveChannels>::type
-{};
 
 struct adjacent_difference_config_tag
 {};
@@ -657,7 +833,7 @@ namespace detail
 {
 
 template<class Value>
-struct default_adjacent_difference_config_base_helper
+struct default_adjacent_difference_config_base
 {
     static constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -668,11 +844,6 @@ struct default_adjacent_difference_config_base_helper
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_store_method::block_store_transpose>;
 };
-
-template<class Value>
-struct default_adjacent_difference_config_base
-    : default_adjacent_difference_config_base_helper<Value>::type
-{};
 
 } // namespace detail
 

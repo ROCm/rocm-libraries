@@ -21,3 +21,4 @@
    * :ref:`dev-adjacent_difference`
    * :ref:`dev-binary_search`
    * :ref:`dev-histogram`
+   * :ref:`dev-memcpy`

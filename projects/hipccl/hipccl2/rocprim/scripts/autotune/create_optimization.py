@@ -475,6 +475,16 @@ class AlgorithmDeviceAdjacentDifferenceInplace(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceSegmentedRadixSort(Algorithm):
+    algorithm_name = 'device_segmented_radix_sort'
+    cpp_configuration_template_name = 'segmented_radix_sort_config_template'
+    config_selection_params = [
+            SelectionType(name='key_type', is_optional=False),
+            SelectionType(name='value_type', is_optional=True)]
+
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 def filt_algo_regex(e, algorithm_name):
     if 'algo_regex' in e:
         return re.match(e['algo_regex'], algorithm_name) is not None
@@ -508,6 +518,8 @@ def create_algorithm(algorithm_name: str, fallback_entries):
         return AlgorithmDeviceAdjacentDifference(fallback_entries)
     elif algorithm_name == 'device_adjacent_difference_inplace':
         return AlgorithmDeviceAdjacentDifferenceInplace(fallback_entries)
+    elif algorithm_name == 'device_segmented_radix_sort':
+        return AlgorithmDeviceSegmentedRadixSort(fallback_entries)
     else:
         raise(NotSupportedError(f'Algorithm "{algorithm_name}" is not supported (yet)'))
 

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -179,9 +179,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 
 template<bool Inclusive>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const std::string& method_name,
-                    hipStream_t stream,
-                    size_t size)
+                    hipStream_t                                   stream,
+                    size_t                                        size)
 {
     using custom_double2 = custom_type<double, double>;
     using custom_int_double = custom_type<int, double>;
@@ -226,8 +225,8 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<true>(benchmarks, "inclusive", stream, size);
-    add_benchmarks<false>(benchmarks, "exclusive", stream, size);
+    add_benchmarks<true>(benchmarks, stream, size); //inclusive
+    add_benchmarks<false>(benchmarks, stream, size); //exclusive
 
     // Use manual timing
     for(auto& b : benchmarks)

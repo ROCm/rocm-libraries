@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -358,8 +358,8 @@ struct device_histogram_benchmark_generator
             template<unsigned int Channels,
                      unsigned int ActiveChannels,
                      unsigned int items_per_thread = ItemsPerThread>
-            auto create(std::vector<std::unique_ptr<config_autotune_interface>>& storage,
-                        const std::vector<unsigned int>&                         cases) ->
+            auto create(std::vector<std::unique_ptr<config_autotune_interface>>& /*storage*/,
+                        const std::vector<unsigned int>& /*cases*/) ->
                 typename std::enable_if<!(items_per_thread * Channels <= max_items_per_thread),
                                         void>::type
             {}

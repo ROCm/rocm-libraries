@@ -93,23 +93,22 @@ template<bool Exclusive,
          class InputIterator,
          class OutputIterator,
          class BinaryFunction,
-         class ResultType,
+         class AccType,
          class LookbackScanState>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     lookback_scan_kernel_impl(InputIterator      input,
                               OutputIterator     output,
                               const size_t       size,
-                              ResultType         initial_value,
+                              AccType            initial_value,
                               BinaryFunction     scan_op,
                               LookbackScanState  scan_state,
                               const unsigned int number_of_blocks,
-                              ResultType*        previous_last_element = nullptr,
-                              ResultType*        new_last_element      = nullptr,
+                              AccType*           previous_last_element = nullptr,
+                              AccType*           new_last_element      = nullptr,
                               bool               override_first_value  = false,
                               bool               save_last_value       = false)
 {
-    using result_type = ResultType;
-    static_assert(std::is_same<result_type, typename LookbackScanState::value_type>::value,
+    static_assert(std::is_same<AccType, typename LookbackScanState::value_type>::value,
                   "value_type of LookbackScanState must be result_type");
     static constexpr scan_config_params params = device_params<Config>();
 
@@ -117,15 +116,14 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     constexpr auto         items_per_thread = params.kernel_config.items_per_thread;
     constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
-    using block_load_type = ::rocprim::
-        block_load<result_type, block_size, items_per_thread, params.block_load_method>;
-    using block_store_type = ::rocprim::
-        block_store<result_type, block_size, items_per_thread, params.block_store_method>;
-    using block_scan_type
-        = ::rocprim::block_scan<result_type, block_size, params.block_scan_method>;
+    using block_load_type
+        = ::rocprim::block_load<AccType, block_size, items_per_thread, params.block_load_method>;
+    using block_store_type
+        = ::rocprim::block_store<AccType, block_size, items_per_thread, params.block_store_method>;
+    using block_scan_type = ::rocprim::block_scan<AccType, block_size, params.block_scan_method>;
 
     using lookback_scan_prefix_op_type
-        = lookback_scan_prefix_op<result_type, BinaryFunction, LookbackScanState>;
+        = lookback_scan_prefix_op<AccType, BinaryFunction, LookbackScanState>;
 
     ROCPRIM_SHARED_MEMORY union
     {
@@ -140,7 +138,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     const auto         valid_in_last_block  = size - items_per_block * (number_of_blocks - 1);
 
     // For input values
-    result_type values[items_per_thread];
+    AccType values[items_per_thread];
 
     // load input values into values
     if(flat_block_id == (number_of_blocks - 1)) // last block
@@ -165,12 +163,12 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
         {
             if(Exclusive)
                 initial_value
-                    = scan_op(previous_last_element[0], static_cast<result_type>(*(input - 1)));
+                    = scan_op(previous_last_element[0], static_cast<AccType>(*(input - 1)));
             else if(flat_block_thread_id == 0)
                 values[0] = scan_op(previous_last_element[0], values[0]);
         }
 
-        result_type reduction;
+        AccType reduction;
         lookback_block_scan<Exclusive, block_scan_type>(values, // input/output
                                                         initial_value,
                                                         reduction,

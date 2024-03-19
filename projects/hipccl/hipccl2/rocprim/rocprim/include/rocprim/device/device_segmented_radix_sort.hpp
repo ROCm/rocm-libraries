@@ -25,10 +25,12 @@
 #include <iterator>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "../config.hpp"
-#include "../detail/various.hpp"
 #include "../detail/radix_sort.hpp"
+#include "../detail/various.hpp"
+#include "config_types.hpp"
 
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
@@ -49,31 +51,28 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    class Config,
-    bool Descending,
-    unsigned int BlockSize,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class OffsetIterator
->
+template<class Config,
+         bool Descending,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class OffsetIterator>
 ROCPRIM_KERNEL
-__launch_bounds__(BlockSize)
-void segmented_sort_kernel(KeysInputIterator keys_input,
-                           typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
-                           KeysOutputIterator keys_output,
-                           ValuesInputIterator values_input,
-                           typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
-                           ValuesOutputIterator values_output,
-                           bool to_output,
-                           OffsetIterator begin_offsets,
-                           OffsetIterator end_offsets,
-                           unsigned int long_iterations,
-                           unsigned int short_iterations,
-                           unsigned int begin_bit,
-                           unsigned int end_bit)
+    __launch_bounds__(device_params<Config>().kernel_config.block_size) void segmented_sort_kernel(
+        KeysInputIterator                                               keys_input,
+        typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
+        KeysOutputIterator                                              keys_output,
+        ValuesInputIterator                                             values_input,
+        typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
+        ValuesOutputIterator                                            values_output,
+        bool                                                            to_output,
+        OffsetIterator                                                  begin_offsets,
+        OffsetIterator                                                  end_offsets,
+        unsigned int                                                    long_iterations,
+        unsigned int                                                    short_iterations,
+        unsigned int                                                    begin_bit,
+        unsigned int                                                    end_bit)
 {
     segmented_sort<Config, Descending>(
         keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
@@ -84,33 +83,34 @@ void segmented_sort_kernel(KeysInputIterator keys_input,
     );
 }
 
-template<
-    class Config,
-    bool Descending,
-    unsigned int BlockSize,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class SegmentIndexIterator,
-    class OffsetIterator
->
-ROCPRIM_KERNEL
-__launch_bounds__(BlockSize)
-void segmented_sort_large_kernel(KeysInputIterator keys_input,
-                                 typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
-                                 KeysOutputIterator keys_output,
-                                 ValuesInputIterator values_input,
-                                 typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
-                                 ValuesOutputIterator values_output,
-                                 bool to_output,
-                                 SegmentIndexIterator segment_indices,
-                                 OffsetIterator begin_offsets,
-                                 OffsetIterator end_offsets,
-                                 unsigned int long_iterations,
-                                 unsigned int short_iterations,
-                                 unsigned int begin_bit,
-                                 unsigned int end_bit)
+template<class Config,
+         bool Descending,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class SegmentIndexIterator,
+         class OffsetIterator>
+ROCPRIM_KERNEL __launch_bounds__(
+    device_params<Config>()
+        .kernel_config
+        .block_size) void segmented_sort_large_kernel(KeysInputIterator keys_input,
+                                                      typename std::iterator_traits<
+                                                          KeysInputIterator>::value_type* keys_tmp,
+                                                      KeysOutputIterator  keys_output,
+                                                      ValuesInputIterator values_input,
+                                                      typename std::iterator_traits<
+                                                          ValuesInputIterator>::value_type*
+                                                                           values_tmp,
+                                                      ValuesOutputIterator values_output,
+                                                      bool                 to_output,
+                                                      SegmentIndexIterator segment_indices,
+                                                      OffsetIterator       begin_offsets,
+                                                      OffsetIterator       end_offsets,
+                                                      unsigned int         long_iterations,
+                                                      unsigned int         short_iterations,
+                                                      unsigned int         begin_bit,
+                                                      unsigned int         end_bit)
 {
     segmented_sort_large<Config, Descending>(
         keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
@@ -122,28 +122,33 @@ void segmented_sort_large_kernel(KeysInputIterator keys_input,
 }
 
 template<class Config,
-         bool         Descending,
-         unsigned int BlockSize,
+         bool Descending,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
          class ValuesOutputIterator,
          class SegmentIndexIterator,
          class OffsetIterator>
-ROCPRIM_KERNEL __launch_bounds__(BlockSize) void segmented_sort_small_or_medium_kernel(
-    KeysInputIterator                                               keys_input,
-    typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-    KeysOutputIterator                                              keys_output,
-    ValuesInputIterator                                             values_input,
-    typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-    ValuesOutputIterator                                            values_output,
-    bool                                                            to_output,
-    unsigned int                                                    num_segments,
-    SegmentIndexIterator                                            segment_indices,
-    OffsetIterator                                                  begin_offsets,
-    OffsetIterator                                                  end_offsets,
-    unsigned int                                                    begin_bit,
-    unsigned int                                                    end_bit)
+ROCPRIM_KERNEL __launch_bounds__(
+    device_params<Config>()
+        .warp_sort_config
+        .block_size_small) void segmented_sort_small_kernel(KeysInputIterator keys_input,
+                                                            typename std::iterator_traits<
+                                                                KeysInputIterator>::value_type*
+                                                                                keys_tmp,
+                                                            KeysOutputIterator  keys_output,
+                                                            ValuesInputIterator values_input,
+                                                            typename std::iterator_traits<
+                                                                ValuesInputIterator>::value_type*
+                                                                                 values_tmp,
+                                                            ValuesOutputIterator values_output,
+                                                            bool                 to_output,
+                                                            unsigned int         num_segments,
+                                                            SegmentIndexIterator segment_indices,
+                                                            OffsetIterator       begin_offsets,
+                                                            OffsetIterator       end_offsets,
+                                                            unsigned int         begin_bit,
+                                                            unsigned int         end_bit)
 {
     segmented_sort_small<Config, Descending>(
         keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
@@ -151,6 +156,50 @@ ROCPRIM_KERNEL __launch_bounds__(BlockSize) void segmented_sort_small_or_medium_
         begin_offsets, end_offsets,
         begin_bit, end_bit
     );
+}
+
+template<class Config,
+         bool Descending,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class SegmentIndexIterator,
+         class OffsetIterator>
+ROCPRIM_KERNEL __launch_bounds__(
+    device_params<Config>()
+        .warp_sort_config
+        .block_size_medium) void segmented_sort_medium_kernel(KeysInputIterator keys_input,
+                                                              typename std::iterator_traits<
+                                                                  KeysInputIterator>::value_type*
+                                                                                  keys_tmp,
+                                                              KeysOutputIterator  keys_output,
+                                                              ValuesInputIterator values_input,
+                                                              typename std::iterator_traits<
+                                                                  ValuesInputIterator>::value_type*
+                                                                                   values_tmp,
+                                                              ValuesOutputIterator values_output,
+                                                              bool                 to_output,
+                                                              unsigned int         num_segments,
+                                                              SegmentIndexIterator segment_indices,
+                                                              OffsetIterator       begin_offsets,
+                                                              OffsetIterator       end_offsets,
+                                                              unsigned int         begin_bit,
+                                                              unsigned int         end_bit)
+{
+    segmented_sort_medium<Config, Descending>(keys_input,
+                                              keys_tmp,
+                                              keys_output,
+                                              values_input,
+                                              values_tmp,
+                                              values_output,
+                                              to_output,
+                                              num_segments,
+                                              segment_indices,
+                                              begin_offsets,
+                                              end_offsets,
+                                              begin_bit,
+                                              end_bit);
 }
 
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
@@ -168,42 +217,12 @@ ROCPRIM_KERNEL __launch_bounds__(BlockSize) void segmented_sort_small_or_medium_
         } \
     }
 
-struct TwoWayPartitioner
+struct Partitioner
 {
-    template<typename InputIterator,
-             typename FirstOutputIterator,
-             typename SecondOutputIterator,
-             typename UnselectedOutputIterator,
-             typename SelectedCountOutputIterator,
-             typename FirstUnaryPredicate,
-             typename SecondUnaryPredicate>
-    hipError_t operator()(void*               temporary_storage,
-                          size_t&             storage_size,
-                          InputIterator       input,
-                          FirstOutputIterator output_first_part,
-                          SecondOutputIterator /*output_second_part*/,
-                          UnselectedOutputIterator /*output_unselected*/,
-                          SelectedCountOutputIterator selected_count_output,
-                          const size_t                size,
-                          FirstUnaryPredicate         select_first_part_op,
-                          SecondUnaryPredicate /*select_second_part_op*/,
-                          const hipStream_t stream,
-                          const bool        debug_synchronous)
-    {
-        return partition(temporary_storage,
-                         storage_size,
-                         input,
-                         output_first_part,
-                         selected_count_output,
-                         size,
-                         select_first_part_op,
-                         stream,
-                         debug_synchronous);
-    }
-};
+    bool three_way_partitioning;
 
-struct ThreeWayPartitioner
-{
+    Partitioner(bool three_way_part) : three_way_partitioning(three_way_part) {}
+
     template<typename InputIterator,
              typename FirstOutputIterator,
              typename SecondOutputIterator,
@@ -224,18 +243,33 @@ struct ThreeWayPartitioner
                           const hipStream_t           stream,
                           const bool                  debug_synchronous)
     {
-        return partition_three_way(temporary_storage,
-                                   storage_size,
-                                   input,
-                                   output_first_part,
-                                   output_second_part,
-                                   output_unselected,
-                                   selected_count_output,
-                                   size,
-                                   select_first_part_op,
-                                   select_second_part_op,
-                                   stream,
-                                   debug_synchronous);
+        if(three_way_partitioning)
+        {
+            return partition_three_way(temporary_storage,
+                                       storage_size,
+                                       input,
+                                       output_first_part,
+                                       output_second_part,
+                                       output_unselected,
+                                       selected_count_output,
+                                       size,
+                                       select_first_part_op,
+                                       select_second_part_op,
+                                       stream,
+                                       debug_synchronous);
+        }
+        else
+        {
+            return partition(temporary_storage,
+                             storage_size,
+                             input,
+                             output_first_part,
+                             selected_count_output,
+                             size,
+                             select_first_part_op,
+                             stream,
+                             debug_synchronous);
+        }
     }
 };
 
@@ -281,35 +315,33 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         "ValuesInputIterator and ValuesOutputIterator must have the same value_type"
     );
 
-    using config = default_or_custom_config<
-        Config,
-        default_segmented_radix_sort_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
-    >;
+    using config = wrapped_segmented_radix_sort_config<Config, key_type, value_type>;
+
+    detail::target_arch target_arch;
+    hipError_t          result = detail::host_target_arch(stream, target_arch);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+
+    const detail::segmented_radix_sort_config_params params
+        = detail::dispatch_target_arch<config>(target_arch);
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
-    static constexpr bool partitioning_allowed =
-        !std::is_same<typename config::warp_sort_config, DisabledWarpSortConfig>::value;
-    static constexpr unsigned int max_small_segment_length
-        = config::warp_sort_config::items_per_thread_small
-          * config::warp_sort_config::logical_warp_size_small;
-    static constexpr unsigned int small_segments_per_block
-        = config::warp_sort_config::block_size_small
-          / config::warp_sort_config::logical_warp_size_small;
-    static constexpr unsigned int max_medium_segment_length
-        = config::warp_sort_config::items_per_thread_medium
-          * config::warp_sort_config::logical_warp_size_medium;
-    static constexpr unsigned int medium_segments_per_block
-        = config::warp_sort_config::block_size_medium
-          / config::warp_sort_config::logical_warp_size_medium;
-    static_assert(
-        max_small_segment_length <= max_medium_segment_length,
-        "The max length of small segments cannot be higher than the max length of medium segments");
-    // Don't waste cycles on 3-way partitioning, if the small and medium segments are equal length
-    static constexpr bool three_way_partitioning
-        = max_small_segment_length < max_medium_segment_length;
-    using partitioner_type
-        = std::conditional_t<three_way_partitioning, ThreeWayPartitioner, TwoWayPartitioner>;
-    partitioner_type partitioner;
+    const bool            partitioning_allowed     = params.warp_sort_config.partitioning_allowed;
+    const unsigned int    max_small_segment_length = params.warp_sort_config.items_per_thread_small
+                                                  * params.warp_sort_config.logical_warp_size_small;
+    const unsigned int small_segments_per_block = params.warp_sort_config.block_size_small
+                                                  / params.warp_sort_config.logical_warp_size_small;
+    const unsigned int max_medium_segment_length
+        = params.warp_sort_config.items_per_thread_medium
+          * params.warp_sort_config.logical_warp_size_medium;
+    const unsigned int medium_segments_per_block
+        = params.warp_sort_config.block_size_medium
+          / params.warp_sort_config.logical_warp_size_medium;
+
+    const bool  three_way_partitioning = max_small_segment_length < max_medium_segment_length;
+    Partitioner partitioner(three_way_partitioning);
 
     const auto large_segment_selector = [=](const unsigned int segment_index) mutable -> bool
     {
@@ -325,20 +357,22 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
 
     const bool with_double_buffer = keys_tmp != nullptr;
     const unsigned int bits = end_bit - begin_bit;
-    const unsigned int iterations = ::rocprim::detail::ceiling_div(bits, config::long_radix_bits);
+    const unsigned int iterations = ::rocprim::detail::ceiling_div(bits, params.long_radix_bits);
     const bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
     is_result_in_output = (iterations % 2 == 0) != to_output;
-    const unsigned int radix_bits_diff = config::long_radix_bits - config::short_radix_bits;
-    const unsigned int short_iterations = radix_bits_diff != 0
-        ? ::rocprim::min(iterations, (config::long_radix_bits * iterations - bits) / radix_bits_diff)
-        : 0;
+    const unsigned int radix_bits_diff = params.long_radix_bits - params.short_radix_bits;
+    const unsigned int short_iterations
+        = radix_bits_diff != 0
+              ? ::rocprim::min(iterations,
+                               (params.long_radix_bits * iterations - bits) / radix_bits_diff)
+              : 0;
     const unsigned int long_iterations = iterations - short_iterations;
-    const bool do_partitioning = partitioning_allowed
-        && segments >= config::warp_sort_config::partitioning_threshold;
+    const bool         do_partitioning
+        = partitioning_allowed && segments >= params.warp_sort_config.partitioning_threshold;
 
-    const size_t            medium_segment_indices_size = three_way_partitioning ? segments : 0;
-    static constexpr size_t segment_count_output_size = three_way_partitioning ? 2 : 1;
-    const size_t            segment_count_output_bytes
+    const size_t medium_segment_indices_size = three_way_partitioning ? segments : 0;
+    const size_t segment_count_output_size   = three_way_partitioning ? 2 : 1;
+    const size_t segment_count_output_bytes
         = segment_count_output_size * sizeof(segment_index_type);
 
     segment_index_type* large_segment_indices_output{};
@@ -412,10 +446,14 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         std::cout << "long_iterations " << long_iterations << '\n';
         std::cout << "short_iterations " << short_iterations << '\n';
         std::cout << "do_partitioning " << do_partitioning << '\n';
-        std::cout << "config::sort::block_size: " << config::sort::block_size << '\n';
-        std::cout << "config::sort::items_per_thread: " << config::sort::items_per_thread << '\n';
+        std::cout << "params.kernel_config.block_size: " << params.kernel_config.block_size << '\n';
+        std::cout << "params.kernel_config.items_per_thread: "
+                  << params.kernel_config.items_per_thread << '\n';
         hipError_t error = hipStreamSynchronize(stream);
-        if(error != hipSuccess) return error;
+        if(error != hipSuccess)
+        {
+            return error;
+        }
     }
 
     if(!with_double_buffer)
@@ -443,8 +481,9 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         {
             return result;
         }
-        segment_index_type segment_counts[segment_count_output_size]{};
-        result = detail::memcpy_and_sync(&segment_counts,
+        std::vector<segment_index_type> segment_counts(segment_count_output_size,
+                                                       segment_index_type{});
+        result = detail::memcpy_and_sync(segment_counts.data(),
                                          segment_count_output,
                                          segment_count_output_bytes,
                                          hipMemcpyDeviceToHost,
@@ -466,15 +505,25 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         {
             std::chrono::high_resolution_clock::time_point start;
             if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(segmented_sort_large_kernel<config, Descending, config::sort::block_size>),
-                dim3(large_segment_count), dim3(config::sort::block_size), 0, stream,
-                keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
-                to_output, large_segment_indices_output,
-                begin_offsets, end_offsets,
-                long_iterations, short_iterations,
-                begin_bit, end_bit
-            );
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_large_kernel<config, Descending>),
+                               dim3(large_segment_count),
+                               dim3(params.kernel_config.block_size),
+                               0,
+                               stream,
+                               keys_input,
+                               keys_tmp,
+                               keys_output,
+                               values_input,
+                               values_tmp,
+                               values_output,
+                               to_output,
+                               large_segment_indices_output,
+                               begin_offsets,
+                               end_offsets,
+                               long_iterations,
+                               short_iterations,
+                               begin_bit,
+                               end_bit);
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:large_segments",
                                                         large_segment_count,
                                                         start)
@@ -486,29 +535,24 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
             std::chrono::high_resolution_clock::time_point start;
             if(debug_synchronous)
                 start = std::chrono::high_resolution_clock::now();
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    segmented_sort_small_or_medium_kernel<
-                        select_warp_sort_helper_config_medium_t<typename config::warp_sort_config>,
-                        Descending,
-                        config::warp_sort_config::block_size_medium>),
-                dim3(medium_segment_grid_size),
-                dim3(config::warp_sort_config::block_size_medium),
-                0,
-                stream,
-                keys_input,
-                keys_tmp,
-                keys_output,
-                values_input,
-                values_tmp,
-                values_output,
-                is_result_in_output,
-                medium_segment_count,
-                medium_segment_indices_output,
-                begin_offsets,
-                end_offsets,
-                begin_bit,
-                end_bit);
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_medium_kernel<config, Descending>),
+                               dim3(medium_segment_grid_size),
+                               dim3(params.warp_sort_config.block_size_medium),
+                               0,
+                               stream,
+                               keys_input,
+                               keys_tmp,
+                               keys_output,
+                               values_input,
+                               values_tmp,
+                               values_output,
+                               is_result_in_output,
+                               medium_segment_count,
+                               medium_segment_indices_output,
+                               begin_offsets,
+                               end_offsets,
+                               begin_bit,
+                               end_bit);
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:medium_segments",
                                                         medium_segment_count,
                                                         start)
@@ -519,29 +563,24 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
                                                                                 small_segments_per_block);
             std::chrono::high_resolution_clock::time_point start;
             if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(
-                    segmented_sort_small_or_medium_kernel<
-                        select_warp_sort_helper_config_small_t<typename config::warp_sort_config>,
-                        Descending,
-                        config::warp_sort_config::block_size_small>),
-                dim3(small_segment_grid_size),
-                dim3(config::warp_sort_config::block_size_small),
-                0,
-                stream,
-                keys_input,
-                keys_tmp,
-                keys_output,
-                values_input,
-                values_tmp,
-                values_output,
-                is_result_in_output,
-                small_segment_count,
-                small_segment_indices_output,
-                begin_offsets,
-                end_offsets,
-                begin_bit,
-                end_bit);
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_small_kernel<config, Descending>),
+                               dim3(small_segment_grid_size),
+                               dim3(params.warp_sort_config.block_size_small),
+                               0,
+                               stream,
+                               keys_input,
+                               keys_tmp,
+                               keys_output,
+                               values_input,
+                               values_tmp,
+                               values_output,
+                               is_result_in_output,
+                               small_segment_count,
+                               small_segment_indices_output,
+                               begin_offsets,
+                               end_offsets,
+                               begin_bit,
+                               end_bit);
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:small_segments",
                                                         small_segment_count,
                                                         start)
@@ -551,15 +590,24 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
     {
         std::chrono::high_resolution_clock::time_point start;
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(segmented_sort_kernel<config, Descending, config::sort::block_size>),
-            dim3(segments), dim3(config::sort::block_size), 0, stream,
-            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
-            to_output,
-            begin_offsets, end_offsets,
-            long_iterations, short_iterations,
-            begin_bit, end_bit
-        );
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_kernel<config, Descending>),
+                           dim3(segments),
+                           dim3(params.kernel_config.block_size),
+                           0,
+                           stream,
+                           keys_input,
+                           keys_tmp,
+                           keys_output,
+                           values_input,
+                           values_tmp,
+                           values_output,
+                           to_output,
+                           begin_offsets,
+                           end_offsets,
+                           long_iterations,
+                           short_iterations,
+                           begin_bit,
+                           end_bit);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort", segments, start)
     }
     return hipSuccess;

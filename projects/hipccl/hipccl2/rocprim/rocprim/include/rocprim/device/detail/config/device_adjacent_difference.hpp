@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,8 +39,10 @@ namespace detail
 {
 
 template<unsigned int arch, class value_type, class enable = void>
-struct default_adjacent_difference_config : default_adjacent_difference_config_base<value_type>
+struct default_adjacent_difference_config
+    : default_adjacent_difference_config_base<value_type>::type
 {};
+
 // Based on value_type = double
 template<class value_type>
 struct default_adjacent_difference_config<

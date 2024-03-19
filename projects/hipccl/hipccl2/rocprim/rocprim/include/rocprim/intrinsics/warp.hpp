@@ -116,9 +116,6 @@ int warp_all(int predicate)
 
 } // end detail namespace
 
-/// @}
-// end of group intrinsicsmodule
-
 /// \brief Group active lanes having the same bits of \p label
 ///
 /// Threads that have the same least significant \p LabelBits bits are grouped into the same group.
@@ -184,6 +181,9 @@ ROCPRIM_DEVICE ROCPRIM_INLINE bool group_elect(lane_mask_type mask)
     const unsigned int prev_same_count = ::rocprim::masked_bit_count(mask);
     return prev_same_count == 0 && mask != 0;
 }
+
+/// @}
+// end of group intrinsicsmodule
 
 END_ROCPRIM_NAMESPACE
 

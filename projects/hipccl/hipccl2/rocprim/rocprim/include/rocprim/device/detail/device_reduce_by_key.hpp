@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,6 @@
 #include "../../block/block_load.hpp"
 #include "../../block/block_scan.hpp"
 #include "../../block/block_store.hpp"
-#include "../../detail/match_result_type.hpp"
 #include "../../detail/various.hpp"
 #include "../../intrinsics/thread.hpp"
 #include "../../thread/thread_operators.hpp"
@@ -51,7 +50,7 @@ using value_type_t = typename std::iterator_traits<Iterator>::value_type;
 
 template<typename ValueIterator, typename BinaryOp>
 using accumulator_type_t =
-    typename detail::match_result_type<reduce_by_key::value_type_t<ValueIterator>, BinaryOp>::type;
+    typename invoke_result_binary_op<reduce_by_key::value_type_t<ValueIterator>, BinaryOp>::type;
 
 template<typename AccumulatorType>
 using wrapped_type_t = rocprim::tuple<unsigned int, AccumulatorType>;

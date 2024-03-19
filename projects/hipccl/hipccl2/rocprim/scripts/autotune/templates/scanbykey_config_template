@@ -10,7 +10,7 @@ scan_by_key_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] 
 
 {% macro general_case() -%}
 template<unsigned int arch, class key_type, class value_type, class enable = void> struct default_scan_by_key_config :
-default_scan_by_key_config_base<key_type, value_type> { };
+default_scan_by_key_config_base<key_type, value_type>::type { };
 {%- endmacro %}
 
 {% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}

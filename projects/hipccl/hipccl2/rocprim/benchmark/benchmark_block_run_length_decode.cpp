@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,7 +57,6 @@ __global__
     rocprim::block_load_direct_blocked(global_thread_idx, d_run_items, run_items);
     rocprim::block_load_direct_blocked(global_thread_idx, d_run_offsets, run_offsets);
 
-    ROCPRIM_SHARED_MEMORY typename BlockRunLengthDecodeT::storage_type temp_storage;
     BlockRunLengthDecodeT block_run_length_decode(run_items, run_offsets);
 
     const OffsetT total_decoded_size

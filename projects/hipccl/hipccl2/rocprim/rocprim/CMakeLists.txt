@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@ configure_file(
   @ONLY
 )
 
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
+if (ROCPRIM_INSTALL AND BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   rocm_wrap_header_file(
     "rocprim_version.hpp"
     WRAPPER_LOCATIONS rocprim/include/rocprim
@@ -54,35 +54,36 @@ target_link_libraries(rocprim_hip INTERFACE rocprim hip::device)
 
 
 # Installation
+if (ROCPRIM_INSTALL)
+  # We need to install headers manually as rocm_install_targets
+  # does not support header-only libraries (INTERFACE targets)
+  rocm_install_targets(
+    TARGETS rocprim rocprim_hip
+  )
 
-# We need to install headers manually as rocm_install_targets
-# does not support header-only libraries (INTERFACE targets)
-rocm_install_targets(
-  TARGETS rocprim rocprim_hip
-)
-
-rocm_install(
-  DIRECTORY
-    "include/"
-    "${PROJECT_BINARY_DIR}/rocprim/include/"
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/
-  FILES_MATCHING
-  PATTERN "*.h"
-  PATTERN "*.hpp"
-  PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
-)
-
-
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-rocm_install(
+  rocm_install(
     DIRECTORY
-       "${PROJECT_BINARY_DIR}/rocprim/wrapper/"
-        DESTINATION rocprim/ )
-endif()
+      "include/"
+      "${PROJECT_BINARY_DIR}/rocprim/include/"
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/
+    FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*.hpp"
+    PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
+  )
 
-# Export targets
-rocm_export_targets(
-  TARGETS roc::rocprim roc::rocprim_hip
-  DEPENDS PACKAGE hip
-  NAMESPACE roc::
-)
+
+  if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
+  rocm_install(
+      DIRECTORY
+        "${PROJECT_BINARY_DIR}/rocprim/wrapper/"
+          DESTINATION rocprim/ )
+  endif()
+
+  # Export targets
+  rocm_export_targets(
+    TARGETS roc::rocprim roc::rocprim_hip
+    DEPENDS PACKAGE hip
+    NAMESPACE roc::
+  )
+endif()

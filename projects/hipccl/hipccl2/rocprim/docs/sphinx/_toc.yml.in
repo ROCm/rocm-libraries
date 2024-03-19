@@ -23,13 +23,14 @@ subtrees:
           - file: device_ops/sort.rst
           - file: device_ops/merge.rst
           - file: device_ops/partition.rst
-          - file: device_ops/run_lenght_encoding.rst
+          - file: device_ops/run_length_encoding.rst
           - file: device_ops/scan.rst
           - file: device_ops/select.rst
           - file: device_ops/reduce.rst
           - file: device_ops/adjacent_difference.rst
           - file: device_ops/binary_search.rst
           - file: device_ops/histogram.rst
+          - file: device_ops/memcpy.rst
       - file: block_ops/index.rst
         subtrees:
         - entries: 
@@ -60,6 +61,5 @@ subtrees:
       - file: reference/thread_ops.rst
       - file: reference/iterators.rst
       - file: reference/intrinsics.rst
-      - file: reference/reorder.rst
       - file: reference/acknowledge.rst
   - file: license.rst

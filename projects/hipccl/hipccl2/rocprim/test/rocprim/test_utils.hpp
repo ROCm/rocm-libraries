@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,6 @@
 #ifndef TEST_TEST_UTILS_HPP_
 #define TEST_TEST_UTILS_HPP_
 
-#include <rocprim/detail/match_result_type.hpp>
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/functional.hpp>
 #include <rocprim/intrinsics.hpp>
@@ -446,12 +445,8 @@ void iota(ForwardIt first, ForwardIt last, T value)
     }
 
 template<unsigned int LogicalWarpSize>
-struct DeviceSelectWarpSize
-{
-    static constexpr unsigned value = ::rocprim::device_warp_size() >= LogicalWarpSize
-        ? LogicalWarpSize
-        : ::rocprim::device_warp_size();
-};
+__device__ constexpr bool device_test_enabled_for_warp_size_v
+    = ::rocprim::device_warp_size() >= LogicalWarpSize;
 
 } // end test_utils namespace
 

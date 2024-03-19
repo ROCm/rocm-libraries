@@ -83,6 +83,11 @@ struct wrapped_adjacent_difference_config<default_config, false, Value>
 };
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<class AdjacentDifferenceConfig, bool InPlace, class Value>
+template<target_arch Arch>
+constexpr adjacent_difference_config_params
+    wrapped_adjacent_difference_config<AdjacentDifferenceConfig, InPlace, Value>::
+        architecture_config<Arch>::params;
 template<class Value>
 template<target_arch Arch>
 constexpr adjacent_difference_config_params
