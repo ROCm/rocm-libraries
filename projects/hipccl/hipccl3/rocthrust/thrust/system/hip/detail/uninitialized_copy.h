@@ -29,6 +29,7 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <iterator>
+#include <memory>
 #include <thrust/distance.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/util.h>
@@ -60,7 +61,7 @@ namespace __uninitialized_copy
         void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
         {
             InputType const& in  = raw_reference_cast(input[idx]);
-            OutputType&      out = raw_reference_cast(output[idx]);
+            OutputType&      out = raw_reference_cast(output[static_cast<typename std::pointer_traits<OutputIt>::difference_type>(idx)]);
 
             ::new(static_cast<void*>(&out)) OutputType(in);
         }
@@ -78,7 +79,7 @@ uninitialized_copy_n(execution_policy<Derived>& policy,
     typedef __uninitialized_copy::functor<InputIt, OutputIt> functor_t;
 
     hip_rocprim::parallel_for(policy, functor_t(first, result), count);
-    return result + count;
+    return result + static_cast<typename std::pointer_traits<OutputIt>::difference_type>(count);
 }
 
 template <class Derived, class InputIt, class OutputIt>

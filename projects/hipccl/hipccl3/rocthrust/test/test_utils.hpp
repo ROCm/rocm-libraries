@@ -152,7 +152,7 @@ std::vector<seed_type> get_seeds()
 }
 
 template <class T>
-inline auto get_random_data(size_t size, T, T, int seed) ->
+inline auto get_random_data(size_t size, T, T, uint64_t seed) ->
     typename std::enable_if<std::is_same<T, bool>::value, thrust::host_vector<T>>::type
 {
     std::random_device          rd;
@@ -165,7 +165,7 @@ inline auto get_random_data(size_t size, T, T, int seed) ->
 }
 
 template <class T>
-inline auto get_random_data(size_t size, T min, T max, int seed) ->
+inline auto get_random_data(size_t size, T min, T max, uint64_t seed) ->
     typename std::enable_if<rocprim::is_integral<T>::value && !std::is_same<T, bool>::value,
                             thrust::host_vector<T>>::type
 {
@@ -179,7 +179,7 @@ inline auto get_random_data(size_t size, T min, T max, int seed) ->
 }
 
 template <class T>
-inline auto get_random_data(size_t size, T min, T max, int seed) ->
+inline auto get_random_data(size_t size, T min, T max, uint64_t seed) ->
     typename std::enable_if<rocprim::is_floating_point<T>::value, thrust::host_vector<T>>::type
 {
     std::random_device                rd;

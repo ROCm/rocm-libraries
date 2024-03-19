@@ -1,11 +1,30 @@
-#include <thrust/host_vector.h>
+/*
+ *  Copyright 20011-2021 NVIDIA Corporation
+ *  Modifications Copyright© 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
+#include <iterator>
+#include <thrust/detail/config.h>
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 #include <thrust/pair.h>
-#include <thrust/sort.h>
+#include <thrust/partition.h>
 #include <thrust/reduce.h>
 #include <thrust/scan.h>
+#include <thrust/sort.h>
 #include <thrust/transform_reduce.h>
-#include <thrust/detail/config.h>
 
 #if THRUST_CPP_DIALECT >= 2011
 #include <thrust/random.h>
@@ -17,16 +36,14 @@
 #include <algorithm>
 #include <numeric>
 
+#include <climits> // For CHAR_BIT.
+#include <cmath> // For `sqrt` and `abs`.
+#include <cstdlib> // For `atoi`.
+#include <exception>
+#include <iostream>
 #include <map>
 #include <string>
-#include <exception>
-
-#include <iostream>
-
-#include <cassert>
-#include <cstdlib>    // For `atoi`.
-#include <climits>    // For CHAR_BIT.
-#include <cmath>      // For `sqrt` and `abs`.
+#include <type_traits>
 
 #include <stdint.h>   // For `intN_t`.
 
@@ -202,6 +219,29 @@ T sample_standard_deviation(InputIt first, InputIt last, T average)
 
   return sqrt(vc.value / T(vc.count - 1));
 }
+
+template <typename T, bool = std::is_integral<T>::value>
+struct partition_predicate
+{
+};
+
+template <typename T>
+struct partition_predicate<T, true>
+{
+  __host__ __device__ bool operator()(T x) const
+  {
+    return (x % 2) == 0;
+  }
+};
+
+template <typename T>
+struct partition_predicate<T, false>
+{
+  __host__ __device__ bool operator()(T x) const
+  {
+    return x > 0.5;
+  }
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -733,6 +773,72 @@ struct shuffle_trial_base : trial_base<TrialKind>
 };
 #endif
 
+template <typename Container, typename TrialKind = regular_trial>
+struct partition_trial_base : trial_base<TrialKind>
+{
+  Container input;
+
+  void setup(uint64_t elements)
+  {
+    input.resize(elements);
+
+    randomize(input);
+  }
+};
+
+template <typename Container, typename TrialKind = regular_trial>
+struct partition_copy_trial_base : trial_base<TrialKind>
+{
+  Container input;
+  Container out_true;
+  Container out_false;
+
+  void setup(uint64_t elements)
+  {
+    input.resize(elements);
+    out_true.resize(elements);
+    out_false.resize(elements);
+
+    randomize(input);
+  }
+};
+
+template <typename Container, typename TrialKind = regular_trial>
+struct partition_stencil_trial_base : trial_base<TrialKind>
+{
+  Container input;
+  Container stencil;
+
+  void setup(uint64_t elements)
+  {
+    input.resize(elements);
+    stencil.resize(elements);
+
+    randomize(input);
+    randomize(stencil);
+  }
+};
+
+template <typename Container, typename TrialKind = regular_trial>
+struct partition_copy_stencil_trial_base : trial_base<TrialKind>
+{
+  Container input;
+  Container out_true;
+  Container out_false;
+  Container stencil;
+
+  void setup(uint64_t elements)
+  {
+    input.resize(elements);
+    out_true.resize(elements);
+    out_false.resize(elements);
+    stencil.resize(elements);
+
+    randomize(input);
+    randomize(stencil);
+  }
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
@@ -959,6 +1065,147 @@ struct shuffle_tester
 };
 #endif
 
+template <typename T>
+struct partition_tester
+{
+  static char const* test_name()
+  {
+    return "partition";
+  }
+
+  struct std_trial : partition_trial_base<std::vector<T>>
+  {
+    void operator()()
+    {
+        std::partition(this->input.begin(), this->input.end(), partition_predicate<T> {});
+    }
+  };
+
+  struct thrust_trial : partition_trial_base<thrust::device_vector<T>>
+  {
+    void operator()()
+    {
+        thrust::partition(this->input.begin(), this->input.end(), partition_predicate<T> {});
+    }
+  };
+};
+
+template <typename T>
+struct partition_copy_tester
+{
+  static char const* test_name()
+  {
+    return "partition_copy";
+  }
+
+  struct std_trial : partition_copy_trial_base<std::vector<T>>
+  {
+    void operator()()
+    {
+        std::partition_copy(this->input.begin(),
+                            this->input.end(),
+                            this->out_true.begin(),
+                            this->out_false.begin(),
+                            partition_predicate<T> {});
+    }
+  };
+  struct thrust_trial : partition_copy_trial_base<thrust::device_vector<T>>
+  {
+    void operator()()
+    {
+        thrust::partition_copy(this->input.begin(),
+                               this->input.end(),
+                               this->out_true.begin(),
+                               this->out_false.begin(),
+                               partition_predicate<T> {});
+    }
+  };
+};
+
+template <typename T>
+struct partition_stencil_tester
+{
+  static char const* test_name()
+  {
+    return "partition_stencil";
+  }
+
+  struct std_trial : partition_stencil_trial_base<std::vector<T>>
+  {
+    void operator()()
+    {
+        std::vector<std::tuple<T, T>> zipped(this->input.size());
+        std::transform(this->input.begin(), this->input.end(), this->stencil.begin(), zipped.begin(), [](T a, T b) {
+            return std::tuple<T, T> {a, b};
+        });
+        std::partition(zipped.begin(), zipped.end(), [](std::tuple<T, T> t) {
+            return partition_predicate<T> {}(std::get<1>(t));
+        });
+        std::transform(zipped.begin(), zipped.end(), this->input.begin(), [](std::tuple<T, T> t) {
+            return std::get<0>(t);
+        });
+    }
+  };
+
+  struct thrust_trial : partition_stencil_trial_base<thrust::device_vector<T>>
+  {
+    void operator()()
+    {
+        thrust::partition(
+            this->input.begin(), this->input.end(), this->stencil.begin(), partition_predicate<T> {});
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        cudaError_t err = cudaDeviceSynchronize();
+        if(err != cudaSuccess)
+          throw thrust::error_code(err, thrust::cuda_category());
+#endif
+    }
+  };
+};
+
+template <typename T>
+struct partition_copy_stencil_tester
+{
+  static char const* test_name()
+  {
+    return "partition_copy_stencil";
+  }
+
+  struct std_trial : partition_copy_stencil_trial_base<std::vector<T>>
+  {
+    void operator()()
+    {
+        std::vector<std::tuple<T, T>> zipped(this->input.size());
+        std::vector<std::tuple<T, T>> zipped_true{};
+        std::vector<std::tuple<T, T>> zipped_false{};
+
+        std::transform(this->input.begin(), this->input.end(), this->stencil.begin(), zipped.begin(), [](T a, T b) {
+            return std::tuple<T, T> {a, b};
+        });
+        std::partition_copy(zipped.begin(), zipped.end(), std::back_inserter(zipped_true), std::back_inserter(zipped_false), [](std::tuple<T, T> t) {
+            return partition_predicate<T> {}(std::get<1>(t));
+        });
+        std::transform(zipped_true.begin(), zipped_true.end(), this->out_true.begin(), [](std::tuple<T, T> t) {
+            return std::get<0>(t);
+        });
+        std::transform(zipped_false.begin(), zipped_false.end(), this->out_false.begin(), [](std::tuple<T, T> t) {
+            return std::get<0>(t);
+        });
+    }
+  };
+  struct thrust_trial : partition_copy_stencil_trial_base<thrust::device_vector<T>>
+  {
+    void operator()()
+    {
+        thrust::partition_copy(this->input.begin(),
+                               this->input.end(),
+                               this->stencil.begin(),
+                               this->out_true.begin(),
+                               this->out_false.begin(),
+                               partition_predicate<T> {});
+    }
+  };
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 
 template <
@@ -1013,6 +1260,38 @@ void run_core_primitives_experiments_for_type()
 
   experiment_driver<
       shuffle_tester
+    , ElementMetaType
+    , Elements / sizeof(typename ElementMetaType::type)
+    , BaselineTrials
+    , RegularTrials
+  >::run_experiment();
+
+  experiment_driver<
+      partition_tester
+    , ElementMetaType
+    , Elements / sizeof(typename ElementMetaType::type)
+    , BaselineTrials
+    , RegularTrials
+  >::run_experiment();
+
+  experiment_driver<
+      partition_copy_tester
+    , ElementMetaType
+    , Elements / sizeof(typename ElementMetaType::type)
+    , BaselineTrials
+    , RegularTrials
+  >::run_experiment();
+
+  experiment_driver<
+      partition_stencil_tester
+    , ElementMetaType
+    , Elements / sizeof(typename ElementMetaType::type)
+    , BaselineTrials
+    , RegularTrials
+  >::run_experiment();
+
+  experiment_driver<
+      partition_copy_stencil_tester
     , ElementMetaType
     , Elements / sizeof(typename ElementMetaType::type)
     , BaselineTrials

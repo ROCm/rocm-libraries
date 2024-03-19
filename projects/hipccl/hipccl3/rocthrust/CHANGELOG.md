@@ -3,20 +3,29 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## rocThrust 3.0.0 for ROCm 6.0
-### Additions
-- Updated to match upstream Thrust 2.0.1
-- NV_IF_TARGET macro from libcu++ for NVIDIA backend and HIP implementation for HIP backend.
+## (Unreleased) rocThrust 3.0.1 for ROCm 6.2
 
 ### Changes
-- The cmake build system now additionally accepts `GPU_TARGETS` in addition to `AMDGPU_TARGETS` for
+
+* Updated internal calls to `rocprim::detail::invoke_result` to use the public API `rocprim::invoke_result`.
+
+## rocThrust 3.0.0 for ROCm 6.0
+
+### Additions
+
+* Updated to match upstream Thrust 2.0.1
+* NV_IF_TARGET macro from libcu++ for NVIDIA backend and HIP implementation for HIP backend.
+
+### Changes
+
+* The cmake build system now additionally accepts `GPU_TARGETS` in addition to `AMDGPU_TARGETS` for
   setting the targeted gpu architectures. `GPU_TARGETS=all` will compile for all supported architectures.
   `AMDGPU_TARGETS` is only provided for backwards compatibility, `GPU_TARGETS` should be preferred.
-- Removed cub symlink from the root of the repository.
-- Removed support for deprecated macros (THRUST_DEVICE_BACKEND and THRUST_HOST_BACKEND).
+* Removed cub symlink from the root of the repository.
+* Removed support for deprecated macros (THRUST_DEVICE_BACKEND and THRUST_HOST_BACKEND).
 
 ### Fixes
-- Fixed a segmentation fault when binary search / upper bound / lower bound / equal range was invoked with `hip_rocprim::execute_on_stream_base` policy.
+* Fixed a segmentation fault when binary search / upper bound / lower bound / equal range was invoked with `hip_rocprim::execute_on_stream_base` policy.
 
 ### Known issues
 
@@ -28,12 +37,12 @@ Documentation for rocThrust available at
 ## rocThrust 2.18.0 for ROCm 5.7
 
 ### Fixes 
-- `lower_bound`, `upper_bound`, and `binary_search` failed to compile for certain types.
-- Fixed issue where `transform_iterator` would not compile with `__device__`-only operators.
+* `lower_bound`, `upper_bound`, and `binary_search` failed to compile for certain types.
+* Fixed issue where `transform_iterator` would not compile with `__device__`-only operators.
 
 ### Changes
-- Updated `docs` directory structure to match the standard of [rocm-docs-core](https://github.com/RadeonOpenCompute/rocm-docs-core).
-- Removed references to and workarounds for deprecated hcc
+* Updated `docs` directory structure to match the standard of [rocm-docs-core](https://github.com/RadeonOpenCompute/rocm-docs-core).
+* Removed references to and workarounds for deprecated hcc
 
 
 ## rocThrust 2.17.0 for ROCm 5.5

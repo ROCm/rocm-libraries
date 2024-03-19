@@ -99,15 +99,15 @@ namespace __parallel_for
 
         // Find maximum number of items per one step and number of steps
         constexpr size_t aligned_size_limit     = (config::size_limit / items_per_block) * items_per_block;
-        const Size number_of_launch             = (num_items + aligned_size_limit - 1) / aligned_size_limit;
+        const size_t number_of_launch             = (static_cast<size_t>(num_items) + aligned_size_limit - 1) / aligned_size_limit;
 
-        for(Size i = 0, offset = 0; i < number_of_launch; ++i, offset += aligned_size_limit)
+        for(size_t i = 0, offset = 0; i < number_of_launch; ++i, offset += aligned_size_limit)
         {
-            const size_t current_items = std::min<size_t>(num_items - offset, aligned_size_limit);
-            const unsigned int number_of_blocks = (current_items + items_per_block - 1) / items_per_block;
+            const size_t current_items = std::min<size_t>(static_cast<size_t>(num_items) - offset, aligned_size_limit);
+            const size_t number_of_blocks = (current_items + items_per_block - 1) / items_per_block;
 
             hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<block_size, F, Size, items_per_thread>),
-                               dim3(number_of_blocks),
+                               dim3(static_cast<uint32_t>(number_of_blocks)),
                                dim3(block_size),
                                0,
                                stream,

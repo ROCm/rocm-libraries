@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2023 Advanced Micro Devices, Inc.
+# Copyright 2019-2024 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
@@ -122,7 +122,7 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 # Setup VERSION
-rocm_setup_version(VERSION "3.0.0")
+rocm_setup_version(VERSION "3.0.1")
 
 # Print configuration summary
 include(cmake/Summary.cmake)
