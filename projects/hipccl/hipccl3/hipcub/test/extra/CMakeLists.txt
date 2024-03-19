@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -42,62 +42,49 @@ include(VerifyCompiler)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-
+  set(CCCL_MINIMUM_VERSION 2.2.0)
   if(NOT DOWNLOAD_CUB)
-    find_package(cub QUIET)
-    find_package(thrust QUIET)
+    find_package(CUB ${CCCL_MINIMUM_VERSION} CONFIG)
+    find_package(Thrust ${CCCL_MINIMUM_VERSION} CONFIG)
+    find_package(libcudacxx ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()
 
-  if(NOT DEFINED CUB_INCLUDE_DIR)
-    file(
-      DOWNLOAD https://github.com/NVIDIA/cub/archive/2.1.0.zip
-      ${CMAKE_CURRENT_BINARY_DIR}/cub-2.1.0.zip
-      STATUS cub_download_status LOG cub_download_log
-    )
-    list(GET cub_download_status 0 cub_download_error_code)
-    if(cub_download_error_code)
+  if (NOT CUB_FOUND OR NOT Thrust_FOUND OR NOT libcudacxx_FOUND)
+    if(CUB_FOUND OR Thrust_FOUND OR libcudacxx_FOUND)
+      message(WARNING "Found one of CUB, Thrust or libcu++, but not all of them.
+                      This can lead to mixing different potentially incompatible versions.")
+    endif()
+
+    message(STATUS "CUB, Thrust or libcu++ not found, downloading and extracting CCCL ${CCCL_MINIMUM_VERSION}")
+    file(DOWNLOAD https://github.com/NVIDIA/cccl/archive/refs/tags/v${CCCL_MINIMUM_VERSION}.zip
+                  ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}.zip
+        STATUS cccl_download_status LOG cccl_download_log)
+
+    list(GET cccl_download_status 0 cccl_download_error_code)
+    if(cccl_download_error_code)
       message(FATAL_ERROR "Error: downloading "
-        "https://github.com/NVIDIA/cub/archive/2.1.0.zip failed "
-        "error_code: ${cub_download_error_code} "
-        "log: ${cub_download_log} "
-      )
+              "https://github.com/NVIDIA/cccl/archive/refs/tags/v${CCCL_MINIMUM_VERSION}.zip failed "
+              "error_code: ${cccl_download_error_code} "
+              "log: ${cccl_download_log}")
     endif()
 
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-2.1.0.zip
-      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-      RESULT_VARIABLE cub_unpack_error_code
-    )
-    if(cub_unpack_error_code)
-      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-2.1.0.zip failed")
-    endif()
-    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-2.1.0/ CACHE PATH "")
-  endif()
-
-  if(NOT DEFINED THRUST_INCLUDE_DIR)
-    file(
-      DOWNLOAD https://github.com/NVIDIA/thrust/archive/2.1.0.zip
-      ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.1.0.zip
-      STATUS thrust_download_status LOG thrust_download_log
-    )
-    list(GET thrust_download_status 0 thrust_download_error_code)
-    if(thrust_download_error_code)
-      message(FATAL_ERROR "Error: downloading "
-        "https://github.com/NVIDIA/thrust/archive/2.1.0.zip failed "
-        "error_code: ${thrust_download_error_code} "
-        "log: ${thrust_download_log} "
-      )
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
+      file(ARCHIVE_EXTRACT INPUT ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}.zip)
+    else()
+      execute_process(COMMAND "${CMAKE_COMMAND}" -E tar xf ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}.zip
+                      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                      RESULT_VARIABLE cccl_unpack_error_code)
+      if(cccl_unpack_error_code)
+        message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}.zip failed")
+      endif()
     endif()
 
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.1.0.zip
-      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-      RESULT_VARIABLE thrust_unpack_error_code
-    )
-    if(thrust_unpack_error_code)
-      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.1.0.zip failed")
-    endif()
-    set(THRUST_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.1.0/ CACHE PATH "")
+    find_package(CUB ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
+                PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}/cub)
+    find_package(Thrust ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
+                PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}/thrust)
+    find_package(libcudacxx ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
+                PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}/libcudacxx)
   endif()
 else()
   # rocPRIM (only for ROCm platform)
@@ -109,7 +96,7 @@ else()
     message(STATUS "rocPRIM not found. Fetching...")
     FetchContent_Declare(
       prim
-      GIT_REPOSITORY https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+      GIT_REPOSITORY https://github.com/ROCm/rocPRIM.git
       GIT_TAG        develop
     )
     FetchContent_MakeAvailable(prim)
@@ -140,15 +127,8 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
   if(HIP_COMPILER STREQUAL "nvcc")
     set_property(TARGET ${TEST_TARGET} PROPERTY CUDA_STANDARD 14)
     set_source_files_properties(${TEST_SOURCES} PROPERTIES LANGUAGE CUDA)
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        hip::hipcub
-    )
-    target_include_directories(${TEST_TARGET}
-      PRIVATE
-        $<BUILD_INTERFACE:${CUB_INCLUDE_DIR}>
-        $<BUILD_INTERFACE:${THRUST_INCLUDE_DIR}>
-    )
+    target_link_libraries(${TEST_TARGET} PRIVATE
+                          hip::hipcub CUB::CUB Thrust::Thrust libcudacxx::libcudacxx)
   elseif(HIP_COMPILER STREQUAL "clang")
     target_link_libraries(${TEST_TARGET}
       PRIVATE

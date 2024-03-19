@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -318,7 +318,7 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
         for(size_t i = 0; i < output.size(); i++)
         {
             T value = 0;
-            for(size_t j = 0; j < valid; j++)
+            for(int j = 0; j < valid; ++j)
             {
                 auto idx = i * logical_warp_size + j;
                 value += input[idx];

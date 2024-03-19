@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -38,6 +38,7 @@
 #include "../iterator/arg_index_input_iterator.hpp"
 #include "../thread/thread_operators.hpp"
 #include "device_reduce.hpp"
+#include "rocprim/type_traits.hpp"
 
 #include <rocprim/device/device_segmented_reduce.hpp>
 
@@ -131,7 +132,7 @@ inline hipError_t segmented_arg_minmax(void*          temporary_storage,
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using result_type =
-        typename ::rocprim::detail::match_result_type<input_type, BinaryFunction>::type;
+        typename ::rocprim::invoke_result_binary_op<input_type, BinaryFunction>::type;
 
     using config = ::rocprim::detail::wrapped_reduce_config<Config, result_type>;
 

@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -61,13 +61,7 @@ else()
   # hipcub_cub target is only for internal use.
   add_library(hipcub_cub INTERFACE)
   target_link_libraries(hipcub_cub
-    INTERFACE
-      hipcub
-  )
-  target_include_directories(hipcub_cub
-    INTERFACE
-      ${CUB_INCLUDE_DIR}
-      ${THRUST_INCLUDE_DIR}
+    INTERFACE hipcub CUB::CUB Thrust::Thrust libcudacxx::libcudacxx
   )
 endif()
 

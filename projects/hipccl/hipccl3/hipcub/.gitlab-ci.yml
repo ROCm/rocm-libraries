@@ -411,6 +411,8 @@ test:nvcc_install:
 
 test:doc:
   stage: test
+  variables:
+    SPHINX_DIR: $DOCS_DIR/sphinx
   extends:
     - .rules:test
     - .build:docs

@@ -1,5 +1,5 @@
 # MIT License #
-# Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -179,7 +179,6 @@ ${TEST_TYPE_SLICE_COUNT} test type slice(s) for test target ${TEST_TARGET}")
     message(FATAL_ERROR "no .cpp files generated for target ${TEST_TARGET}")
   endif()
 
-  set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${TEST_TARGET}.parallel")
   add_hipcub_test_internal(${TEST_NAME} "${SOURCES}" ${TEST_TARGET})
   target_include_directories("${TEST_TARGET}" PRIVATE "../../test/hipcub")
 endfunction()

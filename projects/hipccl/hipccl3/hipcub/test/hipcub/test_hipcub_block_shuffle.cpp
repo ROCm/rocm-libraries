@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,8 @@
 
 // required test headers
 #include "test_utils.hpp"
+
+#include <type_traits>
 
 // Params for tests
 template<
@@ -110,7 +112,9 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
         int distance = rand() % std::min(size_t(10), block_size/2) - std::min(size_t(10), block_size/2);
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value <<" & distance = "<<distance);
         // Generate data
-        std::vector<type> input_data = test_utils::get_random_data<type>(size, -100, 100, seed_value);
+        const int         min_value = std::is_unsigned<type>::value ? 0 : -100;
+        std::vector<type> input_data
+            = test_utils::get_random_data<type>(size, min_value, 100, seed_value);
         std::vector<type> output_data(input_data);
 
         // Preparing device
@@ -198,7 +202,9 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
         int distance = rand() % std::min(size_t(5), block_size/2);
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value <<" & distance = "<<distance);
         // Generate data
-        std::vector<type> input_data = test_utils::get_random_data<type>(size, -100, 100, seed_value);
+        const int         min_value = std::is_unsigned<type>::value ? 0 : -100;
+        std::vector<type> input_data
+            = test_utils::get_random_data<type>(size, min_value, 100, seed_value);
         std::vector<type> output_data(input_data);
 
         // Preparing device
@@ -283,7 +289,9 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockUp)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
         // Generate data
-        std::vector<type> input_data = test_utils::get_random_data<type>(ItemsPerThread * size, -100, 100, seed_value);
+        const int         min_value = std::is_unsigned<type>::value ? 0 : -100;
+        std::vector<type> input_data
+            = test_utils::get_random_data<type>(ItemsPerThread * size, min_value, 100, seed_value);
         std::vector<type> output_data(input_data);
 
         std::vector<type*>  arr_input(size);
@@ -381,7 +389,9 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockDown)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<type> input_data = test_utils::get_random_data<type>(ItemsPerThread * size, -100, 100, seed_value);
+        const int         min_value = std::is_unsigned<type>::value ? 0 : -100;
+        std::vector<type> input_data
+            = test_utils::get_random_data<type>(ItemsPerThread * size, min_value, 100, seed_value);
         std::vector<type> output_data(input_data);
 
         std::vector<type*>  arr_input(size);

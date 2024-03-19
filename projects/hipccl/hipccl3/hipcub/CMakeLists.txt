@@ -98,7 +98,7 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 # Setup VERSION
-set(VERSION_STRING "3.0.0")
+set(VERSION_STRING "3.2.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Print configuration summary

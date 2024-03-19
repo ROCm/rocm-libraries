@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -179,7 +179,10 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
             std::numeric_limits<ItemT>::max(),
             seed_value
         );
+        // Not strictly required, but fixes a spurious GCC warning and good practice anyways
+        run_items.reserve(run_items.size() + empty_run_items.size());
         run_items.insert(run_items.end(), empty_run_items.begin(), empty_run_items.end());
+        run_lengths.reserve(run_lengths.size() + num_trailing_empty_runs);
         run_lengths.insert(run_lengths.end(), num_trailing_empty_runs, static_cast<LengthT>(0));
 
         std::vector<ItemT> expected;
