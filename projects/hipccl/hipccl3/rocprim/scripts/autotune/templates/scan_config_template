@@ -10,7 +10,7 @@ scan_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}, ::r
 
 {% macro general_case() -%}
 template<unsigned int arch, class value_type, class enable = void> struct default_scan_config :
-default_scan_config_base<value_type> { };
+default_scan_config_base<value_type>::type { };
 {%- endmacro %}
 
 {% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}

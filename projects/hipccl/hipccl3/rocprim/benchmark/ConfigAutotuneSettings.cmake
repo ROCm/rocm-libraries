@@ -81,5 +81,17 @@ ${TUNING_TYPES};${LIMITED_TUNING_TYPES};using_warp_scan reduce_then_scan" PARENT
     set(list_across "\
 binary_search upper_bound lower_bound;${TUNING_TYPES};${LIMITED_TUNING_TYPES};64 128 256;1 2 4 8 16" PARENT_SCOPE)
     set(output_pattern_suffix "@SubAlgorithm@_@ValueType@_@OutputType@_@BlockSize@_@ItemsPerThread@" PARENT_SCOPE)
+  elseif(file STREQUAL "benchmark_device_segmented_radix_sort_keys")
+    set(list_across_names "\
+KeyType;BlockSize;ItemsPerThread;PartitionAllowed" PARENT_SCOPE)
+    set(list_across "${TUNING_TYPES};128 256;4 8 16;false" PARENT_SCOPE)
+    set(output_pattern_suffix "\
+@KeyType@_@BlockSize@_@ItemsPerThread@_@PartitionAllowed@" PARENT_SCOPE)
+  elseif(file STREQUAL "benchmark_device_segmented_radix_sort_pairs")
+    set(list_across_names "\
+KeyType;ValueType;BlockSize;ItemsPerThread;PartitionAllowed" PARENT_SCOPE)
+    set(list_across "${TUNING_TYPES};int8_t;64;4 8 16;true false" PARENT_SCOPE)
+    set(output_pattern_suffix "\
+@KeyType@_@ValueType@_@BlockSize@_@ItemsPerThread@_@PartitionAllowed@" PARENT_SCOPE)
   endif()
 endfunction()

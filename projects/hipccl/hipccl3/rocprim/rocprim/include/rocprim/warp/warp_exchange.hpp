@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -210,8 +210,8 @@ public:
             {
                 const auto value = ::rocprim::warp_shuffle(
                     input[src_idx],
-                    flat_id / ItemsPerThread + dst_idx * (WarpSize / ItemsPerThread)
-                );
+                    flat_id / ItemsPerThread + dst_idx * (WarpSize / ItemsPerThread),
+                    WarpSize);
                 if(src_idx == flat_id % ItemsPerThread)
                 {
                     work_array[dst_idx] = value;
@@ -328,10 +328,10 @@ public:
             ROCPRIM_UNROLL
             for(unsigned int src_idx = 0; src_idx < ItemsPerThread; src_idx++)
             {
-                const auto value = ::rocprim::warp_shuffle(
-                    input[src_idx],
-                    (ItemsPerThread * flat_id + dst_idx) % WarpSize
-                );
+                const auto value
+                    = ::rocprim::warp_shuffle(input[src_idx],
+                                              (ItemsPerThread * flat_id + dst_idx) % WarpSize,
+                                              WarpSize);
                 if(flat_id / (WarpSize / ItemsPerThread) == src_idx)
                 {
                     work_array[dst_idx] = value;

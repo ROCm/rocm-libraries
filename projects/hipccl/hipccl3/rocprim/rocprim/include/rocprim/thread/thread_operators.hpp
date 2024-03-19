@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -175,7 +175,7 @@ namespace detail
 // rocPRIM (as well as Thrust) uses result type of BinaryFunction instead (if not void):
 //
 // using input_type = typename std::iterator_traits<InputIterator>::value_type;
-// using result_type = typename ::rocprim::detail::match_result_type<
+// using result_type = typename ::rocprim::match_result_type<
 //     input_type, BinaryFunction
 // >::type;
 //

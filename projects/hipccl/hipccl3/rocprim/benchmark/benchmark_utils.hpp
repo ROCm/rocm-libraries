@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -306,12 +306,8 @@ inline bool is_warp_size_supported(const unsigned int required_warp_size, const 
 }
 
 template<unsigned int LogicalWarpSize>
-struct DeviceSelectWarpSize
-{
-    static constexpr unsigned int value = ::rocprim::device_warp_size() >= LogicalWarpSize
-        ? LogicalWarpSize
-        : ::rocprim::device_warp_size();
-};
+__device__ constexpr bool device_test_enabled_for_warp_size_v
+    = ::rocprim::device_warp_size() >= LogicalWarpSize;
 
 template<typename T>
 std::vector<T>

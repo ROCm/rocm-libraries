@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -329,19 +329,23 @@ constexpr std::add_const_t<T>* as_const_ptr(T* ptr)
     return ptr;
 }
 
-template<class... Types, class Function, size_t... Indices>
-ROCPRIM_HOST_DEVICE inline void for_each_in_tuple_impl(::rocprim::tuple<Types...>& t,
-                                                       Function                    f,
-                                                       ::rocprim::index_sequence<Indices...>)
+template<class Tuple, class Function, size_t... Indices>
+ROCPRIM_HOST_DEVICE inline void
+    for_each_in_tuple_impl(Tuple&& t, Function&& f, ::rocprim::index_sequence<Indices...>)
 {
-    auto swallow = {(f(::rocprim::get<Indices>(t)), 0)...};
+    int swallow[]
+        = {(std::forward<Function>(f)(::rocprim::get<Indices>(std::forward<Tuple>(t))), 0)...};
     (void)swallow;
 }
 
-template<class... Types, class Function>
-ROCPRIM_HOST_DEVICE inline void for_each_in_tuple(::rocprim::tuple<Types...>& t, Function f)
+template<class Tuple, class Function>
+ROCPRIM_HOST_DEVICE inline auto for_each_in_tuple(Tuple&& t, Function&& f)
+    -> void_t<tuple_size<std::remove_reference_t<Tuple>>>
 {
-    for_each_in_tuple_impl(t, f, ::rocprim::index_sequence_for<Types...>());
+    static constexpr size_t size = tuple_size<std::remove_reference_t<Tuple>>::value;
+    for_each_in_tuple_impl(std::forward<Tuple>(t),
+                           std::forward<Function>(f),
+                           ::rocprim::make_index_sequence<size>());
 }
 
 /// \brief Reinterprets the pointer as another type and increments it to match the alignment of

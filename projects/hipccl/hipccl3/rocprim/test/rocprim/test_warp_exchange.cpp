@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,12 +25,13 @@
 
 #include <rocprim/warp/warp_exchange.hpp>
 
-template<
-    class T,
-    unsigned int ItemsPerThread,
-    unsigned int WarpSize,
-    class ExchangeOp
->
+#include <algorithm>
+#include <iterator>
+#include <type_traits>
+
+#include <stdint.h>
+
+template<class T, unsigned int ItemsPerThread, unsigned int WarpSize, class ExchangeOp = void>
 struct Params
 {
     using type = T;
@@ -128,68 +129,65 @@ struct ScatterToStripedOp
     }
 };
 
-using WarpExchangeTestParams = ::testing::Types<
-    Params<int, 4U,  8U, BlockedToStripedOp>,
-    Params<int, 4U, 16U, BlockedToStripedOp>,
-    Params<int, 2U, 32U, BlockedToStripedOp>,
-    Params<int, 4U, 32U, BlockedToStripedOp>,
-    Params<int, 5U, 32U, BlockedToStripedOp>,
-    Params<int, 4U, 64U, BlockedToStripedOp>,
+using WarpExchangeTestParams
+    = ::testing::Types<Params<int16_t, 4U, 8U, BlockedToStripedOp>,
+                       Params<int64_t, 4U, 16U, BlockedToStripedOp>,
+                       Params<int, 2U, 32U, BlockedToStripedOp>,
+                       Params<int, 4U, 32U, BlockedToStripedOp>,
+                       Params<int, 5U, 32U, BlockedToStripedOp>,
+                       Params<int, 4U, 64U, BlockedToStripedOp>,
 
-    Params<int, 4U,  8U, BlockedToStripedShuffleOp>,
-    Params<int, 4U, 16U, BlockedToStripedShuffleOp>,
-    Params<int, 2U, 32U, BlockedToStripedShuffleOp>,
-    Params<int, 4U, 32U, BlockedToStripedShuffleOp>,
-    Params<int, 4U, 64U, BlockedToStripedShuffleOp>,
+                       Params<int, 4U, 8U, BlockedToStripedShuffleOp>,
+                       Params<int16_t, 4U, 16U, BlockedToStripedShuffleOp>,
+                       Params<int64_t, 2U, 32U, BlockedToStripedShuffleOp>,
+                       Params<int, 4U, 32U, BlockedToStripedShuffleOp>,
+                       Params<int, 4U, 64U, BlockedToStripedShuffleOp>,
 
-    Params<int, 4U,  8U, StripedToBlockedOp>,
-    Params<int, 4U, 16U, StripedToBlockedOp>,
-    Params<int, 2U, 32U, StripedToBlockedOp>,
-    Params<int, 4U, 32U, StripedToBlockedOp>,
-    Params<int, 5U, 32U, StripedToBlockedOp>,
-    Params<int, 4U, 64U, StripedToBlockedOp>,
+                       Params<int, 4U, 8U, StripedToBlockedOp>,
+                       Params<int, 4U, 16U, StripedToBlockedOp>,
+                       Params<int16_t, 2U, 32U, StripedToBlockedOp>,
+                       Params<int64_t, 4U, 32U, StripedToBlockedOp>,
+                       Params<int, 5U, 32U, StripedToBlockedOp>,
+                       Params<int, 4U, 64U, StripedToBlockedOp>,
 
-    Params<int, 4U,  8U, StripedToBlockedShuffleOp>,
-    Params<int, 4U, 16U, StripedToBlockedShuffleOp>,
-    Params<int, 2U, 32U, StripedToBlockedShuffleOp>,
-    Params<int, 4U, 32U, StripedToBlockedShuffleOp>,
-    Params<int, 4U, 64U, StripedToBlockedShuffleOp>
->;
+                       Params<int, 4U, 8U, StripedToBlockedShuffleOp>,
+                       Params<int, 4U, 16U, StripedToBlockedShuffleOp>,
+                       Params<int, 2U, 32U, StripedToBlockedShuffleOp>,
+                       Params<int16_t, 4U, 32U, StripedToBlockedShuffleOp>,
+                       Params<int64_t, 4U, 64U, StripedToBlockedShuffleOp>>;
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int LogicalWarpSize,
-    class Op
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_exchange_kernel(T* d_input,
-                          T* d_output)
+template<unsigned int ItemsPerThread, unsigned int LogicalWarpSize, class Op, class T>
+__device__ auto warp_exchange_test(T* d_input, T* d_output)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
-    static_assert(BlockSize == LogicalWarpSize,
-                  "BlockSize must be equal to LogicalWarpSize in this test");
-    using warp_exchange_type = ::rocprim::warp_exchange<
-        T,
-        ItemsPerThread,
-        test_utils::DeviceSelectWarpSize<LogicalWarpSize>::value
-    >;
-
-    ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage;
+    using warp_exchange_type         = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
+    constexpr unsigned int num_warps = ::rocprim::device_warp_size() / LogicalWarpSize;
+    ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[num_warps];
 
     T thread_data[ItemsPerThread];
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        thread_data[i] = d_input[hipThreadIdx_x * ItemsPerThread + i];
+        thread_data[i] = d_input[threadIdx.x * ItemsPerThread + i];
     }
 
-    Op{}(warp_exchange_type(), thread_data, storage);
+    const unsigned int warp_id = threadIdx.x / LogicalWarpSize;
+    Op{}(warp_exchange_type(), thread_data, storage[warp_id]);
 
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        d_output[hipThreadIdx_x * ItemsPerThread + i] = thread_data[i];
+        d_output[threadIdx.x * ItemsPerThread + i] = thread_data[i];
     }
+}
+
+template<unsigned int ItemsPerThread, unsigned int LogicalWarpSize, class Op, class T>
+__device__ auto warp_exchange_test(T* /*d_input*/, T* /*d_output*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned int ItemsPerThread, unsigned int LogicalWarpSize, class Op, class T>
+__global__ void warp_exchange_kernel(T* d_input, T* d_output)
+{
+    warp_exchange_test<ItemsPerThread, LogicalWarpSize, Op>(d_input, d_output);
 }
 
 template<class T>
@@ -217,12 +215,15 @@ TYPED_TEST(WarpExchangeTest, WarpExchange)
     using T = typename TestFixture::params::type;
     constexpr unsigned int warp_size = TestFixture::params::warp_size;
     constexpr unsigned int items_per_thread = TestFixture::params::items_per_thread;
-    using exchange_op = typename TestFixture::params::exchange_op;
-    constexpr unsigned int block_size = warp_size;
-    constexpr unsigned int items_count = items_per_thread * block_size;
+    using exchange_op                       = typename TestFixture::params::exchange_op;
 
-    int device_id = test_common_utils::obtain_device_from_ctest();
+    const int device_id = test_common_utils::obtain_device_from_ctest();
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size, device_id);
+
+    unsigned int hw_warp_size;
+    HIP_CHECK(::rocprim::host_warp_size(device_id, hw_warp_size));
+    const unsigned int block_size  = hw_warp_size;
+    const unsigned int items_count = items_per_thread * block_size;
 
     std::vector<T> input(items_count);
     std::iota(input.begin(), input.end(), static_cast<T>(0));
@@ -238,20 +239,10 @@ TYPED_TEST(WarpExchangeTest, WarpExchange)
     HIP_CHECK(hipMemcpy(d_input, input.data(), items_count * sizeof(T), hipMemcpyHostToDevice));
     T* d_output{};
     HIP_CHECK(hipMalloc(&d_output, items_count * sizeof(T)));
+    HIP_CHECK(hipMemset(d_output, 0, items_count * sizeof(T)));
 
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            warp_exchange_kernel<
-                T,
-                block_size,
-                items_per_thread,
-                warp_size,
-                exchange_op
-            >
-        ),
-        dim3(1), dim3(block_size), 0, 0,
-        d_input, d_output
-    );
+    warp_exchange_kernel<items_per_thread, warp_size, exchange_op>
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -270,13 +261,12 @@ TYPED_TEST(WarpExchangeTest, WarpExchange)
     ASSERT_EQ(expected, output);
 }
 
-using WarpExchangeScatterTestParams = ::testing::Types<
-    Params<int, 4U,  8U, ScatterToStripedOp>,
-    Params<int, 4U, 16U, ScatterToStripedOp>,
-    Params<int, 2U, 32U, ScatterToStripedOp>,
-    Params<int, 4U, 32U, ScatterToStripedOp>,
-    Params<int, 4U, 64U, ScatterToStripedOp>
-    >;
+using WarpExchangeScatterTestParams = ::testing::Types<Params<int, 4U, 8U>,
+                                                       Params<int16_t, 4U, 16U>,
+                                                       Params<int, 2U, 32U>,
+                                                       Params<int64_t, 4U, 32U>,
+                                                       Params<int, 5U, 32U>,
+                                                       Params<int, 4U, 64U>>;
 
 template<class Params>
 class WarpExchangeScatterTest : public ::testing::Test
@@ -285,44 +275,44 @@ public:
     using params = Params;
 };
 
-template<
-    class T,
-    class OffsetT,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int LogicalWarpSize,
-    class Op
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_exchange_scatter_kernel(T* d_input,
-                                  T* d_output,
-                                  OffsetT* d_ranks)
+template<unsigned int ItemsPerThread, unsigned int LogicalWarpSize, class T, class OffsetT>
+__device__ auto warp_exchange_scatter_test(T* d_input, T* d_output, OffsetT* d_ranks)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
-    static_assert(BlockSize == LogicalWarpSize,
-                  "BlockSize must be equal to LogicalWarpSize in this test");
-    using warp_exchange_type = ::rocprim::warp_exchange<
-        T,
-        ItemsPerThread,
-        test_utils::DeviceSelectWarpSize<LogicalWarpSize>::value
-        >;
+    using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
 
-    ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage;
+    constexpr unsigned int num_warps = ::rocprim::device_warp_size() / LogicalWarpSize;
+    ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[num_warps];
 
     T thread_data[ItemsPerThread];
     OffsetT thread_ranks[ItemsPerThread];
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        thread_data[i] = d_input[hipThreadIdx_x * ItemsPerThread + i];
-        thread_ranks[i] = d_ranks[hipThreadIdx_x * ItemsPerThread + i];
+        thread_data[i]  = d_input[threadIdx.x * ItemsPerThread + i];
+        thread_ranks[i] = d_ranks[threadIdx.x * ItemsPerThread + i];
     }
 
-    Op{}(warp_exchange_type(), thread_data, thread_ranks, storage);
+    const unsigned int warp_id = threadIdx.x / LogicalWarpSize;
+    warp_exchange_type{}.scatter_to_striped(thread_data,
+                                            thread_data,
+                                            thread_ranks,
+                                            storage[warp_id]);
 
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        d_output[hipThreadIdx_x * ItemsPerThread + i] = thread_data[i];
+        d_output[threadIdx.x * ItemsPerThread + i] = thread_data[i];
     }
+}
+
+template<unsigned int ItemsPerThread, unsigned int LogicalWarpSize, class T, class OffsetT>
+__device__ auto warp_exchange_scatter_test(T* /*d_input*/, T* /*d_output*/, OffsetT* /*d_ranks*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned int ItemsPerThread, unsigned int LogicalWarpSize, class T, class OffsetT>
+__global__ void warp_exchange_scatter_kernel(T* d_input, T* d_output, OffsetT* d_ranks)
+{
+    warp_exchange_scatter_test<ItemsPerThread, LogicalWarpSize>(d_input, d_output, d_ranks);
 }
 
 TYPED_TEST_SUITE(WarpExchangeScatterTest, WarpExchangeScatterTestParams);
@@ -332,43 +322,42 @@ TYPED_TEST(WarpExchangeScatterTest, WarpExchangeScatter)
     using T = typename TestFixture::params::type;
     constexpr unsigned int warp_size = TestFixture::params::warp_size;
     constexpr unsigned int items_per_thread = TestFixture::params::items_per_thread;
-    using exchange_op = typename TestFixture::params::exchange_op;
-    constexpr unsigned int block_size = warp_size;
-    constexpr unsigned int items_count = items_per_thread * block_size;
     using OffsetT = unsigned short;
 
-    int device_id = test_common_utils::obtain_device_from_ctest();
+    const int device_id = test_common_utils::obtain_device_from_ctest();
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size, device_id);
+    unsigned int hw_warp_size;
+    HIP_CHECK(::rocprim::host_warp_size(device_id, hw_warp_size));
+    const unsigned int block_size  = hw_warp_size;
+    const unsigned int items_count = items_per_thread * block_size;
 
     std::vector<T> input(items_count);
     std::iota(input.begin(), input.end(), static_cast<T>(0));
-    auto expected = input;
-    std::shuffle(input.begin(), input.end(), std::default_random_engine{std::random_device{}()});
-    std::vector<OffsetT> ranks(input.begin(), input.end());
+    const auto                 expected = stripe_vector(input, warp_size, items_per_thread);
+    std::default_random_engine prng(std::random_device{}());
+    for(auto it = input.begin(), end = input.end(); it != end; it += warp_size)
+    {
+        std::shuffle(it, it + warp_size, prng);
+    }
+    std::vector<OffsetT> ranks(items_count);
+    std::transform(input.begin(),
+                   input.end(),
+                   ranks.begin(),
+                   [](const T input_val)
+                   { return static_cast<OffsetT>(input_val) % (warp_size * items_per_thread); });
 
     T* d_input{};
     HIP_CHECK(hipMalloc(&d_input, items_count * sizeof(T)));
     HIP_CHECK(hipMemcpy(d_input, input.data(), items_count * sizeof(T), hipMemcpyHostToDevice));
     T* d_output{};
     HIP_CHECK(hipMalloc(&d_output, items_count * sizeof(T)));
+    HIP_CHECK(hipMemset(d_output, 0, items_count * sizeof(T)));
     OffsetT* d_ranks{};
     HIP_CHECK(hipMalloc(&d_ranks, items_count * sizeof(OffsetT)));
     HIP_CHECK(hipMemcpy(d_ranks, ranks.data(), items_count * sizeof(OffsetT), hipMemcpyHostToDevice));
 
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            warp_exchange_scatter_kernel<
-                T,
-                OffsetT,
-                block_size,
-                items_per_thread,
-                warp_size,
-                exchange_op
-                >
-            ),
-        dim3(1), dim3(block_size), 0, 0,
-        d_input, d_output, d_ranks
-    );
+    warp_exchange_scatter_kernel<items_per_thread, warp_size>
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output, d_ranks);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -378,11 +367,6 @@ TYPED_TEST(WarpExchangeScatterTest, WarpExchangeScatter)
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
     HIP_CHECK(hipFree(d_ranks));
-
-    if(std::is_same<exchange_op, ScatterToStripedOp>::value)
-    {
-        expected = stripe_vector(expected, warp_size, items_per_thread);
-    }
 
     ASSERT_EQ(expected, output);
 }

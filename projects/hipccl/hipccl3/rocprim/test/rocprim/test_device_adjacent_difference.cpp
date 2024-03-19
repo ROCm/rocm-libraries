@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 
 #include "../common_test_header.hpp"
 
+#include "indirect_iterator.hpp"
 #include "test_utils_types.hpp"
 
 #include <rocprim/device/device_adjacent_difference.hpp>
@@ -37,68 +38,129 @@
 namespace
 {
 
-template <typename Config = rocprim::default_config,
-          typename InputIt,
-          typename OutputIt,
-          typename... Args>
-auto dispatch_adjacent_difference(std::true_type /*left*/,
-                                  std::false_type /*in_place*/,
-                                  void* const    temporary_storage,
-                                  std::size_t&   storage_size,
-                                  const InputIt  input,
-                                  const OutputIt output,
-                                  Args&&... args)
+enum class api_variant
+{
+    no_alias,
+    alias,
+    in_place
+};
+
+std::string to_string(api_variant aliasing)
+{
+    switch(aliasing)
+    {
+        case api_variant::no_alias: return "no_alias";
+        case api_variant::alias: return "alias";
+        case api_variant::in_place: return "in_place";
+    }
+}
+
+template<typename Config = rocprim::default_config,
+         typename InputIt,
+         typename OutputIt,
+         typename... Args>
+auto dispatch_adjacent_difference(
+    std::true_type /*left*/,
+    std::integral_constant<api_variant, api_variant::no_alias> /*aliasing*/,
+    void* const    temporary_storage,
+    std::size_t&   storage_size,
+    const InputIt  input,
+    const OutputIt output,
+    Args&&... args)
 {
     return ::rocprim::adjacent_difference<Config>(
         temporary_storage, storage_size, input, output, std::forward<Args>(args)...);
 }
 
-template <typename Config = rocprim::default_config,
-          typename InputIt,
-          typename OutputIt,
-          typename... Args>
-auto dispatch_adjacent_difference(std::false_type /*left*/,
-                                  std::false_type /*in_place*/,
-                                  void* const    temporary_storage,
-                                  std::size_t&   storage_size,
-                                  const InputIt  input,
-                                  const OutputIt output,
-                                  Args&&... args)
+template<typename Config = rocprim::default_config,
+         typename InputIt,
+         typename OutputIt,
+         typename... Args>
+auto dispatch_adjacent_difference(
+    std::false_type /*left*/,
+    std::integral_constant<api_variant, api_variant::no_alias> /*aliasing*/,
+    void* const    temporary_storage,
+    std::size_t&   storage_size,
+    const InputIt  input,
+    const OutputIt output,
+    Args&&... args)
 {
     return ::rocprim::adjacent_difference_right<Config>(
         temporary_storage, storage_size, input, output, std::forward<Args>(args)...);
 }
 
-template <typename Config = rocprim::default_config,
-          typename InputIt,
-          typename OutputIt,
-          typename... Args>
-auto dispatch_adjacent_difference(std::true_type /*left*/,
-                                  std::true_type /*in_place*/,
-                                  void* const   temporary_storage,
-                                  std::size_t&  storage_size,
-                                  const InputIt input,
-                                  const OutputIt /*output*/,
-                                  Args&&... args)
+template<typename Config = rocprim::default_config,
+         typename InputIt,
+         typename OutputIt,
+         typename... Args>
+auto dispatch_adjacent_difference(
+    std::true_type /*left*/,
+    std::integral_constant<api_variant, api_variant::in_place> /*aliasing*/,
+    void* const   temporary_storage,
+    std::size_t&  storage_size,
+    const InputIt input,
+    const OutputIt /*output*/,
+    Args&&... args)
 {
     return ::rocprim::adjacent_difference_inplace<Config>(
         temporary_storage, storage_size, input, std::forward<Args>(args)...);
 }
 
-template <typename Config = rocprim::default_config,
-          typename InputIt,
-          typename OutputIt,
-          typename... Args>
-auto dispatch_adjacent_difference(std::false_type /*left*/,
-                                  std::true_type /*in_place*/,
-                                  void* const   temporary_storage,
-                                  std::size_t&  storage_size,
-                                  const InputIt input,
-                                  const OutputIt /*output*/,
-                                  Args&&... args)
+template<typename Config = rocprim::default_config,
+         typename InputIt,
+         typename OutputIt,
+         typename... Args>
+auto dispatch_adjacent_difference(
+    std::false_type /*left*/,
+    std::integral_constant<api_variant, api_variant::in_place> /*aliasing*/,
+    void* const   temporary_storage,
+    std::size_t&  storage_size,
+    const InputIt input,
+    const OutputIt /*output*/,
+    Args&&... args)
 {
     return ::rocprim::adjacent_difference_right_inplace<Config>(
         temporary_storage, storage_size, input, std::forward<Args>(args)...);
+}
+
+template<typename Config = rocprim::default_config,
+         typename InputIt,
+         typename OutputIt,
+         typename... Args>
+auto dispatch_adjacent_difference(
+    std::true_type /*left*/,
+    std::integral_constant<api_variant, api_variant::alias> /*aliasing*/,
+    void* const    temporary_storage,
+    std::size_t&   storage_size,
+    const InputIt  input,
+    const OutputIt output,
+    Args&&... args)
+{
+    return ::rocprim::adjacent_difference_inplace<Config>(temporary_storage,
+                                                          storage_size,
+                                                          input,
+                                                          output,
+                                                          std::forward<Args>(args)...);
+}
+
+template<typename Config = rocprim::default_config,
+         typename InputIt,
+         typename OutputIt,
+         typename... Args>
+auto dispatch_adjacent_difference(
+    std::false_type /*left*/,
+    std::integral_constant<api_variant, api_variant::alias> /*aliasing*/,
+    void* const    temporary_storage,
+    std::size_t&   storage_size,
+    const InputIt  input,
+    const OutputIt output,
+    Args&&... args)
+{
+    return ::rocprim::adjacent_difference_right_inplace<Config>(temporary_storage,
+                                                                storage_size,
+                                                                input,
+                                                                output,
+                                                                std::forward<Args>(args)...);
 }
 
 template <typename Output, typename T, typename BinaryFunction>
@@ -125,35 +187,38 @@ auto get_expected_result(const std::vector<T>& input,
 
 // Params for tests
 template<class InputType,
-         class OutputType         = InputType,
-         bool Left                = true,
-         bool InPlace             = false,
-         bool UseIdentityIterator = false,
-         class Config             = rocprim::default_config,
-         bool UseGraphs           = false>
+         class OutputType                = InputType,
+         bool        Left                = true,
+         api_variant Aliasing            = api_variant::no_alias,
+         bool        UseIdentityIterator = false,
+         class Config                    = rocprim::default_config,
+         bool UseGraphs                  = false,
+         bool UseIndirectIterator        = false>
 struct DeviceAdjacentDifferenceParams
 {
-    using input_type                              = InputType;
-    using output_type                             = OutputType;
-    static constexpr bool   left                  = Left;
-    static constexpr bool   in_place              = InPlace;
-    static constexpr bool   use_identity_iterator = UseIdentityIterator;
-    using config                                  = Config;
-    static constexpr bool   use_graphs            = UseGraphs;
+    using input_type                                   = InputType;
+    using output_type                                  = OutputType;
+    static constexpr bool        left                  = Left;
+    static constexpr api_variant aliasing              = Aliasing;
+    static constexpr bool        use_identity_iterator = UseIdentityIterator;
+    using config                                       = Config;
+    static constexpr bool use_graphs                   = UseGraphs;
+    static constexpr bool use_indirect_iterator        = UseIndirectIterator;
 };
 
 template <class Params>
 class RocprimDeviceAdjacentDifferenceTests : public ::testing::Test
 {
 public:
-    using input_type                              = typename Params::input_type;
-    using output_type                             = typename Params::output_type;
-    static constexpr bool   left                  = Params::left;
-    static constexpr bool   in_place              = Params::in_place;
-    static constexpr bool   use_identity_iterator = Params::use_identity_iterator;
-    static constexpr bool   debug_synchronous     = false;
-    using config                                  = typename Params::config;
-    static constexpr bool   use_graphs            = Params::use_graphs;
+    using input_type                                   = typename Params::input_type;
+    using output_type                                  = typename Params::output_type;
+    static constexpr bool        left                  = Params::left;
+    static constexpr api_variant aliasing              = Params::aliasing;
+    static constexpr bool        use_identity_iterator = Params::use_identity_iterator;
+    static constexpr bool        use_indirect_iterator = Params::use_indirect_iterator;
+    static constexpr bool        debug_synchronous     = false;
+    using config                                       = typename Params::config;
+    static constexpr bool use_graphs                   = Params::use_graphs;
 };
 
 using custom_double2     = test_utils::custom_test_type<double>;
@@ -173,19 +238,60 @@ using RocprimDeviceAdjacentDifferenceTestsParams = ::testing::Types<
     // Tests with default configuration
     DeviceAdjacentDifferenceParams<int>,
     DeviceAdjacentDifferenceParams<float, double, false>,
-    DeviceAdjacentDifferenceParams<int8_t, int8_t, true, true>,
-    DeviceAdjacentDifferenceParams<custom_double2, custom_double2, false, true>,
-    DeviceAdjacentDifferenceParams<rocprim::bfloat16, float, true, false, false>,
-    DeviceAdjacentDifferenceParams<rocprim::half, rocprim::half, true, true, false>,
-    DeviceAdjacentDifferenceParams<custom_int64_array, custom_int64_array, false, true, true>,
+    DeviceAdjacentDifferenceParams<int8_t, int8_t, true, api_variant::in_place>,
+    DeviceAdjacentDifferenceParams<custom_double2, custom_double2, false, api_variant::in_place>,
+    DeviceAdjacentDifferenceParams<rocprim::bfloat16, float, true, api_variant::no_alias>,
+    DeviceAdjacentDifferenceParams<rocprim::half, rocprim::half, true, api_variant::alias, false>,
+    DeviceAdjacentDifferenceParams<rocprim::half,
+                                   rocprim::half,
+                                   true,
+                                   api_variant::in_place,
+                                   false>,
+    // this is changed to not use identity iterator
+    // because the function doesn't work with it, should be changed back, when fixed
+    DeviceAdjacentDifferenceParams<custom_int64_array,
+                                   custom_int64_array,
+                                   false,
+                                   api_variant::alias,
+                                   false>,
     // Tests for supported config structs
-    DeviceAdjacentDifferenceParams<rocprim::bfloat16, float, true, false, false, custom_config_0>,
-    DeviceAdjacentDifferenceParams<rocprim::bfloat16, float, true, false, false>,
+    DeviceAdjacentDifferenceParams<rocprim::bfloat16,
+                                   float,
+                                   true,
+                                   api_variant::no_alias,
+                                   false,
+                                   custom_config_0>,
+    DeviceAdjacentDifferenceParams<rocprim::bfloat16, float, true, api_variant::alias>,
     // Tests for different size_limits
-    DeviceAdjacentDifferenceParams<int, int, true, false, false, custom_size_limit_config<64>>,
-    DeviceAdjacentDifferenceParams<int, int, true, false, false, custom_size_limit_config<8192>>,
-    DeviceAdjacentDifferenceParams<int, int, true, false, false, custom_size_limit_config<10240>>,
-    DeviceAdjacentDifferenceParams<int, int, true, false, false, rocprim::default_config, true>>;
+    DeviceAdjacentDifferenceParams<int,
+                                   int,
+                                   true,
+                                   api_variant::no_alias,
+                                   false,
+                                   custom_size_limit_config<64>>,
+    DeviceAdjacentDifferenceParams<int,
+                                   int,
+                                   true,
+                                   api_variant::no_alias,
+                                   false,
+                                   custom_size_limit_config<8192>,
+                                   false,
+                                   true>,
+    DeviceAdjacentDifferenceParams<int,
+                                   int,
+                                   true,
+                                   api_variant::no_alias,
+                                   false,
+                                   custom_size_limit_config<10240>,
+                                   false,
+                                   true>,
+    DeviceAdjacentDifferenceParams<int,
+                                   int,
+                                   true,
+                                   api_variant::no_alias,
+                                   false,
+                                   rocprim::default_config,
+                                   true>>;
 
 TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceTests, RocprimDeviceAdjacentDifferenceTestsParams);
 
@@ -195,15 +301,16 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T                                     = typename TestFixture::input_type;
-    using output_type                           = typename TestFixture::output_type;
-    static constexpr bool left                  = TestFixture::left;
-    static constexpr bool in_place              = TestFixture::in_place;
-    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
-    static constexpr bool debug_synchronous     = TestFixture::debug_synchronous;
-    using Config                                = typename TestFixture::config;
+    using T                                            = typename TestFixture::input_type;
+    using output_type                                  = typename TestFixture::output_type;
+    static constexpr bool        left                  = TestFixture::left;
+    static constexpr api_variant aliasing              = TestFixture::aliasing;
+    const bool                   debug_synchronous     = TestFixture::debug_synchronous;
+    static constexpr bool        use_identity_iterator = TestFixture::use_identity_iterator;
+    using Config                                       = typename TestFixture::config;
 
-    SCOPED_TRACE(testing::Message() << "left = " << left << ", in_place = " << in_place);
+    SCOPED_TRACE(testing::Message()
+                 << "left = " << left << ", api_variant = " << to_string(aliasing));
 
     for(std::size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -223,123 +330,149 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            const std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
-            std::vector<output_type> output(input.size());
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
 
-            T*           d_input;
-            output_type* d_output = nullptr;
+            T* d_input;
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(input[0])));
             HIP_CHECK(hipMemcpy(
                 d_input, input.data(), input.size() * sizeof(input[0]), hipMemcpyHostToDevice));
 
-            if(!in_place)
-            {
-                HIP_CHECK(test_common_utils::hipMallocHelper(&d_output,
-                                                             output.size() * sizeof(output[0])));
-            }
+            static constexpr auto left_tag  = rocprim::detail::bool_constant<left>{};
+            static constexpr auto alias_tag = std::integral_constant<api_variant, aliasing>{};
 
-            static constexpr auto left_tag     = rocprim::detail::bool_constant<left> {};
-            static constexpr auto in_place_tag = rocprim::detail::bool_constant<in_place> {};
+            auto input_it
+                = test_utils::wrap_in_indirect_iterator<TestFixture::use_indirect_iterator>(
+                    d_input);
 
-            // Calculate expected results on host
-            const auto expected
-                = get_expected_result<output_type>(input, rocprim::minus<> {}, left_tag);
-
-            const auto output_it
-                = test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output);
-
-            hipGraph_t graph;
+            hipGraph_t     graph;
             hipGraphExec_t graph_instance;
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 graph = test_utils::createGraphHelper(stream);
-            
+
             // Allocate temporary storage
             std::size_t temp_storage_size;
             void*       d_temp_storage = nullptr;
             HIP_CHECK(dispatch_adjacent_difference<Config>(left_tag,
-                                                           in_place_tag,
+                                                           alias_tag,
                                                            d_temp_storage,
                                                            temp_storage_size,
-                                                           d_input,
-                                                           output_it,
+                                                           input_it,
+                                                           (output_type*){nullptr},
                                                            size,
-                                                           rocprim::minus<> {},
+                                                           rocprim::minus<>{},
                                                            stream,
-                                                           TestFixture::debug_synchronous));
+                                                           debug_synchronous));
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+
             ASSERT_GT(temp_storage_size, 0);
 
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size));
 
-            if (TestFixture::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
-            // Run
-            HIP_CHECK(dispatch_adjacent_difference<Config>(left_tag,
-                                                           in_place_tag,
-                                                           d_temp_storage,
-                                                           temp_storage_size,
-                                                           d_input,
-                                                           output_it,
-                                                           size,
-                                                           rocprim::minus<> {},
-                                                           stream,
-                                                           TestFixture::debug_synchronous));
-            HIP_CHECK(hipGetLastError());
-
-            if (TestFixture::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-
-            // Copy output to host
-            HIP_CHECK(
-                hipMemcpy(output.data(),
-                          in_place ? static_cast<void*>(d_input) : static_cast<void*>(d_output),
-                          output.size() * sizeof(output[0]),
-                          hipMemcpyDeviceToHost));
-
-            // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(
-                output,
-                expected,
-                std::max(test_utils::precision<T>, test_utils::precision<output_type>)));
-
-            hipFree(d_input);
-            if(!in_place)
+            // We might call the API multiple times, with almost the same parameter
+            // (in-place and out-of-place)
+            // we should be able to use the same amount of temp storage for and get the same
+            // results (maybe with different types) for both.
+            auto run_and_verify = [&](const auto output_it, auto* d_output)
             {
+                // Run
+                HIP_CHECK(dispatch_adjacent_difference<Config>(left_tag,
+                                                               alias_tag,
+                                                               d_temp_storage,
+                                                               temp_storage_size,
+                                                               input_it,
+                                                               output_it,
+                                                               size,
+                                                               rocprim::minus<>{},
+                                                               stream,
+                                                               debug_synchronous));
+                HIP_CHECK(hipGetLastError());
+
+                if(TestFixture::use_graphs)
+                {
+                    graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+                }
+
+                // input_type for in-place, output_type for out of place
+                using current_output_type = std::remove_reference_t<decltype(*d_output)>;
+
+                // allocate memory for output
+                std::vector<current_output_type> output(size);
+
+                // Copy output to host
+                HIP_CHECK(hipMemcpy(output.data(),
+                                    d_output,
+                                    output.size() * sizeof(output[0]),
+                                    hipMemcpyDeviceToHost));
+
+                // Calculate expected results on host
+                const auto expected
+                    = get_expected_result<current_output_type>(input, rocprim::minus<>{}, left_tag);
+
+                // Check if output values are as expected
+                test_utils::assert_near(
+                    output,
+                    expected,
+                    std::max(test_utils::precision<T>, test_utils::precision<output_type>));
+            };
+
+            // if api_variant is not in_place we should check the non aliased function call
+            if(aliasing != api_variant::in_place)
+            {
+                output_type* d_output = nullptr;
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(*d_output)));
+
+                if(TestFixture::use_graphs)
+                    test_utils::resetGraphHelper(graph, graph_instance, stream);
+
+                const auto output_it
+                    = test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output);
+
+                ASSERT_NO_FATAL_FAILURE(run_and_verify(output_it, d_output));
+
                 hipFree(d_output);
             }
-            hipFree(d_temp_storage);
 
-            if (TestFixture::use_graphs)
+            // if api_variant is not no_alias we should check the inplace function call
+            if(aliasing != api_variant::no_alias)
+            {
+                if(TestFixture::use_graphs)
+                    test_utils::resetGraphHelper(graph, graph_instance, stream);
+
+                ASSERT_NO_FATAL_FAILURE(run_and_verify(input_it, d_input));
+            }
+
+            if(TestFixture::use_graphs)
             {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
                 HIP_CHECK(hipStreamDestroy(stream));
             }
+
+            hipFree(d_temp_storage);
+            hipFree(d_input);
         }
     }
 }
 
 // Params for tests
-template <bool Left = true, bool InPlace = false, bool UseGraphs = false>
+template<bool Left = true, api_variant Aliasing = api_variant::no_alias, bool UseGraphs = false>
 struct DeviceAdjacentDifferenceLargeParams
 {
-    static constexpr bool left       = Left;
-    static constexpr bool in_place   = InPlace;
-    static constexpr bool use_graphs = UseGraphs;
+    static constexpr bool        left       = Left;
+    static constexpr api_variant aliasing   = Aliasing;
+    static constexpr bool        use_graphs = UseGraphs;
 };
 
 template <class Params>
 class RocprimDeviceAdjacentDifferenceLargeTests : public ::testing::Test
 {
 public:
-    static constexpr bool left              = Params::left;
-    static constexpr bool in_place          = Params::in_place;
-    static constexpr bool debug_synchronous = false;
-    static constexpr bool use_graphs        = Params::use_graphs;
+    static constexpr bool        left              = Params::left;
+    static constexpr api_variant aliasing          = Params::aliasing;
+    static constexpr bool        debug_synchronous = false;
+    static constexpr bool        use_graphs        = Params::use_graphs;
 };
 
 template<unsigned int SamplingRate>
@@ -451,9 +584,10 @@ private:
 };
 
 using RocprimDeviceAdjacentDifferenceLargeTestsParams
-    = ::testing::Types<DeviceAdjacentDifferenceLargeParams<true, false>,
-                       DeviceAdjacentDifferenceLargeParams<false, false>,
-                       DeviceAdjacentDifferenceLargeParams<true, false, true>>;
+    = ::testing::Types<DeviceAdjacentDifferenceLargeParams<true, api_variant::no_alias>,
+                       DeviceAdjacentDifferenceLargeParams<false, api_variant::no_alias>,
+                       DeviceAdjacentDifferenceLargeParams<false, api_variant::alias>,
+                       DeviceAdjacentDifferenceLargeParams<true, api_variant::no_alias, true>>;
 
 TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceLargeTests,
                  RocprimDeviceAdjacentDifferenceLargeTestsParams);
@@ -467,13 +601,14 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
 
     using T                                         = size_t;
     static constexpr bool         is_left           = TestFixture::left;
-    static constexpr bool         is_in_place       = TestFixture::in_place;
+    static constexpr api_variant  aliasing          = TestFixture::aliasing;
+    const bool                    debug_synchronous = TestFixture::debug_synchronous;
     static constexpr unsigned int sampling_rate     = 10000;
     using OutputIterator                            = check_output_iterator<sampling_rate>;
     using flag_type                                 = OutputIterator::flag_type;
 
     SCOPED_TRACE(testing::Message()
-                 << "is_left = " << is_left << ", is_in_place = " << is_in_place);
+                 << "is_left = " << is_left << ", api_variant = " << to_string(aliasing));
 
     hipStream_t stream = 0; // default
     if (TestFixture::use_graphs)
@@ -514,7 +649,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
             { return (smaller_value + larger_value) / 2 + (is_left ? 1 : 0); };
 
             static constexpr auto left_tag     = rocprim::detail::bool_constant<is_left>{};
-            static constexpr auto in_place_tag = rocprim::detail::bool_constant<is_in_place>{};
+            static constexpr auto aliasing_tag = std::integral_constant<api_variant, aliasing>{};
 
             hipGraph_t graph;
             hipGraphExec_t graph_instance;
@@ -525,7 +660,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
             std::size_t temp_storage_size;
             void*       d_temp_storage = nullptr;
             HIP_CHECK(dispatch_adjacent_difference(left_tag,
-                                                   in_place_tag,
+                                                   aliasing_tag,
                                                    d_temp_storage,
                                                    temp_storage_size,
                                                    input,
@@ -533,7 +668,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
                                                    size,
                                                    op,
                                                    stream,
-                                                   TestFixture::debug_synchronous));
+                                                   debug_synchronous));
 
             if (TestFixture::use_graphs)
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
@@ -547,7 +682,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
             
             // Run
             HIP_CHECK(dispatch_adjacent_difference(left_tag,
-                                                   in_place_tag,
+                                                   aliasing_tag,
                                                    d_temp_storage,
                                                    temp_storage_size,
                                                    input,
@@ -555,7 +690,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
                                                    size,
                                                    op,
                                                    stream,
-                                                   TestFixture::debug_synchronous));
+                                                   debug_synchronous));
 
             if (TestFixture::use_graphs)
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);

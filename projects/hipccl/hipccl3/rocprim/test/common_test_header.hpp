@@ -60,6 +60,12 @@
         }
 #endif
 
+#if(defined(__GNUC__) || defined(__clang__)) && (defined(__GLIBCXX__) || defined(_LIBCPP_VERSION))
+    #define ROCPRIM_HAS_INT128_SUPPORT 1
+#else
+    #define ROCPRIM_HAS_INT128_SUPPORT 0
+#endif
+
 #define INSTANTIATE_TYPED_TEST_EXPANDED_1(line, test_suite_name, ...)         \
     namespace Id##line                                                        \
     {                                                                         \
@@ -110,19 +116,27 @@ inline int obtain_device_from_ctest()
 #endif
 }
 
+#ifdef _MSC_VER
+    #pragma warning(push)
+    #pragma warning( \
+        disable : 4996) // This function or variable may be unsafe. Consider using _dupenv_s instead.
+#endif
 inline bool use_hmm()
 {
-    if (getenv("ROCPRIM_USE_HMM") == nullptr)
+    if(getenv("ROCPRIM_USE_HMM") == nullptr)
     {
         return false;
     }
 
-    if (strcmp(getenv("ROCPRIM_USE_HMM"), "1") == 0)
+    if(strcmp(getenv("ROCPRIM_USE_HMM"), "1") == 0)
     {
         return true;
     }
     return false;
 }
+#ifdef _MSC_VER
+    #pragma warning(pop)
+#endif
 
 // Helper for HMM allocations: HMM is requested through ROCPRIM_USE_HMM=1 environment variable
 template <class T>

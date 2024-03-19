@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -155,9 +155,19 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void exclusive_scan(T input, T& output, T init, T& reduction,
-                        BinaryFunction scan_op)
+    ROCPRIM_DEVICE ROCPRIM_INLINE void exclusive_scan(
+        T input, T& output, storage_type& /*storage*/, T& reduction, BinaryFunction scan_op)
+    {
+        inclusive_scan(input, output, scan_op);
+        // Broadcast value from the last thread in warp
+        reduction = warp_shuffle(output, WarpSize - 1, WarpSize);
+        // Convert inclusive scan result to exclusive
+        to_exclusive(output, output);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void
+        exclusive_scan(T input, T& output, T init, T& reduction, BinaryFunction scan_op)
     {
         inclusive_scan(input, output, scan_op);
         // Broadcast value from the last thread in warp
@@ -234,8 +244,8 @@ public:
     }
 
 protected:
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
+    [[deprecated]] ROCPRIM_DEVICE ROCPRIM_INLINE void
+        to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
     {
         (void) storage;
         return to_exclusive(inclusive_input, exclusive_output);

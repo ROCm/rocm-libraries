@@ -10,7 +10,7 @@ adjacent_difference_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']
 
 {% macro general_case() -%}
 template<unsigned int arch, class value_type, class enable = void>
-struct default_adjacent_difference_inplace_config : default_adjacent_difference_config_base<value_type>
+struct default_adjacent_difference_inplace_config : default_adjacent_difference_config_base<value_type>::type
 {};
 {%- endmacro %}
 

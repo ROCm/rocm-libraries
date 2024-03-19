@@ -245,8 +245,7 @@ void assert_bit_eq(const std::vector<T>& result, const std::vector<T>& expected)
         }
     }
 }
-
-#if defined(__GNUC__) || defined(__clang__)
+#if ROCPRIM_HAS_INT128_SUPPORT
 inline void assert_bit_eq(const std::vector<__int128_t>& result,
                           const std::vector<__int128_t>& expected)
 {

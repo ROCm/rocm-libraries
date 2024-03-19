@@ -32,6 +32,7 @@
 #include "../../detail/binary_op_wrappers.hpp"
 #include "../../intrinsics/thread.hpp"
 #include "../../types/tuple.hpp"
+#include "rocprim/device/detail/device_config_helper.hpp"
 
 #include <type_traits>
 

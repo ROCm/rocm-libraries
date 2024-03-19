@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #include "test_utils.hpp"
 
 #include <rocprim/warp/warp_load.hpp>
+#include <type_traits>
 
 template<
     class T,
@@ -78,29 +79,20 @@ using WarpLoadTestParams = ::testing::Types<
     Params<float2, 4U, 32U, ::rocprim::warp_load_method::warp_load_transpose>
 >;
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int LogicalWarpSize,
-    ::rocprim::warp_load_method Method
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_load_kernel(T* d_input,
-                      T* d_output)
+template<unsigned int                BlockSize,
+         unsigned int                ItemsPerThread,
+         unsigned int                LogicalWarpSize,
+         ::rocprim::warp_load_method Method,
+         class T>
+__device__ auto warp_load_test(T* d_input, T* d_output)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     static_assert(BlockSize % LogicalWarpSize == 0,
                   "LogicalWarpSize must be a divisor of BlockSize");
-    using warp_load_type = ::rocprim::warp_load<
-        T,
-        ItemsPerThread,
-        test_utils::DeviceSelectWarpSize<LogicalWarpSize>::value,
-        Method
-    >;
+    using warp_load_type = ::rocprim::warp_load<T, ItemsPerThread, LogicalWarpSize, Method>;
     constexpr unsigned int tile_size = ItemsPerThread * LogicalWarpSize;
     constexpr unsigned int num_warps = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = hipThreadIdx_x / LogicalWarpSize;
+    const unsigned int     warp_id   = threadIdx.x / LogicalWarpSize;
 
     ROCPRIM_SHARED_MEMORY typename warp_load_type::storage_type storage[num_warps];
     T thread_data[ItemsPerThread];
@@ -109,35 +101,43 @@ void warp_load_kernel(T* d_input,
 
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        d_output[hipThreadIdx_x * ItemsPerThread + i] = thread_data[i];
+        d_output[threadIdx.x * ItemsPerThread + i] = thread_data[i];
     }
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int LogicalWarpSize,
-    ::rocprim::warp_load_method Method
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_load_guarded_kernel(T* d_input,
-                              T* d_output,
-                              int valid_items,
-                              T oob_default)
+template<unsigned int                BlockSize,
+         unsigned int                ItemsPerThread,
+         unsigned int                LogicalWarpSize,
+         ::rocprim::warp_load_method Method,
+         class T>
+__device__ auto warp_load_test(T* /*d_input*/, T* /*d_output*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned int                BlockSize,
+         unsigned int                ItemsPerThread,
+         unsigned int                LogicalWarpSize,
+         ::rocprim::warp_load_method Method,
+         class T>
+__global__ __launch_bounds__(BlockSize) void warp_load_kernel(T* d_input, T* d_output)
+{
+    warp_load_test<BlockSize, ItemsPerThread, LogicalWarpSize, Method>(d_input, d_output);
+}
+
+template<unsigned int                BlockSize,
+         unsigned int                ItemsPerThread,
+         unsigned int                LogicalWarpSize,
+         ::rocprim::warp_load_method Method,
+         class T>
+__device__ auto warp_load_guarded_test(T* d_input, T* d_output, int valid_items, T oob_default)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     static_assert(BlockSize % LogicalWarpSize == 0,
                   "LogicalWarpSize must be a divisor of BlockSize");
-    using warp_load_type = ::rocprim::warp_load<
-        T,
-        ItemsPerThread,
-        test_utils::DeviceSelectWarpSize<LogicalWarpSize>::value,
-        Method
-    >;
+    using warp_load_type = ::rocprim::warp_load<T, ItemsPerThread, LogicalWarpSize, Method>;
     constexpr unsigned int tile_size = ItemsPerThread * LogicalWarpSize;
     constexpr unsigned int num_warps = BlockSize / LogicalWarpSize;
-    const unsigned warp_id = hipThreadIdx_x / LogicalWarpSize;
+    const unsigned         warp_id   = threadIdx.x / LogicalWarpSize;
 
     ROCPRIM_SHARED_MEMORY typename warp_load_type::storage_type storage[num_warps];
     T thread_data[ItemsPerThread];
@@ -152,8 +152,34 @@ void warp_load_guarded_kernel(T* d_input,
 
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        d_output[hipThreadIdx_x * ItemsPerThread + i] = thread_data[i];
+        d_output[threadIdx.x * ItemsPerThread + i] = thread_data[i];
     }
+}
+
+template<unsigned int                BlockSize,
+         unsigned int                ItemsPerThread,
+         unsigned int                LogicalWarpSize,
+         ::rocprim::warp_load_method Method,
+         class T>
+__device__ auto
+    warp_load_guarded_test(T* /*d_input*/, T* /*d_output*/, int /*valid_items*/, T /*oob_default*/)
+        -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned int                BlockSize,
+         unsigned int                ItemsPerThread,
+         unsigned int                LogicalWarpSize,
+         ::rocprim::warp_load_method Method,
+         class T>
+__global__ __launch_bounds__(BlockSize) void warp_load_guarded_kernel(T*  d_input,
+                                                                      T*  d_output,
+                                                                      int valid_items,
+                                                                      T   oob_default)
+{
+    warp_load_guarded_test<BlockSize, ItemsPerThread, LogicalWarpSize, Method>(d_input,
+                                                                               d_output,
+                                                                               valid_items,
+                                                                               oob_default);
 }
 
 template<class T>
@@ -197,19 +223,8 @@ TYPED_TEST(WarpLoadTest, WarpLoad)
     T* d_output{};
     HIP_CHECK(hipMalloc(&d_output, items_count * sizeof(T)));
 
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            warp_load_kernel<
-                T,
-                block_size,
-                items_per_thread,
-                warp_size,
-                method
-            >
-        ),
-        dim3(1), dim3(block_size), 0, 0,
-        d_input, d_output
-    );
+    warp_load_kernel<block_size, items_per_thread, warp_size, method>
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -251,20 +266,8 @@ TYPED_TEST(WarpLoadTest, WarpLoadGuarded)
     T* d_output{};
     HIP_CHECK(hipMalloc(&d_output, items_count * sizeof(T)));
 
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            warp_load_guarded_kernel<
-                T,
-                block_size,
-                items_per_thread,
-                warp_size,
-                method
-            >
-        ),
-        dim3(1), dim3(block_size), 0, 0,
-        d_input, d_output,
-        valid_items, oob_default
-    );
+    warp_load_guarded_kernel<block_size, items_per_thread, warp_size, method>
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output, valid_items, oob_default);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 

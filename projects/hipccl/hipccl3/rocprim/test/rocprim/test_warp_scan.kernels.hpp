@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -125,6 +125,49 @@ void warp_exclusive_scan_reduce_kernel(
     if((threadIdx.x % LogicalWarpSize) == 0)
     {
         device_output_reductions[index / LogicalWarpSize] = reduction;
+    }
+}
+
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize) void warp_exclusive_scan_wo_init_kernel(T* device_input,
+                                                                                T* device_output)
+{
+    static constexpr unsigned int block_warps_no = BlockSize / LogicalWarpSize;
+
+    const unsigned int global_index  = threadIdx.x + (blockIdx.x * blockDim.x);
+    const unsigned int block_warp_id = threadIdx.x / LogicalWarpSize;
+
+    T value = device_input[global_index];
+
+    using wscan_t = rocprim::warp_scan<T, LogicalWarpSize>;
+    __shared__ typename wscan_t::storage_type storage[block_warps_no];
+    wscan_t().exclusive_scan(value, value, storage[block_warp_id]);
+
+    device_output[global_index] = value;
+}
+
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize) void warp_exclusive_scan_reduce_wo_init_kernel(
+    T* device_input, T* device_output, T* device_output_reductions)
+{
+    static constexpr unsigned int block_warps_no = BlockSize / LogicalWarpSize;
+
+    const unsigned int global_index   = threadIdx.x + (blockIdx.x * blockDim.x);
+    const unsigned int block_warp_id  = threadIdx.x / LogicalWarpSize;
+    const unsigned int lane_id        = threadIdx.x % LogicalWarpSize;
+    const unsigned int global_warp_id = global_index / LogicalWarpSize;
+
+    T value = device_input[global_index];
+    T reduction;
+
+    using wscan_t = rocprim::warp_scan<T, LogicalWarpSize>;
+    __shared__ typename wscan_t::storage_type storage[block_warps_no];
+    wscan_t().exclusive_scan(value, value, storage[block_warp_id], reduction);
+
+    device_output[global_index] = value;
+    if(lane_id == 0)
+    {
+        device_output_reductions[global_warp_id] = reduction;
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,12 +26,12 @@
 #include <type_traits>
 
 #include "../config.hpp"
-#include "../functional.hpp"
 #include "../detail/various.hpp"
-#include "../detail/match_result_type.hpp"
+#include "../functional.hpp"
 
 #include "detail/config/device_reduce.hpp"
 #include "detail/device_segmented_reduce.hpp"
+#include "rocprim/type_traits.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -100,9 +100,8 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
                                  bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryFunction
-    >::type;
+    using result_type =
+        typename ::rocprim::invoke_result_binary_op<input_type, BinaryFunction>::type;
 
     using config = wrapped_reduce_config<Config, result_type>;
 

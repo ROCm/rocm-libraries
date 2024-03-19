@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,7 +44,7 @@ template<unsigned int arch,
          unsigned int active_channels,
          class enable = void>
 struct default_histogram_config
-    : default_histogram_config_base<value_type, channels, active_channels>
+    : default_histogram_config_base<value_type, channels, active_channels>::type
 {};
 
 // Based on value_type = double, channels = 1, active_channels = 1

@@ -52,7 +52,9 @@ void generate_needles(const std::vector<KeyType>& input, std::vector<KeyType>& o
         output[indices.size() + i] = out_of_bounds_vals[i];
 
     // Mix up the in-bounds and out-of-bounds values to make the test a bit more robust
-    std::random_shuffle(output.begin(), output.end());
+    std::random_device         rd;
+    std::default_random_engine gen(rd());
+    std::shuffle(output.begin(), output.end(), gen);
 }
 
 template<typename KeyType, typename BinaryFunction>

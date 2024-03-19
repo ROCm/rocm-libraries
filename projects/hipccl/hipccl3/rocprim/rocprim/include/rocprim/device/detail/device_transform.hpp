@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,6 @@
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
-#include "../../detail/match_result_type.hpp"
 
 #include "../../intrinsics.hpp"
 #include "../../functional.hpp"
@@ -45,7 +44,7 @@ namespace detail
 template<class T1, class T2, class BinaryFunction>
 struct unpack_binary_op
 {
-    using result_type = typename ::rocprim::detail::invoke_result<BinaryFunction, T1, T2>::type;
+    using result_type = typename ::rocprim::invoke_result<BinaryFunction, T1, T2>::type;
 
     ROCPRIM_HOST_DEVICE inline
     unpack_binary_op() = default;

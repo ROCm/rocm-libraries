@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -124,16 +124,14 @@ struct ScatterToStripedOp
     }
 };
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int LogicalWarpSize,
-    class Op
->
-__global__
-__launch_bounds__(BlockSize)
-auto warp_exchange_kernel(T* d_output, unsigned int trials) -> typename std::enable_if<!std::is_same<Op, ScatterToStripedOp>::value, void>::type
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int LogicalWarpSize,
+         class Op,
+         class T>
+__device__ auto warp_exchange_benchmark(T* d_output, unsigned int trials)
+    -> std::enable_if_t<device_test_enabled_for_warp_size_v<LogicalWarpSize>
+                        && !std::is_same<Op, ScatterToStripedOp>::value>
 {
     T thread_data[ItemsPerThread];
 
@@ -141,16 +139,12 @@ auto warp_exchange_kernel(T* d_output, unsigned int trials) -> typename std::ena
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
         // generate unique value each data-element
-        thread_data[i] = static_cast<T>(hipThreadIdx_x*ItemsPerThread+i);
+        thread_data[i] = static_cast<T>(threadIdx.x * ItemsPerThread + i);
     }
 
-    using warp_exchange_type = ::rocprim::warp_exchange<
-        T,
-        ItemsPerThread,
-        DeviceSelectWarpSize<LogicalWarpSize>::value
-    >;
+    using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
     constexpr unsigned int warps_in_block = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = hipThreadIdx_x / LogicalWarpSize;
+    const unsigned int     warp_id        = threadIdx.x / LogicalWarpSize;
     ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[warps_in_block];
 
     ROCPRIM_NO_UNROLL
@@ -163,44 +157,37 @@ auto warp_exchange_kernel(T* d_output, unsigned int trials) -> typename std::ena
     ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        const unsigned int global_idx =
-            (BlockSize * hipBlockIdx_x + hipThreadIdx_x) * ItemsPerThread + i;
+        const unsigned int global_idx = (BlockSize * blockIdx.x + threadIdx.x) * ItemsPerThread + i;
         d_output[global_idx] = thread_data[i];
     }
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int LogicalWarpSize,
-    class Op
-    >
-__global__
-__launch_bounds__(BlockSize)
-    auto warp_exchange_kernel(T* d_output, unsigned int trials) -> typename std::enable_if<std::is_same<Op, ScatterToStripedOp>::value, void>::type
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int LogicalWarpSize,
+         class Op,
+         class T>
+__device__ auto warp_exchange_benchmark(T* d_output, unsigned int trials)
+    -> std::enable_if_t<device_test_enabled_for_warp_size_v<LogicalWarpSize>
+                        && std::is_same<Op, ScatterToStripedOp>::value>
 {
     T thread_data[ItemsPerThread];
     unsigned int thread_ranks[ItemsPerThread];
     constexpr unsigned int warps_in_block = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = hipThreadIdx_x / LogicalWarpSize;
-    const unsigned int lane_id = hipThreadIdx_x % LogicalWarpSize;
+    const unsigned int     warp_id        = threadIdx.x / LogicalWarpSize;
+    const unsigned int     lane_id        = threadIdx.x % LogicalWarpSize;
 
     ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
         // generate unique value each data-element
-        thread_data[i] = static_cast<T>(hipThreadIdx_x*ItemsPerThread+i);
+        thread_data[i] = static_cast<T>(threadIdx.x * ItemsPerThread + i);
         // generate unique destination location for each data-element
         const unsigned int s_lane_id = i % 2 == 0 ? LogicalWarpSize - 1 - lane_id : lane_id;
         thread_ranks[i] = s_lane_id*ItemsPerThread+i; // scatter values in warp across whole storage
     }
 
-    using warp_exchange_type = ::rocprim::warp_exchange<
-        T,
-        ItemsPerThread,
-        DeviceSelectWarpSize<LogicalWarpSize>::value
-        >;
+    using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
     ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[warps_in_block];
 
     ROCPRIM_NO_UNROLL
@@ -213,10 +200,28 @@ __launch_bounds__(BlockSize)
     ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        const unsigned int global_idx =
-            (BlockSize * hipBlockIdx_x + hipThreadIdx_x) * ItemsPerThread + i;
+        const unsigned int global_idx = (BlockSize * blockIdx.x + threadIdx.x) * ItemsPerThread + i;
         d_output[global_idx] = thread_data[i];
     }
+}
+
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int LogicalWarpSize,
+         class Op,
+         class T>
+__device__ auto warp_exchange_benchmark(T* /*d_output*/, unsigned int /*trials*/)
+    -> std::enable_if_t<!device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int LogicalWarpSize,
+         class Op,
+         class T>
+__global__ __launch_bounds__(BlockSize) void warp_exchange_kernel(T* d_output, unsigned int trials)
+{
+    warp_exchange_benchmark<BlockSize, ItemsPerThread, LogicalWarpSize, Op>(d_output, trials);
 }
 
 template<
@@ -245,18 +250,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(warp_exchange_kernel<
-                    T,
-                    BlockSize,
-                    ItemsPerThread,
-                    LogicalWarpSize,
-                    Op
-                >
-            ),
-            dim3(size / items_per_block), dim3(BlockSize), 0, stream,
-            d_output, trials
-        );
+        warp_exchange_kernel<BlockSize, ItemsPerThread, LogicalWarpSize, Op>
+            <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_output, trials);
 
         HIP_CHECK(hipPeekAtLastError());
 

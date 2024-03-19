@@ -50,7 +50,7 @@
 #endif
 
 #if   ROCPRIM_TEST_TYPE_SLICE == 0
-#if   defined(__GNUC__) || defined(__clang__)
+#if ROCPRIM_HAS_INT128_SUPPORT
     INSTANTIATE(params<__int128_t,          __int128_t>)
     INSTANTIATE(params<__uint128_t,         __uint128_t>)
 #endif

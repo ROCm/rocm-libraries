@@ -3,6 +3,22 @@
 Documentation for rocPRIM is available at
 [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## Unreleased rocPRIM-3.2.0 for ROCm 6.2.0
+
+### Additions
+
+* New overloads for `warp_scan::exclusive_scan` that take no initial value. These new overloads will write an unspecified result to the first value of each warp.
+* The internal accumulator type of `inclusive_scan(_by_key)` and `exclusive_scan(_by_key)` is now exposed as an optional type parameter.
+  * The default accumulator type is still the value type of the input iterator (inclusive scan) or the initial value's type (exclusive scan).
+    This is the same behaviour as before this change.
+* New overload for `device_adjacent_difference_inplace` that allows separate input and output iterators, but allows them to point to the same element.
+
+### Fixes
+
+* Fixed incorrect results of `warp_exchange::blocked_to_striped_shuffle` and `warp_exchange::striped_to_blocked_shuffle` when the block size is
+  larger than the logical warp size. The test suite has been updated with such cases.
+* Fixed incorrect results returned when calling device `unique_by_key` with overlapping `values_input` and `values_output`.
+
 ## Unreleased rocPRIM-3.1.0 for ROCm 6.1.0
 
 ### Additions
