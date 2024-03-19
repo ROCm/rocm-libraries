@@ -460,9 +460,6 @@ TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceLargeTests,
 
 TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
 {
-    if (TestFixture::use_graphs)
-        GTEST_SKIP() << "Temporarily skipping test within hipGraphs. Will re-enable when issues with atomics inside graphs are resolved.";
-
     const int device_id = test_common_utils::obtain_device_from_ctest();
 
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -502,6 +499,10 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_counter, sizeof(*d_counter)));
             HIP_CHECK(hipMemset(d_incorrect_flag, 0, sizeof(*d_incorrect_flag)));
             HIP_CHECK(hipMemset(d_counter, 0, sizeof(*d_counter)));
+            // Note: hipMemset runs asynchronously unless the pointer it's passed refers to pinned memory.
+            // Wait for it to complete here before we use the device variables we just set.
+            HIP_CHECK(hipDeviceSynchronize());
+
             OutputIterator output(d_incorrect_flag, d_counter);
 
             const auto input = rocprim::make_counting_iterator(T{0});
