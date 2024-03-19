@@ -8,6 +8,7 @@
 #include "gpu/__algorithm/move.h"
 #include "gpu/__memory/pointer_traits.h"
 #include "gpu/__utility/exception_guard.h"
+#include "gpu/__type_traits/is_trivially_relocatable.h"
 
 namespace gpu {
 
@@ -80,52 +81,41 @@ __uninitialized_allocator_copy(const _Type* __first1, const _Type* __last1, _Typ
   }
 }
 
-// Move-construct the elements [__first1, __last1) into [__first2, __first2 + N)
-// if the move constructor is noexcept, where N is distance(__first1, __last1).
+// __uninitialized_allocator_relocate relocates the objects in [__first, __last) into __result.
+// Relocation means that the objects in [__first, __last) are placed into __result as-if by move-construct and destroy,
+// except that the move constructor and destructor may never be called if they are known to be equivalent to a memcpy.
 //
-// Otherwise try to copy all elements. If an exception is thrown the already copied
-// elements are destroyed in reverse order of their construction.
-template <class _Iter1, class _Sent1, class _Iter2>
-__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _Iter2 __uninitialized_allocator_move_if_noexcept(
-    _Iter1 __first1, _Sent1 __last1, _Iter2 __first2) {
-  using value_type = typename std::iterator_traits<_Iter2>::value_type;
-  auto __destruct_first = __first2;
-  auto __guard =
-      gpu::__make_exception_guard(_AllocatorDestroyRangeReverse<_Iter2>(__destruct_first, __first2));
-  while (__first1 != __last1) {
+// Preconditions:  __result doesn't contain any objects and [__first, __last) contains objects
+// Postconditions: __result contains the objects from [__first, __last) and
+//                 [__first, __last) doesn't contain any objects
+//
+// The strong exception guarantee is provided if any of the following are true:
+// - is_nothrow_move_constructible<_Tp>
+// - is_copy_constructible<_Tp>
+// - __libcpp_is_trivially_relocatable<_Tp>
+template <class _Tp>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 void
+__uninitialized_allocator_relocate(_Tp* __first, _Tp* __last, _Tp* __result) {
+  if (__builtin_is_constant_evaluated() || !__libcpp_is_trivially_relocatable<_Tp>::value) {
+    auto __destruct_first = __result;
+    auto __guard =
+        gpu::__make_exception_guard(_AllocatorDestroyRangeReverse<_Tp*>(__destruct_first, __result));
+    auto __iter = __first;
+    while (__iter != __last) {
 #ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-    ::new (gpu::__to_address(__first2)) value_type(std::move_if_noexcept(*__first1));
+      ::new (__result) _Tp(std::move_if_noexcept(*__iter));
 #else
-    ::new (gpu::__to_address(__first2)) value_type(std::move(*__first1));
+      ::new (__result) _Tp(std::move(*__iter));
 #endif
-    ++__first1;
-    ++__first2;
-  }
-  __guard.__complete();
-  return __first2;
-}
-
-#ifndef _LIBGPU_COMPILER_GCC
-template <
-    class _Iter1,
-    class _Iter2,
-    class _Type = typename std::iterator_traits<_Iter1>::value_type,
-    class = std::enable_if_t<std::is_trivially_move_constructible<_Type>::value && std::is_trivially_move_assignable<_Type>::value> >
-__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _Iter2
-__uninitialized_allocator_move_if_noexcept(_Iter1 __first1, _Iter1 __last1, _Iter2 __first2) {
-  using value_type = typename std::iterator_traits<_Iter2>::value_type;
-  if (__builtin_is_constant_evaluated()) {
-    while (__first1 != __last1) {
-      ::new (gpu::__to_address(__first2)) value_type(std::move(*__first1));
-      ++__first1;
-      ++__first2;
+      ++__iter;
+      ++__result;
     }
-    return __first2;
+    __guard.__complete();
+    gpu::__allocator_destroy(__first, __last);
   } else {
-    return gpu::move(__first1, __last1, __first2);
+    __builtin_memcpy(const_cast<std::remove_const_t<_Tp>*>(__result), __first, sizeof(_Tp) * (__last - __first));
   }
 }
-#endif // _LIBGPU_COMPILER_GCC
 
 } // namespace gpu
 
