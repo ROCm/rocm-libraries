@@ -17,7 +17,7 @@ namespace rocRoller
     class MultiplyGenerator : public BinaryArithmeticGenerator<Expression::Multiply>
     {
     public:
-        MultiplyGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        MultiplyGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::Multiply>(c)
         {
         }

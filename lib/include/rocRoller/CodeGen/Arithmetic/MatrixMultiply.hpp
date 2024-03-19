@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2022-2023 Advanced Micro Devices, Inc.
+ * Copyright 2022-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -71,12 +71,10 @@ namespace rocRoller
         {
             using Base = MatrixMultiply;
 
-            MatrixMultiplyGenerator<ACC, INPUT>(ContextPtr context)
+            MatrixMultiplyGenerator(ContextPtr context)
                 : m_context(context){};
 
             static const std::string Name;
-
-            virtual ~MatrixMultiplyGenerator<ACC, INPUT>() = default;
 
             static bool Match(Argument const& arg)
             {

@@ -14,7 +14,7 @@ namespace rocRoller
     class LogicalNotGenerator : public UnaryArithmeticGenerator<Expression::LogicalNot>
     {
     public:
-        LogicalNotGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        LogicalNotGenerator(ContextPtr c)
             : UnaryArithmeticGenerator<Expression::LogicalNot>(c)
         {
         }

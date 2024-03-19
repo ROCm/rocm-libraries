@@ -140,9 +140,9 @@ namespace rocRoller
         MAKE_TERNARY_XOP(E_Conditional)
 
         template <typename T>
-        concept CXOp = requires
+        concept CXOp = requires()
         {
-            std::constructible_from<XOp, T>;
+            requires std::constructible_from<XOp, T>;
         };
 
         class T_Execute

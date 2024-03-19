@@ -14,7 +14,7 @@ namespace rocRoller
     class EqualGenerator : public BinaryArithmeticGenerator<Expression::Equal>
     {
     public:
-        EqualGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        EqualGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::Equal>(c)
         {
         }

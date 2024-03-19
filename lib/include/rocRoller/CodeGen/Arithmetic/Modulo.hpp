@@ -15,7 +15,7 @@ namespace rocRoller
     class ModuloGenerator : public BinaryArithmeticGenerator<Expression::Modulo>
     {
     public:
-        ModuloGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        ModuloGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::Modulo>(c)
         {
         }

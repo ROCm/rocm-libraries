@@ -16,7 +16,7 @@ namespace rocRoller
     class LogicalOrGenerator : public BinaryArithmeticGenerator<Expression::LogicalOr>
     {
     public:
-        LogicalOrGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        LogicalOrGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::LogicalOr>(c)
         {
         }

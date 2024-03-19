@@ -16,7 +16,7 @@ namespace rocRoller
     class LessThanEqualGenerator : public BinaryArithmeticGenerator<Expression::LessThanEqual>
     {
     public:
-        LessThanEqualGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        LessThanEqualGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::LessThanEqual>(c)
         {
         }

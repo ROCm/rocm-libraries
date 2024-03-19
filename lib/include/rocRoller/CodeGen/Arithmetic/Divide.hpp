@@ -15,7 +15,7 @@ namespace rocRoller
     class DivideGenerator : public BinaryArithmeticGenerator<Expression::Divide>
     {
     public:
-        DivideGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        DivideGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::Divide>(c)
         {
         }

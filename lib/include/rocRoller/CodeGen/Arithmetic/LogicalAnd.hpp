@@ -16,7 +16,7 @@ namespace rocRoller
     class LogicalAndGenerator : public BinaryArithmeticGenerator<Expression::LogicalAnd>
     {
     public:
-        LogicalAndGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        LogicalAndGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::LogicalAnd>(c)
         {
         }

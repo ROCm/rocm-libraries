@@ -15,7 +15,7 @@ namespace rocRoller
     class AddGenerator : public BinaryArithmeticGenerator<Expression::Add>
     {
     public:
-        AddGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        AddGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::Add>(c)
         {
         }

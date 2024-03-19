@@ -16,7 +16,7 @@ namespace rocRoller
     class NotEqualGenerator : public BinaryArithmeticGenerator<Expression::NotEqual>
     {
     public:
-        NotEqualGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        NotEqualGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::NotEqual>(c)
         {
         }

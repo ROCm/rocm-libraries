@@ -17,7 +17,7 @@ namespace rocRoller
     class SubtractGenerator : public BinaryArithmeticGenerator<Expression::Subtract>
     {
     public:
-        SubtractGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        SubtractGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::Subtract>(c)
         {
         }

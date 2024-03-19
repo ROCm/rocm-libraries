@@ -16,7 +16,7 @@ namespace rocRoller
     class GreaterThanEqualGenerator : public BinaryArithmeticGenerator<Expression::GreaterThanEqual>
     {
     public:
-        GreaterThanEqualGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
+        GreaterThanEqualGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::GreaterThanEqual>(c)
         {
         }
