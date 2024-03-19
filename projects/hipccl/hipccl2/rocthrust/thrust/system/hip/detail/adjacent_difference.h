@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -130,8 +130,8 @@ namespace __adjacent_difference
             #pragma unroll
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                unsigned int idx         = tile_base + threadIdx.x * ItemsPerThread + i;
-                Size         input_index = (idx + 1) * AdjacentDiffItemsPerBlock - 1;
+                Size idx         = tile_base + threadIdx.x * ItemsPerThread + i;
+                Size input_index = (idx + 1) * AdjacentDiffItemsPerBlock - 1;
                 if(input_index < input_size)
                     block_heads[idx] = input[input_index];
             }
@@ -177,9 +177,9 @@ namespace __adjacent_difference
         const unsigned int flat_id       = ::rocprim::detail::block_thread_id<0>();
         const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
         const unsigned int block_offset  = flat_block_id * BlockSize * ItemsPerThread;
-        const unsigned int number_of_blocks
+        const size_t number_of_blocks
             = (input_size + items_per_block - 1) / items_per_block;
-        auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
+        const unsigned int valid_in_last_block = static_cast<unsigned int>(input_size - items_per_block * (number_of_blocks - 1));
 
         input_type values[ItemsPerThread];
 
@@ -266,7 +266,7 @@ namespace __adjacent_difference
     {
         using input_type  = typename std::iterator_traits<InputIt>::value_type;
         using result_type
-            = typename ::rocprim::detail::match_result_type<input_type,BinaryOp>::type;
+            = typename ::rocprim::invoke_result_binary_op<input_type,BinaryOp>::type;
 
         // Get default config if Config is default_config
         using config = default_adjacent_difference_config<ROCPRIM_TARGET_ARCH, result_type>;
@@ -275,8 +275,8 @@ namespace __adjacent_difference
         constexpr unsigned int items_per_thread = config::items_per_thread;
         constexpr auto         items_per_block  = block_size * items_per_thread;
 
-        const unsigned int heads      = (num_items + items_per_block - 1) / items_per_block;
-        const size_t       head_bytes = (heads + 1) * sizeof(input_type);
+        const size_t heads      = (num_items + items_per_block - 1) / items_per_block;
+        const size_t head_bytes = (heads + 1) * sizeof(input_type);
 
         if(temporary_storage == nullptr)
         {
@@ -314,8 +314,8 @@ namespace __adjacent_difference
                                                             items_per_block,
                                                             InputIt,
                                                             input_type*,
-                                                            size_t>),
-                           dim3(number_of_blocks_heads),
+                                                            typename std::iterator_traits<InputIt>::difference_type>),
+                           dim3(static_cast<unsigned int>(number_of_blocks_heads)),
                            dim3(block_size_heads),
                            0,
                            stream,
@@ -333,7 +333,7 @@ namespace __adjacent_difference
                                                                       input_type*,
                                                                       OutputIt,
                                                                       BinaryOp>),
-                           dim3(number_of_blocks),
+                           dim3(static_cast<unsigned int>(number_of_blocks)),
                            dim3(block_size),
                            0,
                            stream,
@@ -377,7 +377,7 @@ namespace __adjacent_difference
                                               first,
                                               result,
                                               binary_op,
-                                              num_items,
+                                              static_cast<size_t>(num_items),
                                               stream,
                                               debug_sync),
                                     "adjacent_difference failed on 1st step");
@@ -392,7 +392,7 @@ namespace __adjacent_difference
                                               first,
                                               result,
                                               binary_op,
-                                              num_items,
+                                              static_cast<size_t>(num_items),
                                               stream,
                                               debug_sync),
                                     "adjacent_difference failed on 2nd step");

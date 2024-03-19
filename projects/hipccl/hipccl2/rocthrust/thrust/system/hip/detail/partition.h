@@ -157,7 +157,7 @@ namespace __partition
                                                        debug_sync),
                                     "partition failed on 1st step");
 
-        size_t storage_size = sizeof(size_type) + temp_storage_bytes + sizeof(value_type) * num_items + sizeof(bool) * num_items;
+        size_t storage_size = sizeof(size_type) + temp_storage_bytes + sizeof(value_type) * num_items;
 
         // Allocate temporary storage.
         thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
@@ -170,15 +170,12 @@ namespace __partition
         value_type* d_partition_out = reinterpret_cast<value_type*>(
             reinterpret_cast<char*>(d_num_selected_out) + sizeof(size_type));
 
-        bool* d_flags = reinterpret_cast<bool*>(reinterpret_cast<char*>(d_partition_out)
-                                          + sizeof(value_type) * num_items);
-
-        hip_rocprim::transform(policy, stencil, stencil + num_items, d_flags, predicate);
+        thrust::transform_iterator<Predicate, StencilIt> flags {stencil, predicate};
 
         hip_rocprim::throw_on_error(rocprim::partition(ptr,
                                                        temp_storage_bytes,
                                                        first,
-                                                       d_flags,
+                                                       flags,
                                                        d_partition_out,
                                                        d_num_selected_out,
                                                        num_items,
@@ -344,7 +341,7 @@ namespace __partition
                                                                debug_sync),
                                     "partition failed on 1st step");
 
-        size_t storage_size = sizeof(size_type) + temp_storage_bytes + sizeof(bool) * num_items;
+        size_t storage_size = sizeof(size_type) + temp_storage_bytes;
 
         // Allocate temporary storage.
         thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
@@ -353,15 +350,12 @@ namespace __partition
         size_type* d_num_selected_out
             = reinterpret_cast<size_type*>(static_cast<char*>(ptr) + temp_storage_bytes);
 
-        bool* d_flags = reinterpret_cast<bool*>(reinterpret_cast<char*>(d_num_selected_out)
-                                                + sizeof(size_type));
-
-        hip_rocprim::transform(policy, stencil, stencil + num_items, d_flags, predicate);
+        thrust::transform_iterator<Predicate, StencilIt> flags {stencil, predicate};
 
         hip_rocprim::throw_on_error(rocprim::partition_two_way(ptr,
                                                                temp_storage_bytes,
                                                                first,
-                                                               d_flags,
+                                                               flags,
                                                                selected_result,
                                                                rejected_result,
                                                                d_num_selected_out,

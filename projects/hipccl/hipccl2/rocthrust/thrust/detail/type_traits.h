@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2022 NVIDIA Corporation
- *  Modifications Copyright© 2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-#include <rocprim/detail/match_result_type.hpp>
+#include <rocprim/type_traits.hpp>
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #include <cuda/std/type_traits>
 #endif
@@ -724,7 +724,7 @@ template<typename T>
 template <typename Invokable, typename... Args>
 using invoke_result_t =
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-      typename ::rocprim::detail::invoke_result<Invokable, Args...>::type;
+      typename ::rocprim::invoke_result<Invokable, Args...>::type;
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #if THRUST_CPP_DIALECT < 2017
   typename ::cuda::std::result_of<Invokable(Args...)>::type;

@@ -97,7 +97,7 @@ namespace __copy
                              derived_cast(sys2),
                              reinterpret_cast<InputTy*>(thrust::raw_pointer_cast(&*result)),
                              reinterpret_cast<InputTy const*>(thrust::raw_pointer_cast(&*begin)),
-                             n);
+                             static_cast<size_t>(n));
                      } return result + n;));
     }
 
@@ -283,7 +283,7 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
                       InputIterator                  end,
                       OutputIterator                 result)
     {
-        return cross_system_copy_n(systems, begin, thrust::distance(begin, end), result);
+        return cross_system_copy_n(systems, begin, static_cast<size_t>(thrust::distance(begin, end)), result);
     }
 } // namespace __copy
 } // namespace hip_rocprim

@@ -29,7 +29,7 @@ copyright-date:
   stage: lint
   needs: []
   tags:
-    - rocm-build
+    - build
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
@@ -79,7 +79,7 @@ copyright-date:
     - .gpus:rocm-gpus
     - .rules:build
   tags:
-    - rocm-build
+    - build
   script:
     - !reference [.install-rocprim, script]
     # Setup env vars for testing
@@ -131,7 +131,7 @@ build:package:
     - .cmake-minimum
     - .rules:build
   tags:
-    - rocm-build
+    - build
   script:
     - !reference [.install-rocprim, script]
     - cmake
@@ -157,7 +157,7 @@ test:package:
     - .cmake-minimum
     - .rules:test
   tags:
-    - rocm-build
+    - build
   script:
     - !reference [.install-rocprim, script]
     - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocthrust*.deb
@@ -176,6 +176,8 @@ test:package:
 
 test:doc:
   stage: test
+  variables:
+    SPHINX_DIR: $DOCS_DIR/sphinx
   extends:
     - .build:docs
     - .rules:test

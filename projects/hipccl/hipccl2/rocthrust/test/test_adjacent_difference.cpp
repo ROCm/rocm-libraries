@@ -189,7 +189,7 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifferenceDiscardIterato
             d_result = thrust::adjacent_difference(
                 d_input.begin(), d_input.end(), thrust::make_discard_iterator());
 
-            thrust::discard_iterator<> reference(size);
+            thrust::discard_iterator<> reference(static_cast<std::ptrdiff_t>(size));
 
             ASSERT_EQ_QUIET(reference, h_result);
             ASSERT_EQ_QUIET(reference, d_result);
@@ -261,7 +261,7 @@ TEST(AdjacentDifferenceTests, TestAdjacentDifferenceDevice)
         {
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, static_cast<int>(size), seed);
             thrust::device_vector<int> d_data = h_data;
             thrust::adjacent_difference(h_data.begin(),h_data.end(),h_data.begin());
             hipLaunchKernelGGL(AdjacentDifferenceKernel,
