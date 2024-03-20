@@ -6,7 +6,7 @@ exec 1>&2
 check_failed=false
 
 # Do the code format check
-if ! "$(git rev-parse --show-toplevel)/scripts/code-format/check-format.sh" HEAD --cached 1>&2; then
+if ! "$(git rev-parse --show-toplevel)/scripts/code-format/check-format.sh" HEAD 1>&2; then
     printf "\n\033[31mFailed\033[0m: code format check.\n"
     check_failed=true
 fi

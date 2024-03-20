@@ -137,11 +137,9 @@ fi
 #   BUILD_TEST - off by default,
 #   BUILD_BENCHMARK - off by default.
 #
-compiler="hipcc"
-
 cmake_executable="cmake"
 
-cmake_common_options=""
+cmake_common_options="--toolchain=toolchain-linux.cmake"
 
 if [[ "${build_benchmark}" == true ]]; then
     build_benchmarks="-DBUILD_BENCHMARK=ON"
@@ -162,14 +160,14 @@ if ($install_dependencies); then
 fi
 
 if [[ "${build_relocatable}" == true ]]; then
-    CXX=$rocm_path/bin/${compiler} ${cmake_executable} \
+    ${cmake_executable} \
         -DCMAKE_INSTALL_PREFIX=${rocm_path} \
         -DCMAKE_MODULE_PATH="${rocm_path}/lib/cmake/hip ${rocm_path}/hip/cmake" \
         -Drocprim_DIR=${rocm_path}/rocprim \
         ${cmake_common_options} \
         ${build_tests} ${build_benchmarks} ${build_type} ../../. # or cmake-gui ../.
 else
-    CXX=$rocm_path/bin/${compiler} ${cmake_executable} ${build_tests} ${build_benchmarks} ${build_type} ${cmake_common_options} ../../. # or cmake-gui ../.
+    ${cmake_executable} ${build_tests} ${build_benchmarks} ${build_type} ${cmake_common_options} ../../. # or cmake-gui ../.
 fi
 check_exit_code "$?"
 
