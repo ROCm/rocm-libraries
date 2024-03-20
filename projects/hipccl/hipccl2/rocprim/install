@@ -147,10 +147,8 @@ fi
 # Configure rocPRIM, setup options for your system.
 # See README.md under "Build and Install" for options and defaults.
 
-compiler="hipcc"
-
 cmake_executable="cmake"
-cmake_common_options=""
+cmake_common_options="--toolchain=toolchain-linux.cmake"
 
 benchmark="OFF"
 if [[ "${build_benchmark}" == true ]]; then
@@ -188,7 +186,7 @@ if [[ "${build_codecoverage}" == true ]]; then
 fi
 
 if [[ "${build_relocatable}" == true ]]; then
-    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} ${cmake_common_options} \
+    ${cmake_executable} ${cmake_common_options} \
        -DCMAKE_INSTALL_PREFIX=${rocm_path} -DBUILD_BENCHMARK=${benchmark} \
        -DCMAKE_PREFIX_PATH="${rocm_path}  ${rocm_path}/hip" \
        -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} \
@@ -196,10 +194,9 @@ if [[ "${build_relocatable}" == true ]]; then
        "${static_libs}" \
        ../../.     # or cmake-gui ../.
 else
-    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} ${cmake_common_options} -DBUILD_BENCHMARK=${benchmark} \
-       -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DBUILD_CODE_COVERAGE=${codecoverage} \
-       "${static_libs}" \
-       ../../. # or cmake-gui ../.
+    ${cmake_executable} ${cmake_common_options} -DBUILD_BENCHMARK=${benchmark} \
+       -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DBUILD_CODE_COVERAGE=${codecoverage}  ../../. # or cmake-gui ../.
+
 fi
 
 # Build
