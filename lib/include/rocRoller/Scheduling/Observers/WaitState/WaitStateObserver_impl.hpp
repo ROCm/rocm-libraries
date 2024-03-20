@@ -119,6 +119,7 @@ namespace rocRoller
 
             auto const* thisDerived = static_cast<DerivedObserver const*>(this);
 
+            int requiredNops = -1;
             for(auto const& regId : reg->getRegisterIds())
             {
                 if(m_hazardMap->contains(regId))
@@ -130,11 +131,13 @@ namespace rocRoller
                               || (!thisDerived->writeTrigger() && !hazard.regWasWritten());
                         if(isHazardous && thisDerived->trigger(hazard.getInstructionRef()))
                         {
-                            return hazard.getRequiredNops();
+                            requiredNops = std::max(hazard.getRequiredNops(), requiredNops);
                         }
                     }
                 }
             }
+            if(requiredNops != -1)
+                return requiredNops;
             return std::nullopt;
         }
 
@@ -142,13 +145,16 @@ namespace rocRoller
         std::optional<int>
             WaitStateObserver<DerivedObserver>::checkSrcs(Instruction const& inst) const
         {
+            int requiredNops = -1;
             for(auto const& src : inst.getSrcs())
             {
                 if(auto val = checkRegister(src))
                 {
-                    return val;
+                    requiredNops = std::max(val.value(), requiredNops);
                 }
             }
+            if(requiredNops != -1)
+                return requiredNops;
             return std::nullopt;
         }
 
@@ -156,13 +162,16 @@ namespace rocRoller
         std::optional<int>
             WaitStateObserver<DerivedObserver>::checkDsts(Instruction const& inst) const
         {
+            int requiredNops = -1;
             for(auto const& dst : inst.getDsts())
             {
                 if(auto val = checkRegister(dst))
                 {
-                    return val;
+                    requiredNops = std::max(val.value(), requiredNops);
                 }
             }
+            if(requiredNops != -1)
+                return requiredNops;
             return std::nullopt;
         }
     }

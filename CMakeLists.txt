@@ -357,7 +357,12 @@ set(rocroller_src
  lib/source/Observers/ObserverCreation.cpp
  lib/source/Observers/RegisterLivenessObserver.cpp
  lib/source/Observers/SupportedInstructionObserver.cpp
+ lib/source/Observers/VALUTransWrite94x.cpp
  lib/source/Observers/VALUWrite.cpp
+ lib/source/Observers/VALUWriteReadlane94x.cpp
+ lib/source/Observers/VALUWriteSGPRVCC94x.cpp
+ lib/source/Observers/VALUWriteSGPRVMEM.cpp
+ lib/source/Observers/VALUWriteVCCVDIVFMAS.cpp
  lib/source/Observers/WaitcntObserver.cpp
  lib/source/Observers/XDLReadSrcC908.cpp
  lib/source/Observers/XDLReadSrcC94x.cpp
@@ -483,6 +488,7 @@ set(
   test/unit/GEMMTest.cpp
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
+  test/unit/HazardObserverTest.cpp
   test/unit/HypergraphTest.cpp
   test/unit/InstructionRefTest.cpp
   test/unit/InstructionTest.cpp
@@ -499,7 +505,7 @@ set(
   test/unit/MemoryInstructionsTest.cpp
   test/unit/MatrixMultiplyTest.cpp
   test/unit/MetaObserverTest.cpp
-  test/unit/MFMAObserverTest.cpp
+  test/unit/MFMAHazardObserverTest.cpp
   test/unit/MFMAUnitObserverTest.cpp
   test/unit/MixedArithmeticTest.cpp
   test/unit/RandomTest.cpp

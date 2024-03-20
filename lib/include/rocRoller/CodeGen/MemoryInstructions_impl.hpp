@@ -68,7 +68,7 @@ namespace rocRoller
                     = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
-            co_yield loadScalar(dest, newAddr, offsetVal, numBytes, buffOpts.getGlc());
+            co_yield loadScalar(dest, newAddr, offsetVal, numBytes, buffOpts.glc);
             break;
 
         case Buffer:
@@ -159,7 +159,7 @@ namespace rocRoller
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
-            co_yield storeScalar(newAddr, data, offsetVal, numBytes, buffOpts.getGlc());
+            co_yield storeScalar(newAddr, data, offsetVal, numBytes, buffOpts.glc);
             break;
 
         default:
@@ -583,7 +583,7 @@ namespace rocRoller
         }
 
         std::string offsetModifier = "", glc = "", slc = "", lds = "";
-        if(buffOpts.getOffen() || offset == 0)
+        if(buffOpts.offen || offset == 0)
         {
             offsetModifier += "offset: 0";
         }
@@ -591,15 +591,15 @@ namespace rocRoller
         {
             offsetModifier += genOffsetModifier(offset);
         }
-        if(buffOpts.getGlc())
+        if(buffOpts.glc)
         {
             glc += "glc";
         }
-        if(buffOpts.getSlc())
+        if(buffOpts.slc)
         {
             slc += "slc";
         }
-        if(buffOpts.getLds())
+        if(buffOpts.lds)
         {
             lds += "lds";
         }
@@ -681,8 +681,8 @@ namespace rocRoller
             offset = 0;
         }
 
-        std::string offsetModifier = "", glc = "", slc = "", lds = "";
-        if(buffOpts.getOffen() || offset == 0)
+        std::string offsetModifier = "", glc = "", slc = "", sc1 = "", lds = "";
+        if(buffOpts.offen || offset == 0)
         {
             offsetModifier += "offset: 0";
         }
@@ -690,15 +690,19 @@ namespace rocRoller
         {
             offsetModifier += genOffsetModifier(offset);
         }
-        if(buffOpts.getGlc())
+        if(buffOpts.glc)
         {
             glc += "glc";
         }
-        if(buffOpts.getSlc())
+        if(buffOpts.slc)
         {
             slc += "slc";
         }
-        if(buffOpts.getLds())
+        if(buffOpts.sc1)
+        {
+            sc1 += "sc1";
+        }
+        if(buffOpts.lds)
         {
             lds += "lds";
         }
@@ -731,7 +735,7 @@ namespace rocRoller
             co_yield_(Instruction("buffer_store_" + opEnd,
                                   {},
                                   {data, newAddr, sgprSrd, Register::Value::Literal(0)},
-                                  {"offen", offsetModifier, glc, slc, lds},
+                                  {"offen", offsetModifier, glc, slc, sc1, lds},
                                   "Store value"));
         }
         else
@@ -763,7 +767,7 @@ namespace rocRoller
                                                   width == 1 ? "" : "x" + std::to_string(width)),
                                       {},
                                       {dataSubset, newAddr, sgprSrd, Register::Value::Literal(0)},
-                                      {"offen", offsetModifier, glc, slc, lds},
+                                      {"offen", offsetModifier, glc, slc, sc1, lds},
                                       "Store value"));
                 count += width;
             }

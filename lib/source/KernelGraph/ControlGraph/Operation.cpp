@@ -65,10 +65,11 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
     }
 
-    LoadSGPR::LoadSGPR() = default;
-    LoadSGPR::LoadSGPR(VariableType const varType, bool const glc)
+    LoadSGPR::LoadSGPR()
+        : bufOpts{} {};
+    LoadSGPR::LoadSGPR(VariableType const varType, BufferInstructionOptions const bio)
         : varType(varType)
-        , glc(glc)
+        , bufOpts(bio)
     {
     }
 
@@ -84,10 +85,11 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
     }
 
-    StoreSGPR::StoreSGPR() = default;
-    StoreSGPR::StoreSGPR(DataType const dtype, bool const glc)
+    StoreSGPR::StoreSGPR()
+        : bufOpts{} {};
+    StoreSGPR::StoreSGPR(DataType const dtype, BufferInstructionOptions const bio)
         : dataType(dtype)
-        , glc(glc)
+        , bufOpts(bio)
     {
     }
 

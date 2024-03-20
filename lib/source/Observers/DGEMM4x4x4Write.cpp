@@ -1,4 +1,4 @@
-#include <rocRoller/Scheduling/Observers/WaitState/DGEMM4x4x4Write.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/DGEMM4x4x4Write.hpp>
 
 #include <rocRoller/CodeGen/InstructionRef.hpp>
 

@@ -42,22 +42,6 @@ namespace rocRollerTest
             EXPECT_EQ(peeked.nops, expectedNops);
             m_context->schedule(inst);
         }
-
-        std::vector<Register::ValuePtr> createRegisters(Register::Type const regType,
-                                                        DataType const       dataType,
-                                                        size_t const         amount,
-                                                        int const            regCount = 1)
-        {
-            std::vector<Register::ValuePtr> regs;
-            for(size_t i = 0; i < amount; i++)
-            {
-                auto reg
-                    = std::make_shared<Register::Value>(m_context, regType, dataType, regCount);
-                reg->allocateNow();
-                regs.push_back(reg);
-            }
-            return regs;
-        }
     };
 
     class MFMA942ObserverTest : public GenericContextFixture
@@ -186,6 +170,21 @@ namespace rocRollerTest
             peekAndSchedule(insts[2], 1);
 
             EXPECT_THAT(output(), HasSubstr("s_nop 0"));
+            clearOutput();
+        }
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""),
+                   Instruction("v_or_b32", {v[5]}, {v[3], v[4]}, {}, ""), // Unrelated
+                   Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[2], v[5], a[0]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1]);
+            peekAndSchedule(insts[2], 2);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 1"));
             clearOutput();
         }
     }

@@ -1,4 +1,4 @@
-#include <rocRoller/Scheduling/Observers/WaitState/ACCVGPRWriteWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/ACCVGPRWriteWrite.hpp>
 
 #include <rocRoller/CodeGen/InstructionRef.hpp>
 

@@ -7,19 +7,24 @@
 
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MFMAObserver.hpp>
 
-#include <rocRoller/Scheduling/Observers/WaitState/ACCVGPRReadWrite.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/ACCVGPRWriteWrite.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/CMPXWriteExec.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/DGEMM16x16x4Write.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/DGEMM4x4x4Write.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/DLWrite.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/VALUWrite.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC908.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC90a.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC94x.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/XDLWrite908.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/XDLWrite90a.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/XDLWrite94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/ACCVGPRReadWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/ACCVGPRWriteWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/CMPXWriteExec.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/DGEMM16x16x4Write.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/DGEMM4x4x4Write.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/DLWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/VALUWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLReadSrcC908.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLReadSrcC90a.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLReadSrcC94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite908.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite90a.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteReadlane94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVCC94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVMEM.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteVCCVDIVFMAS.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
 namespace rocRoller
@@ -33,6 +38,8 @@ namespace rocRoller
                                                  ACCVGPRWriteWrite,
                                                  CMPXWriteExec,
                                                  VALUWrite,
+                                                 VALUWriteSGPRVMEM,
+                                                 VALUWriteVCCVDIVFMAS,
                                                  XDLReadSrcC908,
                                                  XDLWrite908>;
             using Gfx90aObservers = MetaObserver<CMPXWriteExec,
@@ -40,6 +47,8 @@ namespace rocRoller
                                                  DGEMM16x16x4Write,
                                                  DLWrite,
                                                  VALUWrite,
+                                                 VALUWriteSGPRVMEM,
+                                                 VALUWriteVCCVDIVFMAS,
                                                  XDLReadSrcC90a,
                                                  XDLWrite90a>;
             using Gfx94xObservers = MetaObserver<CMPXWriteExec,
@@ -47,6 +56,11 @@ namespace rocRoller
                                                  DGEMM16x16x4Write,
                                                  DLWrite,
                                                  VALUWrite,
+                                                 VALUWriteReadlane94x,
+                                                 VALUWriteSGPRVMEM,
+                                                 VALUWriteVCCVDIVFMAS,
+                                                 VALUTransWrite94x,
+                                                 VALUWriteSGPRVCC94x,
                                                  XDLReadSrcC94x,
                                                  XDLWrite94x>;
             using FileObservers   = MetaObserver<FileWritingObserver>;

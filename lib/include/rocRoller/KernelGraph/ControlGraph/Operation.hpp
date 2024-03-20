@@ -7,6 +7,7 @@
 
 #include "Operation_fwd.hpp"
 
+#include <rocRoller/CodeGen/BufferInstructionOptions.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 
@@ -261,10 +262,10 @@ namespace rocRoller
         struct LoadSGPR
         {
             LoadSGPR();
-            LoadSGPR(VariableType const varType, bool const glc = false);
+            LoadSGPR(VariableType const varType, BufferInstructionOptions const bio);
 
-            VariableType varType;
-            bool         glc;
+            VariableType             varType;
+            BufferInstructionOptions bufOpts;
 
             std::string name() const;
         };
@@ -308,7 +309,8 @@ namespace rocRoller
             StoreTiled();
             StoreTiled(DataType const dtype);
 
-            DataType dataType = DataType::Count;
+            DataType                 dataType = DataType::Count;
+            BufferInstructionOptions bufOpts;
 
             std::string name() const;
         };
@@ -324,10 +326,10 @@ namespace rocRoller
         struct StoreSGPR
         {
             StoreSGPR();
-            StoreSGPR(DataType const dtype, bool const glc = true);
+            StoreSGPR(DataType const dtype, BufferInstructionOptions const bio);
 
-            DataType dataType = DataType::Count;
-            bool     glc;
+            DataType                 dataType = DataType::Count;
+            BufferInstructionOptions bufOpts;
 
             std::string name() const;
         };

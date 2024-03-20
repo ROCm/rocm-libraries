@@ -1,4 +1,4 @@
-#include <rocRoller/Scheduling/Observers/WaitState/VALUWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/VALUWrite.hpp>
 
 #include <rocRoller/CodeGen/InstructionRef.hpp>
 

@@ -106,6 +106,7 @@ namespace rocRoller
                 Register::ValuePtr                colStrideReg;
                 Register::ValuePtr                offset;
                 std::shared_ptr<BufferDescriptor> bufDesc;
+                BufferInstructionOptions          bufOpts;
             };
 
             inline Generator<Instruction> generate(auto&                     dest,
@@ -131,7 +132,8 @@ namespace rocRoller
                                             int                            tag,
                                             Register::ValuePtr             vgpr,
                                             Register::ValuePtr             offset,
-                                            CoordinateGraph::Transformer&  coords);
+                                            CoordinateGraph::Transformer&  coords,
+                                            BufferInstructionOptions       bufOpts = {});
             template <MemoryInstructions::MemoryDirection Dir>
             Generator<Instruction> moveTileLiteralStrides(LoadStoreTileInfo& info);
             template <MemoryInstructions::MemoryDirection Dir>

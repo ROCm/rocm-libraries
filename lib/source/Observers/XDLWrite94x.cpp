@@ -1,4 +1,4 @@
-#include <rocRoller/Scheduling/Observers/WaitState/XDLWrite94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite94x.hpp>
 
 #include <rocRoller/CodeGen/InstructionRef.hpp>
 namespace rocRoller

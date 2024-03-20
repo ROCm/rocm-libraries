@@ -21,9 +21,14 @@ namespace rocRoller
         return isMFMA(m_opCode);
     }
 
-    inline bool InstructionRef::isCMPX() const
+    inline bool InstructionRef::isVCMPX() const
     {
-        return isCMPX(m_opCode);
+        return isVCMPX(m_opCode);
+    }
+
+    inline bool InstructionRef::isVCMP() const
+    {
+        return isVCMP(m_opCode);
     }
 
     inline bool InstructionRef::isScalar() const
@@ -54,6 +59,11 @@ namespace rocRoller
     inline bool InstructionRef::isVALU() const
     {
         return isVALU(m_opCode);
+    }
+
+    inline bool InstructionRef::isVALUTrans() const
+    {
+        return isVALUTrans(m_opCode);
     }
 
     inline bool InstructionRef::isDGEMM() const
@@ -111,6 +121,39 @@ namespace rocRoller
         return isACCVGPRRead(m_opCode);
     }
 
+    inline bool InstructionRef::isIntInst() const
+    {
+        return isIntInst(m_opCode);
+    }
+    inline bool InstructionRef::isUIntInst() const
+    {
+        return isUIntInst(m_opCode);
+    }
+    inline bool InstructionRef::isVAddInst() const
+    {
+        return isVAddInst(m_opCode);
+    }
+    inline bool InstructionRef::isVSubInst() const
+    {
+        return isVSubInst(m_opCode);
+    }
+    inline bool InstructionRef::isVReadlane() const
+    {
+        return isVReadlane(m_opCode);
+    }
+    inline bool InstructionRef::isVWritelane() const
+    {
+        return isVWritelane(m_opCode);
+    }
+    inline bool InstructionRef::isVDivScale() const
+    {
+        return isVDivScale(m_opCode);
+    }
+    inline bool InstructionRef::isVDivFmas() const
+    {
+        return isVDivFmas(m_opCode);
+    }
+
     inline bool InstructionRef::isDLOP(Instruction const& inst)
     {
         return isDLOP(inst.getOpCode());
@@ -121,9 +164,14 @@ namespace rocRoller
         return isMFMA(inst.getOpCode());
     }
 
-    inline bool InstructionRef::isCMPX(Instruction const& inst)
+    inline bool InstructionRef::isVCMPX(Instruction const& inst)
     {
-        return isCMPX(inst.getOpCode());
+        return isVCMPX(inst.getOpCode());
+    }
+
+    inline bool InstructionRef::isVCMP(Instruction const& inst)
+    {
+        return isVCMP(inst.getOpCode());
     }
 
     inline bool InstructionRef::isScalar(Instruction const& inst)
@@ -154,6 +202,11 @@ namespace rocRoller
     inline bool InstructionRef::isVALU(Instruction const& inst)
     {
         return isVALU(inst.getOpCode());
+    }
+
+    inline bool InstructionRef::isVALUTrans(Instruction const& inst)
+    {
+        return isVALUTrans(inst.getOpCode());
     }
 
     inline bool InstructionRef::isDGEMM(Instruction const& inst)
@@ -211,6 +264,39 @@ namespace rocRoller
         return isACCVGPRRead(inst.getOpCode());
     }
 
+    inline bool InstructionRef::isIntInst(Instruction const& inst)
+    {
+        return isIntInst(inst.getOpCode());
+    }
+    inline bool InstructionRef::isUIntInst(Instruction const& inst)
+    {
+        return InstructionRef::isUIntInst(inst.getOpCode());
+    }
+    inline bool InstructionRef::isVAddInst(Instruction const& inst)
+    {
+        return isVAddInst(inst.getOpCode());
+    }
+    inline bool InstructionRef::isVSubInst(Instruction const& inst)
+    {
+        return isVSubInst(inst.getOpCode());
+    }
+    inline bool InstructionRef::isVReadlane(Instruction const& inst)
+    {
+        return isVReadlane(inst.getOpCode());
+    }
+    inline bool InstructionRef::isVWritelane(Instruction const& inst)
+    {
+        return isVWritelane(inst.getOpCode());
+    }
+    inline bool InstructionRef::isVDivScale(Instruction const& inst)
+    {
+        return isVDivScale(inst.getOpCode());
+    }
+    inline bool InstructionRef::isVDivFmas(Instruction const& inst)
+    {
+        return isVDivFmas(inst.getOpCode());
+    }
+
     inline bool InstructionRef::isDLOP(std::string const& opCode)
     {
         return opCode.rfind("v_dot", 0) == 0;
@@ -221,9 +307,14 @@ namespace rocRoller
         return opCode.rfind("v_mfma", 0) == 0;
     }
 
-    inline bool InstructionRef::isCMPX(std::string const& opCode)
+    inline bool InstructionRef::isVCMPX(std::string const& opCode)
     {
-        return opCode.rfind("v_cmpx", 0) == 0;
+        return opCode.rfind("v_cmpx_", 0) == 0;
+    }
+
+    inline bool InstructionRef::isVCMP(std::string const& opCode)
+    {
+        return opCode.rfind("v_cmp_", 0) == 0;
     }
 
     inline bool InstructionRef::isScalar(std::string const& opCode)
@@ -257,6 +348,22 @@ namespace rocRoller
     {
         return isVector(opCode) && !isVMEM(opCode) && !isFlat(opCode) && !isLDS(opCode)
                && !isMFMA(opCode) && !isDLOP(opCode);
+    }
+
+    inline bool InstructionRef::isVALUTrans(std::string const& opCode)
+    {
+        return isVALU(opCode)
+               && (opCode.rfind("v_exp_f32", 0) == 0 || opCode.rfind("v_log_f32", 0) == 0
+                   || opCode.rfind("v_rcp_f32", 0) == 0 || opCode.rfind("v_rcp_iflag_f32", 0) == 0
+                   || opCode.rfind("v_rsq_f32", 0) == 0 || opCode.rfind("v_rcp_f64", 0) == 0
+                   || opCode.rfind("v_rsq_f64", 0) == 0 || opCode.rfind("v_sqrt_f32", 0) == 0
+                   || opCode.rfind("v_sqrt_f64", 0) == 0 || opCode.rfind("v_sin_f32", 0) == 0
+                   || opCode.rfind("v_cos_f32", 0) == 0 || opCode.rfind("v_rcp_f16", 0) == 0
+                   || opCode.rfind("v_sqrt_f16", 0) == 0 || opCode.rfind("v_rsq_f16", 0) == 0
+                   || opCode.rfind("v_log_f16", 0) == 0 || opCode.rfind("v_exp_f16", 0) == 0
+                   || opCode.rfind("v_sin_f16", 0) == 0 || opCode.rfind("v_cos_f16", 0) == 0
+                   || opCode.rfind("v_exp_legacy_f32", 0) == 0
+                   || opCode.rfind("v_log_legacy_f32", 0) == 0);
     }
 
     inline bool InstructionRef::isDGEMM(std::string const& opCode)
@@ -323,4 +430,49 @@ namespace rocRoller
         return opCode.rfind("v_accvgpr_read", 0) == 0;
     }
 
+    inline bool InstructionRef::isIntInst(std::string const& opCode)
+    {
+        // '_i' should be in the last 5 characters of the string, unless encoding specifier is present
+        int offset = opCode.rfind("_e", opCode.size() - 6) == 0 ? 10 : 6;
+
+        return opCode.rfind("_i", opCode.size() - offset) == 0;
+    }
+
+    inline bool InstructionRef::isUIntInst(std::string const& opCode)
+    {
+        // '_u' should be in the last 5 characters of the string, unless encoding specifier is present
+        int offset = opCode.rfind("_e", opCode.size() - 6) == 0 ? 10 : 6;
+
+        return opCode.rfind("_u", opCode.size() - offset) == 0;
+    }
+
+    inline bool InstructionRef::isVAddInst(std::string const& opCode)
+    {
+        return opCode.rfind("v_add", 0) == 0;
+    }
+
+    inline bool InstructionRef::isVSubInst(std::string const& opCode)
+    {
+        return opCode.rfind("v_sub", 0) == 0;
+    }
+
+    inline bool InstructionRef::isVReadlane(std::string const& opCode)
+    {
+        return opCode.rfind("v_readlane", 0) == 0 || opCode.rfind("v_readfirstlane", 0) == 0;
+    }
+
+    inline bool InstructionRef::isVWritelane(std::string const& opCode)
+    {
+        return opCode.rfind("v_writelane", 0) == 0;
+    }
+
+    inline bool InstructionRef::isVDivScale(std::string const& opCode)
+    {
+        return opCode.rfind("v_div_scale", 0) == 0;
+    }
+
+    inline bool InstructionRef::isVDivFmas(std::string const& opCode)
+    {
+        return opCode.rfind("v_div_fmas_", 0) == 0;
+    }
 }

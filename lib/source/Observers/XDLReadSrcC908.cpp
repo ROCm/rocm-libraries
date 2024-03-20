@@ -1,4 +1,4 @@
-#include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC908.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLReadSrcC908.hpp>
 
 #include <rocRoller/CodeGen/InstructionRef.hpp>
 

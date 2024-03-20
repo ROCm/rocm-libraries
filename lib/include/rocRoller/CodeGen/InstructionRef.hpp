@@ -18,15 +18,19 @@ namespace rocRoller
 
         bool isDLOP() const;
         bool isMFMA() const;
-        bool isCMPX() const;
+        bool isVCMPX() const;
+        bool isVCMP() const;
 
         bool isScalar() const;
         bool isSMEM() const;
         bool isSControl() const;
         bool isSALU() const;
+        bool isIntInst() const;
+        bool isUIntInst() const;
 
         bool isVector() const;
         bool isVALU() const;
+        bool isVALUTrans() const;
         bool isDGEMM() const;
         bool isSGEMM() const;
         bool isVMEM() const;
@@ -39,18 +43,28 @@ namespace rocRoller
 
         bool isACCVGPRRead() const;
         bool isACCVGPRWrite() const;
+        bool isVAddInst() const;
+        bool isVSubInst() const;
+        bool isVReadlane() const;
+        bool isVWritelane() const;
+        bool isVDivScale() const;
+        bool isVDivFmas() const;
 
         static bool isDLOP(Instruction const& inst);
         static bool isMFMA(Instruction const& inst);
-        static bool isCMPX(Instruction const& inst);
+        static bool isVCMPX(Instruction const& inst);
+        static bool isVCMP(Instruction const& inst);
 
         static bool isScalar(Instruction const& inst);
         static bool isSMEM(Instruction const& inst);
         static bool isSControl(Instruction const& inst);
         static bool isSALU(Instruction const& inst);
+        static bool isIntInst(Instruction const& inst);
+        static bool isUIntInst(Instruction const& inst);
 
         static bool isVector(Instruction const& inst);
         static bool isVALU(Instruction const& inst);
+        static bool isVALUTrans(Instruction const& inst);
         static bool isDGEMM(Instruction const& inst);
         static bool isSGEMM(Instruction const& inst);
         static bool isVMEM(Instruction const& inst);
@@ -63,18 +77,28 @@ namespace rocRoller
 
         static bool isACCVGPRRead(Instruction const& inst);
         static bool isACCVGPRWrite(Instruction const& inst);
+        static bool isVAddInst(Instruction const& inst);
+        static bool isVSubInst(Instruction const& inst);
+        static bool isVReadlane(Instruction const& inst);
+        static bool isVWritelane(Instruction const& inst);
+        static bool isVDivScale(Instruction const& inst);
+        static bool isVDivFmas(Instruction const& inst);
 
         static bool isDLOP(std::string const& inst);
         static bool isMFMA(std::string const& inst);
-        static bool isCMPX(std::string const& inst);
+        static bool isVCMPX(std::string const& inst);
+        static bool isVCMP(std::string const& inst);
 
         static bool isScalar(std::string const& inst);
         static bool isSMEM(std::string const& inst);
         static bool isSControl(std::string const& inst);
         static bool isSALU(std::string const& inst);
+        static bool isIntInst(std::string const& inst);
+        static bool isUIntInst(std::string const& inst);
 
         static bool isVector(std::string const& inst);
         static bool isVALU(std::string const& inst);
+        static bool isVALUTrans(std::string const& inst);
         static bool isDGEMM(std::string const& inst);
         static bool isSGEMM(std::string const& inst);
         static bool isVMEM(std::string const& inst);
@@ -87,6 +111,12 @@ namespace rocRoller
 
         static bool isACCVGPRRead(std::string const& inst);
         static bool isACCVGPRWrite(std::string const& inst);
+        static bool isVAddInst(std::string const& inst);
+        static bool isVSubInst(std::string const& inst);
+        static bool isVReadlane(std::string const& inst);
+        static bool isVWritelane(std::string const& inst);
+        static bool isVDivScale(std::string const& inst);
+        static bool isVDivFmas(std::string const& inst);
 
     private:
         std::string m_opCode;

@@ -1,4 +1,4 @@
-#include <rocRoller/Scheduling/Observers/WaitState/CMPXWriteExec.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/CMPXWriteExec.hpp>
 
 #include <rocRoller/CodeGen/InstructionRef.hpp>
 
@@ -26,7 +26,7 @@ namespace rocRoller
 
         bool CMPXWriteExec::trigger(std::shared_ptr<InstructionRef> inst) const
         {
-            return inst->isCMPX();
+            return inst->isVCMPX();
         };
 
         bool CMPXWriteExec::writeTrigger() const

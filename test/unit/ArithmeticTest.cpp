@@ -353,7 +353,7 @@ namespace ArithmeticTest
                             EXPECT_EQ(result[2], a * b);
                             if(withinDivisionDomain)
                             {
-                                EXPECT_EQ(result[3], a / b);
+                                EXPECT_EQ(result[3], a / b) << "a: " << a << " b: " << b;
                                 EXPECT_EQ(result[4], a % b);
                             }
                             if(b < 32 && b >= 0)

@@ -16,23 +16,10 @@ namespace rocRoller
 {
     struct BufferInstructionOptions
     {
-    public:
-        BufferInstructionOptions();
-        void setOffen(bool on);
-        void setGlc(bool glc);
-        void setSlc(bool slc);
-        void setLds(bool lds);
-        bool getOffen();
-        bool getGlc();
-        bool getSlc();
-        bool getLds();
-
-    private:
-        bool m_offen;
-        bool m_glc;
-        bool m_slc;
-        bool m_lds;
+        bool offen = false;
+        bool glc   = false;
+        bool slc   = false;
+        bool sc1   = false;
+        bool lds   = false;
     };
 }
-
-#include "BufferInstructionOptions_impl.hpp"

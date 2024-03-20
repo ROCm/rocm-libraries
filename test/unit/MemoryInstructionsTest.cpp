@@ -720,25 +720,6 @@ namespace MemoryInstructionsTest
         }
     }
 
-    TEST_P(MemoryInstructionsTest, BufOptionsTest)
-    {
-        auto bufOpt = rocRoller::BufferInstructionOptions();
-        EXPECT_EQ(bufOpt.getOffen(), false);
-        EXPECT_EQ(bufOpt.getGlc(), false);
-        EXPECT_EQ(bufOpt.getSlc(), false);
-        EXPECT_EQ(bufOpt.getLds(), false);
-
-        bufOpt.setOffen(true);
-        bufOpt.setGlc(true);
-        bufOpt.setSlc(true);
-        bufOpt.setLds(true);
-
-        EXPECT_EQ(bufOpt.getOffen(), true);
-        EXPECT_EQ(bufOpt.getGlc(), true);
-        EXPECT_EQ(bufOpt.getSlc(), true);
-        EXPECT_EQ(bufOpt.getLds(), true);
-    }
-
     struct MemoryInstructionsLDSTest : public CurrentGPUContextFixture
     {
         void genLDSTest()

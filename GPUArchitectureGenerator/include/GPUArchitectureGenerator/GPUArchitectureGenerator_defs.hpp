@@ -32,6 +32,7 @@ namespace GPUArchitectureGenerator
            rocRoller::GPUArchitectureTarget("gfx90a:sramecc+"),
            rocRoller::GPUArchitectureTarget("gfx940"),
            rocRoller::GPUArchitectureTarget("gfx941"),
+           rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
            rocRoller::GPUArchitectureTarget("gfx942"),
            rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
            rocRoller::GPUArchitectureTarget("gfx1010"),
@@ -59,7 +60,7 @@ namespace GPUArchitectureGenerator
             {rocRoller::GPUCapability::HasCodeObjectV5, {"", "-mcode-object-version=5"}},
 
             {rocRoller::GPUCapability::HasMFMA,
-             {"v_mfma_f32_32x32x2bf16 a[0:31], v32, v33, a[0:31]", ""}},
+             {"v_mfma_f32_32x32x1f32 a[0:31], v32, v33, a[0:31]", ""}},
             {rocRoller::GPUCapability::HasMFMA_f64,
              {"v_mfma_f64_16x16x4f64 v[0:7], v[32:33], v[36:37], v[0:7]", ""}},
             {rocRoller::GPUCapability::HasMFMA_bf16_1k,
@@ -115,24 +116,38 @@ namespace GPUArchitectureGenerator
                               rocRoller::GPUArchitectureTarget("gfx90a"),
                               rocRoller::GPUArchitectureTarget("gfx940"),
                               rocRoller::GPUArchitectureTarget("gfx941"),
-                              rocRoller::GPUArchitectureTarget("gfx942")}},
+                              rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
+                              rocRoller::GPUArchitectureTarget("gfx942"),
+                              rocRoller::GPUArchitectureTarget("gfx942:sramecc+")}},
                             {rocRoller::GPUCapability::Waitcnt0Disabled,
-                             {rocRoller::GPUArchitectureTarget("gfx908"),
-                              rocRoller::GPUArchitectureTarget("gfx90a"),
-                              rocRoller::GPUArchitectureTarget("gfx940"),
-                              rocRoller::GPUArchitectureTarget("gfx941"),
-                              rocRoller::GPUArchitectureTarget("gfx942")}},
+                             {
+                                 rocRoller::GPUArchitectureTarget("gfx908"),
+                                 rocRoller::GPUArchitectureTarget("gfx90a"),
+                                 rocRoller::GPUArchitectureTarget("gfx940"),
+                                 rocRoller::GPUArchitectureTarget("gfx941"),
+                                 rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx942"),
+                                 rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+                             }},
                             {rocRoller::GPUCapability::HasAccCD,
-                             {rocRoller::GPUArchitectureTarget("gfx90a"),
-                              rocRoller::GPUArchitectureTarget("gfx940"),
-                              rocRoller::GPUArchitectureTarget("gfx941"),
-                              rocRoller::GPUArchitectureTarget("gfx942")}},
+                             {
+                                 rocRoller::GPUArchitectureTarget("gfx90a"),
+                                 rocRoller::GPUArchitectureTarget("gfx940"),
+                                 rocRoller::GPUArchitectureTarget("gfx941"),
+                                 rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx942"),
+                                 rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+                             }},
                             {rocRoller::GPUCapability::ArchAccUnifiedRegs,
-                             {rocRoller::GPUArchitectureTarget("gfx90a"),
-                              rocRoller::GPUArchitectureTarget("gfx90a:sramecc+"),
-                              rocRoller::GPUArchitectureTarget("gfx940"),
-                              rocRoller::GPUArchitectureTarget("gfx941"),
-                              rocRoller::GPUArchitectureTarget("gfx942")}},
+                             {
+                                 rocRoller::GPUArchitectureTarget("gfx90a"),
+                                 rocRoller::GPUArchitectureTarget("gfx90a:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx940"),
+                                 rocRoller::GPUArchitectureTarget("gfx941"),
+                                 rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx942"),
+                                 rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+                             }},
                             {rocRoller::GPUCapability::HasWave64, SupportedISAs}};
 
     inline bool Is10XGPU(rocRoller::GPUArchitectureTarget const& input)
@@ -213,7 +228,8 @@ namespace GPUArchitectureGenerator
                  return x.toString().find("xnack+") != std::string::npos;
              }},
 
-            {rocRoller::GPUCapability::PackedWorkitemIDs, Is90aGPU},
+            {rocRoller::GPUCapability::PackedWorkitemIDs,
+             [](rocRoller::GPUArchitectureTarget x) -> bool { return Is90aGPU(x) || Is94XGPU(x); }},
 
     };
     // This is the way to add a set of instructions that have the same wait value and wait queues.
@@ -686,6 +702,7 @@ namespace GPUArchitectureGenerator
                  "v_subbrev_co_u32",
                  "v_subrev_co_u32",
                  "v_subrev_co_u32_e32",
+                 "v_subrev_u32",
                  "v_subrev_u32_e32",
                  "v_trunc_f32_e32",
                  "v_xor_b32",

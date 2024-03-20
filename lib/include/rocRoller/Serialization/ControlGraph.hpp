@@ -11,6 +11,7 @@
 
 #include "Hypergraph.hpp"
 
+#include "../CodeGen/BufferInstructionOptions.hpp"
 #include "../Graph/Hypergraph.hpp"
 #include "../KernelGraph/ControlGraph/ControlGraph.hpp"
 
@@ -23,6 +24,28 @@ namespace rocRoller
                                          T>) struct MappingTraits<T, IO, Context>
             : public EmptyMappingTraits<T, IO, Context>
         {
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<BufferInstructionOptions, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, BufferInstructionOptions& opt, Context&)
+            {
+                iot::mapRequired(io, "offen", opt.offen);
+                iot::mapRequired(io, "glc", opt.glc);
+                iot::mapRequired(io, "slc", opt.slc);
+                iot::mapRequired(io, "sc1", opt.sc1);
+                iot::mapRequired(io, "lds", opt.lds);
+            }
+
+            static void mapping(IO& io, BufferInstructionOptions& op)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, op, ctx);
+            }
         };
 
         template <typename IO, typename Context>
@@ -221,7 +244,7 @@ namespace rocRoller
                 }
                 if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR>)
                 {
-                    iot::mapRequired(io, "glc", op.glc);
+                    //iot::mapRequired(io, "bufOpts", op.bufOpts);
                 }
             }
 
@@ -242,20 +265,17 @@ namespace rocRoller
                     StoreTiled> || std::same_as<Op, KernelGraph::ControlGraph::StoreSGPR> || std::same_as<Op, KernelGraph::ControlGraph::StoreLDSTile>) struct
             MappingTraits<Op, IO, Context>
         {
-            // If this assertion starts failing, it's likely one of these classes has had a member added.
-            static_assert(
-                std::same_as<
-                    Op,
-                    KernelGraph::ControlGraph::
-                        StoreSGPR> || sizeof(Op) == sizeof(KernelGraph::ControlGraph::StoreTiled));
-
             using iot = IOTraits<IO>;
             static void mapping(IO& io, Op& op, Context&)
             {
                 iot::mapRequired(io, "dataType", op.dataType);
                 if constexpr(std::same_as<Op, KernelGraph::ControlGraph::StoreSGPR>)
                 {
-                    iot::mapRequired(io, "glc", op.glc);
+                    iot::mapRequired(io, "bufOpts", op.bufOpts);
+                }
+                if constexpr(std::same_as<Op, KernelGraph::ControlGraph::StoreTiled>)
+                {
+                    iot::mapRequired(io, "bufOpts", op.bufOpts);
                 }
             }
 

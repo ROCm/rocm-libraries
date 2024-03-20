@@ -408,7 +408,8 @@ namespace rocRoller
                         info.elementSize * info.n,
                         "",
                         false,
-                        info.bufDesc);
+                        info.bufDesc,
+                        info.bufOpts);
                     offsetValue += rowStride;
                 }
             }
@@ -457,7 +458,8 @@ namespace rocRoller
                     info.elementSize * info.n,
                     "",
                     false,
-                    info.bufDesc);
+                    info.bufDesc,
+                    info.bufOpts);
 
                 if(i < info.m - 1)
                 {
@@ -496,7 +498,8 @@ namespace rocRoller
                         info.elementSize,
                         "",
                         j % info.packedAmount == 1,
-                        info.bufDesc);
+                        info.bufDesc,
+                        info.bufOpts);
 
                     if(j < info.n - 1)
                     {
@@ -532,20 +535,22 @@ namespace rocRoller
         Generator<Instruction> LoadStoreTileGenerator::moveTile(MemoryInstructions::MemoryKind kind,
                                                                 uint64_t                       m,
                                                                 uint64_t                       n,
-                                                                VariableType       dataType,
-                                                                int                tag,
-                                                                Register::ValuePtr vgpr,
-                                                                Register::ValuePtr offset,
-                                                                Transformer&       coords)
+                                                                VariableType             dataType,
+                                                                int                      tag,
+                                                                Register::ValuePtr       vgpr,
+                                                                Register::ValuePtr       offset,
+                                                                Transformer&             coords,
+                                                                BufferInstructionOptions bufOpts)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::LoadStoreTileGenerator::moveTile<{}>({})", toString(Dir), tag);
 
             LoadStoreTileInfo info;
-            info.kind   = kind;
-            info.m      = m;
-            info.n      = n;
-            info.offset = offset;
+            info.kind    = kind;
+            info.m       = m;
+            info.n       = n;
+            info.offset  = offset;
+            info.bufOpts = bufOpts;
 
             Register::ValuePtr finalVGPR;
 
@@ -988,7 +993,8 @@ namespace rocRoller
                 tag,
                 vgpr,
                 nullptr,
-                coords);
+                coords,
+                store.bufOpts);
         }
 
         Generator<Instruction> LoadStoreTileGenerator::storeMacroTileWAVELDS(
@@ -1084,7 +1090,8 @@ namespace rocRoller
                 tag,
                 agpr,
                 nullptr,
-                coords);
+                coords,
+                store.bufOpts);
         }
 
         Generator<Instruction> LoadStoreTileGenerator::genStoreTile(int               tag,

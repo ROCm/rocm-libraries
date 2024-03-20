@@ -907,6 +907,7 @@ namespace rocRollerTest
         TimerPool::clear();
 
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        REQUIRE_ARCH_CAP(GPUCapability::v_mac_f32);
         ASSERT_EQ(true, isLocalDevice());
 
         auto seed = 12679u;
@@ -974,6 +975,7 @@ namespace rocRollerTest
         TimerPool::clear();
 
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        REQUIRE_ARCH_CAP(GPUCapability::v_mac_f32);
         ASSERT_EQ(true, isLocalDevice());
 
         auto seed = 12679u;

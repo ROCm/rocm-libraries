@@ -399,7 +399,16 @@ namespace rocRoller
             int forX = cloneForLoop(graph, loopInfo.xLoop);
             int forY = cloneForLoop(graph, loopInfo.yLoop);
 
-            auto storeTileTag = graph.control.addElement(StoreTiled(scratchDataType));
+            auto store = StoreTiled(scratchDataType);
+
+            // TODO: Improve setting of arch-specific buffer options
+            if(!(context->targetArchitecture().target().getVersionString() == "gfx908"
+                 || context->targetArchitecture().target().getVersionString() == "gfx90a"))
+            {
+                store.bufOpts = {.sc1 = true};
+            }
+
+            auto storeTileTag = graph.control.addElement(store);
             for(auto const& c : storeConnections)
                 graph.mapper.connect(storeTileTag, c.coordinate, c.connectionSpec);
 
@@ -434,7 +443,18 @@ namespace rocRoller
             auto assignFlagTag = graph.control.addElement(Assign{Register::Type::Scalar, one});
             graph.mapper.connect(assignFlagTag, flagRegister, NaryArgument::DEST);
 
-            auto storeFlagTag = graph.control.addElement(StoreSGPR(DataType::UInt32, true));
+            // TODO: Improve setting of arch-specific buffer options
+            BufferInstructionOptions bufOpts;
+            if(context->targetArchitecture().target().getVersionString() == "gfx908"
+               || context->targetArchitecture().target().getVersionString() == "gfx90a")
+            {
+                bufOpts = {.glc = true};
+            }
+            else
+            {
+                bufOpts = {.sc1 = true};
+            }
+            auto storeFlagTag = graph.control.addElement(StoreSGPR(DataType::UInt32, bufOpts));
             graph.mapper.connect<User>(storeFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(storeFlagTag, flagRegister);
 
@@ -501,8 +521,19 @@ namespace rocRoller
             auto nextWorkgroupTag = graph.coordinates.addElement(Linear(nullptr, one));
             graph.coordinates.addElement(Split(), {nextWorkgroupTag}, {workgroup, plusOneTag});
 
+            // TODO: Improve setting of arch-specific buffer options
+            BufferInstructionOptions bufOpts;
+            if(context->targetArchitecture().target().getVersionString() == "gfx908"
+               || context->targetArchitecture().target().getVersionString() == "gfx90a")
+            {
+                bufOpts = {.glc = true};
+            }
+            else
+            {
+                bufOpts = {.sc1 = true};
+            }
             auto flagRegister = graph.coordinates.addElement(VGPR());
-            auto loadFlagTag  = graph.control.addElement(LoadSGPR(DataType::UInt32, true));
+            auto loadFlagTag  = graph.control.addElement(LoadSGPR(DataType::UInt32, bufOpts));
 
             auto numScratch     = Expression::literal(context->kernelOptions().numScratchTiles);
             auto boundsCheckTag = graph.control.addElement(

@@ -11,7 +11,6 @@ using namespace rocRoller;
 
 struct LatencyAndOpCode
 {
-    int         latency;
     std::string opCode;
 };
 
@@ -19,11 +18,6 @@ class MFMAUnitObserverTest : public GPUContextFixtureParam<LatencyAndOpCode>
 {
 public:
     MFMAUnitObserverTest() {}
-
-    int latency()
-    {
-        return std::get<1>(GetParam()).latency;
-    }
 
     std::string opCode()
     {
@@ -53,17 +47,20 @@ TEST_P(MFMAUnitObserverTest, Direct)
 
     observer.observe(mfmaInst);
 
-    EXPECT_EQ(latency(), observer.peek(mfmaInst).stallCycles);
+    auto info    = m_context->targetArchitecture().GetInstructionInfo(mfmaInst.getOpCode());
+    auto latency = info.getLatency();
+
+    EXPECT_EQ(latency, observer.peek(mfmaInst).stallCycles);
     EXPECT_EQ(0, observer.peek(valuInst).stallCycles);
 
     observer.observe(valuInst);
 
-    EXPECT_EQ(latency() - 1, observer.peek(mfmaInst).stallCycles);
+    EXPECT_EQ(latency - 1, observer.peek(mfmaInst).stallCycles);
     EXPECT_EQ(0, observer.peek(valuInst).stallCycles);
 
     observer.observe(mfmaInst);
 
-    EXPECT_EQ(latency(), observer.peek(mfmaInst).stallCycles);
+    EXPECT_EQ(latency, observer.peek(mfmaInst).stallCycles);
     EXPECT_EQ(0, observer.peek(valuInst).stallCycles);
 }
 
@@ -85,19 +82,22 @@ TEST_P(MFMAUnitObserverTest, InContext)
     EXPECT_EQ(0, m_context->peek(mfmaInst).stallCycles);
     EXPECT_EQ(0, m_context->peek(valuInst).stallCycles);
 
+    auto info    = m_context->targetArchitecture().GetInstructionInfo(mfmaInst.getOpCode());
+    auto latency = info.getLatency();
+
     m_context->schedule(mfmaInst);
 
-    EXPECT_EQ(latency(), m_context->peek(mfmaInst).stallCycles);
+    EXPECT_EQ(latency, m_context->peek(mfmaInst).stallCycles);
     EXPECT_EQ(0, m_context->peek(valuInst).stallCycles);
 
     m_context->schedule(valuInst);
 
-    EXPECT_EQ(latency() - 1, m_context->peek(mfmaInst).stallCycles);
+    EXPECT_EQ(latency - 1, m_context->peek(mfmaInst).stallCycles);
     EXPECT_EQ(0, m_context->peek(valuInst).stallCycles);
 
     m_context->schedule(mfmaInst);
 
-    EXPECT_EQ(latency(), m_context->peek(mfmaInst).stallCycles);
+    EXPECT_EQ(latency, m_context->peek(mfmaInst).stallCycles);
     EXPECT_EQ(0, m_context->peek(valuInst).stallCycles);
 }
 
@@ -105,5 +105,5 @@ INSTANTIATE_TEST_SUITE_P(
     MFMAUnitObserverTests,
     MFMAUnitObserverTest,
     ::testing::Combine(mfmaSupportedISAValues(),
-                       ::testing::Values(LatencyAndOpCode{8, "v_mfma_f32_16x16x16f16"},
-                                         LatencyAndOpCode{16, "v_mfma_f32_32x32x8f16"})));
+                       ::testing::Values(LatencyAndOpCode{"v_mfma_f32_16x16x16f16"},
+                                         LatencyAndOpCode{"v_mfma_f32_32x32x8f16"})));

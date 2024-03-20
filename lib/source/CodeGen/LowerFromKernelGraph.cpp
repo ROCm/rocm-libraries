@@ -625,8 +625,6 @@ namespace rocRoller
                 }
 
                 auto numBytes = DataTypeInfo::Get(dst->variableType()).elementSize;
-                auto options  = BufferInstructionOptions();
-                options.setGlc(load.glc);
                 co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Scalar,
                                                 dst,
                                                 vPtr,
@@ -635,7 +633,7 @@ namespace rocRoller
                                                 "",
                                                 false,
                                                 nullptr,
-                                                options);
+                                                load.bufOpts);
             }
 
             Generator<Instruction> operator()(int tag, LoadVGPR const& load, Transformer coords)
@@ -858,8 +856,6 @@ namespace rocRoller
                 }
 
                 auto numBytes = DataTypeInfo::Get(src->variableType()).elementSize;
-                auto options  = BufferInstructionOptions();
-                options.setGlc(store.glc);
                 co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Scalar,
                                                  vPtr,
                                                  src,
@@ -868,7 +864,7 @@ namespace rocRoller
                                                  "",
                                                  false,
                                                  nullptr,
-                                                 options);
+                                                 store.bufOpts);
             }
 
             Generator<Instruction> operator()(int, WaitZero const&, Transformer)

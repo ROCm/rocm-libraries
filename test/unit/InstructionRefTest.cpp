@@ -46,7 +46,8 @@ TEST_F(InstructionRefTest, LDS)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -74,7 +75,8 @@ TEST_F(InstructionRefTest, LDS)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -105,7 +107,8 @@ TEST_F(InstructionRefTest, Scalar)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, true);
         EXPECT_CATEGORY_EQ(inst, isSMEM, true);
@@ -132,7 +135,8 @@ TEST_F(InstructionRefTest, Scalar)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, true);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -159,7 +163,8 @@ TEST_F(InstructionRefTest, Scalar)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, true);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -190,7 +195,8 @@ TEST_F(InstructionRefTest, Vector)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -217,7 +223,8 @@ TEST_F(InstructionRefTest, Vector)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -245,7 +252,8 @@ TEST_F(InstructionRefTest, Vector)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -273,7 +281,8 @@ TEST_F(InstructionRefTest, Vector)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, true);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -301,7 +310,8 @@ TEST_F(InstructionRefTest, Vector)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -329,7 +339,8 @@ TEST_F(InstructionRefTest, Vector)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, true);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, true);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -360,7 +371,8 @@ TEST_F(InstructionRefTest, AccMFMA)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -388,7 +400,8 @@ TEST_F(InstructionRefTest, AccMFMA)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, false);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -417,7 +430,8 @@ TEST_F(InstructionRefTest, AccMFMA)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, true);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
@@ -445,7 +459,8 @@ TEST_F(InstructionRefTest, AccMFMA)
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, true);
-        EXPECT_CATEGORY_EQ(inst, isCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);

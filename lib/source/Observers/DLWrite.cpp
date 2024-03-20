@@ -1,4 +1,4 @@
-#include <rocRoller/Scheduling/Observers/WaitState/DLWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/DLWrite.hpp>
 
 #include <rocRoller/CodeGen/InstructionRef.hpp>
 
