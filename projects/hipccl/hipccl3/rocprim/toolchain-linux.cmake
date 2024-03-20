@@ -1,42 +1,27 @@
-#set(CMAKE_MAKE_PROGRAM "nmake.exe")
-#set(CMAKE_GENERATOR "Ninja")
-# Ninja doesn't support platform
-#set(CMAKE_GENERATOR_PLATFORM x64)
 
 if (DEFINED ENV{ROCM_PATH})
   set(rocm_bin "$ENV{ROCM_PATH}/bin")
 else()
+  set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to the ROCm installation.")
   set(rocm_bin "/opt/rocm/bin")
 endif()
 
+if (NOT DEFINED ENV{CXX})
+  set(CMAKE_CXX_COMPILER "${rocm_bin}/amdclang++" CACHE PATH "Path to the C++ compiler")
+  set(CMAKE_CXX_FLAGS_INIT "-mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false")
+  if (DEFINED ENV{HIPCC_COMPILE_FLAGS_APPEND})
+    set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} $ENV{HIPCC_COMPILE_FLAGS_APPEND}")
+  endif()
+else()
+  set(CMAKE_CXX_COMPILER "$ENV{CXX}" CACHE PATH "Path to the C++ compiler")
+endif()
 
-# set(CMAKE_CXX_COMPILER "hipcc")
-# set(CMAKE_C_COMPILER "hipcc")
-set(CMAKE_CXX_COMPILER "${rocm_bin}/hipcc")
-set(CMAKE_C_COMPILER "${rocm_bin}/hipcc")
-
-#set(CMAKE_CXX_LINKER "hipcc" )
-
-# TODO remove, just to speed up slow cmake
-# set(CMAKE_C_COMPILER_WORKS 1)
-# set(CMAKE_CXX_COMPILER_WORKS 1)
-#
-
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -IC:/hip/include -IC:/hip/lib/clang/12.0.0 -DWIN32 -D_CRT_SECURE_NO_WARNINGS")
-
-# flags for clang direct use
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -fms-extensions -fms-compatibility")
-# -Wno-ignored-attributes to avoid warning: __declspec attribute 'dllexport' is not supported [-Wignored-attributes] which is used by msvc compiler
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -fms-extensions -fms-compatibility -Wno-ignored-attributes")
-
-# flags for clang direct use with hip
-# -x hip causes linker error
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -x hip -IC:/hip/include/hip -D__HIP_PLATFORM_AMD__ -D__HIP_ROCclr__")
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -IC:/hip/include/hip -D__HIP_PLATFORM_AMD__ -D__HIP_ROCclr__")
-
-
-# set(GTEST_DIR "C:/rocm/Utils/GTestMSVC")
-# set(GTEST_INCLUDE_DIR "${GTEST_DIR}/include")
-# set(GTEST_LIBRARY "${GTEST_DIR}/lib/Release/gtest.lib")
-# set(GTEST_MAIN_LIBRARY "${GTEST_DIR}/lib/Release/gtest_main.lib")
-# set(GTEST_LIBRARIES "${GTEST_DIR}/lib/Release/gtest.lib;${GTEST_DIR}/lib/Release/gtest_main.lib")
+if (NOT DEFINED ENV{CC})
+  set(CMAKE_C_COMPILER "${rocm_bin}/amdclang" CACHE PATH "Path to the C compiler")
+  set(CMAKE_C_FLAGS_INIT "-mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false")
+  if (DEFINED ENV{HIPCC_COMPILE_FLAGS_APPEND})
+    set(CMAKE_C_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} $ENV{HIPCC_COMPILE_FLAGS_APPEND}")
+  endif()
+else()
+  set(CMAKE_C_COMPILER "$ENV{CC}" CACHE PATH "Path to the C compiler")
+endif()
