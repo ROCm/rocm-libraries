@@ -19,7 +19,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean s
                 cd ${project.paths.project_build_prefix}
                 mkdir -p build/${buildTypeDir} && cd build/${buildTypeDir}
                 ${auxiliary.gfxTargetParser()}
-                ${cmake} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc ${buildTypeArg} ${amdgpuTargets} -DBUILD_TEST=ON -DBUILD_BENCHMARK=ON ../..
+                ${cmake} --toolchain=toolchain-linux.cmake ${buildTypeArg} ${amdgpuTargets} -DBUILD_TEST=ON -DBUILD_BENCHMARK=ON ../..
                 make -j\$(nproc)
                 """
 
@@ -33,13 +33,13 @@ def runTestCommand (platform, project)
     def testCommand = "ctest --output-on-failure"
     def hmmTestCommand = ''
     def excludeRegex = 'reduce_by_key.hip'
-    
+
     if (platform.jenkinsLabel.contains('gfx11'))
     {
         excludeRegex = /(reduce_by_key.hip|partition.hip|sort.hip|sort_by_key.hip|stable_sort_by_key.hip|stable_sort.hip|async_copy.hip|async_reduce.hip|async_scan.hip|async_sort.hip|async_transform.hip)/
     }
     testCommandExclude = "--exclude-regex \"${excludeRegex}\""
-    
+
     if (platform.jenkinsLabel.contains('gfx90a'))
     {
         hmmTestCommand = ""
@@ -72,4 +72,3 @@ def runPackageCommand(platform, project)
 }
 
 return this
-
