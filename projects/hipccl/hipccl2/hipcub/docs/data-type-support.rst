@@ -8,7 +8,7 @@
 Data type support
 ******************************************
 
-* Supported input and output types.
+The input and output data types supported by hipCUB are listed here:
 
   .. list-table:: Supported Input/Output Types
     :header-rows: 1

@@ -3,8 +3,12 @@
 root: index
 subtrees:
   - entries:
-    - file: doxygen/html/index
+    - file: what-is-hipcub
+  - caption: Reference
+    entries:
     - file: data-type-support
+    - file: doxygen/html/index
+      title: API library
   - caption: About
     entries:
     - file: license
