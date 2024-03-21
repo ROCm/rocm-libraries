@@ -8,6 +8,7 @@ __device__ WorkNode_Header *cpuWorkQueue[CPU_WORK_QUEUE_SIZE] = {};
 std::atomic<uint32_t> cpuWorkQueueIndex_push = 0;
 __device__ uint32_t cpuWorkQueueIndex_pop = 0;
 
+__device__ uint32_t activeVcoreCount = 0;
 __device__ WorkNode_Header *workListHead = nullptr;
 __device__ WorkNode_Header **workListTail = &workListHead;
 __device__ WorkNode_Header *volatile currentWorkNode[NUM_VCORES] = {};

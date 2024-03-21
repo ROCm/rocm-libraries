@@ -125,7 +125,6 @@ struct WorkNode_Header {
     WorkNode_Header **link_to_self = nullptr; // (link_to_self == nullptr || *link_to_self = this)
     // Enables thread::detach() to copy a worknode into memory the gpu can free on its own.
     // Can be either nullptr, &(prev->next), &workListHead, &currentWorkNode[blockIdx.x], or &cpuWorkQueue[i]
-    // Use currentWorkNode[blockIdx.x] = nullptr to indicate we're idle
     // Use link_to_self == nullptr to indicate we're locked?
     WorkNode_Header *next = nullptr; // Must always be device-accessible. Either zero-copy pinned host memory, or device memory
     // TODO: does finishedOrDetached need to be an array?
@@ -196,6 +195,7 @@ extern std::atomic<uint32_t> cpuWorkQueueIndex_push;
 extern __device__ uint32_t cpuWorkQueueIndex_pop;
 
 // TODO: should these be static members of WorkNode_Header?
+extern __device__ uint32_t activeVcoreCount;
 extern __device__ WorkNode_Header *workListHead;
 extern __device__ WorkNode_Header **workListTail; // Use workListTail = nullptr as a global lock.
 extern __device__ WorkNode_Header *volatile currentWorkNode[NUM_VCORES];
@@ -315,7 +315,9 @@ static inline __device__ void setCurrentWorkNode(WorkNode_Header *node) {
     node->link_to_self = const_cast<WorkNode_Header **>(&currentWorkNode[blockIdx.x]);
     // If we're called from pseudo_yield, set node->next to the yielding thread so we can restore later.
     node->next = yieldingWorkNode;
-    if (yieldingWorkNode != nullptr) {
+    if (yieldingWorkNode == nullptr) {
+        atomicAdd(&activeVcoreCount, 1);
+    else
         yieldingWorkNode->link_to_self = &node->next;
     }
 }
@@ -395,8 +397,11 @@ static inline __device__ bool invokeNext() {
         currentTail = lockAndFetchTail();
         WorkNode_Header *worknode = currentWorkNode[blockIdx.x];
         // If we're called from pseudo_yield, restore the original worknode.
-        // Otherwise, this sets currentWorkNode[blockIdx.x] to nullptr, signaling that we're 'idle'
+        // Otherwise, decrement activeVcoreCount, signaling that we're 'idle'
         setCurrentWorkNode(worknode->next);
+        if (worknode->next == nullptr) {
+            atomicSub(&activeVcoreCount, 1);
+        }
         if (worknode->finishedOrDetached) { // Detach has been called
             ::free(worknode);
         } else {
@@ -408,30 +413,6 @@ static inline __device__ bool invokeNext() {
     return true;
 }
 
-static inline __device__ uint32_t getActiveVcoreCount() {
-    WorkNode_Header **currentTail;
-    if (threadIdx.x == 0)
-        currentTail = lockAndFetchTail();
-    // Don't need this as long as blockDim.x == MAX_THREAD_WIDTH == warpSize
-    // __syncthreads();
-    uint32_t count = 0;
-    for (uint32_t i = threadIdx.x; i < NUM_VCORES; i += MAX_THREAD_WIDTH) {
-        // TODO: If we're only ever using this function to check whether getActiveVcoreCount() != 0, we could exit early
-        if (currentWorkNode[i] != nullptr) {
-            ++count;
-        }
-    }
-    // equivalent to count = __reduce_add_sync(0x1FU, count);
-    // TODO: Fix this if/when blockDim.x (aka MAX_THREAD_WIDTH) > 32
-    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-        count += __shfl_down(count, offset);
-    }
-
-    if (threadIdx.x == 0)
-        setAndUnlockTail(currentTail);
-    return count;
-}
-
 //====================================================================================================================//
 //      KERNELS
 //====================================================================================================================//
@@ -440,7 +421,11 @@ static inline __device__ uint32_t getActiveVcoreCount() {
 #pragma clang diagnostic ignored "-Wcuda-compat" // Suppress "ignored 'inline' attribute on kernel function" warnings
 
 inline __global__ void threading_main() {
-    for (bool workFound = true; workFound || !finishing || getActiveVcoreCount() != 0;) {
+    // TODO: Because invokeNext can return false even if there's work waiting (because somebody else snagged the job
+    // before we could - see popWorkNodeFromMainQueue and popWorkNodeFromCpuQueue), and we don't increment
+    // activeVcoreCount until AFTER we pop work from the queues, it's theoretically possible for a vcore to exit before
+    // all the work is done. I don't know if this is a big enough concern to be worth fixing or not.
+    for (bool workFound = true; workFound || !finishing || atomicAdd(&activeVcoreCount, 0) != 0;) {
         // TODO: why do we need this when blockDim.x == MAX_THREAD_WIDTH == warpSize?
         __syncthreads();
         workFound = invokeNext();
