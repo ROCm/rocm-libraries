@@ -33,5 +33,12 @@ namespace rocRoller
                                  E_Or,
                                  E_GreaterThan,
                                  E_Conditional>;
+
+        template <typename T>
+        concept CXOp = requires()
+        {
+            requires std::constructible_from<XOp, T>;
+            requires !std::same_as<XOp, T>;
+        };
     }
 }

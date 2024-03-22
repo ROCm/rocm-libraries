@@ -49,6 +49,12 @@ namespace rocRoller
         allocate.call(*op);
     }
 
+    template <Operations::COperation T>
+    inline void Command::addOperation(T&& op)
+    {
+        addOperation(std::make_shared<Operations::Operation>(std::forward<T>(op)));
+    }
+
     // Allocate a single command argument by incrementing the most recent offset.
     inline CommandArgumentPtr Command::allocateArgument(VariableType  variableType,
                                                         DataDirection direction)
@@ -161,6 +167,11 @@ namespace rocRoller
     inline int Command::getNextTag() const
     {
         return m_nextTagValue;
+    }
+
+    inline int Command::allocateTag()
+    {
+        return m_nextTagValue++;
     }
 
     inline std::string Command::toString() const

@@ -29,7 +29,10 @@ namespace rocRoller
         Command(Command const& rhs);
         Command(Command&& rhs);
 
-        void               addOperation(std::shared_ptr<Operations::Operation> op);
+        void addOperation(std::shared_ptr<Operations::Operation> op);
+        template <Operations::COperation T>
+        void addOperation(T&& op);
+
         CommandArgumentPtr allocateArgument(VariableType  variableType,
                                             DataDirection direction = DataDirection::ReadWrite);
         CommandArgumentPtr allocateArgument(VariableType       variableType,
@@ -47,7 +50,9 @@ namespace rocRoller
                                                                std::string const& name);
 
         std::shared_ptr<Operations::Operation> findTag(int tag);
-        int                                    getNextTag() const;
+
+        int getNextTag() const;
+        int allocateTag();
 
         OperationList const& operations() const;
 

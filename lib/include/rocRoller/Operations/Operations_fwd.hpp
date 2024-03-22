@@ -25,6 +25,14 @@ namespace rocRoller
                                        T_Store_Tiled,
                                        T_Execute,
                                        Nop>;
+
+        template <typename T>
+        concept COperation = requires
+        {
+            requires std::constructible_from<Operation, T>;
+            requires !std::same_as<Operation, T>;
+        };
+
         struct Inputs;
         struct Outputs;
         struct TagVisitor;

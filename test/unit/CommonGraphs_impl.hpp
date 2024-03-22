@@ -35,49 +35,41 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        int tag = 0;
+        auto xTag     = m_command->allocateTag();
+        auto yTag     = m_command->allocateTag();
+        auto alphaTag = m_command->allocateTag();
+        m_command->addOperation(rocRoller::Operations::T_Load_Linear(dataType, 1, xTag));
 
-        auto xTag = tag++;
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Linear(dataType, 1, xTag)));
+        m_command->addOperation(rocRoller::Operations::T_Load_Linear(dataType, 1, yTag));
 
-        auto yTag = tag++;
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Linear(dataType, 1, yTag)));
-
-        auto alphaTag = tag++;
         m_command->addOperation(
-            std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Scalar(
-                {dataType, PointerType::PointerGlobal}, alphaTag)));
+            rocRoller::Operations::T_Load_Scalar({dataType, PointerType::PointerGlobal}, alphaTag));
 
-        auto betaTag = m_useBeta ? (tag++) : -1;
+        auto betaTag = -1;
         if(m_useBeta)
         {
-            m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Scalar(dataType, betaTag)));
+            betaTag = m_command->allocateTag();
+            m_command->addOperation(rocRoller::Operations::T_Load_Scalar(dataType, betaTag));
         }
 
         auto execute = rocRoller::Operations::T_Execute();
 
-        auto alphaXTag = tag++;
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(alphaXTag, xTag, alphaTag)));
+        auto alphaXTag = m_command->allocateTag();
+        execute.addXOp(rocRoller::Operations::E_Mul(alphaXTag, xTag, alphaTag));
 
-        auto betaYTag = m_useBeta ? (tag++) : yTag;
+        auto betaYTag = yTag;
         if(m_useBeta)
         {
-            execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-                rocRoller::Operations::E_Mul(betaYTag, yTag, betaTag)));
+            betaYTag = m_command->allocateTag();
+            execute.addXOp(rocRoller::Operations::E_Mul(betaYTag, yTag, betaTag));
         }
 
-        auto sumTag = tag++;
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(sumTag, alphaXTag, betaYTag)));
+        auto sumTag = m_command->allocateTag();
+        execute.addXOp(rocRoller::Operations::E_Add(sumTag, alphaXTag, betaYTag));
 
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
+        m_command->addOperation(std::move(execute));
 
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Linear(1, sumTag)));
+        m_command->addOperation(rocRoller::Operations::T_Store_Linear(1, sumTag));
     }
 
     template <typename T>
@@ -197,34 +189,34 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
+        auto load_a = m_command->allocateTag();
+        auto load_b = m_command->allocateTag();
+
         if(m_useScalarLoads)
         {
-            Operations::T_Load_Scalar load_A(dataType, 0);
-            m_command->addOperation(std::make_shared<Operations::Operation>(std::move(load_A)));
-
-            Operations::T_Load_Scalar load_B(dataType, 1);
-            m_command->addOperation(std::make_shared<Operations::Operation>(std::move(load_B)));
+            m_command->addOperation(Operations::T_Load_Scalar(dataType, load_a));
+            m_command->addOperation(Operations::T_Load_Scalar(dataType, load_b));
         }
         else
         {
-            Operations::T_Load_Linear load_A(dataType, 1, 0);
-            m_command->addOperation(std::make_shared<Operations::Operation>(std::move(load_A)));
-
-            Operations::T_Load_Linear load_B(dataType, 1, 1);
-            m_command->addOperation(std::make_shared<Operations::Operation>(std::move(load_B)));
+            m_command->addOperation(Operations::T_Load_Linear(dataType, 1, load_a));
+            m_command->addOperation(Operations::T_Load_Linear(dataType, 1, load_b));
         }
 
-        Operations::T_Execute execute;
-        execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(2, 1, 0)));
-        execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Neg(3, 2)));
-        execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Mul(4, 2, 3)));
+        auto aPlusB    = m_command->allocateTag();
+        auto negAPlusB = m_command->allocateTag();
+        auto result    = m_command->allocateTag();
 
-        m_command->addOperation(std::make_shared<Operations::Operation>(std::move(execute)));
+        Operations::T_Execute execute;
+        execute.addXOp(Operations::E_Add(aPlusB, load_b, load_a));
+        execute.addXOp(Operations::E_Neg(negAPlusB, aPlusB));
+        execute.addXOp(Operations::E_Mul(result, aPlusB, negAPlusB));
+
+        m_command->addOperation(std::move(execute));
 
         if(!m_useScalarLoads)
         {
-            Operations::T_Store_Linear store_C(1, 4);
-            m_command->addOperation(std::make_shared<Operations::Operation>(std::move(store_C)));
+            m_command->addOperation(Operations::T_Store_Linear(1, result));
         }
     }
 
@@ -257,16 +249,16 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
+        auto a      = m_command->allocateTag();
+        auto b      = m_command->allocateTag();
+        auto result = m_command->allocateTag();
 
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(2, 0, 1))); // D = A * B
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, a)); // A
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, b)); // B
 
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(dataType, 2, 2))); // D
+        m_command->addOperation(rocRoller::Operations::T_Mul(result, a, b)); // D = A * B
+
+        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(dataType, 2, result)); // D
     }
 
     template <typename T>
@@ -298,31 +290,32 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 2))); // C
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar(dataType, 3))); // alpha
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar(dataType, 4))); // beta
+        auto a        = m_command->allocateTag();
+        auto b        = m_command->allocateTag();
+        auto c        = m_command->allocateTag();
+        auto alpha    = m_command->allocateTag();
+        auto beta     = m_command->allocateTag();
+        auto axb      = m_command->allocateTag();
+        auto alphaaxb = m_command->allocateTag();
+        auto betac    = m_command->allocateTag();
+        auto result   = m_command->allocateTag();
 
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(5, 0, 1))); // A * B
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, a)); // A
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, b)); // B
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, c)); // C
+        m_command->addOperation(rocRoller::Operations::T_Load_Scalar(dataType, alpha)); // alpha
+        m_command->addOperation(rocRoller::Operations::T_Load_Scalar(dataType, beta)); // beta
+
+        m_command->addOperation(rocRoller::Operations::T_Mul(axb, a, b)); // A * B
 
         rocRoller::Operations::T_Execute execute;
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(6, 3, 5))); // alpha * (A * B)
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(7, 4, 2))); // beta * C
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(8, 6, 7))); // alpha * (A * B) + beta * C
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
+        execute.addXOp(rocRoller::Operations::E_Mul(alphaaxb, alpha, axb)); // alpha * (A * B)
+        execute.addXOp(rocRoller::Operations::E_Mul(betac, beta, c)); // beta * C
+        execute.addXOp(rocRoller::Operations::E_Add(result, alphaaxb, betac));
+        // alpha * (A * B) + beta * C
+        m_command->addOperation(std::move(execute));
 
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(dataType, 2, 8))); // D
+        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(dataType, 2, result)); // D
     }
 
     template <typename T>
@@ -424,22 +417,22 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // a
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // b
+        auto a    = m_command->allocateTag();
+        auto b    = m_command->allocateTag();
+        auto aa   = m_command->allocateTag();
+        auto bb   = m_command->allocateTag();
+        auto aabb = m_command->allocateTag();
+
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, a)); // a
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, b)); // b
 
         auto execute = rocRoller::Operations::T_Execute();
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(2, 0, 0))); // a + a
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(3, 1, 1))); // b + b
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(4, 3, 2))); // 2a + 2b
+        execute.addXOp(rocRoller::Operations::E_Add(aa, a, a)); // a + a
+        execute.addXOp(rocRoller::Operations::E_Add(bb, b, b)); // b + b
+        execute.addXOp(rocRoller::Operations::E_Add(aabb, bb, aa)); // 2a + 2b
 
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(dataType, 2, 4))); // c
+        m_command->addOperation(std::move(execute));
+        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(dataType, 2, aabb)); // c
     }
 
     template <typename T>
@@ -561,18 +554,18 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
+        auto tag = m_command->allocateTag();
+
         if(!m_literalStrides.empty())
         {
-            m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Tiled(dataType, 2, 0, m_literalStrides)));
+            m_command->addOperation(
+                rocRoller::Operations::T_Load_Tiled(dataType, 2, tag, m_literalStrides));
         }
         else
         {
-            m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Tiled(dataType, 2, 0)));
+            m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, tag));
         }
-        m_command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(dataType, 2, 0)));
+        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(dataType, 2, tag));
     }
 
     template <typename T>

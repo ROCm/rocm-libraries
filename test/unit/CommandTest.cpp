@@ -56,19 +56,18 @@ TEST(CommandTest, VectorAdd)
 {
     auto command = std::make_shared<rocRoller::Command>();
 
-    Operations::T_Load_Linear load_A(DataType::Float, 1, 0);
-    command->addOperation(std::make_shared<Operations::Operation>(std::move(load_A)));
-
-    command->addOperation(
-        std::make_shared<Operations::Operation>(Operations::T_Load_Linear(DataType::Float, 1, 1)));
+    auto load_A = command->allocateTag();
+    auto load_B = command->allocateTag();
+    auto res    = command->allocateTag();
+    command->addOperation(Operations::T_Load_Linear(DataType::Float, 1, load_A));
+    command->addOperation(Operations::T_Load_Linear(DataType::Float, 1, load_B));
 
     Operations::T_Execute execute;
-    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(2, 0, 1)));
+    execute.addXOp(Operations::E_Add(res, load_A, load_B));
 
     command->addOperation(std::make_shared<Operations::Operation>(std::move(execute)));
 
-    Operations::T_Store_Linear store_C(1, 2);
-    command->addOperation(std::make_shared<Operations::Operation>(std::move(store_C)));
+    command->addOperation(Operations::T_Store_Linear(1, res));
 
     std::string result = R"(
         T_LOAD_LINEAR.Float.d1 0, (base=&0, lim=&8, sizes={&16 }, strides={&24 })

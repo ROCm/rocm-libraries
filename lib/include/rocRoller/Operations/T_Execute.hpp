@@ -139,12 +139,6 @@ namespace rocRoller
     };
         MAKE_TERNARY_XOP(E_Conditional)
 
-        template <typename T>
-        concept CXOp = requires()
-        {
-            requires std::constructible_from<XOp, T>;
-        };
-
         class T_Execute
         {
         public:
@@ -154,8 +148,10 @@ namespace rocRoller
             std::unordered_set<int> getInputs() const;
             std::unordered_set<int> getOutputs() const;
             void                    addXOp(std::shared_ptr<XOp>);
-            int                     getNextTag() const;
-            std::string             toString() const;
+            template <CXOp T>
+            void        addXOp(T&& op);
+            int         getNextTag() const;
+            std::string toString() const;
 
             std::vector<std::shared_ptr<XOp>> getXOps() const
             {

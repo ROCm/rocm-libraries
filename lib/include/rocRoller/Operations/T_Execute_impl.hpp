@@ -197,6 +197,12 @@ namespace rocRoller
             m_xops.emplace_back(xop);
         }
 
+        template <CXOp T>
+        inline void T_Execute::addXOp(T&& op)
+        {
+            addXOp(std::make_shared<XOp>(std::forward<T>(op)));
+        }
+
         inline int T_Execute::getNextTag() const
         {
             return m_nextTag;

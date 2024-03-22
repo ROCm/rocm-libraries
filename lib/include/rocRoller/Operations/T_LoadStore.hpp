@@ -50,10 +50,10 @@ namespace rocRoller
         protected:
             std::string getArgumentString(const unsigned char*) const;
 
-            int m_tag;
+            int m_tag = -1;
 
-            DataType m_dataType;
-            int      m_dims;
+            DataType m_dataType = DataType::None;
+            int      m_dims     = -1;
 
             std::weak_ptr<Command> m_command;
 
