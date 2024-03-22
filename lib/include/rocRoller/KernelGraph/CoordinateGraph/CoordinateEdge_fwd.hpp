@@ -14,6 +14,7 @@ namespace rocRoller
         struct Join;
         struct MakeOutput;
         struct PassThrough;
+        struct Duplicate;
         struct Split;
         struct Sunder;
         struct Tile;
@@ -43,7 +44,7 @@ namespace rocRoller
         struct Stride;
         struct View;
 
-        using DataFlowEdge = std::variant<DataFlow, Buffer, Offset, Stride, View>;
+        using DataFlowEdge = std::variant<DataFlow, Duplicate, Buffer, Offset, Stride, View>;
 
         template <typename T>
         concept CDataFlowEdge = std::constructible_from<DataFlowEdge, T>;

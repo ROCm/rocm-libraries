@@ -45,6 +45,11 @@ namespace rocRoller
             Expression::ExpressionPtr getCoordinate(int) const;
 
             /**
+             * Determine if dimension has a value already.
+             */
+            bool hasCoordinate(int) const;
+
+            /**
              * Remove the index expression for the dimension.
              */
             void removeCoordinate(int);

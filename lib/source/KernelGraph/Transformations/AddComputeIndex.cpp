@@ -74,13 +74,12 @@ namespace rocRoller::KernelGraph
 
     struct ComputeIndexChainSpecification
     {
-        int                     target;
-        ComputeIndexChainType   type;
-        int                     location;
-        Graph::Direction        direction;
-        int                     forLoop = -1;
-        std::unordered_set<int> zeros;
-        bool                    replaceWithScope = true;
+        int                   target;
+        ComputeIndexChainType type;
+        int                   location;
+        Graph::Direction      direction;
+        int                   forLoop          = -1;
+        bool                  replaceWithScope = true;
     };
 
     bool operator<(const ComputeIndexChainSpecification& a, const ComputeIndexChainSpecification& b)
@@ -101,16 +100,6 @@ namespace rocRoller::KernelGraph
     /*
      * Helpers
      */
-
-    /**
-     * @brief Append elements of b onto a.
-     */
-    std::vector<int> addZeros(std::vector<int> const& a, std::unordered_set<int> const& b)
-    {
-        std::vector<int> rv = a;
-        std::copy(b.cbegin(), b.cend(), std::back_inserter(rv));
-        return rv;
-    }
 
     /**
      * @brief Return existing Buffer edge between src and dst, or
@@ -152,18 +141,17 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Add a ComputeIndex node and add mapper connections.
      */
-    int makeComputeIndex(KernelGraph&     graph,
-                         int              target,
-                         int              increment,
-                         int              base,
-                         int              offset,
-                         int              stride,
-                         int              buffer,
-                         bool             forward,
-                         DataType         valueType,
-                         std::vector<int> zero       = {},
-                         DataType         offsetType = DataType::UInt64,
-                         DataType         strideType = DataType::UInt64)
+    int makeComputeIndex(KernelGraph& graph,
+                         int          target,
+                         int          increment,
+                         int          base,
+                         int          offset,
+                         int          stride,
+                         int          buffer,
+                         bool         forward,
+                         DataType     valueType,
+                         DataType     offsetType = DataType::UInt64,
+                         DataType     strideType = DataType::UInt64)
     {
         using CCI = Connections::ComputeIndex;
         using CCA = Connections::ComputeIndexArgument;
@@ -183,8 +171,6 @@ namespace rocRoller::KernelGraph
             graph.mapper.connect(ci, stride, CCI{CCA::STRIDE});
         if(target > 0)
             graph.mapper.connect(ci, target, CCI{CCA::TARGET});
-        for(int i = 0; i < zero.size(); ++i)
-            graph.mapper.connect(ci, zero[i], CCI{CCA::ZERO, i});
 
         rocRoller::Log::getLogger()->debug(
             "KernelGraph::makeComputeIndex: ci {} {}/{} {}; {}/{}/{}",
@@ -242,28 +228,12 @@ namespace rocRoller::KernelGraph
         connections.push_back(DC<Stride>(colStride, 1));
         connections.push_back(DC<Buffer>(buffer));
 
-        auto ciMac = makeComputeIndex(
-            graph, user, mac, -1, offsetMac, strideMac, buffer, false, dtype, {elemX, elemY});
-        auto ciRow = makeComputeIndex(graph,
-                                      user,
-                                      elemX,
-                                      offsetMac,
-                                      rowOffset,
-                                      rowStride,
-                                      buffer,
-                                      false,
-                                      dtype,
-                                      {mac, elemY});
-        auto ciCol = makeComputeIndex(graph,
-                                      user,
-                                      elemY,
-                                      rowOffset,
-                                      colOffset,
-                                      colStride,
-                                      buffer,
-                                      false,
-                                      dtype,
-                                      {mac, elemX});
+        auto ciMac
+            = makeComputeIndex(graph, user, mac, -1, offsetMac, strideMac, buffer, false, dtype);
+        auto ciRow = makeComputeIndex(
+            graph, user, elemX, offsetMac, rowOffset, rowStride, buffer, false, dtype);
+        auto ciCol = makeComputeIndex(
+            graph, user, elemY, rowOffset, colOffset, colStride, buffer, false, dtype);
 
         graph.control.addElement(Sequence(), {ciMac}, {ciRow});
         graph.control.addElement(Sequence(), {ciRow}, {ciCol});
@@ -287,7 +257,6 @@ namespace rocRoller::KernelGraph
                                                 int                                 loadstore,
                                                 int                                 source,
                                                 bool                                forward,
-                                                std::unordered_set<int>             zeros,
                                                 int                                 location,
                                                 std::map<std::pair<int, int>, int>& bufferMap)
     {
@@ -350,8 +319,6 @@ namespace rocRoller::KernelGraph
 
         std::vector<int> ciOperations;
 
-        auto unrollZeros = addZeros({elemX, elemY}, zeros);
-
         auto [required, path] = findRequiredCoordinates(
             source, forward ? Graph::Direction::Upstream : Graph::Direction::Downstream, graph);
 
@@ -387,15 +354,11 @@ namespace rocRoller::KernelGraph
                                                             -1,
                                                             forward,
                                                             dtype,
-                                                            unrollZeros,
                                                             DataType::Int64,
                                                             DataType::Int64));
                 }
             }
         }
-
-        auto rowZeros = addZeros({elemY}, zeros);
-        auto colZeros = addZeros({elemX}, zeros);
 
         ciOperations.push_back(makeComputeIndex(graph,
                                                 source,
@@ -406,7 +369,6 @@ namespace rocRoller::KernelGraph
                                                 buffer,
                                                 forward,
                                                 dtype,
-                                                rowZeros,
                                                 offsettype,
                                                 offsettype));
         ciOperations.push_back(makeComputeIndex(graph,
@@ -418,7 +380,6 @@ namespace rocRoller::KernelGraph
                                                 buffer,
                                                 forward,
                                                 dtype,
-                                                colZeros,
                                                 offsettype,
                                                 offsettype));
 
@@ -431,10 +392,7 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Add ComputeIndexes for WAVE MATRIX_A/B from LDS.
      */
-    ComputeIndexChain computeIndexWaveMatrixABLDS(KernelGraph&            graph,
-                                                  int                     load,
-                                                  int                     sdim,
-                                                  std::unordered_set<int> zeros)
+    ComputeIndexChain computeIndexWaveMatrixABLDS(KernelGraph& graph, int load, int sdim)
     {
         rocRoller::Log::getLogger()->debug(
             "KernelGraph::AddComputeIndex()::computeIndexWaveMatrixABLDS({}, {})", load, sdim);
@@ -457,17 +415,13 @@ namespace rocRoller::KernelGraph
         connections.push_back(DC<Stride>(strideWave, 0));
         connections.push_back(DC<Stride>(strideVgpr, 1));
 
-        auto waveZeros = addZeros({vgpr}, zeros);
-        auto vgprZeros = addZeros({wave}, zeros);
-
         std::vector<int> ciOperations;
 
         auto [required, path] = findRequiredCoordinates(lds, Graph::Direction::Downstream, graph);
         auto unrolls          = filterCoordinates<Unroll>(required, graph);
         for(auto unroll : unrolls)
         {
-            auto unrollZeros = addZeros({wave, vgpr}, zeros);
-            auto parents     = graph.coordinates.parentNodes(unroll);
+            auto parents = graph.coordinates.parentNodes(unroll);
             for(auto parent : parents)
             {
                 if(path.contains(parent))
@@ -483,7 +437,6 @@ namespace rocRoller::KernelGraph
                                                             -1,
                                                             false,
                                                             dtype,
-                                                            unrollZeros,
                                                             DataType::Int64,
                                                             DataType::Int64));
                 }
@@ -499,7 +452,6 @@ namespace rocRoller::KernelGraph
                                                 -1,
                                                 false,
                                                 dtype,
-                                                waveZeros,
                                                 DataType::UInt32,
                                                 DataType::UInt32));
         ciOperations.push_back(makeComputeIndex(graph,
@@ -511,7 +463,6 @@ namespace rocRoller::KernelGraph
                                                 -1,
                                                 false,
                                                 dtype,
-                                                vgprZeros,
                                                 DataType::UInt32,
                                                 DataType::UInt32));
 
@@ -528,7 +479,6 @@ namespace rocRoller::KernelGraph
                                                int                                 load,
                                                int                                 sdim,
                                                ExpressionPtr                       step,
-                                               std::unordered_set<int>             zeros,
                                                int                                 location,
                                                std::map<std::pair<int, int>, int>& bufferMap)
     {
@@ -559,11 +509,6 @@ namespace rocRoller::KernelGraph
         connections.push_back(DC<Stride>(strideVgpr, 1));
         connections.push_back(DC<Buffer>(buffer));
 
-        auto macZeros    = addZeros({wave, vgpr}, zeros);
-        auto waveZeros   = addZeros({mac, vgpr}, zeros);
-        auto vgprZeros   = addZeros({mac, wave}, zeros);
-        auto unrollZeros = addZeros({mac, wave, vgpr}, zeros);
-
         std::vector<int> ciOperations;
 
         auto [required, path] = findRequiredCoordinates(user, Graph::Direction::Downstream, graph);
@@ -586,27 +531,18 @@ namespace rocRoller::KernelGraph
                                                             -1,
                                                             false,
                                                             dtype,
-                                                            unrollZeros,
                                                             DataType::Int64,
                                                             DataType::Int64));
                 }
             }
         }
 
+        ciOperations.push_back(
+            makeComputeIndex(graph, user, mac, -1, offsetMac, strideMac, buffer, false, dtype));
         ciOperations.push_back(makeComputeIndex(
-            graph, user, mac, -1, offsetMac, strideMac, buffer, false, dtype, macZeros));
+            graph, user, wave, offsetMac, offsetWave, strideWave, buffer, false, dtype));
         ciOperations.push_back(makeComputeIndex(
-            graph, user, wave, offsetMac, offsetWave, strideWave, buffer, false, dtype, waveZeros));
-        ciOperations.push_back(makeComputeIndex(graph,
-                                                user,
-                                                vgpr,
-                                                offsetWave,
-                                                offsetVgpr,
-                                                strideVgpr,
-                                                buffer,
-                                                false,
-                                                dtype,
-                                                vgprZeros));
+            graph, user, vgpr, offsetWave, offsetVgpr, strideVgpr, buffer, false, dtype));
 
         auto offsetMacExpr = std::make_shared<Expression::Expression>(
             Expression::DataFlowTag{offsetMac, Register::Type::Vector, DataType::UInt64});
@@ -629,7 +565,6 @@ namespace rocRoller::KernelGraph
     ComputeIndexChain computeIndexMatrixAccumulator(KernelGraph&                        graph,
                                                     int                                 op,
                                                     bool                                forward,
-                                                    std::unordered_set<int> const&      zeros,
                                                     int                                 location,
                                                     std::map<std::pair<int, int>, int>& bufferMap)
     {
@@ -692,10 +627,6 @@ namespace rocRoller::KernelGraph
 
         std::vector<int> ciOperations;
 
-        auto vgprBlockZeros = addZeros({vgprIndex}, zeros);
-        auto vgprIndexZeros = addZeros({vgprBlock}, zeros);
-        auto unrollZeros    = addZeros({vgprIndex, vgprBlock}, zeros);
-
         auto [required, path]
             = findRequiredCoordinates(source, forward ? GD::Upstream : GD::Downstream, graph);
 
@@ -741,13 +672,8 @@ namespace rocRoller::KernelGraph
                                                     -1,
                                                     forward,
                                                     dtype,
-                                                    unrollZeros,
                                                     DataType::UInt64,
                                                     DataType::UInt64));
-
-            vgprBlockZeros.push_back(forLoop);
-            vgprIndexZeros.push_back(forLoop);
-            unrollZeros.push_back(forLoop);
         }
 
         auto unrolls = filterCoordinates<Unroll>(required, graph);
@@ -779,7 +705,6 @@ namespace rocRoller::KernelGraph
                                                             -1,
                                                             forward,
                                                             dtype,
-                                                            unrollZeros,
                                                             DataType::Int64,
                                                             DataType::Int64));
                 }
@@ -795,7 +720,6 @@ namespace rocRoller::KernelGraph
                                                 buffer,
                                                 forward,
                                                 dtype,
-                                                vgprBlockZeros,
                                                 offsettype,
                                                 offsettype));
         ciOperations.push_back(makeComputeIndex(graph,
@@ -807,7 +731,6 @@ namespace rocRoller::KernelGraph
                                                 buffer,
                                                 forward,
                                                 dtype,
-                                                vgprIndexZeros,
                                                 offsettype,
                                                 offsettype));
 
@@ -904,7 +827,6 @@ namespace rocRoller::KernelGraph
                                       int                                 tag,
                                       ComputeIndexChainType               chainType,
                                       ExpressionPtr                       step,
-                                      std::unordered_set<int>             zeros,
                                       int                                 location,
                                       std::map<std::pair<int, int>, int>& bufferMap)
     {
@@ -913,26 +835,25 @@ namespace rocRoller::KernelGraph
         switch(chainType)
         {
         case STORE_ELEM:
-            return computeIndexElementMatrix(kgraph, tag, source, true, zeros, location, bufferMap);
+            return computeIndexElementMatrix(kgraph, tag, source, true, location, bufferMap);
         case STORE_WAVE_MATRIX_ACCUMULATOR:
-            return computeIndexMatrixAccumulator(kgraph, tag, true, zeros, location, bufferMap);
+            return computeIndexMatrixAccumulator(kgraph, tag, true, location, bufferMap);
         case LOAD_ELEM_MATRIX_A:
             return computeIndexElementMatrixAB(kgraph, tag, 1, step, location, bufferMap);
         case LOAD_ELEM_MATRIX_B:
             return computeIndexElementMatrixAB(kgraph, tag, 0, step, location, bufferMap);
         case LOAD_ELEM:
-            return computeIndexElementMatrix(
-                kgraph, tag, source, false, zeros, location, bufferMap);
+            return computeIndexElementMatrix(kgraph, tag, source, false, location, bufferMap);
         case LOAD_WAVE_MATRIX_ACCUMULATOR:
-            return computeIndexMatrixAccumulator(kgraph, tag, false, zeros, location, bufferMap);
+            return computeIndexMatrixAccumulator(kgraph, tag, false, location, bufferMap);
         case LOAD_WAVE_MATRIX_A:
-            return computeIndexWaveMatrixAB(kgraph, tag, 1, step, zeros, location, bufferMap);
+            return computeIndexWaveMatrixAB(kgraph, tag, 1, step, location, bufferMap);
         case LOAD_WAVE_MATRIX_B:
-            return computeIndexWaveMatrixAB(kgraph, tag, 0, step, zeros, location, bufferMap);
+            return computeIndexWaveMatrixAB(kgraph, tag, 0, step, location, bufferMap);
         case LOAD_LDS_MATRIX_A:
-            return computeIndexWaveMatrixABLDS(kgraph, tag, 1, zeros);
+            return computeIndexWaveMatrixABLDS(kgraph, tag, 1);
         case LOAD_LDS_MATRIX_B:
-            return computeIndexWaveMatrixABLDS(kgraph, tag, 0, zeros);
+            return computeIndexWaveMatrixABLDS(kgraph, tag, 0);
         default:
             Throw<FatalError>("Not implemented yet.");
         }
@@ -997,17 +918,16 @@ namespace rocRoller::KernelGraph
      */
     struct AddComputeIndexer
     {
-        void stageChain(int                     target,
-                        int                     candidate,
-                        int                     location,
-                        ComputeIndexChainType   type,
-                        Graph::Direction        direction,
-                        int                     forLoop          = -1,
-                        std::unordered_set<int> zeros            = {},
-                        bool                    replaceWithScope = true)
+        void stageChain(int                   target,
+                        int                   candidate,
+                        int                   location,
+                        ComputeIndexChainType type,
+                        Graph::Direction      direction,
+                        int                   forLoop          = -1,
+                        bool                  replaceWithScope = true)
         {
             ComputeIndexChainSpecification spec{
-                target, type, location, direction, forLoop, zeros, replaceWithScope};
+                target, type, location, direction, forLoop, replaceWithScope};
             m_chains[spec].push_back(candidate);
         }
 
@@ -1042,13 +962,7 @@ namespace rocRoller::KernelGraph
                 log->debug("  staged as: hasForLoop and isUniformLoop, location {} forLoopOp {}",
                            *maybeForLoop,
                            *maybeForLoop);
-                stageChain(target,
-                           candidate,
-                           *maybeForLoop,
-                           type,
-                           GD::Upstream,
-                           *maybeForLoop,
-                           unrollCoordinates);
+                stageChain(target, candidate, *maybeForLoop, type, GD::Upstream, *maybeForLoop);
                 return;
             }
 
@@ -1074,8 +988,7 @@ namespace rocRoller::KernelGraph
                            "forLoopOp {}",
                            *maybeForLoop,
                            *maybeForLoop);
-                stageChain(
-                    target, candidate, *maybeScope, type, GD::Upstream, -1, unrollCoordinates);
+                stageChain(target, candidate, *maybeScope, type, GD::Upstream, -1);
                 return;
             }
 
@@ -1085,14 +998,7 @@ namespace rocRoller::KernelGraph
                 log->debug("  staged as: hasForLoop and not isUniformLoop, location {}, {}",
                            *maybeForLoop,
                            *maybeTopOfLoop);
-                stageChain(target,
-                           candidate,
-                           *maybeTopOfLoop,
-                           type,
-                           GD::Upstream,
-                           -1,
-                           unrollCoordinates,
-                           false);
+                stageChain(target, candidate, *maybeTopOfLoop, type, GD::Upstream, -1, false);
                 return;
             }
 
@@ -1101,7 +1007,7 @@ namespace rocRoller::KernelGraph
                 log->debug("  staged as: hasUnroll");
 
                 auto kernel = *kgraph.control.roots().begin();
-                stageChain(target, candidate, kernel, type, GD::Downstream, -1, unrollCoordinates);
+                stageChain(target, candidate, kernel, type, GD::Downstream, -1);
                 return;
             }
 
@@ -1137,7 +1043,7 @@ namespace rocRoller::KernelGraph
                 rocRoller::Log::getLogger()->debug("KernelGraph::AddComputeIndex()::commit({})",
                                                    candidates[0]);
                 auto chain = addComputeIndex(
-                    kgraph, candidates[0], spec.type, step, spec.zeros, spec.location, bufferMap);
+                    kgraph, candidates[0], spec.type, step, spec.location, bufferMap);
 
                 if(spec.direction == GD::Downstream)
                 {

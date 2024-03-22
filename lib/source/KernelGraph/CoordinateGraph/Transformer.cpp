@@ -97,6 +97,11 @@ namespace rocRoller
             return m_indexes.at(tag);
         }
 
+        bool Transformer::hasCoordinate(int tag) const
+        {
+            return m_indexes.contains(tag);
+        }
+
         void Transformer::removeCoordinate(int tag)
         {
             m_indexes.erase(tag);

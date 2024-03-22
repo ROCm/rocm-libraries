@@ -473,9 +473,6 @@ namespace rocRollerTest
         EXPECT_EQ(notTopSet1, getSetCoordinateForDim(kg, 1, load2));
         EXPECT_EQ(notTopSet2, getSetCoordinateForDim(kg, 3, load2));
 
-        EXPECT_EQ((std::vector{load1}), getLoadsForUnroll(kg, 1, {load1, load2}, 5));
-        EXPECT_EQ((std::vector{load2}), getLoadsForUnroll(kg, 1, {load1, load2}, 4));
-
         EXPECT_EQ((std::set{topSet1, topSet2}), getTopSetCoordinates(kg, {load1, load2}));
     }
 }

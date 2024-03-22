@@ -153,7 +153,7 @@ namespace rocRoller
                         // Check to see if the MacroTile associated with the load is the "Original" MacroTile.
                         // If it is, it shouldn't be replaced. Instead, replace the already seen load.
                         auto duplicateStorage = only(graph.coordinates.getOutputNodeIndices(
-                            loadMacroTile, CT::isEdge<PassThrough>));
+                            loadMacroTile, CT::isEdge<Duplicate>));
                         if(!duplicateStorage)
                         {
                             auto tmp                 = loadKey.second;

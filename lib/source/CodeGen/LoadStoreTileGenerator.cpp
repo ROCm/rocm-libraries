@@ -272,7 +272,7 @@ namespace rocRoller
                 namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
                 auto maybeParentLDS = only(
-                    m_graph->coordinates.getOutputNodeIndices(target, CT::isEdge<PassThrough>));
+                    m_graph->coordinates.getOutputNodeIndices(target, CT::isEdge<Duplicate>));
                 if(maybeParentLDS)
                     target = *maybeParentLDS;
             }
@@ -281,14 +281,13 @@ namespace rocRoller
             uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
 
             // Set the zero-coordinates to zero
-            for(int idx = 0;; ++idx)
-            {
-                auto zeroTag = m_graph->mapper.get(
-                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::ZERO, idx});
-                if(zeroTag < 0)
-                    break;
-                coords.setCoordinate(zeroTag, L(0u));
-            }
+            auto fullStop  = [&](int tag) { return tag == increment; };
+            auto direction = ci.forward ? Graph::Direction::Upstream : Graph::Direction::Downstream;
+            auto [required, path] = findRequiredCoordinates(target, direction, fullStop, *m_graph);
+
+            for(auto tag : required)
+                if((tag != increment) && (!coords.hasCoordinate(tag)))
+                    coords.setCoordinate(tag, L(0u));
 
             // Set the increment coordinate to zero if it doesn't
             // already have a value

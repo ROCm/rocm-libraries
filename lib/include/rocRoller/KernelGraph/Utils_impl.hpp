@@ -150,11 +150,11 @@ namespace rocRoller::KernelGraph
                             graph.coordinates.getElement(c.coordinate));
                         reindexer->coordinates[c.coordinate] = dim;
                         auto duplicate
-                            = graph.coordinates.getOutputNodeIndices(coord, CT::isEdge<PassThrough>)
+                            = graph.coordinates.getOutputNodeIndices(coord, CT::isEdge<Duplicate>)
                                   .to<std::vector>();
 
                         auto origCoord = duplicate.empty() ? coord : duplicate[0];
-                        graph.coordinates.addElement(PassThrough(), {dim}, {origCoord});
+                        graph.coordinates.addElement(Duplicate(), {dim}, {origCoord});
 
                         // Add View edges for new duplicated coordinates
                         auto outgoingViews

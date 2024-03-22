@@ -208,7 +208,7 @@ namespace rocRoller
                 // Add newStorage to coordinate graph, keeping track of duplicates
                 // If duplicate, find original.
                 auto duplicateStorage = only(graph.coordinates.getOutputNodeIndices(
-                    location.storage, CT::isEdge<PassThrough>));
+                    location.storage, CT::isEdge<Duplicate>));
 
                 auto originalStorage = duplicateStorage ? *duplicateStorage : location.storage;
 
@@ -241,11 +241,11 @@ namespace rocRoller
                     graph.coordinates.addElement(DataFlow(), {originalStorage}, {newStorage});
                     newStorageDuplicate[originalStorage] = newStorage;
                 }
-                // if original has been seen, add PassThrough edge from newStorage to saved node
+                // if original has been seen, add Duplicate edge from newStorage to saved node
                 else
                 {
                     graph.coordinates.addElement(
-                        PassThrough(), {newStorage}, {newStorageDuplicate[originalStorage]});
+                        Duplicate(), {newStorage}, {newStorageDuplicate[originalStorage]});
                 }
             }
         }

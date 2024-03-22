@@ -70,7 +70,6 @@ namespace rocRoller::KernelGraph
             BASE,
             OFFSET,
             STRIDE,
-            ZERO,
             BUFFER,
 
             Count

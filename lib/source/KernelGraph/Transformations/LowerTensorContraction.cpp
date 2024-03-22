@@ -20,7 +20,7 @@ namespace rocRoller
             auto original = graph.mapper.get<MacroTile>(load);
             auto newMacroTile
                 = graph.coordinates.addElement(graph.coordinates.getElement(original));
-            graph.coordinates.addElement(PassThrough(), {newMacroTile}, {original});
+            graph.coordinates.addElement(Duplicate(), {newMacroTile}, {original});
             graph.mapper.disconnect<MacroTile>(load, original);
             graph.mapper.connect<MacroTile>(load, newMacroTile);
         }

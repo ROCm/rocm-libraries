@@ -338,6 +338,16 @@ namespace rocRoller
         std::pair<std::vector<int>, std::unordered_set<int>> findRequiredCoordinates(
             int target, Graph::Direction direction, KernelGraph const& kgraph)
         {
+            return findRequiredCoordinates(
+                target, direction, [](int tag) { return false; }, kgraph);
+        }
+
+        std::pair<std::vector<int>, std::unordered_set<int>>
+            findRequiredCoordinates(int                      target,
+                                    Graph::Direction         direction,
+                                    std::function<bool(int)> fullStop,
+                                    KernelGraph const&       kgraph)
+        {
             namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
             // TODO: Design a better way of binding storage to coordinates
@@ -348,56 +358,94 @@ namespace rocRoller
                 // node.  For the purposes of figuring out required
                 // coordinates, use the parent LDS as the target
                 // instead.
-                auto maybeParentLDS = only(
-                    kgraph.coordinates.getOutputNodeIndices(target, CT::isEdge<PassThrough>));
+                auto maybeParentLDS
+                    = only(kgraph.coordinates.getOutputNodeIndices(target, CT::isEdge<Duplicate>));
                 if(maybeParentLDS)
                     target = *maybeParentLDS;
             }
 
+            // First, construct the set of elements reachable from the
+            // target.
             auto reachable
                 = kgraph.coordinates.depthFirstVisit(target, direction).to<std::unordered_set>();
 
-            auto dontWalkPastLoopOrStorageNodes = [&](int tag) -> bool {
+            // Next, from the target coordinate, walk the graph but
+            // don't traverse all edges.  This will result in a list
+            // of nodes that are used in the coordinate transform to
+            // compute indexes for the target coordinate.
+            //
+            // The edge predicate is called on edges.  It looks in the
+            // direction opposite the traversal direction and examines
+            // reachable nodes.
+            //
+            // If the edge is not a coordinate-transform edge, then we
+            // don't traverse it.
+            //
+            // If all reachable nodes are storage or loopish, then we
+            // don't traverse the edge.
+            //
+            // If any of the reachable nodes is marked as "full stop",
+            // then we don't traverse the edge.
+            auto edgePredicate = [&](int tag) -> bool {
                 auto element = kgraph.coordinates.getElement(tag);
                 auto edge    = std::get<CT::Edge>(element);
 
                 bool isCT = std::holds_alternative<CT::CoordinateTransformEdge>(edge);
-                bool allReachableNeighoursLoopOrStorage = true;
+                if(!isCT)
+                    return false;
+
+                bool allReachableNeighboursAreBad = true;
                 for(auto neighbour : kgraph.coordinates.getNeighbours(tag, opposite(direction)))
                 {
                     if(!reachable.contains(neighbour))
                         continue;
 
-                    if(neighbour == target
-                       || !(isLoopishCoordinate(neighbour, kgraph)
-                            || isStorageCoordinate(neighbour, kgraph)))
-                    {
-                        allReachableNeighoursLoopOrStorage = false;
-                    }
+                    if(neighbour == target)
+                        allReachableNeighboursAreBad = false;
+
+                    if(!(isLoopishCoordinate(neighbour, kgraph)
+                         || isStorageCoordinate(neighbour, kgraph)))
+                        allReachableNeighboursAreBad = false;
+
+                    if(fullStop(neighbour))
+                        return false;
                 }
-                return isCT && !allReachableNeighoursLoopOrStorage;
+                return !allReachableNeighboursAreBad;
             };
 
-            // From the target coordinate, walk the graph but stop at loop
-            // or storage nodes.  This will result in a list of nodes that
-            // are used in the coordinate transform to compute indexes for
-            // the target coordinate.
-            auto candidates
-                = kgraph.coordinates
-                      .depthFirstVisit(target, dontWalkPastLoopOrStorageNodes, direction)
-                      .to<std::vector>();
+            auto candidates = kgraph.coordinates.depthFirstVisit(target, edgePredicate, direction)
+                                  .to<std::vector>();
 
-            // Internal nodes in the coordinate transform are computed as
-            // part of the transform, so just keep leaf nodes and/or
-            // hardware/loop coordinates.
+            // Internal nodes in the coordinate transform are computed
+            // as part of the transform, so only leaf nodes and/or
+            // hardware/loop coordinates are required.
             std::vector<int> required;
             std::copy_if(
                 candidates.cbegin(), candidates.cend(), std::back_inserter(required), [&](int tag) {
-                    bool isLeaf = kgraph.coordinates.getNeighbours(tag, direction)
-                                      .to<std::vector>()
-                                      .empty();
+                    bool isLeaf = true;
+                    for(auto edgeTag : kgraph.coordinates.getNeighbours(tag, direction))
+                    {
+                        auto edge = std::get<CT::Edge>(kgraph.coordinates.getElement(edgeTag));
+                        if(std::holds_alternative<CT::CoordinateTransformEdge>(edge))
+                        {
+                            // If a connected node, in the opposing
+                            // direction, is marked as "full stop",
+                            // this edge doesn't count.
+                            bool ignoreEdge = false;
+                            for(auto neighbour :
+                                kgraph.coordinates.getNeighbours(edgeTag, opposite(direction)))
+                            {
+                                if(fullStop(neighbour))
+                                    ignoreEdge = true;
+                            }
+                            if(!ignoreEdge)
+                                isLeaf = false;
+                        }
+                    }
+
                     bool isLeafy
                         = isHardwareCoordinate(tag, kgraph) || isLoopishCoordinate(tag, kgraph);
+
                     return isLeaf || isLeafy;
                 });
 
@@ -558,10 +606,10 @@ namespace rocRoller
             while(true)
             {
                 auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
-                AssertFatal(parent, "Dimension was not found in the parents.");
+                AssertFatal(parent, "Unique body-parent not found.");
 
                 auto setCoord = graph.control.get<SetCoordinate>(*parent);
-                AssertFatal(setCoord, "Dimension was not found in the parents.");
+                AssertFatal(setCoord, "Expected a SetCoordinate operation.");
 
                 tag = *parent;
 
@@ -571,27 +619,6 @@ namespace rocRoller
                 if(unroll == dim)
                     return tag;
             }
-        }
-
-        std::vector<int> getLoadsForUnroll(KernelGraph&     graph,
-                                           int              unrollCoord,
-                                           std::vector<int> loads,
-                                           int              unroll)
-        {
-            std::vector<int> retval;
-            for(auto& load : loads)
-            {
-                int  tag      = getSetCoordinateForDim(graph, unrollCoord, load);
-                auto setCoord = graph.control.get<SetCoordinate>(tag);
-                AssertFatal(evaluationTimes(
-                                setCoord->value)[rocRoller::Expression::EvaluationTime::Translate],
-                            "Unroll value should be a literal");
-                if(unroll == getUnsignedInt(evaluate(setCoord->value)))
-                {
-                    retval.push_back(load);
-                }
-            }
-            return retval;
         }
 
         VariableType getVariableType(KernelGraph const& graph, int opTag)

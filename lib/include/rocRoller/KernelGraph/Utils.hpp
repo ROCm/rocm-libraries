@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <functional>
 #include <optional>
 
 #include <rocRoller/Expression.hpp>
@@ -93,6 +94,12 @@ namespace rocRoller
          */
         std::pair<std::vector<int>, std::unordered_set<int>> findRequiredCoordinates(
             int target, Graph::Direction direction, KernelGraph const& kgraph);
+
+        std::pair<std::vector<int>, std::unordered_set<int>>
+            findRequiredCoordinates(int                      target,
+                                    Graph::Direction         direction,
+                                    std::function<bool(int)> fullStop,
+                                    KernelGraph const&       kgraph);
 
         std::pair<std::unordered_set<int>, std::unordered_set<int>>
             findAllRequiredCoordinates(int op, KernelGraph const& graph);
@@ -221,20 +228,6 @@ namespace rocRoller
          * @return int
          */
         int getSetCoordinateForDim(KernelGraph const& graph, int dim, int load);
-
-        /**
-         * @brief Retrieve all loads from the input vector that have a SetCoordinate which sets the input unrollCoord dimension to unroll.
-         *
-         * @param graph
-         * @param unrollCoord
-         * @param loads
-         * @param unroll
-         * @return std::vector<int>
-         */
-        std::vector<int> getLoadsForUnroll(KernelGraph&     graph,
-                                           int              unrollCoord,
-                                           std::vector<int> loads,
-                                           int              unroll);
 
         /**
          * @brief Create duplicates of all of the nodes downstream of the provided

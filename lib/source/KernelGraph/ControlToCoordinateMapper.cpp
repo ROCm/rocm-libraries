@@ -179,8 +179,6 @@ namespace rocRoller::KernelGraph
                 return "OFFSET";
             case ComputeIndexArgument::STRIDE:
                 return "STRIDE";
-            case ComputeIndexArgument::ZERO:
-                return "ZERO";
             case ComputeIndexArgument::BUFFER:
                 return "BUFFER";
             default:

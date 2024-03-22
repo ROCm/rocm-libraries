@@ -163,6 +163,13 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(PassThrough);
 
         /**
+         * Duplicate (identity) -- THIS IS TEMPORARY.
+         *
+         * Forward and reverse transforms are the identity.
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(Duplicate);
+
+        /**
          * Split a tensor into subdimensions.
          *
          * For example, with input dimensions
