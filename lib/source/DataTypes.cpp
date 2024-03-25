@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2023 Advanced Micro Devices, Inc.
+ * Copyright 2019-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -104,6 +104,8 @@ namespace rocRoller
             return "Bool";
         case DataType::Bool32:
             return "Bool32";
+        case DataType::Bool64:
+            return "Bool64";
 
         case DataType::Count:;
         }
@@ -152,6 +154,8 @@ namespace rocRoller
             return "BL";
         case DataType::Bool32:
             return "BL32";
+        case DataType::Bool64:
+            return "BL64";
 
         case DataType::Count:;
         }
@@ -353,9 +357,6 @@ namespace rocRoller
         if(rhs.dataType == DataType::Raw32)
             return lhs;
 
-        if(lhs.dataType == DataType::Bool32 && rhs.dataType == DataType::Bool)
-            return lhs;
-
         AssertFatal(lhsInfo.isIntegral == rhsInfo.isIntegral,
                     "No automatic promotion between integral and non-integral types",
                     ShowValue(lhs),
@@ -442,6 +443,7 @@ namespace rocRoller
 
         registerTypeInfo<bool>();
         registerTypeInfo<Bool32>();
+        registerTypeInfo<Bool64>();
 
         registerTypeInfo<PointerLocal>();
         registerTypeInfo<PointerGlobal>();

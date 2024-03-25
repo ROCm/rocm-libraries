@@ -944,11 +944,21 @@ namespace ExpressionTest
         auto sgprHalfx2
             = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Halfx2, 1)
                   ->expression();
+        auto sgprBool64
+            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Bool64, 1)
+                  ->expression();
         auto sgprBool32
             = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Bool32, 1)
                   ->expression();
         auto sgprBool
             = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Bool, 1)
+                  ->expression();
+        auto sgprWavefrontSized
+            = Register::Value::Placeholder(
+                  m_context,
+                  Register::Type::Scalar,
+                  m_context->kernel()->wavefront_size() == 64 ? DataType::Bool64 : DataType::Bool32,
+                  1)
                   ->expression();
 
         auto agprFloat = Register::Value::Placeholder(
@@ -982,7 +992,11 @@ namespace ExpressionTest
         Expression::ResultType rSgprHalf{Register::Type::Scalar, DataType::Half};
         Expression::ResultType rSgprHalfx2{Register::Type::Scalar, DataType::Halfx2};
         Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32};
+        Expression::ResultType rSgprBool64{Register::Type::Scalar, DataType::Bool64};
         Expression::ResultType rSgprBool{Register::Type::Scalar, DataType::Bool};
+        Expression::ResultType rSgprWavefrontSized{
+            Register::Type::Scalar,
+            m_context->kernel()->wavefront_size() == 64 ? DataType::Bool64 : DataType::Bool32};
 
         Expression::ResultType rVCC{Register::Type::VCC, DataType::Bool32};
         Expression::ResultType rSCC{Register::Type::SCC, DataType::Bool};
@@ -1022,13 +1036,13 @@ namespace ExpressionTest
         EXPECT_EQ(rSgprInt64, resultType(sgprInt64 + litInt32));
         EXPECT_EQ(rSgprInt64, resultType(sgprInt64 + sgprInt32));
 
-        EXPECT_EQ(rSgprBool32, resultType(vgprFloat > vgprFloat));
-        EXPECT_EQ(rSgprBool32, resultType(sgprFloat < vgprFloat));
-        EXPECT_EQ(rSgprBool32, resultType(sgprDouble <= vgprDouble));
-        EXPECT_EQ(rSgprBool32, resultType(sgprInt32 <= vgprInt32));
-        EXPECT_EQ(rSgprBool32, resultType(litInt32 > vgprInt64));
+        EXPECT_EQ(rSgprWavefrontSized, resultType(vgprFloat > vgprFloat));
+        EXPECT_EQ(rSgprWavefrontSized, resultType(sgprFloat < vgprFloat));
+        EXPECT_EQ(rSgprWavefrontSized, resultType(sgprDouble <= vgprDouble));
+        EXPECT_EQ(rSgprWavefrontSized, resultType(sgprInt32 <= vgprInt32));
+        EXPECT_EQ(rSgprWavefrontSized, resultType(litInt32 > vgprInt64));
         EXPECT_EQ(rSgprBool, resultType(litInt32 <= sgprInt64));
-        EXPECT_EQ(rSgprBool, resultType(litInt32 >= sgprInt32));
+        EXPECT_EQ(rSgprBool, resultType(sgprInt32 >= litInt32));
 
         EXPECT_ANY_THROW(resultType(sgprDouble <= vgprFloat));
         EXPECT_ANY_THROW(resultType(vgprInt32 > vgprFloat));
@@ -1096,24 +1110,26 @@ namespace ExpressionTest
 
         for(auto const& op : comparisonOps)
         {
-            EXPECT_EQ(rSgprBool32, resultType(op(vgprFloat, vgprFloat)))
+            EXPECT_EQ(rSgprWavefrontSized, resultType(op(vgprFloat, vgprFloat)))
                 << op(vgprFloat, vgprFloat);
-            EXPECT_EQ(rSgprBool32, resultType(op(vgprDouble, vgprDouble)))
+            EXPECT_EQ(rSgprWavefrontSized, resultType(op(vgprDouble, vgprDouble)))
                 << op(vgprDouble, vgprDouble);
-            EXPECT_EQ(rSgprBool32, resultType(op(vgprInt32, vgprInt32)))
+            EXPECT_EQ(rSgprWavefrontSized, resultType(op(vgprInt32, vgprInt32)))
                 << op(vgprInt32, vgprInt32);
-            EXPECT_EQ(rSgprBool32, resultType(op(vgprInt64, vgprInt64)))
+            EXPECT_EQ(rSgprWavefrontSized, resultType(op(vgprInt64, vgprInt64)))
                 << op(vgprInt64, vgprInt64);
-            EXPECT_EQ(rSgprBool32, resultType(op(vgprUInt32, vgprUInt32)))
+            EXPECT_EQ(rSgprWavefrontSized, resultType(op(vgprUInt32, vgprUInt32)))
                 << op(vgprUInt32, vgprUInt32);
-            EXPECT_EQ(rSgprBool32, resultType(op(vgprUInt64, vgprUInt64)))
+            EXPECT_EQ(rSgprWavefrontSized, resultType(op(vgprUInt64, vgprUInt64)))
                 << op(vgprUInt64, vgprUInt64);
-            EXPECT_EQ(rSgprBool32, resultType(op(vgprHalf, vgprHalf))) << op(vgprHalf, vgprHalf);
-            EXPECT_EQ(rSgprBool32, resultType(op(vgprHalfx2, vgprHalfx2)))
+            EXPECT_EQ(rSgprWavefrontSized, resultType(op(vgprHalf, vgprHalf)))
+                << op(vgprHalf, vgprHalf);
+            EXPECT_EQ(rSgprWavefrontSized, resultType(op(vgprHalfx2, vgprHalfx2)))
                 << op(vgprHalfx2, vgprHalfx2);
-            EXPECT_EQ(rSgprBool32, resultType(op(vgprBool32, vgprBool32)))
+            EXPECT_EQ(rSgprWavefrontSized, resultType(op(vgprBool32, vgprBool32)))
                 << op(vgprBool32, vgprBool32);
-            EXPECT_EQ(rSgprBool32, resultType(op(vgprBool, vgprBool))) << op(vgprBool, vgprBool);
+            EXPECT_EQ(rSgprWavefrontSized, resultType(op(vgprBool, vgprBool)))
+                << op(vgprBool, vgprBool);
 
             EXPECT_EQ(rSgprBool, resultType(op(sgprFloat, sgprFloat))) << op(sgprFloat, sgprFloat);
             EXPECT_EQ(rSgprBool, resultType(op(sgprDouble, sgprDouble)))
@@ -1201,8 +1217,8 @@ namespace ExpressionTest
             EXPECT_ANY_THROW(resultType(op(sgprInt64, sgprInt64))) << op(sgprInt64, sgprInt64);
             EXPECT_ANY_THROW(resultType(op(sgprUInt32, sgprUInt32))) << op(sgprUInt32, sgprUInt32);
 
-            EXPECT_EQ(rSgprBool, resultType(op(sgprUInt64, sgprUInt64)))
-                << op(sgprUInt64, sgprUInt64);
+            EXPECT_EQ(rSgprBool, resultType(op(sgprBool64, sgprBool64)))
+                << op(sgprBool64, sgprBool64);
             EXPECT_ANY_THROW(resultType(op(sgprHalf, sgprHalf))) << op(sgprHalf, sgprHalf);
             EXPECT_ANY_THROW(resultType(op(sgprHalfx2, sgprHalfx2))) << op(sgprHalfx2, sgprHalfx2);
             EXPECT_EQ(rSgprBool, resultType(op(sgprBool32, sgprBool32)))

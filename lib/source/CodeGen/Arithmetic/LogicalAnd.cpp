@@ -7,7 +7,7 @@ namespace rocRoller
 {
     // Register supported components
     RegisterComponentTemplateSpec(LogicalAndGenerator, Register::Type::Scalar, DataType::Bool32);
-    RegisterComponentTemplateSpec(LogicalAndGenerator, Register::Type::Scalar, DataType::UInt64);
+    RegisterComponentTemplateSpec(LogicalAndGenerator, Register::Type::Scalar, DataType::Bool64);
 
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::LogicalAnd>>
@@ -50,7 +50,7 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> LogicalAndGenerator<Register::Type::Scalar, DataType::UInt64>::generate(
+    Generator<Instruction> LogicalAndGenerator<Register::Type::Scalar, DataType::Bool64>::generate(
         Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
         AssertFatal(lhs != nullptr);
@@ -63,7 +63,7 @@ namespace rocRoller
         }
 
         auto tmp
-            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::UInt64, 1);
+            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Bool64, 1);
 
         co_yield_(Instruction("s_and_b64", {tmp}, {lhs, rhs}, {}, ""));
         co_yield_(Instruction("s_cmp_lg_u64", {}, {tmp, Register::Value::Literal(0)}, {}, ""));

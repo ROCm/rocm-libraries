@@ -79,6 +79,14 @@ namespace rocRoller
                                                Register::ValuePtr condition,
                                                std::string        comment = "");
 
+        /**
+         * @brief Creates a result register for a condition expression
+         *
+         * @param expr Conditional expression
+         * @return Result
+         */
+        Register::ValuePtr resultRegister(Expression::ExpressionPtr expr);
+
     private:
         std::weak_ptr<Context> m_context;
     };

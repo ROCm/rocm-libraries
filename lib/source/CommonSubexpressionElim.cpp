@@ -396,12 +396,6 @@ namespace rocRoller
                         return Register::Value::Placeholder(
                             m_context, Register::Type::Scalar, resType.varType, valueCount);
                 }
-                else if(resType.regType == Register::Type::Scalar
-                        && resType.varType == DataType::Bool32)
-                {
-                    return Register::Value::WavefrontPlaceholder(m_context);
-                }
-
                 return Register::Value::Placeholder(
                     m_context, resType.regType, resType.varType, valueCount);
             }

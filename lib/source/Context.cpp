@@ -135,7 +135,7 @@ namespace rocRoller
                 shared_from_this(), Register::Type::VCC_LO, DataType::Bool32, 1);
         else
             return std::make_shared<Register::Value>(
-                shared_from_this(), Register::Type::VCC, DataType::Bool32, 2);
+                shared_from_this(), Register::Type::VCC, DataType::Bool64, 1);
     }
 
     Register::ValuePtr Context::getVCC_LO()

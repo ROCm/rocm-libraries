@@ -10,6 +10,7 @@
 
 #include "../AssemblyKernel.hpp"
 #include "../Context.hpp"
+#include "../ExpressionTransformations.hpp"
 #include "../InstructionValues/Register.hpp"
 #include "../Utilities/Error.hpp"
 
@@ -97,5 +98,16 @@ namespace rocRoller
                                                                    std::string        comment)
     {
         co_yield branchConditional(destLabel, condition, false, comment);
+    }
+
+    inline Register::ValuePtr BranchGenerator::resultRegister(Expression::ExpressionPtr expr)
+    {
+        auto context = m_context.lock();
+
+        // Resolve DataFlowTags and evaluate exprs with translate time source operands.
+        expr = dataFlowTagPropagation(expr, context);
+
+        auto [conditionRegisterType, conditionVariableType] = Expression::resultType(expr);
+        return conditionVariableType == DataType::Bool ? context->getSCC() : context->getVCC();
     }
 }

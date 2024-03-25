@@ -108,12 +108,7 @@ namespace rocRollerTest
             if(useVCC)
                 s_condition = m_context->getVCC();
             else
-                s_condition
-                    = Register::Value::Placeholder(m_context,
-                                                   Register::Type::Scalar,
-                                                   DataType::Raw32,
-                                                   2,
-                                                   Register::AllocationOptions::FullyContiguous());
+                s_condition = Register::Value::WavefrontPlaceholder(m_context);
 
             // Double the input value.
             co_yield Expression::generate(

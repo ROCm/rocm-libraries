@@ -94,7 +94,8 @@ namespace rocRoller
         UInt32, //< 32bit unsigned integer
         UInt64, //< 64bit unsigned integer
         Bool, //< Single bit boolean (SCC)
-        Bool32, //< Thirty-two booleans packed into 32bits.  Usually the result of a vector-comparison (VCC; On Wave32 VCC is a single Bool32; on Wave64 VCC is two Bool32s).
+        Bool32, //< Thirty-two booleans packed into 32bits.  Usually the result of a vector-comparison (VCC; On Wave32 VCC is a single Bool32).
+        Bool64, //< Sixty-four booleans packed into 64bits.  Usually the result of a vector-comparison (VCC; On Wave64 VCC is a single Bool64).
         Count,
         None = Count //< Represents: any, unknown/unspecified, or a deferred type.
     };
@@ -738,6 +739,23 @@ namespace rocRoller
     {
     };
 
+    struct Bool64 : public DistinctType<uint64_t, Bool64>
+    {
+    };
+
+    template <>
+    struct TypeInfo<Bool64> : public BaseTypeInfo<Bool64,
+                                                  DataType::Bool64,
+                                                  DataType::Bool64,
+                                                  PointerType::Value,
+                                                  1,
+                                                  2,
+                                                  false,
+                                                  false,
+                                                  false>
+    {
+    };
+
     struct PointerLocal : public DistinctType<uint32_t, PointerLocal>
     {
     };
@@ -820,6 +838,7 @@ namespace rocRoller
     DeclareEnumTypeInfo(UInt64, uint64_t);
     DeclareEnumTypeInfo(Bool, bool);
     DeclareEnumTypeInfo(Bool32, Bool32);
+    DeclareEnumTypeInfo(Bool64, Bool64);
 
 #undef DeclareEnumTypeInfo
 

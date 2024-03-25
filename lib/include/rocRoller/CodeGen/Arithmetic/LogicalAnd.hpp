@@ -64,6 +64,6 @@ namespace rocRoller
     Generator<Instruction> LogicalAndGenerator<Register::Type::Scalar, DataType::Bool32>::generate(
         Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
     template <>
-    Generator<Instruction> LogicalAndGenerator<Register::Type::Scalar, DataType::UInt64>::generate(
+    Generator<Instruction> LogicalAndGenerator<Register::Type::Scalar, DataType::Bool64>::generate(
         Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
 }

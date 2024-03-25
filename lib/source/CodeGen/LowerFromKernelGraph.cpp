@@ -21,6 +21,7 @@
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
@@ -280,13 +281,11 @@ namespace rocRoller
                 auto botLabel   = m_context->labelAllocator()->label("ConditionalBottom");
 
                 co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Conditional");
-                auto [conditionRegisterType, conditionVariableType]
-                    = Expression::resultType(op.condition);
-                auto conditionResult = conditionVariableType == DataType::Bool
-                                           ? m_context->getSCC()
-                                           : m_context->getVCC();
-                co_yield Expression::generate(
-                    conditionResult, m_fastArith(op.condition), m_context);
+
+                auto expr            = m_fastArith(op.condition);
+                auto conditionResult = m_context->brancher()->resultRegister(expr);
+
+                co_yield Expression::generate(conditionResult, expr, m_context);
 
                 co_yield m_context->brancher()->branchIfZero(
                     falseLabel,
@@ -319,18 +318,17 @@ namespace rocRoller
                 //Do Body at least once
                 auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
 
-                auto [conditionRegisterType, conditionVariableType]
-                    = Expression::resultType(op.condition);
-                auto conditionResult = conditionVariableType == DataType::Bool
-                                           ? m_context->getSCC()
-                                           : m_context->getVCC();
-
                 co_yield Instruction::Label(topLabel);
+
                 co_yield generate(body, coords);
 
+                auto expr = op.condition;
+
+                // For some reason this has to be called after generate(body, coords)
+                auto conditionResult = m_context->brancher()->resultRegister(expr);
+
                 //Check Condition
-                co_yield Expression::generate(
-                    conditionResult, m_fastArith(op.condition), m_context);
+                co_yield Expression::generate(conditionResult, expr, m_context);
 
                 co_yield m_context->brancher()->branchIfNonZero(
                     topLabel,
@@ -369,13 +367,11 @@ namespace rocRoller
                 }
 
                 co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock For Loop");
-                auto [conditionRegisterType, conditionVariableType]
-                    = Expression::resultType(op.condition);
-                auto conditionResult = conditionVariableType == DataType::Bool
-                                           ? m_context->getSCC()
-                                           : m_context->getVCC();
-                co_yield Expression::generate(
-                    conditionResult, m_fastArith(op.condition), m_context);
+
+                auto expr            = m_fastArith(op.condition);
+                auto conditionResult = m_context->brancher()->resultRegister(expr);
+
+                co_yield Expression::generate(conditionResult, expr, m_context);
                 co_yield m_context->brancher()->branchIfZero(
                     botLabel,
                     conditionResult,
@@ -393,8 +389,7 @@ namespace rocRoller
                 co_yield Instruction::Comment("Condition: Bottom (jump to " + topLabel->toString()
                                               + " if true)");
 
-                co_yield Expression::generate(
-                    conditionResult, m_fastArith(op.condition), m_context);
+                co_yield Expression::generate(conditionResult, expr, m_context);
                 co_yield m_context->brancher()->branchIfNonZero(
                     topLabel,
                     conditionResult,

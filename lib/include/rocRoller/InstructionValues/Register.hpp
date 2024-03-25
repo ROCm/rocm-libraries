@@ -135,7 +135,7 @@ namespace rocRoller
                                         int               count,
                                         AllocationOptions allocOptions = {});
 
-            static ValuePtr WavefrontPlaceholder(ContextPtr context);
+            static ValuePtr WavefrontPlaceholder(ContextPtr context, int count = 1);
 
             static ValuePtr AllocateLDS(ContextPtr   ctx,
                                         VariableType varType,

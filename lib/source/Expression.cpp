@@ -161,10 +161,13 @@ namespace rocRoller
          * result type
          */
 
-        struct ExpressionResultTypeVisitor
+        class ExpressionResultTypeVisitor
         {
+            std::weak_ptr<Context> m_context;
+
+        public:
             template <typename T>
-            requires(CBinary<T>&& CArithmetic<T>) ResultType operator()(T const& expr) const
+            requires(CBinary<T>&& CArithmetic<T>) ResultType operator()(T const& expr)
             {
                 auto lhsVal = call(expr.lhs);
                 auto rhsVal = call(expr.rhs);
@@ -186,7 +189,7 @@ namespace rocRoller
             }
 
             template <typename T>
-            requires(CTernary<T>&& CArithmetic<T>) ResultType operator()(T const& expr) const
+            requires(CTernary<T>&& CArithmetic<T>) ResultType operator()(T const& expr)
             {
                 auto lhsVal  = call(expr.lhs);
                 auto r1hsVal = call(expr.r1hs);
@@ -202,7 +205,7 @@ namespace rocRoller
             }
 
             template <typename T>
-            requires(CUnary<T>&& CArithmetic<T>) ResultType operator()(T const& expr) const
+            requires(CUnary<T>&& CArithmetic<T>) ResultType operator()(T const& expr)
             {
                 auto argVal = call(expr.arg);
 
@@ -213,14 +216,14 @@ namespace rocRoller
             }
 
             template <DataType DATATYPE>
-            ResultType operator()(Convert<DATATYPE> const& expr) const
+            ResultType operator()(Convert<DATATYPE> const& expr)
             {
                 auto argVal = call(expr.arg);
                 return {argVal.regType, DATATYPE};
             }
 
             template <typename T>
-            requires(CBinary<T>&& CComparison<T>) ResultType operator()(T const& expr) const
+            requires(CBinary<T>&& CComparison<T>) ResultType operator()(T const& expr)
             {
                 auto lhsVal = call(expr.lhs);
                 auto rhsVal = call(expr.rhs);
@@ -243,8 +246,16 @@ namespace rocRoller
                 case Register::Type::Scalar:
                     return {Register::Type::Scalar, DataType::Bool};
                 case Register::Type::Vector:
-                    return {Register::Type::Scalar, DataType::Bool32};
-
+                    if(auto context = m_context.lock(); context)
+                    {
+                        if(context->kernel()->wavefront_size() == 32)
+                            return {Register::Type::Scalar, DataType::Bool32};
+                        return {Register::Type::Scalar, DataType::Bool64};
+                    }
+                    // If you are reading this, it probably means that this visitor
+                    // was called on an expression with registers that didn't have
+                    // a context.
+                    Throw<FatalError>("Need context to determine wavefront size", ShowValue(expr));
                 default:
                     break;
                 }
@@ -254,16 +265,17 @@ namespace rocRoller
             }
 
             template <typename T>
-            requires(CBinary<T>&& CLogical<T>) ResultType operator()(T const& expr) const
+            requires(CBinary<T>&& CLogical<T>) ResultType operator()(T const& expr)
             {
                 auto lhsVal = call(expr.lhs);
                 auto rhsVal = call(expr.rhs);
                 return logical(lhsVal, rhsVal);
             }
 
-            ResultType logical(ResultType lhsVal, ResultType rhsVal) const
+            ResultType logical(ResultType lhsVal, ResultType rhsVal)
             {
-                if(lhsVal.varType == DataType::Bool && rhsVal.varType == DataType::Bool32)
+                if(lhsVal.varType == DataType::Bool
+                   && (rhsVal.varType == DataType::Bool32 || rhsVal.varType == DataType::Bool64))
                 {
                     std::swap(lhsVal, rhsVal);
                 }
@@ -273,7 +285,8 @@ namespace rocRoller
                     lhsVal.regType == Register::Type::Literal
                         || rhsVal.regType == Register::Type::Literal
                         || lhsVal.varType == rhsVal.varType
-                        || (lhsVal.varType == DataType::Bool32 && rhsVal.varType == DataType::Bool),
+                        || (lhsVal.varType == DataType::Bool32 && rhsVal.varType == DataType::Bool)
+                        || (lhsVal.varType == DataType::Bool64 && rhsVal.varType == DataType::Bool),
                     ShowValue(lhsVal.varType),
                     ShowValue(rhsVal.varType));
 
@@ -284,7 +297,7 @@ namespace rocRoller
                 {
                 case Register::Type::Scalar:
                     if(inputVarType == DataType::Bool || inputVarType == DataType::Bool32
-                       || inputVarType == DataType::Raw32 || inputVarType == DataType::UInt64)
+                       || inputVarType == DataType::Bool64)
                     {
                         return {Register::Type::Scalar, DataType::Bool};
                     }
@@ -295,11 +308,13 @@ namespace rocRoller
                                   ShowValue(lhsVal.regType),
                                   ShowValue(lhsVal.varType),
                                   ShowValue(rhsVal.regType),
-                                  ShowValue(rhsVal.varType));
+                                  ShowValue(rhsVal.varType),
+                                  ShowValue(inputRegType),
+                                  ShowValue(inputVarType));
             }
 
             template <typename T>
-            requires(CUnary<T>&& CLogical<T>) ResultType operator()(T const& expr) const
+            requires(CUnary<T>&& CLogical<T>) ResultType operator()(T const& expr)
             {
                 auto val = call(expr.arg);
                 switch(val.regType)
@@ -307,7 +322,7 @@ namespace rocRoller
                 case Register::Type::Scalar:
                 {
                     if(!(val.varType == DataType::Bool || val.varType == DataType::Bool32
-                         || val.varType == DataType::Raw32))
+                         || val.varType == DataType::Bool64 || val.varType == DataType::Raw32))
                     {
                         Throw<FatalError>("Invalid variable type for unary logical: ",
                                           ShowValue(val.varType));
@@ -320,7 +335,7 @@ namespace rocRoller
                 }
             }
 
-            ResultType operator()(Conditional const& expr) const
+            ResultType operator()(Conditional const& expr)
             {
                 auto lhsVal  = call(expr.lhs);
                 auto r1hsVal = call(expr.r1hs);
@@ -331,7 +346,8 @@ namespace rocRoller
                             ShowValue(r2hsVal.varType));
                 auto varType = r2hsVal.varType;
 
-                if(lhsVal.varType == DataType::Bool32 || lhsVal.regType == Register::Type::Vector
+                if(lhsVal.varType == DataType::Bool32 || lhsVal.varType == DataType::Bool64
+                   || lhsVal.regType == Register::Type::Vector
                    || r1hsVal.regType == Register::Type::Vector
                    || r2hsVal.regType == Register::Type::Vector)
                 {
@@ -340,45 +356,46 @@ namespace rocRoller
                 return {Register::Type::Scalar, varType};
             }
 
-            ResultType operator()(CommandArgumentPtr const& expr) const
+            ResultType operator()(CommandArgumentPtr const& expr)
             {
                 AssertFatal(expr != nullptr, "Null subexpression!");
                 return {Register::Type::Literal, expr->variableType()};
             }
 
-            ResultType operator()(AssemblyKernelArgumentPtr const& expr) const
+            ResultType operator()(AssemblyKernelArgumentPtr const& expr)
             {
                 AssertFatal(expr != nullptr, "Null subexpression!");
                 return {Register::Type::Scalar, expr->variableType};
             }
 
-            ResultType operator()(CommandArgumentValue const& expr) const
+            ResultType operator()(CommandArgumentValue const& expr)
             {
                 return {Register::Type::Literal, variableType(expr)};
             }
 
-            ResultType operator()(Register::ValuePtr const& expr) const
+            ResultType operator()(Register::ValuePtr const& expr)
             {
                 AssertFatal(expr != nullptr, "Null subexpression!");
+                m_context = expr->context();
                 return {expr->regType(), expr->variableType()};
             }
 
-            ResultType operator()(DataFlowTag const& expr) const
+            ResultType operator()(DataFlowTag const& expr)
             {
                 return {expr.regType, expr.varType};
             }
 
-            ResultType operator()(WaveTilePtr const& expr) const
+            ResultType operator()(WaveTilePtr const& expr)
             {
                 return call(expr->vgpr);
             }
 
-            ResultType call(Expression const& expr) const
+            ResultType call(Expression const& expr)
             {
                 return std::visit(*this, expr);
             }
 
-            ResultType call(ExpressionPtr const& expr) const
+            ResultType call(ExpressionPtr const& expr)
             {
                 return call(*expr);
             }

@@ -7,17 +7,17 @@ namespace rocRoller
 {
     namespace Register
     {
-        ValuePtr Value::WavefrontPlaceholder(ContextPtr context)
+        ValuePtr Value::WavefrontPlaceholder(ContextPtr context, int count)
         {
-            int count = 1;
+            auto dataType = DataType::Bool32;
             if(context->kernel()->wavefront_size() == 64)
             {
-                count = 2;
+                dataType = DataType::Bool64;
             }
 
             return Placeholder(context,
                                Type::Scalar,
-                               DataType::Raw32,
+                               dataType,
                                count,
                                Register::AllocationOptions::FullyContiguous());
         }

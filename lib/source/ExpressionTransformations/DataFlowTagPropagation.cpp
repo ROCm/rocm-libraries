@@ -67,7 +67,8 @@ namespace rocRoller
                 }
                 else
                 {
-                    AssertFatal(m_context->registerTagManager()->hasRegister(expr.tag));
+                    AssertFatal(m_context->registerTagManager()->hasRegister(expr.tag),
+                                ShowValue(expr.tag));
                     return std::make_shared<Expression>(
                         m_context->registerTagManager()->getRegister(expr.tag));
                 }
