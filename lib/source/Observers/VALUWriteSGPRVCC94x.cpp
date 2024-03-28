@@ -6,16 +6,22 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        int VALUWriteSGPRVCC94x::getMaxNops(std::shared_ptr<InstructionRef> inst) const
+        int VALUWriteSGPRVCC94x::getMaxNops(Instruction const& inst) const
         {
             return m_maxNops;
         }
 
-        bool VALUWriteSGPRVCC94x::trigger(std::shared_ptr<InstructionRef> inst) const
+        bool VALUWriteSGPRVCC94x::trigger(Instruction const& inst) const
         {
-            return inst->isVCMP() || inst->isVReadlane() || inst->isVDivScale()
-                   || (inst->isVAddInst() && (inst->isIntInst() || inst->isUIntInst()))
-                   || (inst->isVSubInst() && (inst->isIntInst() || inst->isUIntInst()));
+            return InstructionRef::isVCMP(inst.getOpCode())
+                   || InstructionRef::isVReadlane(inst.getOpCode())
+                   || InstructionRef::isVDivScale(inst.getOpCode())
+                   || (InstructionRef::isVAddInst(inst.getOpCode())
+                       && (InstructionRef::isIntInst(inst.getOpCode())
+                           || InstructionRef::isUIntInst(inst.getOpCode())))
+                   || (InstructionRef::isVSubInst(inst.getOpCode())
+                       && (InstructionRef::isIntInst(inst.getOpCode())
+                           || InstructionRef::isUIntInst(inst.getOpCode())));
         };
 
         bool VALUWriteSGPRVCC94x::writeTrigger() const
@@ -25,11 +31,10 @@ namespace rocRoller
 
         int VALUWriteSGPRVCC94x::getNops(Instruction const& inst) const
         {
-            InstructionRef instRef(inst);
-            if(instRef.isVReadlane() || instRef.isVWritelane())
+            if(InstructionRef::isVReadlane(inst.getOpCode())
+               || InstructionRef::isVWritelane(inst.getOpCode()))
             {
-                AssertFatal(
-                    inst.getSrcs().size() >= 2, "Unexpected instruction", instRef.getOpCode());
+                AssertFatal(inst.getSrcs().size() >= 2, "Unexpected instruction", inst.getOpCode());
                 auto const& laneSelect = inst.getSrcs()[1];
                 auto        val        = checkRegister(laneSelect);
                 if(val.has_value()

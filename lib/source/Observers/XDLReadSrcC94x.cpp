@@ -8,8 +8,7 @@ namespace rocRoller
     {
         void XDLReadSrcC94x::observeHazard(Instruction const& inst)
         {
-            auto instRef = std::make_shared<InstructionRef>(inst);
-            if(trigger(instRef))
+            if(trigger(inst))
             {
                 auto srcC = inst.getSrcs().at(2);
                 AssertFatal(srcC != nullptr, "Empty SrcC");
@@ -17,19 +16,19 @@ namespace rocRoller
                 for(auto const& regId : srcC->getRegisterIds())
                 {
                     (*m_hazardMap)[regId].push_back(
-                        WaitStateHazardCounter(getMaxNops(instRef), instRef, writeTrigger()));
+                        WaitStateHazardCounter(getMaxNops(inst), writeTrigger()));
                 }
             }
         }
 
-        int XDLReadSrcC94x::getMaxNops(std::shared_ptr<InstructionRef> inst) const
+        int XDLReadSrcC94x::getMaxNops(Instruction const& inst) const
         {
-            return getNopFromLatency(inst->getOpCode(), m_latencyAndNops);
+            return getNopFromLatency(inst.getOpCode(), m_latencyAndNops);
         }
 
-        bool XDLReadSrcC94x::trigger(std::shared_ptr<InstructionRef> inst) const
+        bool XDLReadSrcC94x::trigger(Instruction const& inst) const
         {
-            return inst->isMFMA();
+            return InstructionRef::isMFMA(inst.getOpCode());
         };
 
         bool XDLReadSrcC94x::writeTrigger() const
@@ -39,8 +38,8 @@ namespace rocRoller
 
         int XDLReadSrcC94x::getNops(Instruction const& inst) const
         {
-            InstructionRef instRef(inst);
-            if(instRef.isVALU() && !instRef.isMFMA())
+            if(InstructionRef::isVALU(inst.getOpCode())
+               && !InstructionRef::isMFMA(inst.getOpCode()))
             {
                 // WAR
                 return checkDsts(inst).value_or(0);

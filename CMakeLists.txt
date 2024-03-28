@@ -295,7 +295,6 @@ set(rocroller_src
  lib/source/CodeGen/ArgumentLoader.cpp
  lib/source/CodeGen/Buffer.cpp
  lib/source/CodeGen/Instruction.cpp
- lib/source/CodeGen/InstructionRef.cpp
  lib/source/CodeGen/LoadStoreTileGenerator.cpp
  lib/source/CodeGen/LowerFromKernelGraph.cpp
  lib/source/CodeGen/MemoryInstructions.cpp
@@ -355,6 +354,7 @@ set(rocroller_src
  lib/source/Observers/DGEMM4x4x4Write.cpp
  lib/source/Observers/DLWrite.cpp
  lib/source/Observers/ObserverCreation.cpp
+ lib/source/Observers/OPSEL94x.cpp
  lib/source/Observers/RegisterLivenessObserver.cpp
  lib/source/Observers/SupportedInstructionObserver.cpp
  lib/source/Observers/VALUTransWrite94x.cpp
@@ -363,6 +363,7 @@ set(rocroller_src
  lib/source/Observers/VALUWriteSGPRVCC94x.cpp
  lib/source/Observers/VALUWriteSGPRVMEM.cpp
  lib/source/Observers/VALUWriteVCCVDIVFMAS.cpp
+ lib/source/Observers/VCMPXWrite94x.cpp
  lib/source/Observers/WaitcntObserver.cpp
  lib/source/Observers/XDLReadSrcC908.cpp
  lib/source/Observers/XDLReadSrcC94x.cpp

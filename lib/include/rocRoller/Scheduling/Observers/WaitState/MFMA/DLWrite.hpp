@@ -19,21 +19,10 @@ namespace rocRoller
          * | 94x  | v_dot* write | Different opcode            | 3    |
          *
          */
-        class DLWrite : public WaitStateObserver<DLWrite>
-        {
-        public:
-            DLWrite() {}
-            DLWrite(ContextPtr context)
-                : WaitStateObserver<DLWrite>(context){};
+            void observeHazard(Instruction const& inst) override;
 
-            static bool required(ContextPtr context)
-            {
-                auto arch = context->targetArchitecture().target().getVersionString();
-                return arch == "gfx90a" || arch == "gfx940" || arch == "gfx941" || arch == "gfx942";
-            }
-
-            int         getMaxNops(std::shared_ptr<InstructionRef> inst) const;
-            bool        trigger(std::shared_ptr<InstructionRef> inst) const;
+            int         getMaxNops(Instruction const& inst) const;
+            bool        trigger(Instruction const& inst) const;
             bool        writeTrigger() const;
             int         getNops(Instruction const& inst) const;
             std::string getComment() const
@@ -42,10 +31,8 @@ namespace rocRoller
             }
 
         private:
-            bool determineHazard(Register::RegisterId const& regId,
-                                 InstructionRef const&       instRef) const;
-
-            int const m_maxNops = 3;
+            int const   m_maxNops    = 3;
+            std::string m_prevOpCode = "";
         };
 
         static_assert(CWaitStateObserver<DLWrite>);

@@ -87,7 +87,8 @@ namespace rocRoller
         int                    getLockValue() const;
         Scheduling::Dependency getDependency() const;
 
-        std::string getOpCode() const;
+        std::string const&                                 getOpCode() const;
+        std::array<std::string, Instruction::MaxModifiers> getModifiers() const;
 
         int getNopCount() const
         {

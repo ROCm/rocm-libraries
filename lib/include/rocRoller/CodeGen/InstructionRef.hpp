@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "Instruction_fwd.hpp"
 
@@ -12,44 +13,6 @@ namespace rocRoller
     class InstructionRef
     {
     public:
-        explicit InstructionRef(Instruction const& inst);
-
-        std::string getOpCode() const;
-
-        bool isDLOP() const;
-        bool isMFMA() const;
-        bool isVCMPX() const;
-        bool isVCMP() const;
-
-        bool isScalar() const;
-        bool isSMEM() const;
-        bool isSControl() const;
-        bool isSALU() const;
-        bool isIntInst() const;
-        bool isUIntInst() const;
-
-        bool isVector() const;
-        bool isVALU() const;
-        bool isVALUTrans() const;
-        bool isDGEMM() const;
-        bool isSGEMM() const;
-        bool isVMEM() const;
-        bool isVMEMRead() const;
-        bool isVMEMWrite() const;
-        bool isFlat() const;
-        bool isLDS() const;
-        bool isLDSRead() const;
-        bool isLDSWrite() const;
-
-        bool isACCVGPRRead() const;
-        bool isACCVGPRWrite() const;
-        bool isVAddInst() const;
-        bool isVSubInst() const;
-        bool isVReadlane() const;
-        bool isVWritelane() const;
-        bool isVDivScale() const;
-        bool isVDivFmas() const;
-
         static bool isDLOP(Instruction const& inst);
         static bool isMFMA(Instruction const& inst);
         static bool isVCMPX(Instruction const& inst);
@@ -61,6 +24,7 @@ namespace rocRoller
         static bool isSALU(Instruction const& inst);
         static bool isIntInst(Instruction const& inst);
         static bool isUIntInst(Instruction const& inst);
+        static bool isSDWA(Instruction const& inst);
 
         static bool isVector(Instruction const& inst);
         static bool isVALU(Instruction const& inst);
@@ -95,6 +59,7 @@ namespace rocRoller
         static bool isSALU(std::string const& inst);
         static bool isIntInst(std::string const& inst);
         static bool isUIntInst(std::string const& inst);
+        static bool isSDWA(std::string const& inst);
 
         static bool isVector(std::string const& inst);
         static bool isVALU(std::string const& inst);
@@ -117,9 +82,6 @@ namespace rocRoller
         static bool isVWritelane(std::string const& inst);
         static bool isVDivScale(std::string const& inst);
         static bool isVDivFmas(std::string const& inst);
-
-    private:
-        std::string m_opCode;
     };
 }
 

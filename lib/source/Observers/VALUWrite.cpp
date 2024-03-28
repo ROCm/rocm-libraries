@@ -6,14 +6,16 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        int VALUWrite::getMaxNops(std::shared_ptr<InstructionRef> inst) const
+        int VALUWrite::getMaxNops(Instruction const& inst) const
         {
             return m_maxNops;
         }
 
-        bool VALUWrite::trigger(std::shared_ptr<InstructionRef> inst) const
+        bool VALUWrite::trigger(Instruction const& inst) const
         {
-            return inst->isVALU() && !inst->isMFMA() && !inst->isDLOP();
+            return InstructionRef::isVALU(inst.getOpCode())
+                   && !InstructionRef::isMFMA(inst.getOpCode())
+                   && !InstructionRef::isDLOP(inst.getOpCode());
         };
 
         bool VALUWrite::writeTrigger() const
@@ -23,8 +25,8 @@ namespace rocRoller
 
         int VALUWrite::getNops(Instruction const& inst) const
         {
-            InstructionRef instRef(inst);
-            if(instRef.isMFMA() || (m_checkACCVGPR && instRef.isACCVGPRWrite()))
+            if(InstructionRef::isMFMA(inst.getOpCode())
+               || (m_checkACCVGPR && InstructionRef::isACCVGPRWrite(inst.getOpCode())))
             {
                 return checkSrcs(inst).value_or(0);
             }

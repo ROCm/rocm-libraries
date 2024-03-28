@@ -405,9 +405,14 @@ namespace rocRoller
         }
     }
 
-    inline std::string Instruction::getOpCode() const
+    inline std::string const& Instruction::getOpCode() const
     {
         return m_opcode;
+    }
+
+    inline std::array<std::string, Instruction::MaxModifiers> Instruction::getModifiers() const
+    {
+        return m_modifiers;
     }
 
     inline void Instruction::coreInstructionString(std::ostream& os) const

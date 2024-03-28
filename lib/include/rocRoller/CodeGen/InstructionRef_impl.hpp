@@ -6,154 +6,6 @@
 
 namespace rocRoller
 {
-    inline std::string InstructionRef::getOpCode() const
-    {
-        return m_opCode;
-    }
-
-    inline bool InstructionRef::isDLOP() const
-    {
-        return isDLOP(m_opCode);
-    }
-
-    inline bool InstructionRef::isMFMA() const
-    {
-        return isMFMA(m_opCode);
-    }
-
-    inline bool InstructionRef::isVCMPX() const
-    {
-        return isVCMPX(m_opCode);
-    }
-
-    inline bool InstructionRef::isVCMP() const
-    {
-        return isVCMP(m_opCode);
-    }
-
-    inline bool InstructionRef::isScalar() const
-    {
-        return isScalar(m_opCode);
-    }
-
-    inline bool InstructionRef::isSMEM() const
-    {
-        return isSMEM(m_opCode);
-    }
-
-    inline bool InstructionRef::isSControl() const
-    {
-        return isSControl(m_opCode);
-    }
-
-    inline bool InstructionRef::isSALU() const
-    {
-        return isSALU(m_opCode);
-    }
-
-    inline bool InstructionRef::isVector() const
-    {
-        return isVector(m_opCode);
-    }
-
-    inline bool InstructionRef::isVALU() const
-    {
-        return isVALU(m_opCode);
-    }
-
-    inline bool InstructionRef::isVALUTrans() const
-    {
-        return isVALUTrans(m_opCode);
-    }
-
-    inline bool InstructionRef::isDGEMM() const
-    {
-        return isDGEMM(m_opCode);
-    }
-
-    inline bool InstructionRef::isSGEMM() const
-    {
-        return isSGEMM(m_opCode);
-    }
-
-    inline bool InstructionRef::isVMEM() const
-    {
-        return isVMEM(m_opCode);
-    }
-
-    inline bool InstructionRef::isVMEMRead() const
-    {
-        return isVMEMRead(m_opCode);
-    }
-
-    inline bool InstructionRef::isVMEMWrite() const
-    {
-        return isVMEMWrite(m_opCode);
-    }
-
-    inline bool InstructionRef::isFlat() const
-    {
-        return isFlat(m_opCode);
-    }
-
-    inline bool InstructionRef::isLDS() const
-    {
-        return isLDS(m_opCode);
-    }
-
-    inline bool InstructionRef::isLDSRead() const
-    {
-        return isLDSRead(m_opCode);
-    }
-
-    inline bool InstructionRef::isLDSWrite() const
-    {
-        return isLDSWrite(m_opCode);
-    }
-
-    inline bool InstructionRef::isACCVGPRWrite() const
-    {
-        return isACCVGPRWrite(m_opCode);
-    }
-
-    inline bool InstructionRef::isACCVGPRRead() const
-    {
-        return isACCVGPRRead(m_opCode);
-    }
-
-    inline bool InstructionRef::isIntInst() const
-    {
-        return isIntInst(m_opCode);
-    }
-    inline bool InstructionRef::isUIntInst() const
-    {
-        return isUIntInst(m_opCode);
-    }
-    inline bool InstructionRef::isVAddInst() const
-    {
-        return isVAddInst(m_opCode);
-    }
-    inline bool InstructionRef::isVSubInst() const
-    {
-        return isVSubInst(m_opCode);
-    }
-    inline bool InstructionRef::isVReadlane() const
-    {
-        return isVReadlane(m_opCode);
-    }
-    inline bool InstructionRef::isVWritelane() const
-    {
-        return isVWritelane(m_opCode);
-    }
-    inline bool InstructionRef::isVDivScale() const
-    {
-        return isVDivScale(m_opCode);
-    }
-    inline bool InstructionRef::isVDivFmas() const
-    {
-        return isVDivFmas(m_opCode);
-    }
-
     inline bool InstructionRef::isDLOP(Instruction const& inst)
     {
         return isDLOP(inst.getOpCode());
@@ -271,6 +123,10 @@ namespace rocRoller
     inline bool InstructionRef::isUIntInst(Instruction const& inst)
     {
         return InstructionRef::isUIntInst(inst.getOpCode());
+    }
+    inline bool InstructionRef::isSDWA(Instruction const& inst)
+    {
+        return InstructionRef::isSDWA(inst.getOpCode());
     }
     inline bool InstructionRef::isVAddInst(Instruction const& inst)
     {
@@ -432,18 +288,17 @@ namespace rocRoller
 
     inline bool InstructionRef::isIntInst(std::string const& opCode)
     {
-        // '_i' should be in the last 5 characters of the string, unless encoding specifier is present
-        int offset = opCode.rfind("_e", opCode.size() - 6) == 0 ? 10 : 6;
-
-        return opCode.rfind("_i", opCode.size() - offset) == 0;
+        return opCode.find("_i32") != std::string::npos || opCode.find("_i64") != std::string::npos;
     }
 
     inline bool InstructionRef::isUIntInst(std::string const& opCode)
     {
-        // '_u' should be in the last 5 characters of the string, unless encoding specifier is present
-        int offset = opCode.rfind("_e", opCode.size() - 6) == 0 ? 10 : 6;
+        return opCode.find("_u32") != std::string::npos || opCode.find("_u64") != std::string::npos;
+    }
 
-        return opCode.rfind("_u", opCode.size() - offset) == 0;
+    inline bool InstructionRef::isSDWA(std::string const& opCode)
+    {
+        return opCode.find("_sdwa") != std::string::npos;
     }
 
     inline bool InstructionRef::isVAddInst(std::string const& opCode)

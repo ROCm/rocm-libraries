@@ -20,11 +20,13 @@
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite908.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite90a.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/OPSEL94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteReadlane94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVCC94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVMEM.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteVCCVDIVFMAS.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VCMPXWrite94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
 namespace rocRoller
@@ -55,12 +57,14 @@ namespace rocRoller
                                                  DGEMM4x4x4Write,
                                                  DGEMM16x16x4Write,
                                                  DLWrite,
+                                                 OPSEL94x,
                                                  VALUWrite,
                                                  VALUWriteReadlane94x,
                                                  VALUWriteSGPRVMEM,
                                                  VALUWriteVCCVDIVFMAS,
                                                  VALUTransWrite94x,
                                                  VALUWriteSGPRVCC94x,
+                                                 VCMPXWrite94x,
                                                  XDLReadSrcC94x,
                                                  XDLWrite94x>;
             using FileObservers   = MetaObserver<FileWritingObserver>;

@@ -6,16 +6,16 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        int DGEMM16x16x4Write::getMaxNops(std::shared_ptr<InstructionRef> inst) const
+        int DGEMM16x16x4Write::getMaxNops(Instruction const& inst) const
         {
             return m_maxNops;
         }
 
-        bool DGEMM16x16x4Write::trigger(std::shared_ptr<InstructionRef> inst) const
+        bool DGEMM16x16x4Write::trigger(Instruction const& inst) const
         {
             for(auto targetOpCode : m_targetOpCodes)
             {
-                if(inst->getOpCode() == targetOpCode)
+                if(inst.getOpCode() == targetOpCode)
                     return true;
             }
             return false;
@@ -28,9 +28,7 @@ namespace rocRoller
 
         int DGEMM16x16x4Write::getNops(Instruction const& inst) const
         {
-            InstructionRef instRef(inst);
-
-            if(instRef.isMFMA())
+            if(InstructionRef::isMFMA(inst.getOpCode()))
             {
                 std::optional<int> value;
 
@@ -48,7 +46,7 @@ namespace rocRoller
                         {
                             for(auto const& hazard : m_hazardMap->at(srcId))
                             {
-                                if(hazard.regWasWritten() && trigger(hazard.getInstructionRef()))
+                                if(hazard.regWasWritten())
                                 {
                                     overlap      = true;
                                     requiredNops = hazard.getRequiredNops() - (m_maxNops - 9);
@@ -62,7 +60,7 @@ namespace rocRoller
                     }
                     if(overlap)
                     {
-                        if(mismatched && instRef.isDGEMM())
+                        if(mismatched && InstructionRef::isDGEMM(inst.getOpCode()))
                         {
                             return requiredNops;
                         }
@@ -87,11 +85,13 @@ namespace rocRoller
                     return *value - (m_maxNops - 11);
                 }
             }
-            else if(instRef.isVMEM() || instRef.isLDS() || instRef.isFlat())
+            else if(InstructionRef::isVMEM(inst.getOpCode())
+                    || InstructionRef::isLDS(inst.getOpCode())
+                    || InstructionRef::isFlat(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0);
             }
-            else if(instRef.isVALU())
+            else if(InstructionRef::isVALU(inst.getOpCode()))
             {
                 std::optional<int> value;
 

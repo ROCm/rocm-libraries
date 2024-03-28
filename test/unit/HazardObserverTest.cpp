@@ -184,4 +184,80 @@ namespace rocRollerTest
             clearOutput();
         }
     }
+
+    TEST_F(Hazard942ObserverTest, VCMPX_EXEC)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::UInt32, 2);
+        auto s = createRegisters(Register::Type::Scalar, DataType::UInt32, 2);
+
+        {
+            std::vector<Instruction> insts = {
+                Instruction("v_cmpx_eq_u32", {}, {s[0], v[0]}, {}, ""),
+                Instruction("v_readlane_b32", {s[1]}, {v[0], Register::Value::Literal(0)}, {}, ""),
+                Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 2);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 1"));
+            clearOutput();
+        }
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_cmpx_eq_u32", {}, {s[0], v[0]}, {}, ""),
+                   Instruction("v_xor_b32", {v[1]}, {v[0], m_context->getExec()}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 4);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 3"));
+            clearOutput();
+        }
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_cmpx_eq_u32", {}, {s[0], v[0]}, {}, ""),
+                   Instruction("v_xor_b32", {v[1]}, {v[0], v[1]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1]);
+
+            EXPECT_THAT(output(), Not(HasSubstr("s_nop")));
+            clearOutput();
+        }
+    }
+
+    TEST_F(Hazard942ObserverTest, OPSEL_SDWA)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::UInt32, 2);
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_xor_b32_sdwa", {v[1]}, {v[0], v[0]}, {}, ""),
+                   Instruction("v_mov_b32", {v[0]}, {v[1]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 1);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 0"));
+            clearOutput();
+        }
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_fma_f16", {v[1]}, {v[0], v[0], v[0]}, {"op_sel:[0,1,1]"}, ""),
+                   Instruction("v_mov_b32", {v[0]}, {v[1]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 1);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 0"));
+            clearOutput();
+        }
+    }
 }

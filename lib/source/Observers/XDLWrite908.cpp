@@ -6,14 +6,14 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        int XDLWrite908::getMaxNops(std::shared_ptr<InstructionRef> inst) const
+        int XDLWrite908::getMaxNops(Instruction const& inst) const
         {
-            return getNopFromLatency(inst->getOpCode(), m_maxLatencyAndNops);
+            return getNopFromLatency(inst.getOpCode(), m_maxLatencyAndNops);
         }
 
-        bool XDLWrite908::trigger(std::shared_ptr<InstructionRef> inst) const
+        bool XDLWrite908::trigger(Instruction const& inst) const
         {
-            return inst->isMFMA();
+            return InstructionRef::isMFMA(inst.getOpCode());
         };
 
         bool XDLWrite908::writeTrigger() const
@@ -23,9 +23,7 @@ namespace rocRoller
 
         int XDLWrite908::getNops(Instruction const& inst) const
         {
-            InstructionRef instRef(inst);
-
-            if(instRef.isMFMA())
+            if(InstructionRef::isMFMA(inst.getOpCode()))
             {
                 std::optional<int> value;
 
@@ -44,14 +42,11 @@ namespace rocRoller
                         {
                             for(auto const& hazard : m_hazardMap->at(srcId))
                             {
-                                if(hazard.regWasWritten() && trigger(hazard.getInstructionRef()))
+                                if(hazard.regWasWritten())
                                 {
-                                    overlap      = true;
-                                    requiredNops = hazard.getRequiredNops()
-                                                   - getNopFromLatency(
-                                                       hazard.getInstructionRef()->getOpCode(),
-                                                       m_maxLatencyAndNops)
-                                                   + 2;
+                                    overlap = true;
+                                    requiredNops
+                                        = hazard.getRequiredNops() - hazard.getMaxNops() + 2;
                                 }
                             }
                         }
@@ -74,12 +69,9 @@ namespace rocRoller
                     {
                         for(auto const& hazard : m_hazardMap->at(srcId))
                         {
-                            if(hazard.regWasWritten() && trigger(hazard.getInstructionRef()))
+                            if(hazard.regWasWritten())
                             {
-                                return hazard.getRequiredNops()
-                                       - (getNopFromLatency(hazard.getInstructionRef()->getOpCode(),
-                                                            m_maxLatencyAndNops)
-                                          - 4);
+                                return hazard.getRequiredNops() - (hazard.getMaxNops() - 4);
                             }
                         }
                     }
@@ -93,23 +85,20 @@ namespace rocRoller
                     {
                         for(auto const& hazard : m_hazardMap->at(srcId))
                         {
-                            if(hazard.regWasWritten() && trigger(hazard.getInstructionRef()))
+                            if(hazard.regWasWritten())
                             {
-                                return hazard.getRequiredNops()
-                                       - (getNopFromLatency(hazard.getInstructionRef()->getOpCode(),
-                                                            m_maxLatencyAndNops)
-                                          - 4);
+                                return hazard.getRequiredNops() - (hazard.getMaxNops() - 4);
                             }
                         }
                     }
                 }
             }
-            else if(instRef.isACCVGPRRead())
+            else if(InstructionRef::isACCVGPRRead(inst.getOpCode()))
             {
                 // ACCVGPR RAW
                 return checkSrcs(inst).value_or(0);
             }
-            else if(instRef.isACCVGPRWrite())
+            else if(InstructionRef::isACCVGPRWrite(inst.getOpCode()))
             {
                 // ACCVGPR WAW
                 return checkDsts(inst).value_or(0) - 3;

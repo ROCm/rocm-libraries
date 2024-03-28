@@ -244,9 +244,8 @@ TEST_F(InstructionTest, Classifications)
     dst->allocateNow();
     src->allocateNow();
 
-    auto           inst = Instruction("s_cmov_b32", {dst}, {src}, {}, "Not VALU");
-    InstructionRef ref(inst);
-    EXPECT_FALSE(ref.isVALU());
+    auto inst = Instruction("s_cmov_b32", {dst}, {src}, {}, "Not VALU");
+    EXPECT_FALSE(InstructionRef::isVALU(inst.getOpCode()));
 }
 
 TEST_F(InstructionTest, Special)

@@ -8,25 +8,24 @@ namespace rocRoller
     {
         void CMPXWriteExec::observeHazard(Instruction const& inst)
         {
-            auto instRef = std::make_shared<InstructionRef>(inst);
-            if(trigger(instRef))
+            if(trigger(inst))
             {
                 for(auto const& regId : m_context.lock()->getExec()->getRegisterIds())
                 {
                     (*m_hazardMap)[regId].push_back(
-                        WaitStateHazardCounter(getMaxNops(instRef), instRef, writeTrigger()));
+                        WaitStateHazardCounter(getMaxNops(inst), writeTrigger()));
                 }
             }
         }
 
-        int CMPXWriteExec::getMaxNops(std::shared_ptr<InstructionRef> inst) const
+        int CMPXWriteExec::getMaxNops(Instruction const& inst) const
         {
             return m_maxNops;
         }
 
-        bool CMPXWriteExec::trigger(std::shared_ptr<InstructionRef> inst) const
+        bool CMPXWriteExec::trigger(Instruction const& inst) const
         {
-            return inst->isVCMPX();
+            return InstructionRef::isVCMPX(inst.getOpCode());
         };
 
         bool CMPXWriteExec::writeTrigger() const
@@ -36,8 +35,8 @@ namespace rocRoller
 
         int CMPXWriteExec::getNops(Instruction const& inst) const
         {
-            InstructionRef instRef(inst);
-            if(instRef.isMFMA() || (m_checkACCVGPR && instRef.isACCVGPRWrite()))
+            if(InstructionRef::isMFMA(inst.getOpCode())
+               || (m_checkACCVGPR && InstructionRef::isACCVGPRWrite(inst.getOpCode())))
             {
                 return checkRegister(m_context.lock()->getExec()).value_or(0);
             }

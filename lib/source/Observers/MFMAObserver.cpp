@@ -21,7 +21,7 @@ namespace rocRoller
 
         bool MFMAObserver::isMFMAInstruction(Instruction const& inst) const
         {
-            return InstructionRef(inst).isMFMA();
+            return InstructionRef::isMFMA(inst.getOpCode());
         }
 
         InstructionStatus MFMAObserver::peek(Instruction const& inst) const

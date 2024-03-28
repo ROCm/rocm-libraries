@@ -5,17 +5,17 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        int XDLWrite94x::getMaxNops(std::shared_ptr<InstructionRef> inst) const
+        int XDLWrite94x::getMaxNops(Instruction const& inst) const
         {
-            return getNopFromLatency(inst->getOpCode(), m_latencyAndNops);
+            return getNopFromLatency(inst.getOpCode(), m_latencyAndNops);
         }
 
-        bool XDLWrite94x::trigger(std::shared_ptr<InstructionRef> inst) const
+        bool XDLWrite94x::trigger(Instruction const& inst) const
         {
             bool excluded
-                = std::find(m_excludedOpCodes.begin(), m_excludedOpCodes.end(), inst->getOpCode())
+                = std::find(m_excludedOpCodes.begin(), m_excludedOpCodes.end(), inst.getOpCode())
                   != m_excludedOpCodes.end();
-            return inst->isMFMA() && !excluded;
+            return InstructionRef::isMFMA(inst.getOpCode()) && !excluded;
         };
 
         bool XDLWrite94x::writeTrigger() const
@@ -25,15 +25,14 @@ namespace rocRoller
 
         int XDLWrite94x::getNops(Instruction const& inst) const
         {
-            InstructionRef instRef(inst);
-            int            decrement = 0;
+            int decrement = 0;
 
-            if(instRef.isSGEMM())
+            if(InstructionRef::isSGEMM(inst.getOpCode()))
             {
                 decrement = 1;
             }
 
-            if(instRef.isMFMA())
+            if(InstructionRef::isMFMA(inst.getOpCode()))
             {
                 std::optional<int> value;
 
@@ -52,14 +51,14 @@ namespace rocRoller
                         {
                             for(auto const& hazard : m_hazardMap->at(srcId))
                             {
-                                if(hazard.regWasWritten() && trigger(hazard.getInstructionRef()))
+                                if(hazard.regWasWritten())
                                 {
                                     decrement = 2;
-                                    if(instRef.isDGEMM())
+                                    if(InstructionRef::isDGEMM(inst.getOpCode()))
                                     {
                                         decrement = 2;
                                     }
-                                    else if(instRef.isSGEMM())
+                                    else if(InstructionRef::isSGEMM(inst.getOpCode()))
                                     {
                                         decrement = 3;
                                     }
@@ -93,11 +92,13 @@ namespace rocRoller
                     return *value - decrement;
                 }
             }
-            else if(instRef.isVMEM() || instRef.isLDS() || instRef.isFlat())
+            else if(InstructionRef::isVMEM(inst.getOpCode())
+                    || InstructionRef::isLDS(inst.getOpCode())
+                    || InstructionRef::isFlat(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0) - decrement;
             }
-            else if(instRef.isVALU())
+            else if(InstructionRef::isVALU(inst.getOpCode()))
             {
                 std::optional<int> value;
 

@@ -5,17 +5,17 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        int XDLWrite90a::getMaxNops(std::shared_ptr<InstructionRef> inst) const
+        int XDLWrite90a::getMaxNops(Instruction const& inst) const
         {
-            return getNopFromLatency(inst->getOpCode(), m_latencyAndNops);
+            return getNopFromLatency(inst.getOpCode(), m_latencyAndNops);
         }
 
-        bool XDLWrite90a::trigger(std::shared_ptr<InstructionRef> inst) const
+        bool XDLWrite90a::trigger(Instruction const& inst) const
         {
             bool excluded
-                = std::find(m_excludedOpCodes.begin(), m_excludedOpCodes.end(), inst->getOpCode())
+                = std::find(m_excludedOpCodes.begin(), m_excludedOpCodes.end(), inst.getOpCode())
                   != m_excludedOpCodes.end();
-            return inst->isMFMA() && !excluded;
+            return InstructionRef::isMFMA(inst.getOpCode()) && !excluded;
         };
 
         bool XDLWrite90a::writeTrigger() const
@@ -25,9 +25,7 @@ namespace rocRoller
 
         int XDLWrite90a::getNops(Instruction const& inst) const
         {
-            InstructionRef instRef(inst);
-
-            if(instRef.isMFMA())
+            if(InstructionRef::isMFMA(inst.getOpCode()))
             {
                 std::optional<int> value;
 
@@ -46,11 +44,12 @@ namespace rocRoller
                         {
                             for(auto const& hazard : m_hazardMap->at(srcId))
                             {
-                                if(hazard.regWasWritten() && trigger(hazard.getInstructionRef()))
+                                if(hazard.regWasWritten())
                                 {
-                                    int decrement = instRef.isDGEMM() ? 2 : 3;
-                                    overlap       = true;
-                                    requiredNops  = hazard.getRequiredNops() - decrement;
+                                    int decrement
+                                        = InstructionRef::isDGEMM(inst.getOpCode()) ? 2 : 3;
+                                    overlap      = true;
+                                    requiredNops = hazard.getRequiredNops() - decrement;
                                 }
                             }
                         }
@@ -79,11 +78,13 @@ namespace rocRoller
                     return *value;
                 }
             }
-            else if(instRef.isVMEM() || instRef.isLDS() || instRef.isFlat())
+            else if(InstructionRef::isVMEM(inst.getOpCode())
+                    || InstructionRef::isLDS(inst.getOpCode())
+                    || InstructionRef::isFlat(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0);
             }
-            else if(instRef.isVALU())
+            else if(InstructionRef::isVALU(inst.getOpCode()))
             {
                 std::optional<int> value;
 

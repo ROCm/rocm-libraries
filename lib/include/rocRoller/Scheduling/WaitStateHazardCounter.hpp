@@ -1,7 +1,5 @@
 #pragma once
 
-#include <rocRoller/CodeGen/InstructionRef_fwd.hpp>
-
 #include <memory>
 
 namespace rocRoller
@@ -12,11 +10,9 @@ namespace rocRoller
         {
         public:
             WaitStateHazardCounter() {}
-            WaitStateHazardCounter(int                             maxRequiredNops,
-                                   std::shared_ptr<InstructionRef> inst,
-                                   bool                            written)
+            WaitStateHazardCounter(int maxRequiredNops, bool written)
                 : m_counter(maxRequiredNops)
-                , m_inst(inst)
+                , m_maxCounter(maxRequiredNops)
                 , m_written(written)
             {
             }
@@ -43,14 +39,14 @@ namespace rocRoller
                 return m_counter > 0;
             }
 
-            std::shared_ptr<InstructionRef> getInstructionRef() const
-            {
-                return m_inst;
-            }
-
             int getRequiredNops() const
             {
                 return m_counter;
+            }
+
+            int getMaxNops() const
+            {
+                return m_maxCounter;
             }
 
             bool regWasWritten() const
@@ -64,9 +60,9 @@ namespace rocRoller
             }
 
         private:
-            int                             m_counter = 0;
-            std::shared_ptr<InstructionRef> m_inst;
-            bool                            m_written = false;
+            int  m_counter    = 0;
+            int  m_maxCounter = 0;
+            bool m_written    = false;
         };
     }
 }

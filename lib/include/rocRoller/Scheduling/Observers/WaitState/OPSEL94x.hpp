@@ -7,19 +7,20 @@ namespace rocRoller
     namespace Scheduling
     {
         /**
-         * @brief 94x rule for VALU Write followed by a Readlane requiring 1 NOP
+         * @brief 94x rules for using OPSEL or SDWA
          *
-         * | Arch | 1st Inst  | 2nd Inst             | NOPs |
-         * | ---- | --------- | -------------------- | ---- |
-         * | 94x  | v_* write | v_readlane_* read    | 1    |
+         * | Arch | 1st Inst        | 2nd Inst | NOPs |
+         * | ---- | --------------- | -------- | ---- |
+         * | 94x  | v_* using OPSEL | v_* read | 1    |
+         * | 94x  | v_* using SDWA  | v_* read | 1    |
          *
          */
-        class VALUWriteReadlane94x : public WaitStateObserver<VALUWriteReadlane94x>
+        class OPSEL94x : public WaitStateObserver<OPSEL94x>
         {
         public:
-            VALUWriteReadlane94x() {}
-            VALUWriteReadlane94x(ContextPtr context)
-                : WaitStateObserver<VALUWriteReadlane94x>(context){};
+            OPSEL94x() {}
+            OPSEL94x(ContextPtr context)
+                : WaitStateObserver<OPSEL94x>(context){};
 
             static bool required(ContextPtr context)
             {
@@ -33,14 +34,13 @@ namespace rocRoller
             int         getNops(Instruction const& inst) const;
             std::string getComment() const
             {
-                return "VALU Write Readlane Hazard";
+                return "OPSEL/SDWA Write Hazard";
             }
 
         private:
-            bool      m_checkACCVGPR;
             int const m_maxNops = 1;
         };
 
-        static_assert(CWaitStateObserver<VALUWriteReadlane94x>);
+        static_assert(CWaitStateObserver<OPSEL94x>);
     }
 }

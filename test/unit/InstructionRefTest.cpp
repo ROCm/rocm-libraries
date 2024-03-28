@@ -21,22 +21,17 @@ class InstructionRefTest : public GenericContextFixture
     }
 };
 
-#define EXPECT_CATEGORY_EQ(opcode, category, val)                                           \
-    {                                                                                       \
-        std::string str_(opcode);                                                           \
-        auto        fromString_ = InstructionRef::category(str_);                           \
-                                                                                            \
-        Instruction inst_(str_, {}, {}, {}, "");                                            \
-        auto        fromInstruction_ = InstructionRef::category(inst);                      \
-                                                                                            \
-        InstructionRef iref_(inst_);                                                        \
-        auto           fromRef_ = iref_.category();                                         \
-                                                                                            \
-        EXPECT_TRUE(fromString_ == fromInstruction_ && fromInstruction_ == fromRef_         \
-                    && fromRef_ == (val))                                                   \
-            << #category << "(" << opcode << ")\n"                                          \
-            << ShowValue(fromString_) << ShowValue(fromInstruction_) << ShowValue(fromRef_) \
-            << ShowValue(val);                                                              \
+#define EXPECT_CATEGORY_EQ(opcode, category, val)                                       \
+    {                                                                                   \
+        std::string str_(opcode);                                                       \
+        auto        fromString_ = InstructionRef::category(str_);                       \
+                                                                                        \
+        Instruction inst_(str_, {}, {}, {}, "");                                        \
+        auto        fromInstruction_ = InstructionRef::category(opcode);                \
+                                                                                        \
+        EXPECT_TRUE(fromString_ == fromInstruction_ && fromString_ == (val))            \
+            << #category << "(" << opcode << ")\n"                                      \
+            << ShowValue(fromString_) << ShowValue(fromInstruction_) << ShowValue(val); \
     }
 
 TEST_F(InstructionRefTest, LDS)
@@ -483,4 +478,24 @@ TEST_F(InstructionRefTest, AccMFMA)
         EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
     }
+}
+
+TEST_F(InstructionRefTest, Signed)
+{
+    for(auto inst : {"v_add_u32", "v_add_u32_e32", "v_add_u32\n"})
+    {
+        EXPECT_CATEGORY_EQ(inst, isUIntInst, true);
+        EXPECT_CATEGORY_EQ(inst, isIntInst, false);
+    }
+
+    for(auto inst : {"v_add_i32", "v_add_i32_e32"})
+    {
+        EXPECT_CATEGORY_EQ(inst, isUIntInst, false);
+        EXPECT_CATEGORY_EQ(inst, isIntInst, true);
+    }
+}
+
+TEST_F(InstructionRefTest, SDWA)
+{
+    EXPECT_CATEGORY_EQ("v_xor_b32_sdwa", isSDWA, true);
 }

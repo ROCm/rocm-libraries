@@ -6,14 +6,16 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        int VALUWriteVCCVDIVFMAS::getMaxNops(std::shared_ptr<InstructionRef> inst) const
+        int VALUWriteVCCVDIVFMAS::getMaxNops(Instruction const& inst) const
         {
             return m_maxNops;
         }
 
-        bool VALUWriteVCCVDIVFMAS::trigger(std::shared_ptr<InstructionRef> inst) const
+        bool VALUWriteVCCVDIVFMAS::trigger(Instruction const& inst) const
         {
-            return inst->isVALU() && !inst->isMFMA() && !inst->isDLOP();
+            return InstructionRef::isVALU(inst.getOpCode())
+                   && !InstructionRef::isMFMA(inst.getOpCode())
+                   && !InstructionRef::isDLOP(inst.getOpCode());
         };
 
         bool VALUWriteVCCVDIVFMAS::writeTrigger() const
@@ -23,8 +25,7 @@ namespace rocRoller
 
         int VALUWriteVCCVDIVFMAS::getNops(Instruction const& inst) const
         {
-            InstructionRef instRef(inst);
-            if(instRef.isVDivFmas())
+            if(InstructionRef::isVDivFmas(inst.getOpCode()))
             {
                 for(auto const& src : inst.getSrcs())
                 {

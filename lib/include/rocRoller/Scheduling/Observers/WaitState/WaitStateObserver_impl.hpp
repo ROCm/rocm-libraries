@@ -2,7 +2,6 @@
 
 #include <rocRoller/Scheduling/Observers/WaitState/WaitStateObserver.hpp>
 
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 #include <rocRoller/Context.hpp>
 
 namespace rocRoller
@@ -40,8 +39,7 @@ namespace rocRoller
         void WaitStateObserver<DerivedObserver>::observeHazard(Instruction const& inst)
         {
             auto* thisDerived = static_cast<DerivedObserver*>(this);
-            auto  instRef     = std::make_shared<InstructionRef>(inst);
-            if(thisDerived->trigger(instRef))
+            if(thisDerived->trigger(inst))
             {
                 for(auto iter = (thisDerived->writeTrigger() ? inst.getDsts().begin()
                                                              : inst.getSrcs().begin());
@@ -54,10 +52,8 @@ namespace rocRoller
                     {
                         for(auto const& regId : reg->getRegisterIds())
                         {
-                            (*m_hazardMap)[regId].push_back(
-                                WaitStateHazardCounter(thisDerived->getMaxNops(instRef),
-                                                       instRef,
-                                                       thisDerived->writeTrigger()));
+                            (*m_hazardMap)[regId].push_back(WaitStateHazardCounter(
+                                thisDerived->getMaxNops(inst), thisDerived->writeTrigger()));
                         }
                     }
                 }
@@ -129,7 +125,7 @@ namespace rocRoller
                         bool isHazardous
                             = (thisDerived->writeTrigger() && hazard.regWasWritten())
                               || (!thisDerived->writeTrigger() && !hazard.regWasWritten());
-                        if(isHazardous && thisDerived->trigger(hazard.getInstructionRef()))
+                        if(isHazardous)
                         {
                             requiredNops = std::max(hazard.getRequiredNops(), requiredNops);
                         }

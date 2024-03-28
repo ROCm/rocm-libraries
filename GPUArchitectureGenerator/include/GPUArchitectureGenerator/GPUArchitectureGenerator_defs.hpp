@@ -666,6 +666,7 @@ namespace GPUArchitectureGenerator
                  "v_cmp_ne_u32_e32",
                  "v_cmp_ne_u64_e32",
                  "v_cmpx_lt_f32",
+                 "v_cmpx_eq_u32",
                  "v_cndmask_b32",
                  "v_cndmask_b32_e32",
                  "v_cvt_f16_f32",
@@ -673,6 +674,7 @@ namespace GPUArchitectureGenerator
                  "v_cvt_f32_u32_e32",
                  "v_cvt_u32_f32_e32",
                  "v_dot2c_f32_f16",
+                 "v_fma_f16",
                  "v_fma_f32",
                  "v_fma_f64",
                  "v_fma_mix_f32",
@@ -707,6 +709,7 @@ namespace GPUArchitectureGenerator
                  "v_trunc_f32_e32",
                  "v_xor_b32",
                  "v_xor_b32_e32",
+                 "v_xor_b32_sdwa",
                  // clang-format on
              },
              -1,

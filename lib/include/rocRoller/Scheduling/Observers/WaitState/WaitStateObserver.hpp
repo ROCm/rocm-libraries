@@ -18,8 +18,7 @@ namespace rocRoller
                                  Register::RegisterIdHash>;
 
         template <class T>
-        concept CWaitStateObserver
-            = requires(T obs, std::shared_ptr<InstructionRef> instRef, Instruction const& inst)
+        concept CWaitStateObserver = requires(T obs, Instruction const& inst)
         {
             requires CObserver<T>;
 
@@ -29,20 +28,20 @@ namespace rocRoller
                  *
                  * This amount is used to populate the RegisterHazardMap.
                  *
-                 * @param inst The instruction reference that is analyzed for hazard potential.
+                 * @param inst The instruction that is analyzed for hazard potential.
                  * @return Worst case NOPs required if the hazard is discovered.
                  */
-                obs.getMaxNops(instRef)
+                obs.getMaxNops(inst)
                 } -> std::same_as<int>;
 
             {
                 /*
                  * The condition that could trigger the hazard for this rule.
                  *
-                 * @param instRef The instruction reference that is analyzed for hazard potential.
+                 * @param instRef The instruction that is analyzed for hazard potential.
                  * @return True if the instruction could cause a hazard according to this rule.
                  */
-                obs.trigger(instRef)
+                obs.trigger(inst)
                 } -> std::same_as<bool>;
 
             {
