@@ -267,7 +267,7 @@ namespace rocRollerTest
         ++iter;
         EXPECT_TRUE(iter == fib.end());
         EXPECT_EQ(GeneratorState::Done, fib.state());
-        EXPECT_THROW(*iter, std::runtime_error);
+        EXPECT_THROW(std::ignore = *iter, std::runtime_error);
     }
 
     TEST(GeneratorTest, Ranges)

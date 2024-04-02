@@ -35,6 +35,7 @@
 #include <string>
 
 #include "DataTypes_BFloat16.hpp"
+#include "DataTypes_FP8_NANOO.hpp"
 #include "DataTypes_Half.hpp"
 #include "DataTypes_Int8.hpp"
 #include "DataTypes_Int8x4.hpp"
@@ -82,6 +83,8 @@ namespace rocRoller
         ComplexDouble, //< Two 64bit floating point; real and imaginary
         Half, //< 16bit floating point (IEEE format)
         Halfx2, //< Two 16bit floating point; packed into 32bits
+        FP8_NANOO, //< 8bit floating point in NANOO format
+        FP8x4_NANOO, //< Four 8bit floating point in NANOO format; backed into 32bits
         Int8x4, //< Four 8bit signed integers; packed into 32bits
         Int8, //< 8bit signed integer
         Int16, //< 16bit signed integer
@@ -680,6 +683,36 @@ namespace rocRoller
     };
 
     template <>
+    struct TypeInfo<FP8_NANOO> : public BaseTypeInfo<FP8_NANOO,
+                                                     DataType::FP8_NANOO,
+                                                     DataType::FP8_NANOO,
+                                                     PointerType::Value,
+                                                     1,
+                                                     1,
+                                                     false,
+                                                     false,
+                                                     true>
+    {
+    };
+
+    struct FP8x4_NANOO : public DistinctType<uint32_t, FP8x4_NANOO>
+    {
+    };
+
+    template <>
+    struct TypeInfo<FP8x4_NANOO> : public BaseTypeInfo<FP8x4_NANOO,
+                                                       DataType::FP8x4_NANOO,
+                                                       DataType::FP8_NANOO,
+                                                       PointerType::Value,
+                                                       4,
+                                                       1,
+                                                       false,
+                                                       false,
+                                                       true>
+    {
+    };
+
+    template <>
     struct TypeInfo<BFloat16> : public BaseTypeInfo<BFloat16,
                                                     DataType::BFloat16,
                                                     DataType::BFloat16,
@@ -828,6 +861,8 @@ namespace rocRoller
     DeclareEnumTypeInfo(ComplexDouble, std::complex<double>);
     DeclareEnumTypeInfo(Half, Half);
     DeclareEnumTypeInfo(Halfx2, Halfx2);
+    DeclareEnumTypeInfo(FP8_NANOO, FP8_NANOO);
+    DeclareEnumTypeInfo(FP8x4_NANOO, FP8x4_NANOO);
     DeclareEnumTypeInfo(Int8x4, Int8x4);
     DeclareEnumTypeInfo(Int32, int32_t);
     DeclareEnumTypeInfo(Int64, int64_t);

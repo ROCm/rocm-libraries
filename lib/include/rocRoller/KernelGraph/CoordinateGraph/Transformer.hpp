@@ -80,8 +80,8 @@ namespace rocRoller
                 reverseStride(int, Expression::ExpressionPtr, std::vector<int> const&) const;
 
             /**
-	     * True if we can reach the target.
-	     */
+             * True if we can reach the target.
+            */
             bool hasPath(std::vector<int> const&, bool forward) const;
 
             /**

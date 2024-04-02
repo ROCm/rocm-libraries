@@ -78,6 +78,9 @@ namespace rocRoller
             co_yield_(
                 Instruction("v_cvt_f32_f16", {dest->element({1})}, {dest->element({1})}, {}, ""));
             break;
+        case DataType::FP8_NANOO:
+            co_yield_(Instruction("v_cvt_f32_fp8", {dest}, {arg}, {}, ""));
+            break;
         default:
             Throw<FatalError>("Unsupported datatype for convert to float: ", ShowValue(dataType));
         }

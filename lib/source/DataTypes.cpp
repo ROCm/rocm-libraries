@@ -74,6 +74,10 @@ namespace rocRoller
             return "ComplexFloat";
         case DataType::ComplexDouble:
             return "ComplexDouble";
+        case DataType::FP8_NANOO:
+            return "FP8_NANOO";
+        case DataType::FP8x4_NANOO:
+            return "FP8x4_NANOO";
         case DataType::Half:
             return "Half";
         case DataType::Halfx2:
@@ -124,6 +128,10 @@ namespace rocRoller
             return "C";
         case DataType::ComplexDouble:
             return "Z";
+        case DataType::FP8_NANOO:
+            return "FP8_NANOO";
+        case DataType::FP8x4_NANOO:
+            return "4xFP8_NANOO";
         case DataType::Half:
             return "H";
         case DataType::Halfx2:
@@ -420,6 +428,8 @@ namespace rocRoller
 
     void DataTypeInfo::registerAllTypeInfo()
     {
+        registerTypeInfo<FP8_NANOO>();
+        registerTypeInfo<FP8x4_NANOO>();
         registerTypeInfo<BFloat16>();
         registerTypeInfo<Half>();
         registerTypeInfo<Halfx2>();

@@ -159,6 +159,14 @@ namespace rocRoller
         };
 
         template <>
+        inline void EmitterOutput::output(FP8_NANOO& obj)
+        {
+            std::stringstream ss;
+            ss << obj;
+            *emitter << ss.str();
+        }
+
+        template <>
         struct IOTraits<EmitterOutput>
         {
             using IO = EmitterOutput;
@@ -376,3 +384,28 @@ namespace rocRoller
 
     } // namespace Serialization
 } // namespace rocRoller
+
+namespace YAML
+{
+    template <>
+    struct convert<rocRoller::FP8_NANOO>
+    {
+        static Node encode(const rocRoller::FP8_NANOO& rhs)
+        {
+            Node node;
+            node.push_back(rhs.data);
+            return node;
+        }
+
+        static bool decode(const Node& node, rocRoller::FP8_NANOO& rhs)
+        {
+            if(!node.IsSequence() || node.size() != 1)
+            {
+                return false;
+            }
+
+            rhs.data = node[0].as<decltype(rhs.data)>();
+            return true;
+        }
+    };
+} // namespace YAML

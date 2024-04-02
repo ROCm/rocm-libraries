@@ -95,6 +95,8 @@ namespace rocRoller
             return getValue<Half>(args);
         // case DataType::Int8x4:
         //     return getValue<Int8x4>(args);
+        case DataType::FP8_NANOO:
+            return getValue<FP8_NANOO>(args);
         case DataType::Int32:
             return getValue<int32_t>(args);
         case DataType::Int64:
@@ -113,7 +115,7 @@ namespace rocRoller
             return getValue<bool>(args);
         case DataType::Count:
         default:
-            throw std::runtime_error("Unsupported argument type.");
+            Throw<FatalError>("Unsupported argument type ", ShowValue(m_variableType));
         }
     }
 
