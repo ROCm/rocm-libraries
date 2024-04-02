@@ -81,16 +81,20 @@ namespace MatrixMultiplyTest
         auto command  = std::make_shared<Command>();
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0, {(size_t)1}))); // A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
+        auto tagA = command->allocateTag();
+        auto tagB = command->allocateTag();
+        auto tagD = command->allocateTag();
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(2, 0, 1))); // D = A * B
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, tagA, {(size_t)1}))); // A
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, tagB))); // B
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(dataType, 2, 2))); // D
+            rocRoller::Operations::T_Mul(tagD, tagA, tagB))); // D = A * B
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, tagD))); // D
 
         KernelArguments runtimeArgs;
 
@@ -253,16 +257,20 @@ namespace MatrixMultiplyTest
         auto command  = std::make_shared<Command>();
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
+        auto tagA = command->allocateTag();
+        auto tagB = command->allocateTag();
+        auto tagD = command->allocateTag();
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(2, 0, 1))); // D = A * B
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, tagA))); // A
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, tagB))); // B
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(dataType, 2, 2))); // D
+            rocRoller::Operations::T_Mul(tagD, tagA, tagB))); // D = A * B
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, tagD))); // D
 
         KernelArguments runtimeArgs;
 
@@ -379,23 +387,29 @@ namespace MatrixMultiplyTest
         auto command  = std::make_shared<Command>();
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 2))); // C
+        auto tagA  = command->allocateTag();
+        auto tagB  = command->allocateTag();
+        auto tagC  = command->allocateTag();
+        auto tagAB = command->allocateTag();
+        auto tagD  = command->allocateTag();
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(3, 0, 1))); // D = A * B
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, tagA))); // A
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, tagB))); // B
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, tagC))); // C
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Mul(tagAB, tagA, tagB))); // D = A * B
 
         auto execute = rocRoller::Operations::T_Execute();
         execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(4, 3, 2))); // E = D + C
+            rocRoller::Operations::E_Add(tagD, tagAB, tagC))); // E = D + C
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(dataType, 2, 4))); // D
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, tagD))); // D
 
         KernelArguments runtimeArgs;
 

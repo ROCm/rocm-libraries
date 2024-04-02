@@ -81,22 +81,28 @@ namespace TileTransposeAddTest
 
         auto command = std::make_shared<Command>();
 
+        auto tagA  = command->allocateTag();
+        auto tagB  = command->allocateTag();
+        auto tag2A = command->allocateTag();
+        auto tag2B = command->allocateTag();
+        auto tagD  = command->allocateTag();
+
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, 0))); // a
+            rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, tagA))); // a
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, 1))); // b
+            rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, tagB))); // b
 
         auto execute = rocRoller::Operations::T_Execute();
         execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(2, 0, 0))); // a + a
+            rocRoller::Operations::E_Add(tag2A, tagA, tagA))); // a + a
         execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(3, 1, 1))); // b + b
+            rocRoller::Operations::E_Add(tag2B, tagB, tagB))); // b + b
         execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(4, 3, 2))); // 2a + 2b
+            rocRoller::Operations::E_Add(tagD, tag2A, tag2B))); // 2a + 2b
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, 4))); // c
+            rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, tagD))); // c
 
         KernelArguments runtimeArgs;
 

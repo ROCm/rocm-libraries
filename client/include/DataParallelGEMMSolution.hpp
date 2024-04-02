@@ -81,18 +81,28 @@ namespace rocRoller
                     bool no_beta = m_solutionParams.problemParams.beta == 0.0
                                    && m_solutionParams.problemParams.alpha == 1.0;
 
+                    auto tagA       = command->allocateTag();
+                    auto tagB       = command->allocateTag();
+                    auto tagC       = command->allocateTag();
+                    auto tagAB      = command->allocateTag();
+                    auto tagAlpha   = command->allocateTag();
+                    auto tagBeta    = command->allocateTag();
+                    auto tagBetaC   = command->allocateTag();
+                    auto tagAlphaAB = command->allocateTag();
+                    auto tagD       = command->allocateTag();
+
                     //TODO: Handle transposed matrices more elegantly
                     switch(m_solutionParams.problemParams.transA)
                     {
                     case TransposeType::T:
                         command->addOperation(
                             std::make_shared<Operations::Operation>(Operations::T_Load_Tiled(
-                                TypeInfo<A>::Var.dataType, 2, 0, {(size_t)0, (size_t)1}))); // AT
+                                TypeInfo<A>::Var.dataType, 2, tagA, {(size_t)0, (size_t)1}))); // AT
                         break;
                     case TransposeType::N:
                         command->addOperation(
                             std::make_shared<Operations::Operation>(Operations::T_Load_Tiled(
-                                TypeInfo<A>::Var.dataType, 2, 0, {(size_t)1}))); // AN
+                                TypeInfo<A>::Var.dataType, 2, tagA, {(size_t)1}))); // AN
                         break;
                     default:
                         Throw<FatalError>("Bad transpose option");
@@ -104,13 +114,13 @@ namespace rocRoller
                     case TransposeType::T:
                         command->addOperation(
                             std::make_shared<Operations::Operation>(Operations::T_Load_Tiled(
-                                TypeInfo<B>::Var.dataType, 2, 1, {(size_t)0, (size_t)1}))); // BT
+                                TypeInfo<B>::Var.dataType, 2, tagB, {(size_t)0, (size_t)1}))); // BT
                         break;
                     case TransposeType::N:
                         command->addOperation(std::make_shared<Operations::Operation>(
                             Operations::T_Load_Tiled(TypeInfo<B>::Var.dataType,
                                                      2,
-                                                     1,
+                                                     tagB,
                                                      {
                                                          (size_t)1,
                                                      }))); // BN
@@ -123,45 +133,45 @@ namespace rocRoller
                     {
                         command->addOperation(
                             std::make_shared<Operations::Operation>(Operations::T_Load_Tiled(
-                                TypeInfo<C>::Var.dataType, 2, 2, {(size_t)1}))); // C
+                                TypeInfo<C>::Var.dataType, 2, tagC, {(size_t)1}))); // C
                         command->addOperation(std::make_shared<Operations::Operation>(
                             Operations::T_Load_Scalar(DataType::Float,
-                                                      3))); // alpha
+                                                      tagAlpha))); // alpha
                         command->addOperation(std::make_shared<Operations::Operation>(
                             Operations::T_Load_Scalar(DataType::Float,
-                                                      4))); // beta
+                                                      tagBeta))); // beta
 
                         command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Mul(5, 0, 1))); // A * B
+                            Operations::T_Mul(tagAB, tagA, tagB))); // A * B
 
                         Operations::T_Execute execute;
                         execute.addXOp(std::make_shared<Operations::XOp>(
-                            Operations::E_Mul(6, 4, 2))); // beta * C
+                            Operations::E_Mul(tagBetaC, tagBeta, tagC))); // beta * C
                         execute.addXOp(std::make_shared<Operations::XOp>(
-                            Operations::E_Mul(7, 3, 5))); // alpha * (A * B)
+                            Operations::E_Mul(tagAlphaAB, tagAlpha, tagAB))); // alpha * (A * B)
                         if(m_solutionParams.betaInFma)
                         {
-                            execute.addXOp(std::make_shared<Operations::XOp>(
-                                Operations::E_Add(8, 6, 7))); // beta * C + alpha * (A * B)
+                            execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(
+                                tagD, tagBetaC, tagAlphaAB))); // beta * C + alpha * (A * B)
                         }
                         else
                         {
-                            execute.addXOp(std::make_shared<Operations::XOp>(
-                                Operations::E_Add(8, 7, 6))); // alpha * (A * B) + beta * C
+                            execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(
+                                tagD, tagAlphaAB, tagBetaC))); // alpha * (A * B) + beta * C
                         }
                         command->addOperation(std::make_shared<Operations::Operation>(execute));
 
                         command->addOperation(
                             std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
-                                TypeInfo<D>::Var.dataType, 2, 8, {(size_t)1}))); // D
+                                TypeInfo<D>::Var.dataType, 2, tagD, {(size_t)1}))); // D
                     }
                     else
                     {
                         command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Mul(2, 0, 1))); // A * B
+                            Operations::T_Mul(tagD, tagA, tagB))); // A * B
                         command->addOperation(
                             std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
-                                TypeInfo<D>::Var.dataType, 2, 2, {(size_t)1}))); // D
+                                TypeInfo<D>::Var.dataType, 2, tagD, {(size_t)1}))); // D
                     }
 
                     return command;

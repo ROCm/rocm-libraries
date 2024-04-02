@@ -1892,33 +1892,31 @@ namespace KernelGraphTest
 
         constexpr auto dataType = DataType::Float;
 
-        int tag = 0;
-
-        auto xTag = tag++;
+        auto xTag = command->allocateTag();
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Load_Linear(dataType, 1, xTag)));
 
-        auto alphaTag = tag++;
+        auto alphaTag = command->allocateTag();
         command->addOperation(
             std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Scalar(
                 {dataType, PointerType::PointerGlobal}, alphaTag)));
 
         // TODO: allow for literal constants
-        auto zeroTag = tag++;
+        auto zeroTag = command->allocateTag();
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Load_Scalar({dataType, PointerType::PointerGlobal}, zeroTag)));
 
         auto execute = rocRoller::Operations::T_Execute();
 
-        auto condTag = tag++;
+        auto condTag = command->allocateTag();
         execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
             rocRoller::Operations::E_GreaterThan(condTag, xTag, zeroTag)));
 
-        auto productTag = tag++;
+        auto productTag = command->allocateTag();
         execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
             rocRoller::Operations::E_Mul(productTag, xTag, alphaTag)));
 
-        auto reluTag = tag++;
+        auto reluTag = command->allocateTag();
         execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
             rocRoller::Operations::E_Conditional(reluTag, condTag, xTag, productTag)));
 
@@ -1979,10 +1977,12 @@ namespace KernelGraphTest
     {
         auto command = std::make_shared<rocRoller::Command>();
 
-        Operations::T_Load_Linear load_A(DataType::Int32, 1, 0);
+        auto tag = command->allocateTag();
+
+        Operations::T_Load_Linear load_A(DataType::Int32, 1, tag);
         command->addOperation(std::make_shared<Operations::Operation>(std::move(load_A)));
 
-        Operations::T_Store_Linear store_C(1, 0);
+        Operations::T_Store_Linear store_C(1, tag);
         command->addOperation(std::make_shared<Operations::Operation>(std::move(store_C)));
 
         CommandKernel commandKernel(command, "LinearCopy");
@@ -2436,12 +2436,16 @@ namespace KernelGraphTest
     {
         auto command = std::make_shared<Command>();
 
+        auto tagA = command->allocateTag();
+        auto tagB = command->allocateTag();
+        auto tagD = command->allocateTag();
+
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 0))); // A
+            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, tagA))); // A
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 1))); // B
+            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, tagB))); // B
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(2, 0, 1)));
+            rocRoller::Operations::T_Mul(tagD, tagA, tagB)));
 
         auto kgraph0 = translate(command);
 

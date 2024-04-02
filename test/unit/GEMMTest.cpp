@@ -184,42 +184,54 @@ namespace GEMMDriverTest
                                                   ? std::vector<size_t>({(size_t)0, (size_t)1})
                                                   : std::vector<size_t>({});
 
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Tiled(
-                    dataType, 2, 0, gemm.transA == "N" ? oneStridesN : oneStridesT))); // A
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Tiled(
-                    dataType, 2, 1, gemm.transB == "N" ? oneStridesN : oneStridesT))); // B
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Tiled(dataType, 2, 2, oneStridesN))); // C
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Scalar(DataType::Float, 3))); // alpha
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Scalar(DataType::Float, 4))); // beta
+            auto tagA       = command->allocateTag();
+            auto tagB       = command->allocateTag();
+            auto tagC       = command->allocateTag();
+            auto tagAlpha   = command->allocateTag();
+            auto tagBeta    = command->allocateTag();
+            auto tagAB      = command->allocateTag();
+            auto tagBetaC   = command->allocateTag();
+            auto tagAlphaAB = command->allocateTag();
+            auto tagD       = command->allocateTag();
 
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Mul(5, 0, 1))); // A * B
+                rocRoller::Operations::T_Load_Tiled(
+                    dataType, 2, tagA, gemm.transA == "N" ? oneStridesN : oneStridesT))); // A
+            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+                rocRoller::Operations::T_Load_Tiled(
+                    dataType, 2, tagB, gemm.transB == "N" ? oneStridesN : oneStridesT))); // B
+            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+                rocRoller::Operations::T_Load_Tiled(dataType, 2, tagC, oneStridesN))); // C
+            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+                rocRoller::Operations::T_Load_Scalar(DataType::Float, tagAlpha))); // alpha
+            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+                rocRoller::Operations::T_Load_Scalar(DataType::Float, tagBeta))); // beta
+
+            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+                rocRoller::Operations::T_Mul(tagAB, tagA, tagB))); // A * B
 
             rocRoller::Operations::T_Execute execute;
             execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-                rocRoller::Operations::E_Mul(6, 4, 2))); // beta * C
+                rocRoller::Operations::E_Mul(tagBetaC, tagBeta, tagC))); // beta * C
             execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-                rocRoller::Operations::E_Mul(7, 3, 5))); // alpha * (A * B)
+                rocRoller::Operations::E_Mul(tagAlphaAB, tagAlpha, tagAB))); // alpha * (A * B)
             if(gemm.betaInFma)
             {
-                execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-                    rocRoller::Operations::E_Add(8, 6, 7))); // beta * C + alpha * (A * B)
+                execute.addXOp(
+                    std::make_shared<rocRoller::Operations::XOp>(rocRoller::Operations::E_Add(
+                        tagD, tagBetaC, tagAlphaAB))); // beta * C + alpha * (A * B)
             }
             else
             {
-                execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-                    rocRoller::Operations::E_Add(8, 7, 6))); // alpha * (A * B) + beta * C
+                execute.addXOp(
+                    std::make_shared<rocRoller::Operations::XOp>(rocRoller::Operations::E_Add(
+                        tagD, tagAlphaAB, tagBetaC))); // alpha * (A * B) + beta * C
             }
 
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Store_Tiled(dataType, 2, 8, oneStridesN))); // D
+                rocRoller::Operations::T_Store_Tiled(dataType, 2, tagD, oneStridesN))); // D
 
             KernelArguments runtimeArgs;
 
