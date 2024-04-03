@@ -487,6 +487,7 @@ set(
   test/unit/GPUArchitectureTest.cpp
   test/unit/GPUInstructionInfoTest.cpp
   test/unit/GEMMTest.cpp
+  test/unit/GEMMFusion.cpp
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
   test/unit/FP8Test.cpp

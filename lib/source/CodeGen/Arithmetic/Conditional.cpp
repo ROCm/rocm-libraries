@@ -28,7 +28,8 @@ namespace rocRoller
         AssertFatal(r2hs != nullptr);
         AssertFatal(dest->valueCount() == 1,
                     "Non-1 value count not supported",
-                    ShowValue(dest->valueCount()));
+                    ShowValue(dest->valueCount()),
+                    ShowValue(dest->toString()));
 
         if(dest->regType() == Register::Type::Scalar)
         {

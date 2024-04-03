@@ -243,6 +243,49 @@ namespace rocRoller
             }
 
             /*
+             * Generate code for comparison binary operation.
+             *
+             * We need to support, for example,
+             * 1. scalar <=> scalar
+             * 2. vector <=> vector
+             */
+            template <typename T>
+            requires(CKernelExecuteTime<T>&& CBinary<T> && (CLogical<T> || CComparison<T>))
+                Generator<Instruction> generateComparisonOrLogicalBinary(Register::ValuePtr& dest,
+                                                                         T const&            expr,
+                                                                         Register::ValuePtr& lhs,
+                                                                         Register::ValuePtr& rhs,
+                                                                         ResultType& resType)
+            {
+                auto const lhsInfo = DataTypeInfo::Get(lhs->variableType());
+                auto const rhsInfo = DataTypeInfo::Get(rhs->variableType());
+
+                int valueCount = resultValueCount(dest, {lhs, rhs});
+
+                if(!dest)
+                {
+                    dest = resultPlaceholder(resType, true, valueCount);
+                }
+
+                for(size_t k = 0; k < dest->valueCount(); ++k)
+                {
+                    // TODD: Consolidate with other similar code
+                    // that only calls `->element` if conditions are met
+                    auto lhsVal = lhs->regType() == Register::Type::Literal
+                                          || IsSpecial(lhs->regType()) || lhs->valueCount() == 1
+                                      ? lhs
+                                      : lhs->element({k});
+
+                    auto rhsVal = rhs->regType() == Register::Type::Literal
+                                          || IsSpecial(rhs->regType()) || rhs->valueCount() == 1
+                                      ? rhs
+                                      : rhs->element({k});
+
+                    co_yield generateOp<T>(dest->element({k}), lhsVal, rhsVal);
+                }
+            }
+
+            /*
              * Generate code for arithemtic binary operation.
              *
              * We need to support, for example,
@@ -385,8 +428,7 @@ namespace rocRoller
             requires(CKernelExecuteTime<T>&& CBinary<T>&& CArithmetic<T>) Generator<Instruction>
             operator()(Register::ValuePtr& dest, T const& expr)
             {
-                auto strValue = toString(expr);
-                co_yield Instruction::Comment(strValue);
+                co_yield Instruction::Comment(toString(expr));
                 bool                            schedulerLocked = false;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.rhs};
@@ -412,18 +454,23 @@ namespace rocRoller
                 Generator<Instruction>
             operator()(Register::ValuePtr& dest, T const& expr)
             {
+                co_yield Instruction::Comment(toString(expr));
                 bool                            schedulerLocked = false;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.rhs};
 
-                co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
+                AssertFatal(
+                    !expressionHasDFTag(expr),
+                    "expr is not expected to have a DataFlowTag : check DataFlowTagPropagation");
 
                 auto resType = resultType(expr);
+                AssertFatal(resType.varType != DataType::None,
+                            "expr w/o DataFlowTag(s) doesn't have deferred datatype");
 
-                if(dest == nullptr)
-                    dest = resultPlaceholder(resType);
+                co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
 
-                co_yield generateOp<T>(dest, results[0], results[1]);
+                co_yield generateComparisonOrLogicalBinary(
+                    dest, expr, results[0], results[1], resType);
 
                 if(schedulerLocked)
                     co_yield Instruction::Unlock("Expression temporary in special register");
@@ -522,23 +569,28 @@ namespace rocRoller
                 auto regType    = promoteRegisterTypes(results);
                 auto valueCount = resultValueCount(dest, results);
 
-                if(valueCount > 1 && regType == Register::Type::Accumulator)
-                {
-                    regType = Register::Type::Vector;
-                    for(int i = 0; i < results.size(); ++i)
-                    {
-                        co_yield m_context->copier()->ensureType(results[i], results[i], regType);
-                    }
-                }
-
-                if(!dest)
+                if(dest == nullptr)
                 {
                     auto varType = promoteVariableTypes(results);
                     dest         = resultPlaceholder({regType, varType}, true, valueCount);
                 }
 
-                //If dest, results have multiple elements, handled inside generateOp
-                co_yield generateOp<Conditional>(dest, cond, results[0], results[1]);
+                for(size_t k = 0; k < valueCount; ++k)
+                {
+                    auto lhs    = results[0];
+                    auto rhs    = results[1];
+                    auto lhsVal = lhs->regType() == Register::Type::Literal
+                                          || IsSpecial(lhs->regType()) || lhs->valueCount() == 1
+                                      ? lhs
+                                      : lhs->element({k});
+
+                    auto rhsVal = rhs->regType() == Register::Type::Literal
+                                          || IsSpecial(rhs->regType()) || rhs->valueCount() == 1
+                                      ? rhs
+                                      : rhs->element({k});
+                    co_yield generateOp<Conditional>(
+                        dest->element({k}), cond->element({k}), lhsVal, rhsVal);
+                }
             }
 
             template <CUnary Operation>

@@ -70,9 +70,9 @@ namespace rocRoller
 
         /**
          * @brief Enable/disable wave-storage strategy.
-	 *
-	 * When storing through LDS; the LDS traffic is done following
-	 * the MFMA accumulator layout intead of straight threads.
+     *
+     * When storing through LDS; the LDS traffic is done following
+     * the MFMA accumulator layout intead of straight threads.
          */
         void setSplitStoreTileIntoWaveBlocks(bool);
         bool getSplitStoreTileIntoWaveBlocks() const;

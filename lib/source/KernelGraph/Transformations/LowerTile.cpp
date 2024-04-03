@@ -1557,7 +1557,8 @@ namespace rocRoller
 
                 auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
-                AssertFatal(macTile.rank == 2, "Rank /= 2 not implemented yet.");
+                AssertFatal(
+                    macTile.rank == 2, ShowValue(macTile.rank), "Rank /= 2 not implemented yet.");
 
                 logger->debug("  User({}), MacroTile({}), MacroTile size: {}x{}",
                               userTag,

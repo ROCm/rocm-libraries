@@ -335,7 +335,8 @@ namespace rocRoller
 
             for(auto const index : info.siblingOps)
             {
-                auto e    = *only(graph.control.getNeighbours<Graph::Direction::Downstream>(index));
+                auto e = only(graph.control.getNeighbours<Graph::Direction::Downstream>(index))
+                             .value();
                 auto elem = graph.control.getElement(e);
                 graph.control.deleteElement(e);
                 graph.control.addElement(
