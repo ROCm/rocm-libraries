@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -393,8 +393,7 @@ struct DeviceReduceSelector
                          T*          d_input,
                          U*          d_output,
                          int         num_items,
-                         hipStream_t stream,
-                         bool        debug_synchronous)
+                         hipStream_t stream)
     {
         HIP_CHECK(hipcub::DeviceReduce::Reduce(d_temp_storage,
                                                temp_storage_size_bytes,
@@ -403,8 +402,7 @@ struct DeviceReduceSelector
                                                num_items,
                                                ExtendedFloatBinOp<hipcub::Sum>(),
                                                U(0.f),
-                                               stream,
-                                               debug_synchronous));
+                                               stream));
     }
 
     void reduce_sum_impl(std::false_type,
@@ -413,16 +411,14 @@ struct DeviceReduceSelector
                          T*          d_input,
                          U*          d_output,
                          int         num_items,
-                         hipStream_t stream,
-                         bool        debug_synchronous)
+                         hipStream_t stream)
     {
         HIP_CHECK(hipcub::DeviceReduce::Sum(d_temp_storage,
                                             temp_storage_size_bytes,
                                             d_input,
                                             d_output,
                                             num_items,
-                                            stream,
-                                            debug_synchronous));
+                                            stream));
     }
 
     void reduce_sum(void*       d_temp_storage,
@@ -430,8 +426,7 @@ struct DeviceReduceSelector
                     T*          d_input,
                     U*          d_output,
                     int         num_items,
-                    hipStream_t stream,
-                    bool        debug_synchronous)
+                    hipStream_t stream)
     {
         reduce_sum_impl(std::integral_constant < bool,
                         std::is_same<T, test_utils::half>::value
@@ -441,8 +436,7 @@ struct DeviceReduceSelector
                         d_input,
                         d_output,
                         num_items,
-                        stream,
-                        debug_synchronous);
+                        stream);
     }
 };
 

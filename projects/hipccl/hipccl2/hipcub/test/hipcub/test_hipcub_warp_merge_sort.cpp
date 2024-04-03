@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,8 +28,9 @@
 #include "hipcub/block/block_store.hpp"
 #include "hipcub/warp/warp_merge_sort.hpp"
 
-#include <utility>
 #include <limits>
+#include <type_traits>
+#include <utility>
 
 #include <cstdio>
 
@@ -76,94 +77,124 @@ typedef ::testing::Types<
 
 TYPED_TEST_SUITE(HipcubWarpMergeSort, Params);
 
-// Used to disable the kernels on unsupported warp sizes
-template <
-    typename Key,
-    unsigned int ItemsPerThread,
-    unsigned int LogicalWarpSize,
-    typename Value = hipcub::NullType>
-using select_warp_merge_sort =
-    hipcub::WarpMergeSort<Key, ItemsPerThread,
-        test_utils::DeviceSelectWarpSize<LogicalWarpSize>::value, Value>;
-
-template<
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize,
-    unsigned int ItemsPerThread,
-    bool Stable,
-    typename Key,
-    typename Compare
->
-__global__
-__launch_bounds__(BlockSize)
-void sort_keys_full(
-    Key* keys,
-    Compare compare_op)
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Compare>
+__device__ auto sort_keys_full_test(Key* keys, Compare compare_op)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    const unsigned int flat_tid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
+    const unsigned int flat_tid     = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * items_per_block;
     Key thread_keys[ItemsPerThread];
     hipcub::LoadDirectBlocked(flat_tid, keys + block_offset, thread_keys);
 
     constexpr unsigned int warps_per_block = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = hipThreadIdx_x / LogicalWarpSize;
+    const unsigned int     warp_id         = threadIdx.x / LogicalWarpSize;
 
-    using warp_merge_sort = select_warp_merge_sort<Key, ItemsPerThread, LogicalWarpSize>;
+    using warp_merge_sort = hipcub::WarpMergeSort<Key, ItemsPerThread, LogicalWarpSize>;
     __shared__ typename warp_merge_sort::TempStorage storage[warps_per_block];
 
     warp_merge_sort wsort{storage[warp_id]};
-    if(Stable) {
+    if HIPCUB_IF_CONSTEXPR(Stable)
+    {
         wsort.StableSort(thread_keys, compare_op);
-    } else {
+    } else
+    {
         wsort.Sort(thread_keys, compare_op);
     }
 
     hipcub::StoreDirectBlocked(flat_tid, keys + block_offset, thread_keys);
 }
 
-template<
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize,
-    unsigned int ItemsPerThread,
-    bool Stable, 
-    typename Key,
-    typename Value,
-    typename Compare
->
-__global__
-__launch_bounds__(BlockSize)
-void sort_keys_values_full(
-    Key* keys,
-    Value* values,
-    Compare compare_op)
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Compare>
+__device__ auto sort_keys_full_test(Key* /*keys*/, Compare /*compare_op*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Compare>
+__global__ __launch_bounds__(BlockSize) void sort_keys_full(Key* keys, Compare compare_op)
+{
+    sort_keys_full_test<BlockSize, LogicalWarpSize, ItemsPerThread, Stable>(keys, compare_op);
+}
+
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Value,
+         typename Compare>
+__device__ auto sort_keys_values_full_test(Key* keys, Value* values, Compare compare_op)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    const unsigned int flat_tid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
+    const unsigned int flat_tid     = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * items_per_block;
     Key   thread_keys  [ItemsPerThread];
     Value thread_values[ItemsPerThread];
     hipcub::LoadDirectBlocked(flat_tid, keys + block_offset, thread_keys);
     hipcub::LoadDirectBlocked(flat_tid, values + block_offset, thread_values);
 
     constexpr unsigned int warps_per_block = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = hipThreadIdx_x / LogicalWarpSize;
+    const unsigned int     warp_id         = threadIdx.x / LogicalWarpSize;
 
-    using warp_merge_sort =
-        select_warp_merge_sort<Key, ItemsPerThread, LogicalWarpSize, Value>;
+    using warp_merge_sort = hipcub::WarpMergeSort<Key, ItemsPerThread, LogicalWarpSize, Value>;
     __shared__ typename warp_merge_sort::TempStorage storage[warps_per_block];
 
     warp_merge_sort wsort{storage[warp_id]};
-    if(Stable) {
+    if HIPCUB_IF_CONSTEXPR(Stable)
+    {
         wsort.StableSort(thread_keys, thread_values, compare_op);
-    } else {
+    } else
+    {
         wsort.Sort(thread_keys, thread_values, compare_op);
     }
 
     hipcub::StoreDirectBlocked(flat_tid, keys + block_offset, thread_keys);
     hipcub::StoreDirectBlocked(flat_tid, values + block_offset, thread_values);
+}
+
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Value,
+         typename Compare>
+__device__ auto sort_keys_values_full_test(Key* /*keys*/, Value* /*values*/, Compare /*compare_op*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Value,
+         typename Compare>
+__global__ __launch_bounds__(BlockSize) void sort_keys_values_full(Key*    keys,
+                                                                   Value*  values,
+                                                                   Compare compare_op)
+{
+    sort_keys_values_full_test<BlockSize, LogicalWarpSize, ItemsPerThread, Stable>(keys,
+                                                                                   values,
+                                                                                   compare_op);
 }
 
 // Provides the value that would be sorted last according to the comparison function
@@ -180,28 +211,26 @@ struct sort_last<test_utils::greater, T> {
     static constexpr T value = std::numeric_limits<T>::lowest();
 };
 
-template<
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize,
-    unsigned int ItemsPerThread,
-    bool Stable, 
-    typename Key,
-    typename Compare
->
-__global__
-__launch_bounds__(BlockSize)
-void sort_keys_segmented(Key* keys, const unsigned int* segment_sizes, Compare compare) {
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Compare>
+__device__ auto
+    sort_keys_segmented_test(Key* keys, const unsigned int* segment_sizes, Compare compare)
+        -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{
     constexpr unsigned int max_segment_size = LogicalWarpSize * ItemsPerThread;
     constexpr unsigned int segments_per_block = BlockSize / LogicalWarpSize;
 
-    using warp_merge_sort =
-        select_warp_merge_sort<Key, ItemsPerThread, LogicalWarpSize>;
+    using warp_merge_sort = hipcub::WarpMergeSort<Key, ItemsPerThread, LogicalWarpSize>;
     __shared__ typename warp_merge_sort::TempStorage storage[segments_per_block];
 
-    const unsigned int warp_id = hipThreadIdx_x / LogicalWarpSize;
+    const unsigned int warp_id = threadIdx.x / LogicalWarpSize;
     warp_merge_sort wsort{storage[warp_id]};
 
-    const unsigned int segment_id = hipBlockIdx_x * segments_per_block + warp_id;
+    const unsigned int segment_id = blockIdx.x * segments_per_block + warp_id;
 
     const unsigned int segment_size = segment_sizes[segment_id];
     const unsigned int warp_offset = segment_id * max_segment_size;
@@ -211,38 +240,67 @@ void sort_keys_segmented(Key* keys, const unsigned int* segment_sizes, Compare c
     hipcub::LoadDirectBlocked(flat_tid, keys + warp_offset, thread_keys, segment_size);
 
     const Key oob_default = sort_last<Compare, Key>::value;
-    if (Stable) {
-      wsort.StableSort(thread_keys, compare, segment_size, oob_default);
-    } else {
-      wsort.Sort(thread_keys, compare, segment_size, oob_default);
+    if HIPCUB_IF_CONSTEXPR(Stable)
+    {
+        wsort.StableSort(thread_keys, compare, segment_size, oob_default);
+    } else
+    {
+        wsort.Sort(thread_keys, compare, segment_size, oob_default);
     }
 
     hipcub::StoreDirectBlocked(flat_tid, keys + warp_offset, thread_keys, segment_size);
 }
 
-template<
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize,
-    unsigned int ItemsPerThread,
-    bool Stable, 
-    typename Key,
-    typename Value,
-    typename Compare
->
-__global__
-__launch_bounds__(BlockSize)
-void sort_keys_values_segmented(Key* keys, Value* values, const unsigned int* segment_sizes, Compare compare) {
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Compare>
+__device__ auto sort_keys_segmented_test(Key* /*keys*/,
+                                         const unsigned int* /*segment_sizes*/,
+                                         Compare /*compare*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Compare>
+__global__ __launch_bounds__(BlockSize) void sort_keys_segmented(Key*                keys,
+                                                                 const unsigned int* segment_sizes,
+                                                                 Compare             compare)
+{
+    sort_keys_segmented_test<BlockSize, LogicalWarpSize, ItemsPerThread, Stable>(keys,
+                                                                                 segment_sizes,
+                                                                                 compare);
+}
+
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Value,
+         typename Compare>
+__device__ auto sort_keys_values_segmented_test(Key*                keys,
+                                                Value*              values,
+                                                const unsigned int* segment_sizes,
+                                                Compare             compare)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{
     constexpr unsigned int max_segment_size = LogicalWarpSize * ItemsPerThread;
     constexpr unsigned int segments_per_block = BlockSize / LogicalWarpSize;
 
-    using warp_merge_sort =
-        select_warp_merge_sort<Key, ItemsPerThread, LogicalWarpSize, Value>;
+    using warp_merge_sort = hipcub::WarpMergeSort<Key, ItemsPerThread, LogicalWarpSize, Value>;
     __shared__ typename warp_merge_sort::TempStorage storage[segments_per_block];
 
-    const unsigned int warp_id = hipThreadIdx_x / LogicalWarpSize;
+    const unsigned int warp_id = threadIdx.x / LogicalWarpSize;
     warp_merge_sort wsort{storage[warp_id]};
 
-    const unsigned int segment_id = hipBlockIdx_x * segments_per_block + warp_id;
+    const unsigned int segment_id = blockIdx.x * segments_per_block + warp_id;
 
     const unsigned int segment_size = segment_sizes[segment_id];
     const unsigned int warp_offset = segment_id * max_segment_size;
@@ -254,14 +312,47 @@ void sort_keys_values_segmented(Key* keys, Value* values, const unsigned int* se
     hipcub::LoadDirectBlocked(flat_tid, values + warp_offset, thread_values, segment_size);
 
     const Key oob_default = sort_last<Compare, Key>::value;
-    if (Stable) {
-      wsort.StableSort(thread_keys, thread_values, compare, segment_size, oob_default);
-    } else {
-      wsort.Sort(thread_keys, thread_values, compare, segment_size, oob_default);
+    if HIPCUB_IF_CONSTEXPR(Stable)
+    {
+        wsort.StableSort(thread_keys, thread_values, compare, segment_size, oob_default);
+    } else
+    {
+        wsort.Sort(thread_keys, thread_values, compare, segment_size, oob_default);
     }
 
     hipcub::StoreDirectBlocked(flat_tid, keys + warp_offset, thread_keys, segment_size);
     hipcub::StoreDirectBlocked(flat_tid, values + warp_offset, thread_values, segment_size);
+}
+
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Value,
+         typename Compare>
+__device__ auto sort_keys_values_segmented_test(Key* /*keys*/,
+                                                Value* /*values*/,
+                                                const unsigned int* /*segment_sizes*/,
+                                                Compare /*compare*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         unsigned int ItemsPerThread,
+         bool         Stable,
+         typename Key,
+         typename Value,
+         typename Compare>
+__global__ __launch_bounds__(BlockSize) void sort_keys_values_segmented(
+    Key* keys, Value* values, const unsigned int* segment_sizes, Compare compare)
+{
+    sort_keys_values_segmented_test<BlockSize, LogicalWarpSize, ItemsPerThread, Stable>(
+        keys,
+        values,
+        segment_sizes,
+        compare);
 }
 
 TYPED_TEST(HipcubWarpMergeSort, SortKeysSegmented)
@@ -350,10 +441,10 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysSegmented)
                             segment_sizes.size() * sizeof(segment_sizes[0]),
                             hipMemcpyHostToDevice));
 
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                sort_keys_segmented<block_size, warp_size, items_per_thread, params::stable>),
-            dim3(num_blocks), dim3(block_size), 0, 0, device_keys, device_segment_sizes, compare);
+        sort_keys_segmented<block_size, warp_size, items_per_thread, params::stable>
+            <<<dim3(num_blocks), dim3(block_size), 0, 0>>>(device_keys,
+                                                           device_segment_sizes,
+                                                           compare);
         HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(
@@ -489,10 +580,11 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValuesSegmented)
                             segment_sizes.size() * sizeof(segment_sizes[0]),
                             hipMemcpyHostToDevice));
 
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                sort_keys_values_segmented<block_size, warp_size, items_per_thread, params::stable>),
-            dim3(num_blocks), dim3(block_size), 0, 0, device_keys, device_values, device_segment_sizes, compare);
+        sort_keys_values_segmented<block_size, warp_size, items_per_thread, params::stable>
+            <<<dim3(num_blocks), dim3(block_size), 0, 0>>>(device_keys,
+                                                           device_values,
+                                                           device_segment_sizes,
+                                                           compare);
         HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(
@@ -599,10 +691,8 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeys)
                             keys.size() * sizeof(keys[0]),
                             hipMemcpyHostToDevice));
 
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                sort_keys_full<block_size, warp_size, items_per_thread, params::stable>),
-            dim3(num_blocks), dim3(block_size), 0, 0, device_keys, compare);
+        sort_keys_full<block_size, warp_size, items_per_thread, params::stable>
+            <<<dim3(num_blocks), dim3(block_size), 0, 0>>>(device_keys, compare);
         HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(
@@ -729,10 +819,8 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValues)
                             values.size() * sizeof(values[0]),
                             hipMemcpyHostToDevice));
 
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                sort_keys_values_full<block_size, warp_size, items_per_thread, params::stable>),
-            dim3(num_blocks), dim3(block_size), 0, 0, device_keys, device_values, compare);
+        sort_keys_values_full<block_size, warp_size, items_per_thread, params::stable>
+            <<<dim3(num_blocks), dim3(block_size), 0, 0>>>(device_keys, device_values, compare);
         HIP_CHECK(hipGetLastError());
 
         HIP_CHECK(

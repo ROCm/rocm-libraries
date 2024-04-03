@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,8 +49,7 @@ class HipcubDeviceSelectTests : public ::testing::Test
 public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
-    using flag_type = typename Params::flag_type;
-    const bool debug_synchronous = false;
+    using flag_type   = typename Params::flag_type;
 };
 
 typedef ::testing::Types<DeviceSelectParams<int, long>,
@@ -88,7 +87,6 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
-    const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
 
@@ -152,19 +150,14 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
-            HIP_CHECK(
-                hipcub::DeviceSelect::Flagged(
-                    nullptr,
-                    temp_storage_size_bytes,
-                    d_input,
-                    d_flags,
-                    d_output,
-                    d_selected_count_output,
-                    input.size(),
-                    stream,
-                    debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DeviceSelect::Flagged(nullptr,
+                                                    temp_storage_size_bytes,
+                                                    d_input,
+                                                    d_flags,
+                                                    d_output,
+                                                    d_selected_count_output,
+                                                    input.size(),
+                                                    stream));
             HIP_CHECK(hipDeviceSynchronize());
 
             // temp_storage_size_bytes must be >0
@@ -176,19 +169,14 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
-            HIP_CHECK(
-                hipcub::DeviceSelect::Flagged(
-                    d_temp_storage,
-                    temp_storage_size_bytes,
-                    d_input,
-                    d_flags,
-                    d_output,
-                    d_selected_count_output,
-                    input.size(),
-                    stream,
-                    debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DeviceSelect::Flagged(d_temp_storage,
+                                                    temp_storage_size_bytes,
+                                                    d_input,
+                                                    d_flags,
+                                                    d_output,
+                                                    d_selected_count_output,
+                                                    input.size(),
+                                                    stream));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if number of selected value is as expected
@@ -238,7 +226,6 @@ TEST(HipcubDeviceSelectTests, FlagNormalization)
     using T                      = int;
     using U                      = long;
     using F                      = unsigned int;
-    const bool debug_synchronous = false;
 
     hipStream_t stream = 0; // default stream
 
@@ -277,8 +264,7 @@ TEST(HipcubDeviceSelectTests, FlagNormalization)
                                                 d_output,
                                                 d_selected_count_output,
                                                 size,
-                                                stream,
-                                                debug_synchronous));
+                                                stream));
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0U);
@@ -295,8 +281,7 @@ TEST(HipcubDeviceSelectTests, FlagNormalization)
                                                 d_output,
                                                 d_selected_count_output,
                                                 size,
-                                                stream,
-                                                debug_synchronous));
+                                                stream));
 
         // Check if number of selected value is as expected
         unsigned int selected_count_output = 0;
@@ -342,7 +327,6 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
-    const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
 
@@ -393,19 +377,14 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
-            HIP_CHECK(
-                hipcub::DeviceSelect::If(
-                    nullptr,
-                    temp_storage_size_bytes,
-                    d_input,
-                    d_output,
-                    d_selected_count_output,
-                    input.size(),
-                    select_op,
-                    stream,
-                    debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DeviceSelect::If(nullptr,
+                                               temp_storage_size_bytes,
+                                               d_input,
+                                               d_output,
+                                               d_selected_count_output,
+                                               input.size(),
+                                               select_op,
+                                               stream));
             HIP_CHECK(hipDeviceSynchronize());
 
             // temp_storage_size_bytes must be >0
@@ -417,19 +396,14 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
-            HIP_CHECK(
-                hipcub::DeviceSelect::If(
-                    d_temp_storage,
-                    temp_storage_size_bytes,
-                    d_input,
-                    d_output,
-                    d_selected_count_output,
-                    input.size(),
-                    select_op,
-                    stream,
-                    debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DeviceSelect::If(d_temp_storage,
+                                               temp_storage_size_bytes,
+                                               d_input,
+                                               d_output,
+                                               d_selected_count_output,
+                                               input.size(),
+                                               select_op,
+                                               stream));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if number of selected value is as expected
@@ -485,7 +459,6 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
-    const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
 
@@ -543,18 +516,13 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                 // temp storage
                 size_t temp_storage_size_bytes;
                 // Get size of d_temp_storage
-                HIP_CHECK(
-                    hipcub::DeviceSelect::Unique(
-                        nullptr,
-                        temp_storage_size_bytes,
-                        d_input,
-                        d_output,
-                        d_selected_count_output,
-                        input.size(),
-                        stream,
-                        debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceSelect::Unique(nullptr,
+                                                       temp_storage_size_bytes,
+                                                       d_input,
+                                                       d_output,
+                                                       d_selected_count_output,
+                                                       input.size(),
+                                                       stream));
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // temp_storage_size_bytes must be >0
@@ -566,18 +534,13 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Run
-                HIP_CHECK(
-                    hipcub::DeviceSelect::Unique(
-                        d_temp_storage,
-                        temp_storage_size_bytes,
-                        d_input,
-                        d_output,
-                        d_selected_count_output,
-                        input.size(),
-                        stream,
-                        debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceSelect::Unique(d_temp_storage,
+                                                       temp_storage_size_bytes,
+                                                       d_input,
+                                                       d_output,
+                                                       d_selected_count_output,
+                                                       input.size(),
+                                                       stream));
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Check if number of selected value is as expected
@@ -624,8 +587,6 @@ TEST(HipcubDeviceSelectTests, UniqueDiscardOutputIterator)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    const bool debug_synchronous = false;
-
     hipStream_t stream = 0; //default stream
 
     const auto sizes = get_sizes();
@@ -648,8 +609,7 @@ TEST(HipcubDeviceSelectTests, UniqueDiscardOutputIterator)
                                                d_output,
                                                d_selected_count_output,
                                                size,
-                                               stream,
-                                               debug_synchronous));
+                                               stream));
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0U);
@@ -665,8 +625,7 @@ TEST(HipcubDeviceSelectTests, UniqueDiscardOutputIterator)
                                                d_output,
                                                d_selected_count_output,
                                                size,
-                                               stream,
-                                               debug_synchronous));
+                                               stream));
 
         // Check if number of selected value is as expected
         size_t selected_count_output = 0;
@@ -704,7 +663,6 @@ public:
     using value_type = typename Params::value_type;
     using output_key_type = typename Params::output_key_type;
     using output_value_type = typename Params::output_value_type;
-    const bool debug_synchronous = false;
 };
 
 typedef ::testing::Types<
@@ -726,8 +684,6 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
     using value_type = typename TestFixture::value_type;
     using output_key_type = typename TestFixture::output_key_type;
     using output_value_type = typename TestFixture::output_value_type;
-
-    const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
 
@@ -810,20 +766,15 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
                 // temp storage
                 size_t temp_storage_size_bytes;
                 // Get the size of d_temp_storage
-                HIP_CHECK(
-                    hipcub::DeviceSelect::UniqueByKey(
-                        nullptr,
-                        temp_storage_size_bytes,
-                        d_keys_input,
-                        d_values_input,
-                        d_keys_output,
-                        d_values_output,
-                        d_selected_count_output,
-                        input_keys.size(),
-                        stream,
-                        debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceSelect::UniqueByKey(nullptr,
+                                                            temp_storage_size_bytes,
+                                                            d_keys_input,
+                                                            d_values_input,
+                                                            d_keys_output,
+                                                            d_values_output,
+                                                            d_selected_count_output,
+                                                            input_keys.size(),
+                                                            stream));
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // temp_storage_size_bytes must be >0
@@ -835,20 +786,15 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // run
-                HIP_CHECK(
-                    hipcub::DeviceSelect::UniqueByKey(
-                        d_temp_storage,
-                        temp_storage_size_bytes,
-                        d_keys_input,
-                        d_values_input,
-                        d_keys_output,
-                        d_values_output,
-                        d_selected_count_output,
-                        input_keys.size(),
-                        stream,
-                        debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceSelect::UniqueByKey(d_temp_storage,
+                                                            temp_storage_size_bytes,
+                                                            d_keys_input,
+                                                            d_values_input,
+                                                            d_keys_output,
+                                                            d_values_output,
+                                                            d_selected_count_output,
+                                                            input_keys.size(),
+                                                            stream));
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Check if number of selected value is as expected

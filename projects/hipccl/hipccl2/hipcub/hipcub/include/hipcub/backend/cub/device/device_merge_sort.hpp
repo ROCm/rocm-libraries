@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,6 +31,7 @@
 #define HIPCUB_CUB_DEVICE_DEVICE_MERGE_SORT_HPP_
 
 #include "../../../config.hpp"
+#include "../../../util_deprecated.hpp"
 
 #include <cub/device/device_merge_sort.cuh>
 
@@ -39,16 +40,14 @@ BEGIN_HIPCUB_NAMESPACE
 struct DeviceMergeSort
 {
     template<typename KeyIteratorT, typename ValueIteratorT, typename OffsetT, typename CompareOpT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairs(void *         d_temp_storage,
-                                                      std::size_t &  temp_storage_bytes,
-                                                      KeyIteratorT   d_keys,
-                                                      ValueIteratorT d_items,
-                                                      OffsetT        num_items,
-                                                      CompareOpT     compare_op,
-                                                      hipStream_t    stream            = 0,
-                                                      bool           debug_synchronous = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairs(void*          d_temp_storage,
+                                                        std::size_t&   temp_storage_bytes,
+                                                        KeyIteratorT   d_keys,
+                                                        ValueIteratorT d_items,
+                                                        OffsetT        num_items,
+                                                        CompareOpT     compare_op,
+                                                        hipStream_t    stream = 0)
     {
-        (void)debug_synchronous;
         return hipCUDAErrorTohipError(::cub::DeviceMergeSort::SortPairs(d_temp_storage,
                                                                         temp_storage_bytes,
                                                                         d_keys,
@@ -58,24 +57,43 @@ struct DeviceMergeSort
                                                                         stream));
     }
 
+    template<typename KeyIteratorT, typename ValueIteratorT, typename OffsetT, typename CompareOpT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortPairs(void*          d_temp_storage,
+                  std::size_t&   temp_storage_bytes,
+                  KeyIteratorT   d_keys,
+                  ValueIteratorT d_items,
+                  OffsetT        num_items,
+                  CompareOpT     compare_op,
+                  hipStream_t    stream,
+                  bool           debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortPairs(d_temp_storage,
+                         temp_storage_bytes,
+                         d_keys,
+                         d_items,
+                         num_items,
+                         compare_op,
+                         stream);
+    }
+
     template<typename KeyInputIteratorT,
              typename ValueInputIteratorT,
              typename KeyIteratorT,
              typename ValueIteratorT,
              typename OffsetT,
              typename CompareOpT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairsCopy(void *              d_temp_storage,
-                                                          std::size_t &       temp_storage_bytes,
-                                                          KeyInputIteratorT   d_input_keys,
-                                                          ValueInputIteratorT d_input_items,
-                                                          KeyIteratorT        d_output_keys,
-                                                          ValueIteratorT      d_output_items,
-                                                          OffsetT             num_items,
-                                                          CompareOpT          compare_op,
-                                                          hipStream_t         stream = 0,
-                                                          bool debug_synchronous     = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairsCopy(void*               d_temp_storage,
+                                                            std::size_t&        temp_storage_bytes,
+                                                            KeyInputIteratorT   d_input_keys,
+                                                            ValueInputIteratorT d_input_items,
+                                                            KeyIteratorT        d_output_keys,
+                                                            ValueIteratorT      d_output_items,
+                                                            OffsetT             num_items,
+                                                            CompareOpT          compare_op,
+                                                            hipStream_t         stream = 0)
     {
-        (void)debug_synchronous;
         return hipCUDAErrorTohipError(::cub::DeviceMergeSort::SortPairsCopy(d_temp_storage,
                                                                             temp_storage_bytes,
                                                                             d_input_keys,
@@ -87,16 +105,44 @@ struct DeviceMergeSort
                                                                             stream));
     }
 
-    template<typename KeyIteratorT, typename OffsetT, typename CompareOpT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeys(void *        d_temp_storage,
-                                                     std::size_t & temp_storage_bytes,
-                                                     KeyIteratorT  d_keys,
-                                                     OffsetT       num_items,
-                                                     CompareOpT    compare_op,
-                                                     hipStream_t   stream            = 0,
-                                                     bool          debug_synchronous = false)
+    template<typename KeyInputIteratorT,
+             typename ValueInputIteratorT,
+             typename KeyIteratorT,
+             typename ValueIteratorT,
+             typename OffsetT,
+             typename CompareOpT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortPairsCopy(void*               d_temp_storage,
+                      std::size_t&        temp_storage_bytes,
+                      KeyInputIteratorT   d_input_keys,
+                      ValueInputIteratorT d_input_items,
+                      KeyIteratorT        d_output_keys,
+                      ValueIteratorT      d_output_items,
+                      OffsetT             num_items,
+                      CompareOpT          compare_op,
+                      hipStream_t         stream,
+                      bool                debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortPairsCopy(d_temp_storage,
+                             temp_storage_bytes,
+                             d_input_keys,
+                             d_input_items,
+                             d_output_keys,
+                             d_output_items,
+                             num_items,
+                             compare_op,
+                             stream);
+    }
+
+    template<typename KeyIteratorT, typename OffsetT, typename CompareOpT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeys(void*        d_temp_storage,
+                                                       std::size_t& temp_storage_bytes,
+                                                       KeyIteratorT d_keys,
+                                                       OffsetT      num_items,
+                                                       CompareOpT   compare_op,
+                                                       hipStream_t  stream = 0)
+    {
         return hipCUDAErrorTohipError(::cub::DeviceMergeSort::SortKeys(d_temp_storage,
                                                                        temp_storage_bytes,
                                                                        d_keys,
@@ -105,21 +151,33 @@ struct DeviceMergeSort
                                                                        stream));
     }
 
+    template<typename KeyIteratorT, typename OffsetT, typename CompareOpT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortKeys(void*        d_temp_storage,
+                 std::size_t& temp_storage_bytes,
+                 KeyIteratorT d_keys,
+                 OffsetT      num_items,
+                 CompareOpT   compare_op,
+                 hipStream_t  stream,
+                 bool         debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortKeys(d_temp_storage, temp_storage_bytes, d_keys, num_items, compare_op, stream);
+    }
+
     template<typename KeyInputIteratorT,
              typename KeyIteratorT,
              typename OffsetT,
              typename CompareOpT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeysCopy(void * d_temp_storage,
-                                                         std::size_t & temp_storage_bytes,
-                                                         KeyInputIteratorT d_input_keys,
-                                                         KeyIteratorT      d_output_keys,
-                                                         OffsetT           num_items,
-                                                         CompareOpT        compare_op,
-                                                         hipStream_t stream = 0,
-                                                         bool debug_synchronous = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeysCopy(void*             d_temp_storage,
+                                                           std::size_t&      temp_storage_bytes,
+                                                           KeyInputIteratorT d_input_keys,
+                                                           KeyIteratorT      d_output_keys,
+                                                           OffsetT           num_items,
+                                                           CompareOpT        compare_op,
+                                                           hipStream_t       stream = 0)
 
     {
-        (void)debug_synchronous;
         return hipCUDAErrorTohipError(::cub::DeviceMergeSort::SortKeysCopy(d_temp_storage,
                                                                            temp_storage_bytes,
                                                                            d_input_keys,
@@ -129,6 +187,31 @@ struct DeviceMergeSort
                                                                            stream));
     }
 
+    template<typename KeyInputIteratorT,
+             typename KeyIteratorT,
+             typename OffsetT,
+             typename CompareOpT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortKeysCopy(void*             d_temp_storage,
+                     std::size_t&      temp_storage_bytes,
+                     KeyInputIteratorT d_input_keys,
+                     KeyIteratorT      d_output_keys,
+                     OffsetT           num_items,
+                     CompareOpT        compare_op,
+                     hipStream_t       stream,
+                     bool              debug_synchronous)
+
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortKeysCopy(d_temp_storage,
+                            temp_storage_bytes,
+                            d_input_keys,
+                            d_output_keys,
+                            num_items,
+                            compare_op,
+                            stream);
+    }
+
     template<typename KeyIteratorT, typename ValueIteratorT, typename OffsetT, typename CompareOpT>
     HIPCUB_RUNTIME_FUNCTION static hipError_t StableSortPairs(void*          d_temp_storage,
                                                               std::size_t&   temp_storage_bytes,
@@ -136,10 +219,8 @@ struct DeviceMergeSort
                                                               ValueIteratorT d_items,
                                                               OffsetT        num_items,
                                                               CompareOpT     compare_op,
-                                                              hipStream_t    stream  = 0,
-                                                              bool debug_synchronous = false)
+                                                              hipStream_t    stream = 0)
     {
-        (void)debug_synchronous;
         return hipCUDAErrorTohipError(::cub::DeviceMergeSort::StableSortPairs(d_temp_storage,
                                                                               temp_storage_bytes,
                                                                               d_keys,
@@ -149,22 +230,60 @@ struct DeviceMergeSort
                                                                               stream));
     }
 
-    template<typename KeyIteratorT, typename OffsetT, typename CompareOpT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t StableSortKeys(void *        d_temp_storage,
-                                                             std::size_t & temp_storage_bytes,
-                                                             KeyIteratorT  d_keys,
-                                                             OffsetT       num_items,
-                                                             CompareOpT    compare_op,
-                                                             hipStream_t   stream   = 0,
-                                                             bool debug_synchronous = false)
+    template<typename KeyIteratorT, typename ValueIteratorT, typename OffsetT, typename CompareOpT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortPairs(void*          d_temp_storage,
+                        std::size_t&   temp_storage_bytes,
+                        KeyIteratorT   d_keys,
+                        ValueIteratorT d_items,
+                        OffsetT        num_items,
+                        CompareOpT     compare_op,
+                        hipStream_t    stream,
+                        bool           debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortPairs(d_temp_storage,
+                               temp_storage_bytes,
+                               d_keys,
+                               d_items,
+                               num_items,
+                               compare_op,
+                               stream);
+    }
+
+    template<typename KeyIteratorT, typename OffsetT, typename CompareOpT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t StableSortKeys(void*        d_temp_storage,
+                                                             std::size_t& temp_storage_bytes,
+                                                             KeyIteratorT d_keys,
+                                                             OffsetT      num_items,
+                                                             CompareOpT   compare_op,
+                                                             hipStream_t  stream = 0)
+    {
         return hipCUDAErrorTohipError(::cub::DeviceMergeSort::StableSortKeys(d_temp_storage,
                                                                              temp_storage_bytes,
                                                                              d_keys,
                                                                              num_items,
                                                                              compare_op,
                                                                              stream));
+    }
+
+    template<typename KeyIteratorT, typename OffsetT, typename CompareOpT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortKeys(void*        d_temp_storage,
+                       std::size_t& temp_storage_bytes,
+                       KeyIteratorT d_keys,
+                       OffsetT      num_items,
+                       CompareOpT   compare_op,
+                       hipStream_t  stream,
+                       bool         debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortKeys(d_temp_storage,
+                              temp_storage_bytes,
+                              d_keys,
+                              num_items,
+                              compare_op,
+                              stream);
     }
 
     template<typename KeyInputIteratorT,
@@ -177,10 +296,8 @@ struct DeviceMergeSort
                                                                  KeyIteratorT      d_output_keys,
                                                                  OffsetT           num_items,
                                                                  CompareOpT        compare_op,
-                                                                 hipStream_t       stream = 0,
-                                                                 bool debug_synchronous   = false)
+                                                                 hipStream_t       stream = 0)
     {
-        (void)debug_synchronous;
         return hipCUDAErrorTohipError(::cub::DeviceMergeSort::StableSortKeysCopy(d_temp_storage,
                                                                                  temp_storage_bytes,
                                                                                  d_input_keys,
@@ -188,6 +305,30 @@ struct DeviceMergeSort
                                                                                  num_items,
                                                                                  compare_op,
                                                                                  stream));
+    }
+
+    template<typename KeyInputIteratorT,
+             typename KeyIteratorT,
+             typename OffsetT,
+             typename CompareOpT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortKeysCopy(void*             d_temp_storage,
+                           std::size_t&      temp_storage_bytes,
+                           KeyInputIteratorT d_input_keys,
+                           KeyIteratorT      d_output_keys,
+                           OffsetT           num_items,
+                           CompareOpT        compare_op,
+                           hipStream_t       stream,
+                           bool              debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortKeysCopy(d_temp_storage,
+                                  temp_storage_bytes,
+                                  d_input_keys,
+                                  d_output_keys,
+                                  num_items,
+                                  compare_op,
+                                  stream);
     }
 };
 

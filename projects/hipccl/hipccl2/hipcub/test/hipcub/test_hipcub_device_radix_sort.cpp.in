@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,4 +86,9 @@
     // large sizes to check correctness of more than 1 block per batch
 
     INSTANTIATE(params<float,                 char,               true,   0,  32, true    >)
+#elif HIPCUB_TEST_TYPE_SLICE == 2
+    INSTANTIATE(params<test_utils::custom_test_type<int>,           int>) 
+    INSTANTIATE(params<test_utils::custom_test_type<int>,           int,              true>)
+    INSTANTIATE(params<test_utils::custom_test_type<float>,         int8_t,           false,   0,  64>)
+    INSTANTIATE(params<test_utils::custom_test_type<uint32_t>,      test_utils::half, true,   32,  64>)
 #endif

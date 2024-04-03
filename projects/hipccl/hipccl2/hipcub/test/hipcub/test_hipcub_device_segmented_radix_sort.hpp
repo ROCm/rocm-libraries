@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -85,8 +85,6 @@ inline void sort_keys()
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -189,26 +187,31 @@ inline void sort_keys()
             if(descending)
             {
                 HIP_CHECK(
-                    hipcub::DeviceSegmentedRadixSort::SortKeysDescending(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_keys_input, d_keys_output, size,
-                        segments_count, d_offsets, d_offsets + 1,
-                        start_bit, end_bit,
-                        stream, debug_synchronous
-                    )
-                );
+                    hipcub::DeviceSegmentedRadixSort::SortKeysDescending(d_temporary_storage,
+                                                                         temporary_storage_bytes,
+                                                                         d_keys_input,
+                                                                         d_keys_output,
+                                                                         size,
+                                                                         segments_count,
+                                                                         d_offsets,
+                                                                         d_offsets + 1,
+                                                                         start_bit,
+                                                                         end_bit,
+                                                                         stream));
             }
             else
             {
-                HIP_CHECK(
-                    hipcub::DeviceSegmentedRadixSort::SortKeys(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_keys_input, d_keys_output, size,
-                        segments_count, d_offsets, d_offsets + 1,
-                        start_bit, end_bit,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortKeys(d_temporary_storage,
+                                                                     temporary_storage_bytes,
+                                                                     d_keys_input,
+                                                                     d_keys_output,
+                                                                     size,
+                                                                     segments_count,
+                                                                     d_offsets,
+                                                                     d_offsets + 1,
+                                                                     start_bit,
+                                                                     end_bit,
+                                                                     stream));
             }
 
             std::vector<key_type> keys_output(size);
@@ -249,8 +252,6 @@ inline void sort_pairs()
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -374,26 +375,35 @@ inline void sort_pairs()
             if(descending)
             {
                 HIP_CHECK(
-                    hipcub::DeviceSegmentedRadixSort::SortPairsDescending(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                        segments_count, d_offsets, d_offsets + 1,
-                        start_bit, end_bit,
-                        stream, debug_synchronous
-                    )
-                );
+                    hipcub::DeviceSegmentedRadixSort::SortPairsDescending(d_temporary_storage,
+                                                                          temporary_storage_bytes,
+                                                                          d_keys_input,
+                                                                          d_keys_output,
+                                                                          d_values_input,
+                                                                          d_values_output,
+                                                                          size,
+                                                                          segments_count,
+                                                                          d_offsets,
+                                                                          d_offsets + 1,
+                                                                          start_bit,
+                                                                          end_bit,
+                                                                          stream));
             }
             else
             {
-                HIP_CHECK(
-                    hipcub::DeviceSegmentedRadixSort::SortPairs(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                        segments_count, d_offsets, d_offsets + 1,
-                        start_bit, end_bit,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortPairs(d_temporary_storage,
+                                                                      temporary_storage_bytes,
+                                                                      d_keys_input,
+                                                                      d_keys_output,
+                                                                      d_values_input,
+                                                                      d_values_output,
+                                                                      size,
+                                                                      segments_count,
+                                                                      d_offsets,
+                                                                      d_offsets + 1,
+                                                                      start_bit,
+                                                                      end_bit,
+                                                                      stream));
             }
 
             std::vector<key_type> keys_output(size);
@@ -445,8 +455,6 @@ inline void sort_keys_double_buffer()
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -551,26 +559,29 @@ inline void sort_keys_double_buffer()
             if(descending)
             {
                 HIP_CHECK(
-                    hipcub::DeviceSegmentedRadixSort::SortKeysDescending(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_keys, size,
-                        segments_count, d_offsets, d_offsets + 1,
-                        start_bit, end_bit,
-                        stream, debug_synchronous
-                    )
-                );
+                    hipcub::DeviceSegmentedRadixSort::SortKeysDescending(d_temporary_storage,
+                                                                         temporary_storage_bytes,
+                                                                         d_keys,
+                                                                         size,
+                                                                         segments_count,
+                                                                         d_offsets,
+                                                                         d_offsets + 1,
+                                                                         start_bit,
+                                                                         end_bit,
+                                                                         stream));
             }
             else
             {
-                HIP_CHECK(
-                    hipcub::DeviceSegmentedRadixSort::SortKeys(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_keys, size,
-                        segments_count, d_offsets, d_offsets + 1,
-                        start_bit, end_bit,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortKeys(d_temporary_storage,
+                                                                     temporary_storage_bytes,
+                                                                     d_keys,
+                                                                     size,
+                                                                     segments_count,
+                                                                     d_offsets,
+                                                                     d_offsets + 1,
+                                                                     start_bit,
+                                                                     end_bit,
+                                                                     stream));
             }
 
             std::vector<key_type> keys_output(size);
@@ -611,8 +622,6 @@ inline void sort_pairs_double_buffer()
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -739,26 +748,31 @@ inline void sort_pairs_double_buffer()
             if(descending)
             {
                 HIP_CHECK(
-                    hipcub::DeviceSegmentedRadixSort::SortPairsDescending(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_keys, d_values, size,
-                        segments_count, d_offsets, d_offsets + 1,
-                        start_bit, end_bit,
-                        stream, debug_synchronous
-                    )
-                );
+                    hipcub::DeviceSegmentedRadixSort::SortPairsDescending(d_temporary_storage,
+                                                                          temporary_storage_bytes,
+                                                                          d_keys,
+                                                                          d_values,
+                                                                          size,
+                                                                          segments_count,
+                                                                          d_offsets,
+                                                                          d_offsets + 1,
+                                                                          start_bit,
+                                                                          end_bit,
+                                                                          stream));
             }
             else
             {
-                HIP_CHECK(
-                    hipcub::DeviceSegmentedRadixSort::SortPairs(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_keys, d_values, size,
-                        segments_count, d_offsets, d_offsets + 1,
-                        start_bit, end_bit,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceSegmentedRadixSort::SortPairs(d_temporary_storage,
+                                                                      temporary_storage_bytes,
+                                                                      d_keys,
+                                                                      d_values,
+                                                                      size,
+                                                                      segments_count,
+                                                                      d_offsets,
+                                                                      d_offsets + 1,
+                                                                      start_bit,
+                                                                      end_bit,
+                                                                      stream));
             }
 
             std::vector<key_type> keys_output(size);

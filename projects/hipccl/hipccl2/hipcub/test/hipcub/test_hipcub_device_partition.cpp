@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,8 +50,7 @@ class HipcubDevicePartitionTests : public ::testing::Test
 public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
-    using flag_type = typename Params::flag_type;
-    const bool debug_synchronous = false;
+    using flag_type                             = typename Params::flag_type;
     static constexpr bool use_identity_iterator = Params::use_identity_iterator;
 };
 
@@ -91,7 +90,6 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
-    const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
 
@@ -154,19 +152,15 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
-            HIP_CHECK(
-                hipcub::DevicePartition::Flagged(
-                    nullptr,
-                    temp_storage_size_bytes,
-                    d_input,
-                    d_flags,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    d_selected_count_output,
-                    input.size(),
-                    stream,
-                    debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DevicePartition::Flagged(
+                nullptr,
+                temp_storage_size_bytes,
+                d_input,
+                d_flags,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                d_selected_count_output,
+                input.size(),
+                stream));
             HIP_CHECK(hipDeviceSynchronize());
 
             // temp_storage_size_bytes must be >0
@@ -178,19 +172,15 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
-            HIP_CHECK(
-                hipcub::DevicePartition::Flagged(
-                    d_temp_storage,
-                    temp_storage_size_bytes,
-                    d_input,
-                    d_flags,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    d_selected_count_output,
-                    input.size(),
-                    stream,
-                    debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DevicePartition::Flagged(
+                d_temp_storage,
+                temp_storage_size_bytes,
+                d_input,
+                d_flags,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                d_selected_count_output,
+                input.size(),
+                stream));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if number of selected value is as expected_selected
@@ -256,7 +246,6 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
-    const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
 
@@ -319,19 +308,15 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
-            HIP_CHECK(
-                hipcub::DevicePartition::If(
-                    nullptr,
-                    temp_storage_size_bytes,
-                    d_input,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    d_selected_count_output,
-                    input.size(),
-                    select_op,
-                    stream,
-                    debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DevicePartition::If(
+                nullptr,
+                temp_storage_size_bytes,
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                d_selected_count_output,
+                input.size(),
+                select_op,
+                stream));
             HIP_CHECK(hipDeviceSynchronize());
 
             // temp_storage_size_bytes must be >0
@@ -343,19 +328,15 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
-            HIP_CHECK(
-                hipcub::DevicePartition::If(
-                    d_temp_storage,
-                    temp_storage_size_bytes,
-                    d_input,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    d_selected_count_output,
-                    input.size(),
-                    select_op,
-                    stream,
-                    debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DevicePartition::If(
+                d_temp_storage,
+                temp_storage_size_bytes,
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                d_selected_count_output,
+                input.size(),
+                select_op,
+                stream));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if number of selected value is as expected_selected
@@ -423,7 +404,6 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
-    const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const hipStream_t stream = 0; // default stream
 
@@ -489,22 +469,18 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
-            HIP_CHECK(
-                hipcub::DevicePartition::If(
-                    nullptr,
-                    temp_storage_size_bytes,
-                    d_input,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_first_output),
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_second_output),
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unselected_output),
-                    d_selected_counts,
-                    static_cast<int>(input.size()),
-                    first_op,
-                    second_op,
-                    stream,
-                    debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DevicePartition::If(
+                nullptr,
+                temp_storage_size_bytes,
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_first_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_second_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unselected_output),
+                d_selected_counts,
+                static_cast<int>(input.size()),
+                first_op,
+                second_op,
+                stream));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -514,22 +490,18 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
             HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
             // Run
-            HIP_CHECK(
-                hipcub::DevicePartition::If(
-                    d_temp_storage,
-                    temp_storage_size_bytes,
-                    d_input,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_first_output),
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_second_output),
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unselected_output),
-                    d_selected_counts,
-                    static_cast<int>(input.size()),
-                    first_op,
-                    second_op,
-                    stream,
-                    debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DevicePartition::If(
+                d_temp_storage,
+                temp_storage_size_bytes,
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_first_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_second_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unselected_output),
+                d_selected_counts,
+                static_cast<int>(input.size()),
+                first_op,
+                second_op,
+                stream));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if number of selected value is as expected_selected

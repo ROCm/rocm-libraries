@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,14 +32,52 @@
 
 #include "../../../config.hpp"
 
+#include "../tuple.hpp"
 #include "../util_type.hpp"
 
-#include <rocprim/functional.hpp>
 #include <rocprim/block/block_radix_sort.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/types/tuple.hpp>
+
+#include <initializer_list>
+#include <type_traits>
+#include <utility>
 
 #include "block_scan.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
+
+namespace detail
+{
+
+template<class Tuple>
+struct tuple_bit_size
+{
+    // Always false
+    static_assert(sizeof(Tuple) == 0, "tuple_bit_size can only be used with hipcub::tuple");
+};
+
+template<class Tuple, size_t Index>
+constexpr auto tuple_bit_size_impl()
+    -> std::enable_if_t<Index == ::hipcub::tuple_size<Tuple>::value, size_t>
+{
+    return 0;
+}
+
+template<class Tuple, size_t Index>
+constexpr auto tuple_bit_size_impl()
+    -> std::enable_if_t<Index != ::hipcub::tuple_size<Tuple>::value, size_t>
+{
+    using element_t = std::decay_t<::hipcub::tuple_element_t<Index, Tuple>>;
+    return 8 * sizeof(element_t) + tuple_bit_size_impl<Tuple, Index + 1>();
+}
+
+template<class... Args>
+struct tuple_bit_size<::hipcub::tuple<Args...>>
+    : public std::integral_constant<std::size_t, tuple_bit_size_impl<::hipcub::tuple<Args...>, 0>()>
+{};
+
+} // namespace detail
 
 template<
     typename KeyT,
@@ -85,87 +123,222 @@ class BlockRadixSort
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE inline
-    BlockRadixSort() : temp_storage_(private_storage())
-    {
-    }
+    HIPCUB_DEVICE BlockRadixSort() : temp_storage_(private_storage()) {}
 
-    HIPCUB_DEVICE inline
-    BlockRadixSort(TempStorage& temp_storage) : temp_storage_(temp_storage)
-    {
-    }
+    HIPCUB_DEVICE BlockRadixSort(TempStorage& temp_storage) : temp_storage_(temp_storage) {}
 
-    HIPCUB_DEVICE inline
-    void Sort(KeyT (&keys)[ITEMS_PER_THREAD],
-              int begin_bit = 0,
-              int end_bit = sizeof(KeyT) * 8)
+    HIPCUB_DEVICE void
+        Sort(KeyT (&keys)[ITEMS_PER_THREAD], int begin_bit = 0, int end_bit = sizeof(KeyT) * 8)
     {
         base_type::sort(keys, temp_storage_, begin_bit, end_bit);
     }
 
-    HIPCUB_DEVICE inline
-    void Sort(KeyT (&keys)[ITEMS_PER_THREAD],
-              ValueT (&values)[ITEMS_PER_THREAD],
-              int begin_bit = 0,
-              int end_bit = sizeof(KeyT) * 8)
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+        Sort(KeyT (&keys)[ITEMS_PER_THREAD], Decomposer decomposer, int begin_bit, int end_bit)
+    {
+        base_type::sort(keys, temp_storage_, begin_bit, end_bit, decomposer);
+    }
+
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  Sort(KeyT (&keys)[ITEMS_PER_THREAD], Decomposer decomposer)
+    {
+        static constexpr int end_bit = detail::tuple_bit_size<decltype(decomposer(keys[0]))>::value;
+        base_type::sort(keys, temp_storage_, 0, end_bit, decomposer);
+    }
+
+    HIPCUB_DEVICE void Sort(KeyT (&keys)[ITEMS_PER_THREAD],
+                            ValueT (&values)[ITEMS_PER_THREAD],
+                            int begin_bit = 0,
+                            int end_bit   = sizeof(KeyT) * 8)
     {
         base_type::sort(keys, values, temp_storage_, begin_bit, end_bit);
     }
 
-    HIPCUB_DEVICE inline
-    void SortDescending(KeyT (&keys)[ITEMS_PER_THREAD],
-                        int begin_bit = 0,
-                        int end_bit = sizeof(KeyT) * 8)
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  Sort(KeyT (&keys)[ITEMS_PER_THREAD],
+                       ValueT (&values)[ITEMS_PER_THREAD],
+                       Decomposer decomposer,
+                       int        begin_bit,
+                       int        end_bit)
+    {
+        base_type::sort(keys, values, temp_storage_, begin_bit, end_bit, decomposer);
+    }
+
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value> Sort(
+        KeyT (&keys)[ITEMS_PER_THREAD], ValueT (&values)[ITEMS_PER_THREAD], Decomposer decomposer)
+    {
+        static constexpr int end_bit = detail::tuple_bit_size<decltype(decomposer(keys[0]))>::value;
+        base_type::sort(keys, values, temp_storage_, 0, end_bit, decomposer);
+    }
+
+    HIPCUB_DEVICE void SortDescending(KeyT (&keys)[ITEMS_PER_THREAD],
+                                      int begin_bit = 0,
+                                      int end_bit   = sizeof(KeyT) * 8)
     {
         base_type::sort_desc(keys, temp_storage_, begin_bit, end_bit);
     }
 
-    HIPCUB_DEVICE inline
-    void SortDescending(KeyT (&keys)[ITEMS_PER_THREAD],
-                        ValueT (&values)[ITEMS_PER_THREAD],
-                        int begin_bit = 0,
-                        int end_bit = sizeof(KeyT) * 8)
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value> SortDescending(
+        KeyT (&keys)[ITEMS_PER_THREAD], Decomposer decomposer, int begin_bit, int end_bit)
+    {
+        base_type::sort_desc(keys, temp_storage_, begin_bit, end_bit, decomposer);
+    }
+
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  SortDescending(KeyT (&keys)[ITEMS_PER_THREAD], Decomposer decomposer)
+    {
+        static constexpr int end_bit = detail::tuple_bit_size<decltype(decomposer(keys[0]))>::value;
+        base_type::sort_desc(keys, temp_storage_, 0, end_bit, decomposer);
+    }
+
+    HIPCUB_DEVICE void SortDescending(KeyT (&keys)[ITEMS_PER_THREAD],
+                                      ValueT (&values)[ITEMS_PER_THREAD],
+                                      int begin_bit = 0,
+                                      int end_bit   = sizeof(KeyT) * 8)
     {
         base_type::sort_desc(keys, values, temp_storage_, begin_bit, end_bit);
     }
 
-    HIPCUB_DEVICE inline
-    void SortBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
-                              int begin_bit = 0,
-                              int end_bit = sizeof(KeyT) * 8)
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  SortDescending(KeyT (&keys)[ITEMS_PER_THREAD],
+                                 ValueT (&values)[ITEMS_PER_THREAD],
+                                 Decomposer decomposer,
+                                 int        begin_bit,
+                                 int        end_bit)
+    {
+        base_type::sort_desc(keys, values, temp_storage_, begin_bit, end_bit, decomposer);
+    }
+
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value> SortDescending(
+        KeyT (&keys)[ITEMS_PER_THREAD], ValueT (&values)[ITEMS_PER_THREAD], Decomposer decomposer)
+    {
+        static constexpr int end_bit = detail::tuple_bit_size<decltype(decomposer(keys[0]))>::value;
+        base_type::sort_desc(keys, values, temp_storage_, 0, end_bit, decomposer);
+    }
+
+    HIPCUB_DEVICE void SortBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
+                                            int begin_bit = 0,
+                                            int end_bit   = sizeof(KeyT) * 8)
     {
         base_type::sort_to_striped(keys, temp_storage_, begin_bit, end_bit);
     }
 
-    HIPCUB_DEVICE inline
-    void SortBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
-                              ValueT (&values)[ITEMS_PER_THREAD],
-                              int begin_bit = 0,
-                              int end_bit = sizeof(KeyT) * 8)
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  SortBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
+                                       Decomposer decomposer,
+                                       int        begin_bit,
+                                       int        end_bit)
+    {
+        base_type::sort_to_striped(keys, temp_storage_, begin_bit, end_bit, decomposer);
+    }
+
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  SortBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD], Decomposer decomposer)
+    {
+        static constexpr int end_bit = detail::tuple_bit_size<decltype(decomposer(keys[0]))>::value;
+        base_type::sort_to_striped(keys, temp_storage_, 0, end_bit, decomposer);
+    }
+
+    HIPCUB_DEVICE void SortBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
+                                            ValueT (&values)[ITEMS_PER_THREAD],
+                                            int begin_bit = 0,
+                                            int end_bit   = sizeof(KeyT) * 8)
     {
         base_type::sort_to_striped(keys, values, temp_storage_, begin_bit, end_bit);
     }
 
-    HIPCUB_DEVICE inline
-    void SortDescendingBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
-                                        int begin_bit = 0,
-                                        int end_bit = sizeof(KeyT) * 8)
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  SortBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
+                                       ValueT (&values)[ITEMS_PER_THREAD],
+                                       Decomposer decomposer,
+                                       int        begin_bit,
+                                       int        end_bit)
+    {
+        base_type::sort_to_striped(keys, values, temp_storage_, begin_bit, end_bit, decomposer);
+    }
+
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  SortBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
+                                       ValueT (&values)[ITEMS_PER_THREAD],
+                                       Decomposer decomposer)
+    {
+        static constexpr int end_bit = detail::tuple_bit_size<decltype(decomposer(keys[0]))>::value;
+        base_type::sort_to_striped(keys, values, temp_storage_, 0, end_bit, decomposer);
+    }
+
+    HIPCUB_DEVICE void SortDescendingBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
+                                                      int begin_bit = 0,
+                                                      int end_bit   = sizeof(KeyT) * 8)
     {
         base_type::sort_desc_to_striped(keys, temp_storage_, begin_bit, end_bit);
     }
 
-    HIPCUB_DEVICE inline
-    void SortDescendingBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
-                                        ValueT (&values)[ITEMS_PER_THREAD],
-                                        int begin_bit = 0,
-                                        int end_bit = sizeof(KeyT) * 8)
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  SortDescendingBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
+                                                 Decomposer decomposer,
+                                                 int        begin_bit,
+                                                 int        end_bit)
+    {
+        base_type::sort_desc_to_striped(keys, temp_storage_, begin_bit, end_bit, decomposer);
+    }
+
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+        SortDescendingBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD], Decomposer decomposer)
+    {
+        static constexpr int end_bit = detail::tuple_bit_size<decltype(decomposer(keys[0]))>::value;
+        base_type::sort_desc_to_striped(keys, temp_storage_, 0, end_bit, decomposer);
+    }
+
+    HIPCUB_DEVICE void SortDescendingBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
+                                                      ValueT (&values)[ITEMS_PER_THREAD],
+                                                      int begin_bit = 0,
+                                                      int end_bit   = sizeof(KeyT) * 8)
     {
         base_type::sort_desc_to_striped(keys, values, temp_storage_, begin_bit, end_bit);
     }
 
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  SortDescendingBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
+                                                 ValueT (&values)[ITEMS_PER_THREAD],
+                                                 Decomposer decomposer,
+                                                 int        begin_bit,
+                                                 int        end_bit)
+    {
+        base_type::sort_desc_to_striped(keys,
+                                        values,
+                                        temp_storage_,
+                                        begin_bit,
+                                        end_bit,
+                                        decomposer);
+    }
+
+    template<class Decomposer>
+    HIPCUB_DEVICE std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
+                  SortDescendingBlockedToStriped(KeyT (&keys)[ITEMS_PER_THREAD],
+                                                 ValueT (&values)[ITEMS_PER_THREAD],
+                                                 Decomposer decomposer)
+    {
+        static constexpr int end_bit = detail::tuple_bit_size<decltype(decomposer(keys[0]))>::value;
+        base_type::sort_desc_to_striped(keys, values, temp_storage_, 0, end_bit, decomposer);
+    }
+
 private:
-    HIPCUB_DEVICE inline
-    TempStorage& private_storage()
+    HIPCUB_DEVICE TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;

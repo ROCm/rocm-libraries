@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -176,8 +176,6 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
 
     hipStream_t stream = 0;
 
-    const bool debug_synchronous = false;
-
     for(auto dim : get_dims())
     {
         SCOPED_TRACE(
@@ -238,27 +236,29 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
-                HIP_CHECK(
-                    hipcub::DeviceHistogram::HistogramEven(
-                        nullptr, temporary_storage_bytes,
-                        d_input, d_histogram,
-                        bins + 1, lower_level, upper_level,
-                        int(columns),
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(nullptr,
+                                                                 temporary_storage_bytes,
+                                                                 d_input,
+                                                                 d_histogram,
+                                                                 bins + 1,
+                                                                 lower_level,
+                                                                 upper_level,
+                                                                 int(columns),
+                                                                 stream));
             }
             else
             {
-                HIP_CHECK(
-                    hipcub::DeviceHistogram::HistogramEven(
-                        nullptr, temporary_storage_bytes,
-                        d_input, d_histogram,
-                        bins + 1, lower_level, upper_level,
-                        int(columns), int(rows), row_stride_bytes,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(nullptr,
+                                                                 temporary_storage_bytes,
+                                                                 d_input,
+                                                                 d_histogram,
+                                                                 bins + 1,
+                                                                 lower_level,
+                                                                 upper_level,
+                                                                 int(columns),
+                                                                 int(rows),
+                                                                 row_stride_bytes,
+                                                                 stream));
             }
 
             ASSERT_GT(temporary_storage_bytes, 0U);
@@ -268,27 +268,29 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
 
             if(rows == 1)
             {
-                HIP_CHECK(
-                    hipcub::DeviceHistogram::HistogramEven(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input, d_histogram,
-                        bins + 1, lower_level, upper_level,
-                        int(columns),
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
+                                                                 temporary_storage_bytes,
+                                                                 d_input,
+                                                                 d_histogram,
+                                                                 bins + 1,
+                                                                 lower_level,
+                                                                 upper_level,
+                                                                 int(columns),
+                                                                 stream));
             }
             else
             {
-                HIP_CHECK(
-                    hipcub::DeviceHistogram::HistogramEven(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input, d_histogram,
-                        bins + 1, lower_level, upper_level,
-                        int(columns), int(rows), row_stride_bytes,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
+                                                                 temporary_storage_bytes,
+                                                                 d_input,
+                                                                 d_histogram,
+                                                                 bins + 1,
+                                                                 lower_level,
+                                                                 upper_level,
+                                                                 int(columns),
+                                                                 int(rows),
+                                                                 row_stride_bytes,
+                                                                 stream));
             }
 
             std::vector<counter_type> histogram(bins);
@@ -371,8 +373,6 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
     using native_level_type  = test_utils::convert_to_fundamental_t<level_type>;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -463,27 +463,27 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
-                HIP_CHECK(
-                    hipcub::DeviceHistogram::HistogramRange(
-                        nullptr, temporary_storage_bytes,
-                        d_input, d_histogram,
-                        bins + 1, d_levels,
-                        int(columns),
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(nullptr,
+                                                                  temporary_storage_bytes,
+                                                                  d_input,
+                                                                  d_histogram,
+                                                                  bins + 1,
+                                                                  d_levels,
+                                                                  int(columns),
+                                                                  stream));
             }
             else
             {
-                HIP_CHECK(
-                    hipcub::DeviceHistogram::HistogramRange(
-                        nullptr, temporary_storage_bytes,
-                        d_input, d_histogram,
-                        bins + 1, d_levels,
-                        int(columns), int(rows), row_stride_bytes,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(nullptr,
+                                                                  temporary_storage_bytes,
+                                                                  d_input,
+                                                                  d_histogram,
+                                                                  bins + 1,
+                                                                  d_levels,
+                                                                  int(columns),
+                                                                  int(rows),
+                                                                  row_stride_bytes,
+                                                                  stream));
             }
 
             ASSERT_GT(temporary_storage_bytes, 0U);
@@ -493,27 +493,27 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
 
             if(rows == 1)
             {
-                HIP_CHECK(
-                    hipcub::DeviceHistogram::HistogramRange(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input, d_histogram,
-                        bins + 1, d_levels,
-                        int(columns),
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(d_temporary_storage,
+                                                                  temporary_storage_bytes,
+                                                                  d_input,
+                                                                  d_histogram,
+                                                                  bins + 1,
+                                                                  d_levels,
+                                                                  int(columns),
+                                                                  stream));
             }
             else
             {
-                HIP_CHECK(
-                    hipcub::DeviceHistogram::HistogramRange(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input, d_histogram,
-                        bins + 1, d_levels,
-                        int(columns), int(rows), row_stride_bytes,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(d_temporary_storage,
+                                                                  temporary_storage_bytes,
+                                                                  d_input,
+                                                                  d_histogram,
+                                                                  bins + 1,
+                                                                  d_levels,
+                                                                  int(columns),
+                                                                  int(rows),
+                                                                  row_stride_bytes,
+                                                                  stream));
             }
 
             std::vector<counter_type> histogram(bins);
@@ -629,8 +629,6 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
 
     hipStream_t stream = 0;
 
-    const bool debug_synchronous = false;
-
     for(auto dim : get_dims())
     {
         SCOPED_TRACE(
@@ -745,29 +743,31 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
-                HIP_CHECK((
-                    hipcub::DeviceHistogram::MultiHistogramEven<channels, active_channels>(
-                        nullptr, temporary_storage_bytes,
-                        d_input2,
-                        d_histogram,
-                        num_levels, lower_level, upper_level,
-                        int(columns),
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<channels, active_channels>(
+                    nullptr,
+                    temporary_storage_bytes,
+                    d_input2,
+                    d_histogram,
+                    num_levels,
+                    lower_level,
+                    upper_level,
+                    int(columns),
+                    stream)));
             }
             else
             {
-                HIP_CHECK((
-                    hipcub::DeviceHistogram::MultiHistogramEven<channels, active_channels>(
-                        nullptr, temporary_storage_bytes,
-                        d_input2,
-                        d_histogram,
-                        num_levels, lower_level, upper_level,
-                        int(columns), int(rows), row_stride_bytes,
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<channels, active_channels>(
+                    nullptr,
+                    temporary_storage_bytes,
+                    d_input2,
+                    d_histogram,
+                    num_levels,
+                    lower_level,
+                    upper_level,
+                    int(columns),
+                    int(rows),
+                    row_stride_bytes,
+                    stream)));
             }
 
             ASSERT_GT(temporary_storage_bytes, 0U);
@@ -777,29 +777,31 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
 
             if(rows == 1)
             {
-                HIP_CHECK((
-                    hipcub::DeviceHistogram::MultiHistogramEven<channels, active_channels>(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input2,
-                        d_histogram,
-                        num_levels, lower_level, upper_level,
-                        int(columns),
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<channels, active_channels>(
+                    d_temporary_storage,
+                    temporary_storage_bytes,
+                    d_input2,
+                    d_histogram,
+                    num_levels,
+                    lower_level,
+                    upper_level,
+                    int(columns),
+                    stream)));
             }
             else
             {
-                HIP_CHECK((
-                    hipcub::DeviceHistogram::MultiHistogramEven<channels, active_channels>(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input2,
-                        d_histogram,
-                        num_levels, lower_level, upper_level,
-                        int(columns), int(rows), row_stride_bytes,
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<channels, active_channels>(
+                    d_temporary_storage,
+                    temporary_storage_bytes,
+                    d_input2,
+                    d_histogram,
+                    num_levels,
+                    lower_level,
+                    upper_level,
+                    int(columns),
+                    int(rows),
+                    row_stride_bytes,
+                    stream)));
             }
 
             std::vector<counter_type> histogram[active_channels];
@@ -897,8 +899,6 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
     constexpr unsigned int active_channels = TestFixture::params::active_channels;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -1059,27 +1059,29 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
-                HIP_CHECK((
-                    hipcub::DeviceHistogram::MultiHistogramRange<channels, active_channels>(
-                        nullptr, temporary_storage_bytes,
-                        d_input2, d_histogram,
-                        num_levels, d_levels,
-                        int(columns),
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<channels, active_channels>(
+                    nullptr,
+                    temporary_storage_bytes,
+                    d_input2,
+                    d_histogram,
+                    num_levels,
+                    d_levels,
+                    int(columns),
+                    stream)));
             }
             else
             {
-                HIP_CHECK((
-                    hipcub::DeviceHistogram::MultiHistogramRange<channels, active_channels>(
-                        nullptr, temporary_storage_bytes,
-                        d_input2, d_histogram,
-                        num_levels, d_levels,
-                        int(columns), int(rows), row_stride_bytes,
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<channels, active_channels>(
+                    nullptr,
+                    temporary_storage_bytes,
+                    d_input2,
+                    d_histogram,
+                    num_levels,
+                    d_levels,
+                    int(columns),
+                    int(rows),
+                    row_stride_bytes,
+                    stream)));
             }
 
             ASSERT_GT(temporary_storage_bytes, 0U);
@@ -1089,27 +1091,29 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
 
             if(rows == 1)
             {
-                HIP_CHECK((
-                    hipcub::DeviceHistogram::MultiHistogramRange<channels, active_channels>(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input2, d_histogram,
-                        num_levels, d_levels,
-                        int(columns),
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<channels, active_channels>(
+                    d_temporary_storage,
+                    temporary_storage_bytes,
+                    d_input2,
+                    d_histogram,
+                    num_levels,
+                    d_levels,
+                    int(columns),
+                    stream)));
             }
             else
             {
-                HIP_CHECK((
-                    hipcub::DeviceHistogram::MultiHistogramRange<channels, active_channels>(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input2, d_histogram,
-                        num_levels, d_levels,
-                        int(columns), int(rows), row_stride_bytes,
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<channels, active_channels>(
+                    d_temporary_storage,
+                    temporary_storage_bytes,
+                    d_input2,
+                    d_histogram,
+                    num_levels,
+                    d_levels,
+                    int(columns),
+                    int(rows),
+                    row_stride_bytes,
+                    stream)));
             }
 
             std::vector<counter_type> histogram[active_channels];

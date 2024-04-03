@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,7 +49,7 @@ void run_benchmark(benchmark::State& state,
     {
         std::vector<int> flat_indices = benchmark_utils::get_random_data<int>(
             2 * num_nonzeroes_attempt, 0, size - 1, 2 * num_nonzeroes_attempt);
-        for(size_t i = 0; i < num_nonzeroes_attempt; i++)
+        for(int i = 0; i < num_nonzeroes_attempt; i++)
         {
             indices[i] = std::make_pair(flat_indices[2 * i], flat_indices[2 * i + 1]);
         }
@@ -64,7 +64,7 @@ void run_benchmark(benchmark::State& state,
     std::vector<int> column_indices(num_nonzeroes_attempt); 
     row_offsets[0] = 0;
     int last_row_written = 0;
-    for(size_t i = 0; i < num_nonzeroes_attempt; i++) 
+    for(int i = 0; i < num_nonzeroes_attempt; i++)
     {
         if(indices[i] != prev_cell) 
         {
@@ -84,7 +84,7 @@ void run_benchmark(benchmark::State& state,
         }
     }
     // fill in the entries for any missing rows
-    for(int j = last_row_written + 1; j < size + 1; j++)
+    for(int j = last_row_written + 1; j < static_cast<int>(size) + 1; j++)
     {
         row_offsets[j] = num_nonzeroes;
     }

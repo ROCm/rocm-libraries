@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <memory>
 #include "common_benchmark_header.hpp"
+
+#include <memory>
+#include <type_traits>
 
 // HIP API
 #include "hipcub/device/device_radix_sort.hpp"
@@ -54,6 +56,81 @@ std::vector<Key> generate_keys(size_t size)
     }
 }
 
+template<bool Descending, class Key>
+auto invoke_sort_keys(void*       d_temp_storage,
+                      size_t&     temp_storage_bytes,
+                      Key*        d_keys_input,
+                      Key*        d_keys_output,
+                      size_t      size,
+                      hipStream_t stream)
+    -> std::enable_if_t<!Descending && !benchmark_utils::is_custom_type<Key>::value, hipError_t>
+{
+    return hipcub::DeviceRadixSort::SortKeys(d_temp_storage,
+                                             temp_storage_bytes,
+                                             d_keys_input,
+                                             d_keys_output,
+                                             size,
+                                             0,
+                                             sizeof(Key) * 8,
+                                             stream);
+}
+
+template<bool Descending, class Key>
+auto invoke_sort_keys(void*       d_temp_storage,
+                      size_t&     temp_storage_bytes,
+                      Key*        d_keys_input,
+                      Key*        d_keys_output,
+                      size_t      size,
+                      hipStream_t stream)
+    -> std::enable_if_t<Descending && !benchmark_utils::is_custom_type<Key>::value, hipError_t>
+{
+    return hipcub::DeviceRadixSort::SortKeysDescending(d_temp_storage,
+                                                       temp_storage_bytes,
+                                                       d_keys_input,
+                                                       d_keys_output,
+                                                       size,
+                                                       0,
+                                                       sizeof(Key) * 8,
+                                                       stream);
+}
+
+template<bool Descending, class Key>
+auto invoke_sort_keys(void*       d_temp_storage,
+                      size_t&     temp_storage_bytes,
+                      Key*        d_keys_input,
+                      Key*        d_keys_output,
+                      size_t      size,
+                      hipStream_t stream)
+    -> std::enable_if_t<!Descending && benchmark_utils::is_custom_type<Key>::value, hipError_t>
+{
+    return hipcub::DeviceRadixSort::SortKeys(d_temp_storage,
+                                             temp_storage_bytes,
+                                             d_keys_input,
+                                             d_keys_output,
+                                             size,
+                                             benchmark_utils::custom_type_decomposer<Key>{},
+                                             stream);
+}
+
+template<bool Descending, class Key>
+auto invoke_sort_keys(void*       d_temp_storage,
+                      size_t&     temp_storage_bytes,
+                      Key*        d_keys_input,
+                      Key*        d_keys_output,
+                      size_t      size,
+                      hipStream_t stream)
+    -> std::enable_if_t<Descending && benchmark_utils::is_custom_type<Key>::value, hipError_t>
+{
+    return hipcub::DeviceRadixSort::SortKeysDescending(
+        d_temp_storage,
+        temp_storage_bytes,
+        d_keys_input,
+        d_keys_output,
+        size,
+        benchmark_utils::custom_type_decomposer<Key>{},
+        stream);
+}
+
 template<class Key, bool Descending = false>
 void run_sort_keys_benchmark(benchmark::State& state,
                              hipStream_t stream,
@@ -61,16 +138,6 @@ void run_sort_keys_benchmark(benchmark::State& state,
                              std::shared_ptr<std::vector<Key>> keys_input)
 {
     using key_type = Key;
-    typedef hipError_t (*sort_func) (
-        void *, size_t&, const key_type *, key_type *, size_t, int, int, hipStream_t, bool);
-
-    sort_func func_ascending  = &hipcub::DeviceRadixSort::SortKeys
-        <key_type, size_t>;
-    sort_func func_descending = &hipcub::DeviceRadixSort::SortKeysDescending
-        <key_type, size_t>;
-
-    sort_func sorting = Descending ? func_descending : func_ascending;
-
     key_type * d_keys_input;
     key_type * d_keys_output;
     HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
@@ -85,14 +152,12 @@ void run_sort_keys_benchmark(benchmark::State& state,
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK(
-        sorting(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, size,
-            0, sizeof(key_type) * 8 ,
-            stream, false
-        )
-    );
+    HIP_CHECK(invoke_sort_keys<Descending>(d_temporary_storage,
+                                           temporary_storage_bytes,
+                                           d_keys_input,
+                                           d_keys_output,
+                                           size,
+                                           stream));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
@@ -100,14 +165,12 @@ void run_sort_keys_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK(
-            sorting(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, size,
-                0, sizeof(key_type) * 8,
-                stream, false
-            )
-        );
+        HIP_CHECK(invoke_sort_keys<Descending>(d_temporary_storage,
+                                               temporary_storage_bytes,
+                                               d_keys_input,
+                                               d_keys_output,
+                                               size,
+                                               stream));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -117,14 +180,12 @@ void run_sort_keys_benchmark(benchmark::State& state,
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK(
-                sorting(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input, d_keys_output, size,
-                    0, sizeof(key_type) * 8,
-                    stream, false
-                )
-            );
+            HIP_CHECK(invoke_sort_keys<Descending>(d_temporary_storage,
+                                                   temporary_storage_bytes,
+                                                   d_keys_input,
+                                                   d_keys_output,
+                                                   size,
+                                                   stream));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -141,6 +202,97 @@ void run_sort_keys_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_keys_output));
 }
 
+template<bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*       d_temp_storage,
+                       size_t&     temp_storage_bytes,
+                       Key*        d_keys_input,
+                       Key*        d_keys_output,
+                       Value*      d_values_input,
+                       Value*      d_values_output,
+                       size_t      size,
+                       hipStream_t stream)
+    -> std::enable_if_t<!Descending && !benchmark_utils::is_custom_type<Key>::value, hipError_t>
+{
+    return hipcub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                              temp_storage_bytes,
+                                              d_keys_input,
+                                              d_keys_output,
+                                              d_values_input,
+                                              d_values_output,
+                                              size,
+                                              0,
+                                              sizeof(Key) * 8,
+                                              stream);
+}
+
+template<bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*       d_temp_storage,
+                       size_t&     temp_storage_bytes,
+                       Key*        d_keys_input,
+                       Key*        d_keys_output,
+                       Value*      d_values_input,
+                       Value*      d_values_output,
+                       size_t      size,
+                       hipStream_t stream)
+    -> std::enable_if_t<Descending && !benchmark_utils::is_custom_type<Key>::value, hipError_t>
+{
+    return hipcub::DeviceRadixSort::SortPairsDescending(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys_input,
+                                                        d_keys_output,
+                                                        d_values_input,
+                                                        d_values_output,
+                                                        size,
+                                                        0,
+                                                        sizeof(Key) * 8,
+                                                        stream);
+}
+
+template<bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*       d_temp_storage,
+                       size_t&     temp_storage_bytes,
+                       Key*        d_keys_input,
+                       Key*        d_keys_output,
+                       Value*      d_values_input,
+                       Value*      d_values_output,
+                       size_t      size,
+                       hipStream_t stream)
+    -> std::enable_if_t<!Descending && benchmark_utils::is_custom_type<Key>::value, hipError_t>
+{
+    return hipcub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                              temp_storage_bytes,
+                                              d_keys_input,
+                                              d_keys_output,
+                                              d_values_input,
+                                              d_values_output,
+                                              size,
+                                              benchmark_utils::custom_type_decomposer<Key>{},
+                                              stream);
+}
+
+template<bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*       d_temp_storage,
+                       size_t&     temp_storage_bytes,
+                       Key*        d_keys_input,
+                       Key*        d_keys_output,
+                       Value*      d_values_input,
+                       Value*      d_values_output,
+                       size_t      size,
+                       hipStream_t stream)
+    -> std::enable_if_t<Descending && benchmark_utils::is_custom_type<Key>::value, hipError_t>
+{
+    return hipcub::DeviceRadixSort::SortPairsDescending(
+        d_temp_storage,
+        temp_storage_bytes,
+        d_keys_input,
+        d_keys_output,
+        d_values_input,
+        d_values_output,
+        size,
+        benchmark_utils::custom_type_decomposer<Key>{},
+        stream);
+}
+
 template<class Key, class Value, bool Descending = false>
 void run_sort_pairs_benchmark(benchmark::State& state,
                               hipStream_t stream,
@@ -149,17 +301,6 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 {
     using key_type = Key;
     using value_type = Value;
-    typedef hipError_t (*sort_func) (
-        void *, size_t&, const key_type *, key_type *, const value_type *, value_type *,
-        size_t, int, int, hipStream_t, bool);
-
-    sort_func func_ascending  = &hipcub::DeviceRadixSort::SortPairs
-        <key_type, value_type, size_t>;
-    sort_func func_descending = &hipcub::DeviceRadixSort::SortPairsDescending
-        <key_type, value_type, size_t>;
-
-    sort_func sorting = Descending ? func_descending : func_ascending;
-
     std::vector<value_type> values_input(size);
     for(size_t i = 0; i < size; i++)
     {
@@ -192,14 +333,14 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK(
-        sorting(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-            0, sizeof(key_type) * 8,
-            stream, false
-        )
-    );
+    HIP_CHECK(invoke_sort_pairs<Descending>(d_temporary_storage,
+                                            temporary_storage_bytes,
+                                            d_keys_input,
+                                            d_keys_output,
+                                            d_values_input,
+                                            d_values_output,
+                                            size,
+                                            stream));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
@@ -207,14 +348,14 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK(
-            sorting(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                0, sizeof(key_type) * 8,
-                stream, false
-            )
-        );
+        HIP_CHECK(invoke_sort_pairs<Descending>(d_temporary_storage,
+                                                temporary_storage_bytes,
+                                                d_keys_input,
+                                                d_keys_output,
+                                                d_values_input,
+                                                d_values_output,
+                                                size,
+                                                stream));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -224,14 +365,14 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK(
-                sorting(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                    0, sizeof(key_type) * 8,
-                    stream, false
-                )
-            );
+            HIP_CHECK(invoke_sort_pairs<Descending>(d_temporary_storage,
+                                                    temporary_storage_bytes,
+                                                    d_keys_input,
+                                                    d_keys_output,
+                                                    d_values_input,
+                                                    d_values_output,
+                                                    size,
+                                                    stream));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -292,11 +433,13 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
                               hipStream_t stream,
                               size_t size)
 {
+    using custom_int_t = benchmark_utils::custom_type<int>;
     CREATE_SORT_KEYS_BENCHMARK(int)
     CREATE_SORT_KEYS_BENCHMARK(long long)
     CREATE_SORT_KEYS_BENCHMARK(int8_t)
     CREATE_SORT_KEYS_BENCHMARK(uint8_t)
     CREATE_SORT_KEYS_BENCHMARK(short)
+    CREATE_SORT_KEYS_BENCHMARK(custom_int_t)
 }
 
 void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -307,6 +450,7 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
     using custom_double2 = benchmark_utils::custom_type<double, double>;
     using custom_char_double = benchmark_utils::custom_type<char, double>;
     using custom_double_char = benchmark_utils::custom_type<double, char>;
+    using custom_int_t       = benchmark_utils::custom_type<int>;
 
     CREATE_SORT_PAIRS_BENCHMARK(int, float)
     CREATE_SORT_PAIRS_BENCHMARK(int, double)
@@ -324,6 +468,8 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
 
     CREATE_SORT_PAIRS_BENCHMARK(int8_t, int8_t)
     CREATE_SORT_PAIRS_BENCHMARK(uint8_t, uint8_t)
+
+    CREATE_SORT_PAIRS_BENCHMARK(custom_int_t, float)
 }
 
 int main(int argc, char *argv[])

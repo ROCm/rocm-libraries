@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,6 +31,7 @@
 #define HIPCUB_CUB_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HPP_
 
 #include "../../../config.hpp"
+#include "../../../util_deprecated.hpp"
 
 #include <cub/device/device_run_length_encode.cuh>
 
@@ -39,24 +40,19 @@ BEGIN_HIPCUB_NAMESPACE
 class DeviceRunLengthEncode
 {
 public:
-    template<
-        typename InputIteratorT,
-        typename UniqueOutputIteratorT,
-        typename LengthsOutputIteratorT,
-        typename NumRunsOutputIteratorT
-    >
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t Encode(void * d_temp_storage,
-                      size_t& temp_storage_bytes,
-                      InputIteratorT d_in,
-                      UniqueOutputIteratorT d_unique_out,
-                      LengthsOutputIteratorT d_counts_out,
-                      NumRunsOutputIteratorT d_num_runs_out,
-                      int num_items,
-                      hipStream_t stream = 0,
-                      bool debug_synchronous = false)
+    template<typename InputIteratorT,
+             typename UniqueOutputIteratorT,
+             typename LengthsOutputIteratorT,
+             typename NumRunsOutputIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t Encode(void*                  d_temp_storage,
+                                                     size_t&                temp_storage_bytes,
+                                                     InputIteratorT         d_in,
+                                                     UniqueOutputIteratorT  d_unique_out,
+                                                     LengthsOutputIteratorT d_counts_out,
+                                                     NumRunsOutputIteratorT d_num_runs_out,
+                                                     int                    num_items,
+                                                     hipStream_t            stream = 0)
     {
-        (void)debug_synchronous;
         return hipCUDAErrorTohipError(::cub::DeviceRunLengthEncode::Encode(d_temp_storage,
                                                                            temp_storage_bytes,
                                                                            d_in,
@@ -67,24 +63,45 @@ public:
                                                                            stream));
     }
 
-    template<
-        typename InputIteratorT,
-        typename OffsetsOutputIteratorT,
-        typename LengthsOutputIteratorT,
-        typename NumRunsOutputIteratorT
-    >
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t NonTrivialRuns(void * d_temp_storage,
-                              size_t& temp_storage_bytes,
-                              InputIteratorT d_in,
-                              OffsetsOutputIteratorT d_offsets_out,
-                              LengthsOutputIteratorT d_lengths_out,
-                              NumRunsOutputIteratorT d_num_runs_out,
-                              int num_items,
-                              hipStream_t stream = 0,
-                              bool debug_synchronous = false)
+    template<typename InputIteratorT,
+             typename UniqueOutputIteratorT,
+             typename LengthsOutputIteratorT,
+             typename NumRunsOutputIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        Encode(void*                  d_temp_storage,
+               size_t&                temp_storage_bytes,
+               InputIteratorT         d_in,
+               UniqueOutputIteratorT  d_unique_out,
+               LengthsOutputIteratorT d_counts_out,
+               NumRunsOutputIteratorT d_num_runs_out,
+               int                    num_items,
+               hipStream_t            stream,
+               bool                   debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return Encode(d_temp_storage,
+                      temp_storage_bytes,
+                      d_in,
+                      d_unique_out,
+                      d_counts_out,
+                      d_num_runs_out,
+                      num_items,
+                      stream);
+    }
+
+    template<typename InputIteratorT,
+             typename OffsetsOutputIteratorT,
+             typename LengthsOutputIteratorT,
+             typename NumRunsOutputIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t NonTrivialRuns(void*          d_temp_storage,
+                                                             size_t&        temp_storage_bytes,
+                                                             InputIteratorT d_in,
+                                                             OffsetsOutputIteratorT d_offsets_out,
+                                                             LengthsOutputIteratorT d_lengths_out,
+                                                             NumRunsOutputIteratorT d_num_runs_out,
+                                                             int                    num_items,
+                                                             hipStream_t            stream = 0)
+    {
         return hipCUDAErrorTohipError(
             ::cub::DeviceRunLengthEncode::NonTrivialRuns(d_temp_storage,
                                                          temp_storage_bytes,
@@ -94,6 +111,32 @@ public:
                                                          d_num_runs_out,
                                                          num_items,
                                                          stream));
+    }
+
+    template<typename InputIteratorT,
+             typename OffsetsOutputIteratorT,
+             typename LengthsOutputIteratorT,
+             typename NumRunsOutputIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        NonTrivialRuns(void*                  d_temp_storage,
+                       size_t&                temp_storage_bytes,
+                       InputIteratorT         d_in,
+                       OffsetsOutputIteratorT d_offsets_out,
+                       LengthsOutputIteratorT d_lengths_out,
+                       NumRunsOutputIteratorT d_num_runs_out,
+                       int                    num_items,
+                       hipStream_t            stream,
+                       bool                   debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return NonTrivialRuns(d_temp_storage,
+                              temp_storage_bytes,
+                              d_in,
+                              d_offsets_out,
+                              d_lengths_out,
+                              d_num_runs_out,
+                              num_items,
+                              stream);
     }
 };
 

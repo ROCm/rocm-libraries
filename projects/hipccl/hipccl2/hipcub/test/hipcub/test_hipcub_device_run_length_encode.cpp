@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -96,8 +96,6 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
         std::uniform_int_distribution<key_type>
     >::type;
 
-    const bool debug_synchronous = false;
-
     const std::vector<size_t> sizes = get_sizes();
 
     for(size_t size : sizes)
@@ -169,30 +167,28 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
 
             size_t temporary_storage_bytes = 0;
 
-            HIP_CHECK(
-                hipcub::DeviceRunLengthEncode::Encode(
-                    nullptr, temporary_storage_bytes,
-                    d_input,
-                    d_unique_output, d_counts_output, d_runs_count_output,
-                    size,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DeviceRunLengthEncode::Encode(nullptr,
+                                                            temporary_storage_bytes,
+                                                            d_input,
+                                                            d_unique_output,
+                                                            d_counts_output,
+                                                            d_runs_count_output,
+                                                            size,
+                                                            stream));
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            HIP_CHECK(
-                hipcub::DeviceRunLengthEncode::Encode(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_input,
-                    d_unique_output, d_counts_output, d_runs_count_output,
-                    size,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DeviceRunLengthEncode::Encode(d_temporary_storage,
+                                                            temporary_storage_bytes,
+                                                            d_input,
+                                                            d_unique_output,
+                                                            d_counts_output,
+                                                            d_runs_count_output,
+                                                            size,
+                                                            stream));
 
             HIP_CHECK(hipFree(d_temporary_storage));
 
@@ -253,8 +249,6 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
         std::uniform_real_distribution<key_type>,
         std::uniform_int_distribution<key_type>
     >::type;
-
-    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -340,30 +334,28 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
 
             size_t temporary_storage_bytes = 0;
 
-            HIP_CHECK(
-                hipcub::DeviceRunLengthEncode::NonTrivialRuns(
-                    nullptr, temporary_storage_bytes,
-                    d_input,
-                    d_offsets_output, d_counts_output, d_runs_count_output,
-                    size,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DeviceRunLengthEncode::NonTrivialRuns(nullptr,
+                                                                    temporary_storage_bytes,
+                                                                    d_input,
+                                                                    d_offsets_output,
+                                                                    d_counts_output,
+                                                                    d_runs_count_output,
+                                                                    size,
+                                                                    stream));
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            HIP_CHECK(
-                hipcub::DeviceRunLengthEncode::NonTrivialRuns(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_input,
-                    d_offsets_output, d_counts_output, d_runs_count_output,
-                    size,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(hipcub::DeviceRunLengthEncode::NonTrivialRuns(d_temporary_storage,
+                                                                    temporary_storage_bytes,
+                                                                    d_input,
+                                                                    d_offsets_output,
+                                                                    d_counts_output,
+                                                                    d_runs_count_output,
+                                                                    size,
+                                                                    stream));
 
             HIP_CHECK(hipFree(d_temporary_storage));
 

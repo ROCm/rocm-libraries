@@ -5,11 +5,30 @@ Documentation for hipCUB is available at
 
 ## (Unreleased) hipCUB-3.2.0 for ROCm 6.2.0
 
+### Added
+* Add `DeviceCopy` function to have parity with CUB.
+* In the rocPRIM backend, added `enum WarpExchangeAlgorithm`, which is used as the new optional template argument for `WarpExchange`.
+  * The potential values for the enum are `WARP_EXCHANGE_SMEM` and `WARP_EXCHANGE_SHUFFLE`.
+  * `WARP_EXCHANGE_SMEM` stands for the previous algorithm, while `WARP_EXCHANGE_SHUFFLE` performs the exchange via shuffle operations.
+  * `WARP_EXCHANGE_SHUFFLE` does not require any pre-allocated shared memory, but the `ItemsPerThread` must be a divisor of `WarpSize`.
+* Added `tuple.hpp` which defines templates `hipcub::tuple`, `hipcub::tuple_element`, `hipcub::tuple_element_t` and `hipcub::tuple_size`.
+* Added new overloaded member functions to `BlockRadixSort` and `DeviceRadixSort` that expose a `decomposer` argument. Keys of a custom
+  type (`key_type`) can be sorted via these overloads, if an appropriate decomposer is passed. The decomposer has to implement
+  `operator(const key_type&)` which returns a `hipcub::tuple` of references pointing to members of `key_type`.
+
+### Changed
+
+* The NVIDIA backend now requires CUB, Thrust and libcu++ 2.2.0. If it is not found it will be downloaded from the NVIDIA CCCL repository.
+
 ### Fixed
 
 * Fixed the derivation for the accumulator type for device scan algorithms in the rocPRIM backend being different compared to CUB.
   It now derives the accumulator type as the result of the binary operator.
-* The NVIDIA backend now requires CUB, Thrust and libcu++ 2.2.0. If it is not found it will be downloaded from the NVIDIA CCCL repository.
+* `debug_synchronous` has been deprecated in hipCUB-2.13.2, and it no longer has any effect. With this release, passing `debug_synchronous`
+  to the device functions results in a deprecation warning both at runtime and at compile time.
+  * The synchronization that was previously achievable by passing `debug_synchronous=true` can now be achieved at compile time
+    by setting the `CUB_DEBUG_SYNC` (or higher debug level) or the `HIPCUB_DEBUG_SYNC` preprocessor definition.
+  * The compile time deprecation warnings can be disabled by defining the `HIPCUB_IGNORE_DEPRECATED_API` preprocessor definition.
 
 ## (Unreleased) hipCUB-3.1.0 for ROCm 6.1.0
 

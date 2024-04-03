@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -46,6 +46,7 @@
 
     #include <rocprim/device/config_types.hpp>
 
+BEGIN_HIPCUB_NAMESPACE
 namespace detail
 {
 inline unsigned int host_warp_size_wrapper()
@@ -65,10 +66,11 @@ inline unsigned int host_warp_size_wrapper()
     return host_warp_size;
 }
 } // namespace detail
+END_HIPCUB_NAMESPACE
 
     #define HIPCUB_WARP_THREADS ::rocprim::warp_size()
     #define HIPCUB_DEVICE_WARP_THREADS ::rocprim::device_warp_size()
-    #define HIPCUB_HOST_WARP_THREADS detail::host_warp_size_wrapper()
+    #define HIPCUB_HOST_WARP_THREADS ::hipcub::detail::host_warp_size_wrapper()
     #define HIPCUB_ARCH 1 // ignored with rocPRIM backend
 #elif defined(__HIP_PLATFORM_NVIDIA__)
     #define HIPCUB_CUB_API 1
@@ -109,13 +111,17 @@ inline unsigned int host_warp_size_wrapper()
 #define HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH(w)
 #endif // __clang__
 
-BEGIN_HIPCUB_NAMESPACE
-
 /// hipCUB error reporting macro (prints error messages to stderr)
 #if (defined(DEBUG) || defined(_DEBUG)) && !defined(HIPCUB_STDERR)
     #define HIPCUB_STDERR
 #endif
 
+BEGIN_HIPCUB_NAMESPACE
+
+/// \brief Don't use this function directly, but via the `HipcubDebug` macro instead.
+/// If `error` is not `hipSuccess`, prints an error message containing the source filename and
+/// line information to the standard error output.
+/// \note This only happens if `HIPCUB_STDERR` is defined.
 inline
 hipError_t Debug(
     hipError_t      error,
@@ -134,8 +140,22 @@ hipError_t Debug(
     return error;
 }
 
+/// \brief Don't use this function directly, but via the `HipcubLog` macro instead.
+/// Prints the provided message containing the source filename and
+/// line information to the standard output.
+inline void Log(const char* message, const char* filename, int line)
+{
+    printf("hipcub: %s [%s:%d]\n", message, filename, line);
+}
+
+END_HIPCUB_NAMESPACE
+
 #ifndef HipcubDebug
-    #define HipcubDebug(e) hipcub::Debug((hipError_t) (e), __FILE__, __LINE__)
+    #define HipcubDebug(e) ::hipcub::Debug((hipError_t)(e), __FILE__, __LINE__)
+#endif
+
+#ifndef HipcubLog
+    #define HipcubLog(msg) ::hipcub::Log(msg, __FILE__, __LINE__)
 #endif
 
 #if __cpp_if_constexpr
@@ -151,6 +171,33 @@ hipError_t Debug(
     #endif
 #endif
 
-END_HIPCUB_NAMESPACE
+#ifdef DOXYGEN_SHOULD_SKIP_THIS // Documentation only
+
+    /// \def HIPCUB_DEBUG_SYNC
+    /// \brief If defined, synchronizes the stream after every kernel launch and prints the launch information
+    /// to the standard output. If any of `CUB_DEBUG_SYNC`, `CUB_DEBUG_HOST_ASSERTIONS`, `CUB_DEBUG_DEVICE_ASSERTIONS`
+    /// or `CUB_DEBUG_ALL` is defined, this is also defined automatically.
+    #define HIPCUB_DEBUG_SYNC
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
+#if defined(HIPCUB_CUB_API) && defined(HIPCUB_DEBUG_SYNC) && !defined(CUB_DEBUG_SYNC)
+    #define CUB_DEBUG_SYNC
+#endif
+
+#if !defined(HIPCUB_DEBUG_SYNC)                                       \
+    && (defined(CUB_DEBUG_SYNC) || defined(CUB_DEBUG_HOST_ASSERTIONS) \
+        || defined(CUB_DEBUG_DEVICE_ASSERTIONS) || defined(CUB_DEBUG_ALL))
+    #define HIPCUB_DEBUG_SYNC
+#endif
+
+#ifdef HIPCUB_ROCPRIM_API
+    // TODO C++17: use an inline constexpr variable
+    #ifdef HIPCUB_DEBUG_SYNC
+        #define HIPCUB_DETAIL_DEBUG_SYNC_VALUE true
+    #else
+        #define HIPCUB_DETAIL_DEBUG_SYNC_VALUE false
+    #endif
+#endif // HIPCUB_ROCPRIM_API
 
 #endif // HIPCUB_CONFIG_HPP_

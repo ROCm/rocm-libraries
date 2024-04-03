@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2023-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -46,8 +46,7 @@ struct DeviceMemcpy
                               OutputBufferIt      output_buffer_it,
                               BufferSizeIteratorT buffer_sizes,
                               uint32_t            num_buffers,
-                              hipStream_t         stream   = 0,
-                              bool /* debug_synchronous */ = false)
+                              hipStream_t         stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceMemcpy::Batched(d_temp_storage,
                                                                    temp_storage_bytes,

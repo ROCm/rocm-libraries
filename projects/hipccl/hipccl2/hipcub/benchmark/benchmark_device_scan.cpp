@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,102 +36,93 @@
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-template<
-    bool Exclusive,
-    class T,
-    class BinaryFunction
->
-auto run_device_scan(void * temporary_storage,
-                     size_t& storage_size,
-                     T * input,
-                     T * output,
-                     const T initial_value,
-                     const size_t input_size,
-                     BinaryFunction scan_op,
-                     const hipStream_t stream,
-                     const bool debug = false)
-    -> typename std::enable_if<Exclusive, hipError_t>::type
+template<bool Exclusive, class T, class BinaryFunction>
+auto run_device_scan(void*             temporary_storage,
+                     size_t&           storage_size,
+                     T*                input,
+                     T*                output,
+                     const T           initial_value,
+                     const size_t      input_size,
+                     BinaryFunction    scan_op,
+                     const hipStream_t stream) ->
+    typename std::enable_if<Exclusive, hipError_t>::type
 {
-    return hipcub::DeviceScan::ExclusiveScan(
-        temporary_storage, storage_size,
-        input, output, scan_op, initial_value, input_size,
-        stream, debug
-    );
+    return hipcub::DeviceScan::ExclusiveScan(temporary_storage,
+                                             storage_size,
+                                             input,
+                                             output,
+                                             scan_op,
+                                             initial_value,
+                                             input_size,
+                                             stream);
 }
 
-template<
-    bool Exclusive,
-    class T,
-    class BinaryFunction
->
-auto run_device_scan(void * temporary_storage,
-                     size_t& storage_size,
-                     T * input,
-                     T * output,
-                     const T initial_value,
-                     const size_t input_size,
-                     BinaryFunction scan_op,
-                     const hipStream_t stream,
-                     const bool debug = false)
-    -> typename std::enable_if<!Exclusive, hipError_t>::type
+template<bool Exclusive, class T, class BinaryFunction>
+auto run_device_scan(void*             temporary_storage,
+                     size_t&           storage_size,
+                     T*                input,
+                     T*                output,
+                     const T           initial_value,
+                     const size_t      input_size,
+                     BinaryFunction    scan_op,
+                     const hipStream_t stream) ->
+    typename std::enable_if<!Exclusive, hipError_t>::type
 {
     (void) initial_value;
-    return hipcub::DeviceScan::InclusiveScan(
-        temporary_storage, storage_size,
-        input, output, scan_op, input_size,
-        stream, debug
-    );
+    return hipcub::DeviceScan::InclusiveScan(temporary_storage,
+                                             storage_size,
+                                             input,
+                                             output,
+                                             scan_op,
+                                             input_size,
+                                             stream);
 }
 
-template<
-    bool Exclusive,
-    class T,
-    class K,
-    class BinaryFunction
->
-auto run_device_scan_by_key(void * temporary_storage,
-                            size_t& storage_size,
-                            K * keys,
-                            T * input,
-                            T * output,
-                            const T initial_value,
-                            const size_t input_size,
-                            BinaryFunction scan_op,
-                            const hipStream_t stream,
-                            const bool debug = false)
-    -> typename std::enable_if<Exclusive, hipError_t>::type
+template<bool Exclusive, class T, class K, class BinaryFunction>
+auto run_device_scan_by_key(void*             temporary_storage,
+                            size_t&           storage_size,
+                            K*                keys,
+                            T*                input,
+                            T*                output,
+                            const T           initial_value,
+                            const size_t      input_size,
+                            BinaryFunction    scan_op,
+                            const hipStream_t stream) ->
+    typename std::enable_if<Exclusive, hipError_t>::type
 {
-    return hipcub::DeviceScan::ExclusiveScanByKey(
-        temporary_storage, storage_size, keys,
-        input, output, scan_op, initial_value,
-        static_cast<int>(input_size), hipcub::Equality(),
-        stream, debug
-    );
+    return hipcub::DeviceScan::ExclusiveScanByKey(temporary_storage,
+                                                  storage_size,
+                                                  keys,
+                                                  input,
+                                                  output,
+                                                  scan_op,
+                                                  initial_value,
+                                                  static_cast<int>(input_size),
+                                                  hipcub::Equality(),
+                                                  stream);
 }
 
-template<
-    bool Exclusive,
-    class T,
-    class K,
-    class BinaryFunction
->
-auto run_device_scan_by_key(void * temporary_storage,
+template<bool Exclusive, class T, class K, class BinaryFunction>
+auto run_device_scan_by_key(void*   temporary_storage,
                             size_t& storage_size,
-                            K * keys,
-                            T * input,
-                            T * output,
+                            K*      keys,
+                            T*      input,
+                            T*      output,
                             const T /*initial_value*/,
-                            const size_t input_size,
-                            BinaryFunction scan_op,
-                            const hipStream_t stream,
-                            const bool debug = false)
-    -> typename std::enable_if<!Exclusive, hipError_t>::type
+                            const size_t      input_size,
+                            BinaryFunction    scan_op,
+                            const hipStream_t stream) ->
+    typename std::enable_if<!Exclusive, hipError_t>::type
 {
-    return hipcub::DeviceScan::InclusiveScanByKey(
-        temporary_storage, storage_size, keys,
-        input, output, scan_op, static_cast<int>(input_size),
-        hipcub::Equality(), stream, debug
-    );
+    return hipcub::DeviceScan::InclusiveScanByKey(temporary_storage,
+                                                  storage_size,
+                                                  keys,
+                                                  input,
+                                                  output,
+                                                  scan_op,
+                                                  static_cast<int>(input_size),
+                                                  hipcub::Equality(),
+                                                  stream);
 }
 
 template<

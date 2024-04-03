@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -265,7 +265,7 @@ void add_benchmarks_type(const std::string&                            name,
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-#define CREATE_BENCHMARKS(T) add_benchmarks_type<Benchmark, int>(name, benchmarks, stream, size, #T)
+#define CREATE_BENCHMARKS(T) add_benchmarks_type<Benchmark, T>(name, benchmarks, stream, size, #T)
 
 template<class Benchmark>
 void add_benchmarks(const std::string&                            name,

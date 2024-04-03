@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,33 +25,26 @@
 // HIP API
 #include "hipcub/warp/warp_load.hpp"
 
+#include <type_traits>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-template<
-    class T,
-    unsigned BlockSize,
-    unsigned ItemsPerThread,
-    unsigned LogicalWarpSize,
-    ::hipcub::WarpLoadAlgorithm Algorithm
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_load_kernel(T* d_input, T* d_output)
+template<unsigned                    BlockSize,
+         unsigned                    ItemsPerThread,
+         unsigned                    LogicalWarpSize,
+         ::hipcub::WarpLoadAlgorithm Algorithm,
+         class T>
+__device__ auto warp_load_benchmark(T* d_input, T* d_output)
+    -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
-    using WarpLoadT = ::hipcub::WarpLoad<
-        T,
-        ItemsPerThread,
-        Algorithm,
-        ::benchmark_utils::DeviceSelectWarpSize<LogicalWarpSize>::value
-    >;
+    using WarpLoadT = ::hipcub::WarpLoad<T, ItemsPerThread, Algorithm, LogicalWarpSize>;
     constexpr unsigned warps_in_block = BlockSize / LogicalWarpSize;
     constexpr int tile_size = ItemsPerThread * LogicalWarpSize;
 
-    const unsigned warp_id = hipThreadIdx_x / LogicalWarpSize;
-    const unsigned global_warp_id = hipBlockIdx_x * warps_in_block + warp_id;
+    const unsigned warp_id        = threadIdx.x / LogicalWarpSize;
+    const unsigned global_warp_id = blockIdx.x * warps_in_block + warp_id;
     __shared__ typename WarpLoadT::TempStorage temp_storage[warps_in_block];
     T thread_data[ItemsPerThread];
 
@@ -60,10 +53,29 @@ void warp_load_kernel(T* d_input, T* d_output)
     #pragma unroll
     for (unsigned i = 0; i < ItemsPerThread; ++i)
     {
-        const unsigned striped_global_idx =
-            BlockSize * ItemsPerThread * hipBlockIdx_x + BlockSize * i + hipThreadIdx_x;
+        const unsigned striped_global_idx
+            = BlockSize * ItemsPerThread * blockIdx.x + BlockSize * i + threadIdx.x;
         d_output[striped_global_idx] = thread_data[i];
     }
+}
+
+template<unsigned                    BlockSize,
+         unsigned                    ItemsPerThread,
+         unsigned                    LogicalWarpSize,
+         ::hipcub::WarpLoadAlgorithm Algorithm,
+         class T>
+__device__ auto warp_load_benchmark(T* /*d_input*/, T* /*d_output*/)
+    -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned                    BlockSize,
+         unsigned                    ItemsPerThread,
+         unsigned                    LogicalWarpSize,
+         ::hipcub::WarpLoadAlgorithm Algorithm,
+         class T>
+__global__ __launch_bounds__(BlockSize) void warp_load_kernel(T* d_input, T* d_output)
+{
+    warp_load_benchmark<BlockSize, ItemsPerThread, LogicalWarpSize, Algorithm>(d_input, d_output);
 }
 
 template<
@@ -98,16 +110,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
         for (size_t i = 0; i < Trials; i++)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_load_kernel<
-                    T,
-                    BlockSize,
-                    ItemsPerThread,
-                    LogicalWarpSize,
-                    Algorithm
-                >),
-                dim3(size / items_per_block), dim3(BlockSize), 0, stream, d_input, d_output
-            );
+            warp_load_kernel<BlockSize, ItemsPerThread, LogicalWarpSize, Algorithm>
+                <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
         }
         HIP_CHECK(hipPeekAtLastError())
         HIP_CHECK(hipDeviceSynchronize());

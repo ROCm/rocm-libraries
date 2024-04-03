@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -121,16 +121,15 @@ void run_even_benchmark(benchmark::State& state,
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK(
-        hipcub::DeviceHistogram::HistogramEven(
-            d_temporary_storage, temporary_storage_bytes,
-            d_input,
-            d_histogram,
-            bins + 1, lower_level, upper_level,
-            int(size),
-            stream, false
-        )
-    );
+    HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
+                                                     temporary_storage_bytes,
+                                                     d_input,
+                                                     d_histogram,
+                                                     bins + 1,
+                                                     lower_level,
+                                                     upper_level,
+                                                     int(size),
+                                                     stream));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
@@ -138,16 +137,15 @@ void run_even_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK(
-            hipcub::DeviceHistogram::HistogramEven(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input,
-                d_histogram,
-                bins + 1, lower_level, upper_level,
-                int(size),
-                stream, false
-            )
-        );
+        HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
+                                                         temporary_storage_bytes,
+                                                         d_input,
+                                                         d_histogram,
+                                                         bins + 1,
+                                                         lower_level,
+                                                         upper_level,
+                                                         int(size),
+                                                         stream));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -157,16 +155,15 @@ void run_even_benchmark(benchmark::State& state,
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK(
-                hipcub::DeviceHistogram::HistogramEven(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_input,
-                    d_histogram,
-                    bins + 1, lower_level, upper_level,
-                    int(size),
-                    stream, false
-                )
-            );
+            HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
+                                                             temporary_storage_bytes,
+                                                             d_input,
+                                                             d_histogram,
+                                                             bins + 1,
+                                                             lower_level,
+                                                             upper_level,
+                                                             int(size),
+                                                             stream));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -223,16 +220,16 @@ void run_multi_even_benchmark(benchmark::State& state,
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK((
-        hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
-            d_temporary_storage, temporary_storage_bytes,
-            d_input,
-            d_histogram,
-            num_levels, lower_level, upper_level,
-            int(size),
-            stream, false
-        )
-    ));
+    HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
+        d_temporary_storage,
+        temporary_storage_bytes,
+        d_input,
+        d_histogram,
+        num_levels,
+        lower_level,
+        upper_level,
+        int(size),
+        stream)));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
@@ -240,16 +237,16 @@ void run_multi_even_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK((
-            hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input,
-                d_histogram,
-                num_levels, lower_level, upper_level,
-                int(size),
-                stream, false
-            )
-        ));
+        HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
+            d_temporary_storage,
+            temporary_storage_bytes,
+            d_input,
+            d_histogram,
+            num_levels,
+            lower_level,
+            upper_level,
+            int(size),
+            stream)));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -259,16 +256,16 @@ void run_multi_even_benchmark(benchmark::State& state,
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK((
-                hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_input,
-                    d_histogram,
-                    num_levels, lower_level, upper_level,
-                    int(size),
-                    stream, false
-                )
-            ));
+            HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
+                d_temporary_storage,
+                temporary_storage_bytes,
+                d_input,
+                d_histogram,
+                num_levels,
+                lower_level,
+                upper_level,
+                int(size),
+                stream)));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -322,16 +319,14 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK(
-        hipcub::DeviceHistogram::HistogramRange(
-            d_temporary_storage, temporary_storage_bytes,
-            d_input,
-            d_histogram,
-            bins + 1, d_levels,
-            int(size),
-            stream, false
-        )
-    );
+    HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(d_temporary_storage,
+                                                      temporary_storage_bytes,
+                                                      d_input,
+                                                      d_histogram,
+                                                      bins + 1,
+                                                      d_levels,
+                                                      int(size),
+                                                      stream));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
@@ -339,16 +334,14 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK(
-            hipcub::DeviceHistogram::HistogramRange(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input,
-                d_histogram,
-                bins + 1, d_levels,
-                int(size),
-                stream, false
-            )
-        );
+        HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(d_temporary_storage,
+                                                          temporary_storage_bytes,
+                                                          d_input,
+                                                          d_histogram,
+                                                          bins + 1,
+                                                          d_levels,
+                                                          int(size),
+                                                          stream));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -358,16 +351,14 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK(
-                hipcub::DeviceHistogram::HistogramRange(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_input,
-                    d_histogram,
-                    bins + 1, d_levels,
-                    int(size),
-                    stream, false
-                )
-            );
+            HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(d_temporary_storage,
+                                                              temporary_storage_bytes,
+                                                              d_input,
+                                                              d_histogram,
+                                                              bins + 1,
+                                                              d_levels,
+                                                              int(size),
+                                                              stream));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -434,13 +425,15 @@ void run_multi_range_benchmark(benchmark::State& state, size_t bins, hipStream_t
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK((
-        hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
-            d_temporary_storage, temporary_storage_bytes,
-            d_input, d_histogram, num_levels, d_levels,
-            int(size), stream, false
-        )
-    ));
+    HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
+        d_temporary_storage,
+        temporary_storage_bytes,
+        d_input,
+        d_histogram,
+        num_levels,
+        d_levels,
+        int(size),
+        stream)));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
@@ -448,13 +441,15 @@ void run_multi_range_benchmark(benchmark::State& state, size_t bins, hipStream_t
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK((
-            hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input, d_histogram, num_levels, d_levels,
-                int(size), stream, false
-            )
-        ));
+        HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
+            d_temporary_storage,
+            temporary_storage_bytes,
+            d_input,
+            d_histogram,
+            num_levels,
+            d_levels,
+            int(size),
+            stream)));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -464,13 +459,15 @@ void run_multi_range_benchmark(benchmark::State& state, size_t bins, hipStream_t
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK((
-                hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_input, d_histogram, num_levels, d_levels,
-                    int(size), stream, false
-                )
-            ));
+            HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
+                d_temporary_storage,
+                temporary_storage_bytes,
+                d_input,
+                d_histogram,
+                num_levels,
+                d_levels,
+                int(size),
+                stream)));
         }
         HIP_CHECK(hipDeviceSynchronize());
 

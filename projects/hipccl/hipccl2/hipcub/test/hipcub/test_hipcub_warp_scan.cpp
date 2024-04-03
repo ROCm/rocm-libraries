@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -119,6 +119,11 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     // logical warp side for warp primitive, execution warp size
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
@@ -161,17 +166,19 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100, seed_value);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
         std::vector<T> output(size);
         std::vector<T> expected(output.size(), 0);
 
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
         {
+            acc_type accumulator(0);
             for(size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                expected[idx] = input[idx] + expected[j > 0 ? idx-1 : idx];
+                accumulator   = binary_op_host(input[idx], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
         }
 
@@ -220,21 +227,9 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
         );
 
         // Validating results
-        if (std::is_integral<T>::value)
-        {
-            for(size_t i = 0; i < output.size(); i++)
-            {
-                ASSERT_EQ(output[i], expected[i]);
-            }
-        }
-        else if (std::is_floating_point<T>::value)
-        {
-            for(size_t i = 0; i < output.size(); i++)
-            {
-                auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-                ASSERT_NEAR(output[i], expected[i], tolerance);
-            }
-        }
+        test_utils::assert_near(output,
+                                expected,
+                                test_utils::precision<T>::value * logical_warp_size);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -287,6 +282,11 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
@@ -329,7 +329,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100, seed_value);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
         std::vector<T> output(size);
         std::vector<T> output_reductions(size / logical_warp_size);
         std::vector<T> expected(output.size(), 0);
@@ -338,10 +338,12 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
         // Calculate expected results on host
         for(size_t i = 0; i < output.size() / logical_warp_size; i++)
         {
+            acc_type accumulator(0);
             for(size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                expected[idx] = input[idx] + expected[j > 0 ? idx-1 : idx];
+                accumulator   = binary_op_host(input[idx], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
             expected_reductions[i] = expected[(i+1) * logical_warp_size - 1];
         }
@@ -406,32 +408,9 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
         );
 
         // Validating results
-        if (std::is_integral<T>::value)
-        {
-            for(size_t i = 0; i < output.size(); i++)
-            {
-                ASSERT_EQ(output[i], expected[i]);
-            }
-
-            for(size_t i = 0; i < output_reductions.size(); i++)
-            {
-                ASSERT_EQ(output_reductions[i], expected_reductions[i]);
-            }
-        }
-        else if (std::is_floating_point<T>::value)
-        {
-            for(size_t i = 0; i < output.size(); i++)
-            {
-                auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-                ASSERT_NEAR(output[i], expected[i], tolerance);
-            }
-
-            for(size_t i = 0; i < output_reductions.size(); i++)
-            {
-                auto tolerance = std::max<T>(std::abs(0.1f * expected_reductions[i]), T(0.01f));
-                ASSERT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
-            }
-        }
+        test_utils::assert_near(output,
+                                expected,
+                                test_utils::precision<T>::value * logical_warp_size);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -470,6 +449,11 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
@@ -512,7 +496,7 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100, seed_value);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
         std::vector<T> output(size);
         std::vector<T> expected(input.size(), 0);
         const T init = test_utils::get_random_value(0, 100, seed_value + seed_value_addition);
@@ -520,11 +504,13 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
         {
+            acc_type accumulator(init);
             expected[i * logical_warp_size] = init;
             for(size_t j = 1; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                expected[idx] = input[idx-1] + expected[idx-1];
+                accumulator   = binary_op_host(input[idx - 1], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
         }
 
@@ -573,21 +559,9 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
         );
 
         // Validating results
-        if (std::is_integral<T>::value)
-        {
-            for(size_t i = 0; i < output.size(); i++)
-            {
-                ASSERT_EQ(output[i], expected[i]);
-            }
-        }
-        else if (std::is_floating_point<T>::value)
-        {
-            for(size_t i = 0; i < output.size(); i++)
-            {
-                auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-                ASSERT_NEAR(output[i], expected[i], tolerance);
-            }
-        }
+        test_utils::assert_near(output,
+                                expected,
+                                test_utils::precision<T>::value * logical_warp_size);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -634,6 +608,11 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
@@ -676,7 +655,7 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100, seed_value);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
         std::vector<T> output(size);
         std::vector<T> output_reductions(size / logical_warp_size);
         std::vector<T> expected(input.size(), 0);
@@ -686,18 +665,21 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
         {
-          expected[i * logical_warp_size] = init;
-          for(size_t j = 1; j < logical_warp_size; j++)
-          {
-              auto idx = i * logical_warp_size + j;
-              expected[idx] = input[idx-1] + expected[idx-1];
+            acc_type accumulator(init);
+            expected[i * logical_warp_size] = init;
+            for(size_t j = 1; j < logical_warp_size; j++)
+            {
+                auto idx      = i * logical_warp_size + j;
+                accumulator   = binary_op_host(input[idx - 1], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
 
-            expected_reductions[i] = 0;
+            acc_type accumulator_reductions(0);
             for(size_t j = 0; j < logical_warp_size; j++)
             {
-              auto idx = i * logical_warp_size + j;
-              expected_reductions[i] += input[idx];
+                auto idx               = i * logical_warp_size + j;
+                accumulator_reductions = binary_op_host(input[idx], accumulator_reductions);
+                expected_reductions[i] = static_cast<T>(accumulator_reductions);
             }
         }
 
@@ -761,32 +743,12 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
         );
 
         // Validating results
-        if (std::is_integral<T>::value)
-        {
-          for(size_t i = 0; i < output.size(); i++)
-          {
-            ASSERT_EQ(output[i], expected[i]);
-          }
-
-          for(size_t i = 0; i < output_reductions.size(); i++)
-          {
-            ASSERT_EQ(output_reductions[i], expected_reductions[i]);
-          }
-        }
-        else if (std::is_floating_point<T>::value)
-        {
-          for(size_t i = 0; i < output.size(); i++)
-          {
-            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            ASSERT_NEAR(output[i], expected[i], tolerance);
-          }
-
-          for(size_t i = 0; i < output_reductions.size(); i++)
-          {
-            auto tolerance = std::max<T>(std::abs(0.1f * expected_reductions[i]), T(0.01f));
-            ASSERT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
-          }
-        }
+        test_utils::assert_near(output,
+                                expected,
+                                test_utils::precision<T>::value * logical_warp_size);
+        test_utils::assert_near(output_reductions,
+                                expected_reductions,
+                                test_utils::precision<T>::value * logical_warp_size);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -831,6 +793,11 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
@@ -873,7 +840,7 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100, seed_value);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
         std::vector<T> output_inclusive(size);
         std::vector<T> output_exclusive(size);
         std::vector<T> expected_inclusive(output_inclusive.size(), 0);
@@ -883,15 +850,18 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
         {
+            acc_type accumulator_inclusive(init);
+            acc_type accumulator_exclusive(init);
             expected_exclusive[i * logical_warp_size] = init;
-            expected_inclusive[i * logical_warp_size] = init;
             for(size_t j = 0; j < logical_warp_size; j++)
             {
-                auto idx = i * logical_warp_size + j;
-                expected_inclusive[idx] = input[idx] + expected_inclusive[j > 0 ? idx-1 : idx];
+                auto idx                = i * logical_warp_size + j;
+                accumulator_inclusive   = binary_op_host(input[idx], accumulator_inclusive);
+                expected_inclusive[idx] = static_cast<T>(accumulator_inclusive);
                 if(j > 0)
                 {
-                    expected_exclusive[idx] = input[idx-1] + expected_exclusive[idx-1];
+                    accumulator_exclusive   = binary_op_host(input[idx - 1], accumulator_exclusive);
+                    expected_exclusive[idx] = static_cast<T>(accumulator_exclusive);
                 }
             }
         }
@@ -961,25 +931,12 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
         );
 
         // Validating results
-        if (std::is_integral<T>::value)
-        {
-            for(size_t i = 0; i < output_inclusive.size(); i++)
-            {
-                ASSERT_EQ(output_inclusive[i], expected_inclusive[i]);
-                ASSERT_EQ(output_exclusive[i], expected_exclusive[i]);
-            }
-        }
-        else if (std::is_floating_point<T>::value)
-        {
-            for(size_t i = 0; i < output_inclusive.size(); i++)
-            {
-                auto tolerance = std::max<T>(std::abs(0.1f * expected_inclusive[i]), T(0.01f));
-                ASSERT_NEAR(output_inclusive[i], expected_inclusive[i], tolerance);
-
-                tolerance = std::max<T>(std::abs(0.1f * expected_exclusive[i]), T(0.01f));
-                ASSERT_NEAR(output_exclusive[i], expected_exclusive[i], tolerance);
-            }
-        }
+        test_utils::assert_near(output_inclusive,
+                                expected_inclusive,
+                                test_utils::precision<T>::value * logical_warp_size);
+        test_utils::assert_near(output_exclusive,
+                                expected_exclusive,
+                                test_utils::precision<T>::value * logical_warp_size);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_inclusive_output));
@@ -995,6 +952,11 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
 
     using base_type = typename TestFixture::type;
     using T = test_utils::custom_test_type<base_type>;
+    // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
@@ -1056,10 +1018,12 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
         {
+            acc_type accumulator(0);
             for(size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                expected[idx] = input[idx] + expected[j > 0 ? idx-1 : idx];
+                accumulator   = binary_op_host(input[idx], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
         }
 
@@ -1107,24 +1071,9 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
             )
         );
 
-        // Validating results
-        if (std::is_integral<base_type>::value)
-        {
-            for(size_t i = 0; i < output.size(); i++)
-            {
-                ASSERT_EQ(output[i], expected[i]);
-            }
-        }
-        else if (std::is_floating_point<base_type>::value)
-        {
-            for(size_t i = 0; i < output.size(); i++)
-            {
-                auto tolerance_x = std::max<base_type>(std::abs(0.1f * expected[i].x), base_type(0.01f));
-                auto tolerance_y = std::max<base_type>(std::abs(0.1f * expected[i].y), base_type(0.01f));
-                ASSERT_NEAR(output[i].x, expected[i].x, tolerance_x);
-                ASSERT_NEAR(output[i].y, expected[i].y, tolerance_y);
-            }
-        }
+        test_utils::assert_near(output,
+                                expected,
+                                test_utils::precision<T>::value * logical_warp_size);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));

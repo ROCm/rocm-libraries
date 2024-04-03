@@ -1,6 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -144,7 +145,7 @@ struct CooMatrix
         OffsetT            col;
         ValueT             val;
 
-        CooTuple() : row(OffsetT(), col(OffsetT()), val(ValueT()) {}
+        CooTuple() : row(OffsetT()), col(OffsetT()), val(ValueT()) {}
         CooTuple(OffsetT row, OffsetT col) : row(row), col(col) {}
         CooTuple(OffsetT row, OffsetT col, ValueT val) : row(row), col(col), val(val) {}
 
@@ -282,7 +283,7 @@ struct CooMatrix
     /**
      * Builds a METIS COO sparse from the given file.
      */
-    void InitMetis(const string &metis_filename) const
+    void InitMetis(const string& /*metis_filename*/) const
     {
         if (coo_tuples)
         {
@@ -488,11 +489,10 @@ struct CooMatrix
     /**
      * Builds a dense matrix
      */
-    int InitDense(
-        OffsetT     num_rows,
-        OffsetT     num_cols,
-        ValueT      default_value   = 1.0,
-        bool        verbose         = false)
+    int InitDense(OffsetT num_rows,
+                  OffsetT num_cols,
+                  ValueT  default_value = 1.0,
+                  bool /*verbose*/      = false)
     {
         if (coo_tuples)
         {
@@ -523,10 +523,7 @@ struct CooMatrix
     /**
      * Builds a wheel COO sparse matrix having spokes spokes.
      */
-    int InitWheel(
-        OffsetT     spokes,
-        ValueT      default_value   = 1.0,
-        bool        verbose         = false)
+    int InitWheel(OffsetT spokes, ValueT default_value = 1.0, bool /*verbose*/ = false)
     {
         if (coo_tuples)
         {
@@ -910,8 +907,8 @@ struct CsrMatrix
             }
         }
 
-        double s_xx     = ss_x / num_nonzeros;
-        double s_yy     = ss_y / num_nonzeros;
+        // double s_xx     = ss_x / num_nonzeros;
+        // double s_yy     = ss_y / num_nonzeros;
 
         stats.pearson_r = (num_nonzeros * s_xy) / (sqrt(ss_x) * sqrt(ss_y));
 

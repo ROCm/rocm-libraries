@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -62,24 +62,12 @@ void run_benchmark(benchmark::State& state,
     size_t temp_storage_size_bytes = 0;
     void * d_temp_storage = nullptr;
     // Get size of d_temp_storage
-    HIP_CHECK(
-        reduce(
-            d_temp_storage, temp_storage_size_bytes,
-            d_input, d_output, size,
-            stream, false
-        )
-    );
+    HIP_CHECK(reduce(d_temp_storage, temp_storage_size_bytes, d_input, d_output, size, stream));
     HIP_CHECK(hipMalloc(&d_temp_storage,temp_storage_size_bytes));
     HIP_CHECK(hipDeviceSynchronize());
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK(
-            reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, size,
-                stream, false
-            )
-        );
+        HIP_CHECK(reduce(d_temp_storage, temp_storage_size_bytes, d_input, d_output, size, stream));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -90,12 +78,7 @@ void run_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                reduce(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, size,
-                    stream, false
-                )
-            );
+                reduce(d_temp_storage, temp_storage_size_bytes, d_input, d_output, size, stream));
         }
         HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -119,7 +102,9 @@ template<typename T>
 struct Benchmark<T, hipcub::Sum> {
     static void run(benchmark::State& state, size_t size, const hipStream_t stream)
     {
-        run_benchmark<T, T>(state, size, stream, hipcub::DeviceReduce::Sum<T*, T*, int>);
+        hipError_t (*ptr_to_sum)(void*, size_t&, T*, T*, int, hipStream_t)
+            = &hipcub::DeviceReduce::Sum;
+        run_benchmark<T, T>(state, size, stream, ptr_to_sum);
     }
 };
 
@@ -127,7 +112,9 @@ template<typename T>
 struct Benchmark<T, hipcub::Min> {
     static void run(benchmark::State& state, size_t size, const hipStream_t stream)
     {
-        run_benchmark<T, T>(state, size, stream, hipcub::DeviceReduce::Min<T*, T*, int>);
+        hipError_t (*ptr_to_min)(void*, size_t&, T*, T*, int, hipStream_t)
+            = &hipcub::DeviceReduce::Min;
+        run_benchmark<T, T>(state, size, stream, ptr_to_min);
     }
 };
 
@@ -139,10 +126,9 @@ struct Benchmark<T, hipcub::ArgMin> {
 
     static void run(benchmark::State& state, size_t size, const hipStream_t stream)
     {
-        run_benchmark<T, KeyValue>(state,
-                                   size,
-                                   stream,
-                                   hipcub::DeviceReduce::ArgMin<T*, KeyValue*, int>);
+        hipError_t (*ptr_to_argmin)(void*, size_t&, T*, KeyValue*, int, hipStream_t)
+            = &hipcub::DeviceReduce::ArgMin;
+        run_benchmark<T, KeyValue>(state, size, stream, ptr_to_argmin);
     }
 };
 

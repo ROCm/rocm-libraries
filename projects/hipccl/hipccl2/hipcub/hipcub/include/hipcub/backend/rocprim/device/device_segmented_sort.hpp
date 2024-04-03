@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,6 +31,7 @@
 #define HIPCUB_ROCPRIM_DEVICE_DEVICE_SEGMENTED_SORT_HPP_
 
 #include "../../../config.hpp"
+#include "../../../util_deprecated.hpp"
 
 #include "../util_type.hpp"
 
@@ -41,367 +42,817 @@ BEGIN_HIPCUB_NAMESPACE
 struct DeviceSegmentedSort
 {
     template<typename KeyT, typename ValueT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortPairs(void * d_temp_storage,
-                         size_t& temp_storage_bytes,
-                         const KeyT * d_keys_in,
-                         KeyT * d_keys_out,
-                         const ValueT * d_values_in,
-                         ValueT * d_values_out,
-                         int num_items,
-                         int num_segments,
-                         OffsetIteratorT d_begin_offsets,
-                         OffsetIteratorT d_end_offsets,
-                         hipStream_t stream = 0,
-                         bool debug_synchronous = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairs(void*           d_temp_storage,
+                                                        size_t&         temp_storage_bytes,
+                                                        const KeyT*     d_keys_in,
+                                                        KeyT*           d_keys_out,
+                                                        const ValueT*   d_values_in,
+                                                        ValueT*         d_values_out,
+                                                        int             num_items,
+                                                        int             num_segments,
+                                                        OffsetIteratorT d_begin_offsets,
+                                                        OffsetIteratorT d_end_offsets,
+                                                        hipStream_t     stream = 0)
     {
-        return ::rocprim::segmented_radix_sort_pairs(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_in, d_keys_out, d_values_in, d_values_out, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            0, sizeof(KeyT) * 8,
-            stream, debug_synchronous
-        );
+        return ::rocprim::segmented_radix_sort_pairs(d_temp_storage,
+                                                     temp_storage_bytes,
+                                                     d_keys_in,
+                                                     d_keys_out,
+                                                     d_values_in,
+                                                     d_values_out,
+                                                     num_items,
+                                                     num_segments,
+                                                     d_begin_offsets,
+                                                     d_end_offsets,
+                                                     0,
+                                                     sizeof(KeyT) * 8,
+                                                     stream,
+                                                     HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
 
     template<typename KeyT, typename ValueT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortPairs(void * d_temp_storage,
-                         size_t& temp_storage_bytes,
-                         DoubleBuffer<KeyT>& d_keys,
-                         DoubleBuffer<ValueT>& d_values,
-                         int num_items,
-                         int num_segments,
-                         OffsetIteratorT d_begin_offsets,
-                         OffsetIteratorT d_end_offsets,
-                         hipStream_t stream = 0,
-                         bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortPairs(void*           d_temp_storage,
+                  size_t&         temp_storage_bytes,
+                  const KeyT*     d_keys_in,
+                  KeyT*           d_keys_out,
+                  const ValueT*   d_values_in,
+                  ValueT*         d_values_out,
+                  int             num_items,
+                  int             num_segments,
+                  OffsetIteratorT d_begin_offsets,
+                  OffsetIteratorT d_end_offsets,
+                  hipStream_t     stream,
+                  bool            debug_synchronous)
     {
-        ::rocprim::double_buffer<KeyT> d_keys_db = detail::to_double_buffer(d_keys);
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortPairs(d_temp_storage,
+                         temp_storage_bytes,
+                         d_keys_in,
+                         d_keys_out,
+                         d_values_in,
+                         d_values_out,
+                         num_items,
+                         num_segments,
+                         d_begin_offsets,
+                         d_end_offsets,
+                         stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairs(void*                 d_temp_storage,
+                                                        size_t&               temp_storage_bytes,
+                                                        DoubleBuffer<KeyT>&   d_keys,
+                                                        DoubleBuffer<ValueT>& d_values,
+                                                        int                   num_items,
+                                                        int                   num_segments,
+                                                        OffsetIteratorT       d_begin_offsets,
+                                                        OffsetIteratorT       d_end_offsets,
+                                                        hipStream_t           stream = 0)
+    {
+        ::rocprim::double_buffer<KeyT>   d_keys_db   = detail::to_double_buffer(d_keys);
         ::rocprim::double_buffer<ValueT> d_values_db = detail::to_double_buffer(d_values);
-        hipError_t error = ::rocprim::segmented_radix_sort_pairs(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_db, d_values_db, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            0, sizeof(KeyT) * 8,
-            stream, debug_synchronous
-        );
+        hipError_t error = ::rocprim::segmented_radix_sort_pairs(d_temp_storage,
+                                                                 temp_storage_bytes,
+                                                                 d_keys_db,
+                                                                 d_values_db,
+                                                                 num_items,
+                                                                 num_segments,
+                                                                 d_begin_offsets,
+                                                                 d_end_offsets,
+                                                                 0,
+                                                                 sizeof(KeyT) * 8,
+                                                                 stream,
+                                                                 HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
         detail::update_double_buffer(d_keys, d_keys_db);
         detail::update_double_buffer(d_values, d_values_db);
         return error;
     }
 
     template<typename KeyT, typename ValueT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortPairsDescending(void * d_temp_storage,
-                                   size_t& temp_storage_bytes,
-                                   const KeyT * d_keys_in,
-                                   KeyT * d_keys_out,
-                                   const ValueT * d_values_in,
-                                   ValueT * d_values_out,
-                                   int num_items,
-                                   int num_segments,
-                                   OffsetIteratorT d_begin_offsets,
-                                   OffsetIteratorT d_end_offsets,
-                                   hipStream_t stream = 0,
-                                   bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortPairs(void*                 d_temp_storage,
+                  size_t&               temp_storage_bytes,
+                  DoubleBuffer<KeyT>&   d_keys,
+                  DoubleBuffer<ValueT>& d_values,
+                  int                   num_items,
+                  int                   num_segments,
+                  OffsetIteratorT       d_begin_offsets,
+                  OffsetIteratorT       d_end_offsets,
+                  hipStream_t           stream,
+                  bool                  debug_synchronous)
     {
-        return ::rocprim::segmented_radix_sort_pairs_desc(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_in, d_keys_out, d_values_in, d_values_out, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            0, sizeof(KeyT) * 8,
-            stream, debug_synchronous
-        );
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortPairs(d_temp_storage,
+                         temp_storage_bytes,
+                         d_keys,
+                         d_values,
+                         num_items,
+                         num_segments,
+                         d_begin_offsets,
+                         d_end_offsets,
+                         stream);
     }
 
     template<typename KeyT, typename ValueT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortPairsDescending(void * d_temp_storage,
-                                   size_t& temp_storage_bytes,
-                                   DoubleBuffer<KeyT>& d_keys,
-                                   DoubleBuffer<ValueT>& d_values,
-                                   int num_items,
-                                   int num_segments,
-                                   OffsetIteratorT d_begin_offsets,
-                                   OffsetIteratorT d_end_offsets,
-                                   hipStream_t stream = 0,
-                                   bool debug_synchronous = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairsDescending(void*         d_temp_storage,
+                                                                  size_t&       temp_storage_bytes,
+                                                                  const KeyT*   d_keys_in,
+                                                                  KeyT*         d_keys_out,
+                                                                  const ValueT* d_values_in,
+                                                                  ValueT*       d_values_out,
+                                                                  int           num_items,
+                                                                  int           num_segments,
+                                                                  OffsetIteratorT d_begin_offsets,
+                                                                  OffsetIteratorT d_end_offsets,
+                                                                  hipStream_t     stream = 0)
     {
-        ::rocprim::double_buffer<KeyT> d_keys_db = detail::to_double_buffer(d_keys);
+        return ::rocprim::segmented_radix_sort_pairs_desc(d_temp_storage,
+                                                          temp_storage_bytes,
+                                                          d_keys_in,
+                                                          d_keys_out,
+                                                          d_values_in,
+                                                          d_values_out,
+                                                          num_items,
+                                                          num_segments,
+                                                          d_begin_offsets,
+                                                          d_end_offsets,
+                                                          0,
+                                                          sizeof(KeyT) * 8,
+                                                          stream,
+                                                          HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+    }
+
+    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortPairsDescending(void*           d_temp_storage,
+                            size_t&         temp_storage_bytes,
+                            const KeyT*     d_keys_in,
+                            KeyT*           d_keys_out,
+                            const ValueT*   d_values_in,
+                            ValueT*         d_values_out,
+                            int             num_items,
+                            int             num_segments,
+                            OffsetIteratorT d_begin_offsets,
+                            OffsetIteratorT d_end_offsets,
+                            hipStream_t     stream,
+                            bool            debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortPairsDescending(d_temp_storage,
+                                   temp_storage_bytes,
+                                   d_keys_in,
+                                   d_keys_out,
+                                   d_values_in,
+                                   d_values_out,
+                                   num_items,
+                                   num_segments,
+                                   d_begin_offsets,
+                                   d_end_offsets,
+                                   stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairsDescending(void*   d_temp_storage,
+                                                                  size_t& temp_storage_bytes,
+                                                                  DoubleBuffer<KeyT>&   d_keys,
+                                                                  DoubleBuffer<ValueT>& d_values,
+                                                                  int                   num_items,
+                                                                  int             num_segments,
+                                                                  OffsetIteratorT d_begin_offsets,
+                                                                  OffsetIteratorT d_end_offsets,
+                                                                  hipStream_t     stream = 0)
+    {
+        ::rocprim::double_buffer<KeyT>   d_keys_db   = detail::to_double_buffer(d_keys);
         ::rocprim::double_buffer<ValueT> d_values_db = detail::to_double_buffer(d_values);
-        hipError_t error = ::rocprim::segmented_radix_sort_pairs_desc(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_db, d_values_db, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            0, sizeof(KeyT) * 8,
-            stream, debug_synchronous
-        );
+        hipError_t                       error
+            = ::rocprim::segmented_radix_sort_pairs_desc(d_temp_storage,
+                                                         temp_storage_bytes,
+                                                         d_keys_db,
+                                                         d_values_db,
+                                                         num_items,
+                                                         num_segments,
+                                                         d_begin_offsets,
+                                                         d_end_offsets,
+                                                         0,
+                                                         sizeof(KeyT) * 8,
+                                                         stream,
+                                                         HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
         detail::update_double_buffer(d_keys, d_keys_db);
         detail::update_double_buffer(d_values, d_values_db);
         return error;
     }
 
-    template<typename KeyT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortKeys(void * d_temp_storage,
-                        size_t& temp_storage_bytes,
-                        const KeyT * d_keys_in,
-                        KeyT * d_keys_out,
-                        int num_items,
-                        int num_segments,
-                        OffsetIteratorT d_begin_offsets,
-                        OffsetIteratorT d_end_offsets,
-                        hipStream_t stream = 0,
-                        bool debug_synchronous = false)
+    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortPairsDescending(void*                 d_temp_storage,
+                            size_t&               temp_storage_bytes,
+                            DoubleBuffer<KeyT>&   d_keys,
+                            DoubleBuffer<ValueT>& d_values,
+                            int                   num_items,
+                            int                   num_segments,
+                            OffsetIteratorT       d_begin_offsets,
+                            OffsetIteratorT       d_end_offsets,
+                            hipStream_t           stream,
+                            bool                  debug_synchronous)
     {
-        return ::rocprim::segmented_radix_sort_keys(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_in, d_keys_out, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            0, sizeof(KeyT) * 8,
-            stream, debug_synchronous
-        );
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortPairsDescending(d_temp_storage,
+                                   temp_storage_bytes,
+                                   d_keys,
+                                   d_values,
+                                   num_items,
+                                   num_segments,
+                                   d_begin_offsets,
+                                   d_end_offsets,
+                                   stream);
     }
 
     template<typename KeyT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortKeys(void * d_temp_storage,
-                        size_t& temp_storage_bytes,
-                        DoubleBuffer<KeyT>& d_keys,
-                        int num_items,
-                        int num_segments,
-                        OffsetIteratorT d_begin_offsets,
-                        OffsetIteratorT d_end_offsets,
-                        hipStream_t stream = 0,
-                        bool debug_synchronous = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeys(void*           d_temp_storage,
+                                                       size_t&         temp_storage_bytes,
+                                                       const KeyT*     d_keys_in,
+                                                       KeyT*           d_keys_out,
+                                                       int             num_items,
+                                                       int             num_segments,
+                                                       OffsetIteratorT d_begin_offsets,
+                                                       OffsetIteratorT d_end_offsets,
+                                                       hipStream_t     stream = 0)
+    {
+        return ::rocprim::segmented_radix_sort_keys(d_temp_storage,
+                                                    temp_storage_bytes,
+                                                    d_keys_in,
+                                                    d_keys_out,
+                                                    num_items,
+                                                    num_segments,
+                                                    d_begin_offsets,
+                                                    d_end_offsets,
+                                                    0,
+                                                    sizeof(KeyT) * 8,
+                                                    stream,
+                                                    HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+    }
+
+    template<typename KeyT, typename OffsetIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortKeys(void*           d_temp_storage,
+                 size_t&         temp_storage_bytes,
+                 const KeyT*     d_keys_in,
+                 KeyT*           d_keys_out,
+                 int             num_items,
+                 int             num_segments,
+                 OffsetIteratorT d_begin_offsets,
+                 OffsetIteratorT d_end_offsets,
+                 hipStream_t     stream,
+                 bool            debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortKeys(d_temp_storage,
+                        temp_storage_bytes,
+                        d_keys_in,
+                        d_keys_out,
+                        num_items,
+                        num_segments,
+                        d_begin_offsets,
+                        d_end_offsets,
+                        stream);
+    }
+
+    template<typename KeyT, typename OffsetIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeys(void*               d_temp_storage,
+                                                       size_t&             temp_storage_bytes,
+                                                       DoubleBuffer<KeyT>& d_keys,
+                                                       int                 num_items,
+                                                       int                 num_segments,
+                                                       OffsetIteratorT     d_begin_offsets,
+                                                       OffsetIteratorT     d_end_offsets,
+                                                       hipStream_t         stream = 0)
     {
         ::rocprim::double_buffer<KeyT> d_keys_db = detail::to_double_buffer(d_keys);
-        hipError_t error = ::rocprim::segmented_radix_sort_keys(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_db, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            0, sizeof(KeyT) * 8,
-            stream, debug_synchronous
-        );
+        hipError_t                     error = ::rocprim::segmented_radix_sort_keys(d_temp_storage,
+                                                                temp_storage_bytes,
+                                                                d_keys_db,
+                                                                num_items,
+                                                                num_segments,
+                                                                d_begin_offsets,
+                                                                d_end_offsets,
+                                                                0,
+                                                                sizeof(KeyT) * 8,
+                                                                stream,
+                                                                HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
         detail::update_double_buffer(d_keys, d_keys_db);
         return error;
     }
 
     template<typename KeyT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortKeysDescending(void * d_temp_storage,
-                                  size_t& temp_storage_bytes,
-                                  const KeyT * d_keys_in,
-                                  KeyT * d_keys_out,
-                                  int num_items,
-                                  int num_segments,
-                                  OffsetIteratorT d_begin_offsets,
-                                  OffsetIteratorT d_end_offsets,
-                                  hipStream_t stream = 0,
-                                  bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortKeys(void*               d_temp_storage,
+                 size_t&             temp_storage_bytes,
+                 DoubleBuffer<KeyT>& d_keys,
+                 int                 num_items,
+                 int                 num_segments,
+                 OffsetIteratorT     d_begin_offsets,
+                 OffsetIteratorT     d_end_offsets,
+                 hipStream_t         stream,
+                 bool                debug_synchronous)
     {
-        return ::rocprim::segmented_radix_sort_keys_desc(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_in, d_keys_out, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            0, sizeof(KeyT) * 8,
-            stream, debug_synchronous
-        );
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortKeys(d_temp_storage,
+                        temp_storage_bytes,
+                        d_keys,
+                        num_items,
+                        num_segments,
+                        d_begin_offsets,
+                        d_end_offsets,
+                        stream);
     }
 
     template<typename KeyT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortKeysDescending(void * d_temp_storage,
-                                  size_t& temp_storage_bytes,
-                                  DoubleBuffer<KeyT>& d_keys,
-                                  int num_items,
-                                  int num_segments,
-                                  OffsetIteratorT d_begin_offsets,
-                                  OffsetIteratorT d_end_offsets,
-                                  hipStream_t stream = 0,
-                                  bool debug_synchronous = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeysDescending(void*           d_temp_storage,
+                                                                 size_t&         temp_storage_bytes,
+                                                                 const KeyT*     d_keys_in,
+                                                                 KeyT*           d_keys_out,
+                                                                 int             num_items,
+                                                                 int             num_segments,
+                                                                 OffsetIteratorT d_begin_offsets,
+                                                                 OffsetIteratorT d_end_offsets,
+                                                                 hipStream_t     stream = 0)
+    {
+        return ::rocprim::segmented_radix_sort_keys_desc(d_temp_storage,
+                                                         temp_storage_bytes,
+                                                         d_keys_in,
+                                                         d_keys_out,
+                                                         num_items,
+                                                         num_segments,
+                                                         d_begin_offsets,
+                                                         d_end_offsets,
+                                                         0,
+                                                         sizeof(KeyT) * 8,
+                                                         stream,
+                                                         HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
+    }
+
+    template<typename KeyT, typename OffsetIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortKeysDescending(void*           d_temp_storage,
+                           size_t&         temp_storage_bytes,
+                           const KeyT*     d_keys_in,
+                           KeyT*           d_keys_out,
+                           int             num_items,
+                           int             num_segments,
+                           OffsetIteratorT d_begin_offsets,
+                           OffsetIteratorT d_end_offsets,
+                           hipStream_t     stream,
+                           bool            debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortKeysDescending(d_temp_storage,
+                                  temp_storage_bytes,
+                                  d_keys_in,
+                                  d_keys_out,
+                                  num_items,
+                                  num_segments,
+                                  d_begin_offsets,
+                                  d_end_offsets,
+                                  stream);
+    }
+
+    template<typename KeyT, typename OffsetIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeysDescending(void*   d_temp_storage,
+                                                                 size_t& temp_storage_bytes,
+                                                                 DoubleBuffer<KeyT>& d_keys,
+                                                                 int                 num_items,
+                                                                 int                 num_segments,
+                                                                 OffsetIteratorT d_begin_offsets,
+                                                                 OffsetIteratorT d_end_offsets,
+                                                                 hipStream_t     stream = 0)
     {
         ::rocprim::double_buffer<KeyT> d_keys_db = detail::to_double_buffer(d_keys);
-        hipError_t error = ::rocprim::segmented_radix_sort_keys_desc(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_db, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            0, sizeof(KeyT) * 8,
-            stream, debug_synchronous
-        );
+        hipError_t                     error
+            = ::rocprim::segmented_radix_sort_keys_desc(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys_db,
+                                                        num_items,
+                                                        num_segments,
+                                                        d_begin_offsets,
+                                                        d_end_offsets,
+                                                        0,
+                                                        sizeof(KeyT) * 8,
+                                                        stream,
+                                                        HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
         detail::update_double_buffer(d_keys, d_keys_db);
         return error;
     }
 
-    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t StableSortPairs(void * d_temp_storage,
-                               size_t& temp_storage_bytes,
-                               const KeyT * d_keys_in,
-                               KeyT * d_keys_out,
-                               const ValueT * d_values_in,
-                               ValueT * d_values_out,
-                               int num_items,
-                               int num_segments,
-                               OffsetIteratorT d_begin_offsets,
-                               OffsetIteratorT d_end_offsets,
-                               hipStream_t stream = 0,
-                               bool debug_synchronous = false)
+    template<typename KeyT, typename OffsetIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortKeysDescending(void*               d_temp_storage,
+                           size_t&             temp_storage_bytes,
+                           DoubleBuffer<KeyT>& d_keys,
+                           int                 num_items,
+                           int                 num_segments,
+                           OffsetIteratorT     d_begin_offsets,
+                           OffsetIteratorT     d_end_offsets,
+                           hipStream_t         stream,
+                           bool                debug_synchronous)
     {
-        return SortPairs(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_in, d_keys_out, d_values_in, d_values_out, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            stream, debug_synchronous
-        );
-    }
-
-    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t StableSortPairs(void * d_temp_storage,
-                               size_t& temp_storage_bytes,
-                               DoubleBuffer<KeyT>& d_keys,
-                               DoubleBuffer<ValueT>& d_values,
-                               int num_items,
-                               int num_segments,
-                               OffsetIteratorT d_begin_offsets,
-                               OffsetIteratorT d_end_offsets,
-                               hipStream_t stream = 0,
-                               bool debug_synchronous = false)
-    {
-        return SortPairs(
-            d_temp_storage, temp_storage_bytes,
-            d_keys, d_values, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            stream, debug_synchronous
-        );
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortKeysDescending(d_temp_storage,
+                                  temp_storage_bytes,
+                                  d_keys,
+                                  num_items,
+                                  num_segments,
+                                  d_begin_offsets,
+                                  d_end_offsets,
+                                  stream);
     }
 
     template<typename KeyT, typename ValueT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t StableSortPairsDescending(void * d_temp_storage,
-                                         size_t& temp_storage_bytes,
-                                         const KeyT * d_keys_in,
-                                         KeyT * d_keys_out,
-                                         const ValueT * d_values_in,
-                                         ValueT * d_values_out,
-                                         int num_items,
-                                         int num_segments,
-                                         OffsetIteratorT d_begin_offsets,
-                                         OffsetIteratorT d_end_offsets,
-                                         hipStream_t stream = 0,
-                                         bool debug_synchronous = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t StableSortPairs(void*           d_temp_storage,
+                                                              size_t&         temp_storage_bytes,
+                                                              const KeyT*     d_keys_in,
+                                                              KeyT*           d_keys_out,
+                                                              const ValueT*   d_values_in,
+                                                              ValueT*         d_values_out,
+                                                              int             num_items,
+                                                              int             num_segments,
+                                                              OffsetIteratorT d_begin_offsets,
+                                                              OffsetIteratorT d_end_offsets,
+                                                              hipStream_t     stream = 0)
     {
-        return SortPairsDescending(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_in, d_keys_out, d_values_in, d_values_out, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            stream, debug_synchronous
-        );
+        return SortPairs(d_temp_storage,
+                         temp_storage_bytes,
+                         d_keys_in,
+                         d_keys_out,
+                         d_values_in,
+                         d_values_out,
+                         num_items,
+                         num_segments,
+                         d_begin_offsets,
+                         d_end_offsets,
+                         stream);
     }
 
     template<typename KeyT, typename ValueT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t StableSortPairsDescending(void * d_temp_storage,
-                                         size_t& temp_storage_bytes,
-                                         DoubleBuffer<KeyT>& d_keys,
-                                         DoubleBuffer<ValueT>& d_values,
-                                         int num_items,
-                                         int num_segments,
-                                         OffsetIteratorT d_begin_offsets,
-                                         OffsetIteratorT d_end_offsets,
-                                         hipStream_t stream = 0,
-                                         bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortPairs(void*           d_temp_storage,
+                        size_t&         temp_storage_bytes,
+                        const KeyT*     d_keys_in,
+                        KeyT*           d_keys_out,
+                        const ValueT*   d_values_in,
+                        ValueT*         d_values_out,
+                        int             num_items,
+                        int             num_segments,
+                        OffsetIteratorT d_begin_offsets,
+                        OffsetIteratorT d_end_offsets,
+                        hipStream_t     stream,
+                        bool            debug_synchronous)
     {
-        return SortPairsDescending(
-            d_temp_storage, temp_storage_bytes,
-            d_keys, d_values, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            stream, debug_synchronous
-        );
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortPairs(d_temp_storage,
+                               temp_storage_bytes,
+                               d_keys_in,
+                               d_keys_out,
+                               d_values_in,
+                               d_values_out,
+                               num_items,
+                               num_segments,
+                               d_begin_offsets,
+                               d_end_offsets,
+                               stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t StableSortPairs(void*   d_temp_storage,
+                                                              size_t& temp_storage_bytes,
+                                                              DoubleBuffer<KeyT>&   d_keys,
+                                                              DoubleBuffer<ValueT>& d_values,
+                                                              int                   num_items,
+                                                              int                   num_segments,
+                                                              OffsetIteratorT       d_begin_offsets,
+                                                              OffsetIteratorT       d_end_offsets,
+                                                              hipStream_t           stream = 0)
+    {
+        return SortPairs(d_temp_storage,
+                         temp_storage_bytes,
+                         d_keys,
+                         d_values,
+                         num_items,
+                         num_segments,
+                         d_begin_offsets,
+                         d_end_offsets,
+                         stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortPairs(void*                 d_temp_storage,
+                        size_t&               temp_storage_bytes,
+                        DoubleBuffer<KeyT>&   d_keys,
+                        DoubleBuffer<ValueT>& d_values,
+                        int                   num_items,
+                        int                   num_segments,
+                        OffsetIteratorT       d_begin_offsets,
+                        OffsetIteratorT       d_end_offsets,
+                        hipStream_t           stream,
+                        bool                  debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortPairs(d_temp_storage,
+                               temp_storage_bytes,
+                               d_keys,
+                               d_values,
+                               num_items,
+                               num_segments,
+                               d_begin_offsets,
+                               d_end_offsets,
+                               stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortPairsDescending(void*           d_temp_storage,
+                                  size_t&         temp_storage_bytes,
+                                  const KeyT*     d_keys_in,
+                                  KeyT*           d_keys_out,
+                                  const ValueT*   d_values_in,
+                                  ValueT*         d_values_out,
+                                  int             num_items,
+                                  int             num_segments,
+                                  OffsetIteratorT d_begin_offsets,
+                                  OffsetIteratorT d_end_offsets,
+                                  hipStream_t     stream = 0)
+    {
+        return SortPairsDescending(d_temp_storage,
+                                   temp_storage_bytes,
+                                   d_keys_in,
+                                   d_keys_out,
+                                   d_values_in,
+                                   d_values_out,
+                                   num_items,
+                                   num_segments,
+                                   d_begin_offsets,
+                                   d_end_offsets,
+                                   stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortPairsDescending(void*           d_temp_storage,
+                                  size_t&         temp_storage_bytes,
+                                  const KeyT*     d_keys_in,
+                                  KeyT*           d_keys_out,
+                                  const ValueT*   d_values_in,
+                                  ValueT*         d_values_out,
+                                  int             num_items,
+                                  int             num_segments,
+                                  OffsetIteratorT d_begin_offsets,
+                                  OffsetIteratorT d_end_offsets,
+                                  hipStream_t     stream,
+                                  bool            debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortPairsDescending(d_temp_storage,
+                                         temp_storage_bytes,
+                                         d_keys_in,
+                                         d_keys_out,
+                                         d_values_in,
+                                         d_values_out,
+                                         num_items,
+                                         num_segments,
+                                         d_begin_offsets,
+                                         d_end_offsets,
+                                         stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortPairsDescending(void*                 d_temp_storage,
+                                  size_t&               temp_storage_bytes,
+                                  DoubleBuffer<KeyT>&   d_keys,
+                                  DoubleBuffer<ValueT>& d_values,
+                                  int                   num_items,
+                                  int                   num_segments,
+                                  OffsetIteratorT       d_begin_offsets,
+                                  OffsetIteratorT       d_end_offsets,
+                                  hipStream_t           stream = 0)
+    {
+        return SortPairsDescending(d_temp_storage,
+                                   temp_storage_bytes,
+                                   d_keys,
+                                   d_values,
+                                   num_items,
+                                   num_segments,
+                                   d_begin_offsets,
+                                   d_end_offsets,
+                                   stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename OffsetIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortPairsDescending(void*                 d_temp_storage,
+                                  size_t&               temp_storage_bytes,
+                                  DoubleBuffer<KeyT>&   d_keys,
+                                  DoubleBuffer<ValueT>& d_values,
+                                  int                   num_items,
+                                  int                   num_segments,
+                                  OffsetIteratorT       d_begin_offsets,
+                                  OffsetIteratorT       d_end_offsets,
+                                  hipStream_t           stream,
+                                  bool                  debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortPairsDescending(d_temp_storage,
+                                         temp_storage_bytes,
+                                         d_keys,
+                                         d_values,
+                                         num_items,
+                                         num_segments,
+                                         d_begin_offsets,
+                                         d_end_offsets,
+                                         stream);
     }
 
     template<typename KeyT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t StableSortKeys(void * d_temp_storage,
-                              size_t& temp_storage_bytes,
-                              const KeyT * d_keys_in,
-                              KeyT * d_keys_out,
-                              int num_items,
-                              int num_segments,
-                              OffsetIteratorT d_begin_offsets,
-                              OffsetIteratorT d_end_offsets,
-                              hipStream_t stream = 0,
-                              bool debug_synchronous = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t StableSortKeys(void*           d_temp_storage,
+                                                             size_t&         temp_storage_bytes,
+                                                             const KeyT*     d_keys_in,
+                                                             KeyT*           d_keys_out,
+                                                             int             num_items,
+                                                             int             num_segments,
+                                                             OffsetIteratorT d_begin_offsets,
+                                                             OffsetIteratorT d_end_offsets,
+                                                             hipStream_t     stream = 0)
     {
-        return SortKeys(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_in, d_keys_out, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            stream, debug_synchronous
-        );
+        return SortKeys(d_temp_storage,
+                        temp_storage_bytes,
+                        d_keys_in,
+                        d_keys_out,
+                        num_items,
+                        num_segments,
+                        d_begin_offsets,
+                        d_end_offsets,
+                        stream);
     }
 
     template<typename KeyT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t StableSortKeys(void * d_temp_storage,
-                              size_t& temp_storage_bytes,
-                              DoubleBuffer<KeyT>& d_keys,
-                              int num_items,
-                              int num_segments,
-                              OffsetIteratorT d_begin_offsets,
-                              OffsetIteratorT d_end_offsets,
-                              hipStream_t stream = 0,
-                              bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortKeys(void*           d_temp_storage,
+                       size_t&         temp_storage_bytes,
+                       const KeyT*     d_keys_in,
+                       KeyT*           d_keys_out,
+                       int             num_items,
+                       int             num_segments,
+                       OffsetIteratorT d_begin_offsets,
+                       OffsetIteratorT d_end_offsets,
+                       hipStream_t     stream,
+                       bool            debug_synchronous)
     {
-        return SortKeys(
-            d_temp_storage, temp_storage_bytes,
-            d_keys, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            stream, debug_synchronous
-        );
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortKeys(d_temp_storage,
+                              temp_storage_bytes,
+                              d_keys_in,
+                              d_keys_out,
+                              num_items,
+                              num_segments,
+                              d_begin_offsets,
+                              d_end_offsets,
+                              stream);
     }
 
     template<typename KeyT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t StableSortKeysDescending(void * d_temp_storage,
-                                        size_t& temp_storage_bytes,
-                                        const KeyT * d_keys_in,
-                                        KeyT * d_keys_out,
-                                        int num_items,
-                                        int num_segments,
-                                        OffsetIteratorT d_begin_offsets,
-                                        OffsetIteratorT d_end_offsets,
-                                        hipStream_t stream = 0,
-                                        bool debug_synchronous = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t StableSortKeys(void*               d_temp_storage,
+                                                             size_t&             temp_storage_bytes,
+                                                             DoubleBuffer<KeyT>& d_keys,
+                                                             int                 num_items,
+                                                             int                 num_segments,
+                                                             OffsetIteratorT     d_begin_offsets,
+                                                             OffsetIteratorT     d_end_offsets,
+                                                             hipStream_t         stream = 0)
     {
-        return SortKeysDescending(
-            d_temp_storage, temp_storage_bytes,
-            d_keys_in, d_keys_out, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            stream, debug_synchronous
-        );
+        return SortKeys(d_temp_storage,
+                        temp_storage_bytes,
+                        d_keys,
+                        num_items,
+                        num_segments,
+                        d_begin_offsets,
+                        d_end_offsets,
+                        stream);
     }
 
     template<typename KeyT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t StableSortKeysDescending(void * d_temp_storage,
-                                        size_t& temp_storage_bytes,
-                                        DoubleBuffer<KeyT>& d_keys,
-                                        int num_items,
-                                        int num_segments,
-                                        OffsetIteratorT d_begin_offsets,
-                                        OffsetIteratorT d_end_offsets,
-                                        hipStream_t stream = 0,
-                                        bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortKeys(void*               d_temp_storage,
+                       size_t&             temp_storage_bytes,
+                       DoubleBuffer<KeyT>& d_keys,
+                       int                 num_items,
+                       int                 num_segments,
+                       OffsetIteratorT     d_begin_offsets,
+                       OffsetIteratorT     d_end_offsets,
+                       hipStream_t         stream,
+                       bool                debug_synchronous)
     {
-        return SortKeysDescending(
-            d_temp_storage, temp_storage_bytes,
-            d_keys, num_items,
-            num_segments, d_begin_offsets, d_end_offsets,
-            stream, debug_synchronous
-        );
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortKeys(d_temp_storage,
+                              temp_storage_bytes,
+                              d_keys,
+                              num_items,
+                              num_segments,
+                              d_begin_offsets,
+                              d_end_offsets,
+                              stream);
+    }
+
+    template<typename KeyT, typename OffsetIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortKeysDescending(void*           d_temp_storage,
+                                 size_t&         temp_storage_bytes,
+                                 const KeyT*     d_keys_in,
+                                 KeyT*           d_keys_out,
+                                 int             num_items,
+                                 int             num_segments,
+                                 OffsetIteratorT d_begin_offsets,
+                                 OffsetIteratorT d_end_offsets,
+                                 hipStream_t     stream = 0)
+    {
+        return SortKeysDescending(d_temp_storage,
+                                  temp_storage_bytes,
+                                  d_keys_in,
+                                  d_keys_out,
+                                  num_items,
+                                  num_segments,
+                                  d_begin_offsets,
+                                  d_end_offsets,
+                                  stream);
+    }
+
+    template<typename KeyT, typename OffsetIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortKeysDescending(void*           d_temp_storage,
+                                 size_t&         temp_storage_bytes,
+                                 const KeyT*     d_keys_in,
+                                 KeyT*           d_keys_out,
+                                 int             num_items,
+                                 int             num_segments,
+                                 OffsetIteratorT d_begin_offsets,
+                                 OffsetIteratorT d_end_offsets,
+                                 hipStream_t     stream,
+                                 bool            debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortKeysDescending(d_temp_storage,
+                                        temp_storage_bytes,
+                                        d_keys_in,
+                                        d_keys_out,
+                                        num_items,
+                                        num_segments,
+                                        d_begin_offsets,
+                                        d_end_offsets,
+                                        stream);
+    }
+
+    template<typename KeyT, typename OffsetIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortKeysDescending(void*               d_temp_storage,
+                                 size_t&             temp_storage_bytes,
+                                 DoubleBuffer<KeyT>& d_keys,
+                                 int                 num_items,
+                                 int                 num_segments,
+                                 OffsetIteratorT     d_begin_offsets,
+                                 OffsetIteratorT     d_end_offsets,
+                                 hipStream_t         stream = 0)
+    {
+        return SortKeysDescending(d_temp_storage,
+                                  temp_storage_bytes,
+                                  d_keys,
+                                  num_items,
+                                  num_segments,
+                                  d_begin_offsets,
+                                  d_end_offsets,
+                                  stream);
+    }
+
+    template<typename KeyT, typename OffsetIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        StableSortKeysDescending(void*               d_temp_storage,
+                                 size_t&             temp_storage_bytes,
+                                 DoubleBuffer<KeyT>& d_keys,
+                                 int                 num_items,
+                                 int                 num_segments,
+                                 OffsetIteratorT     d_begin_offsets,
+                                 OffsetIteratorT     d_end_offsets,
+                                 hipStream_t         stream,
+                                 bool                debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return StableSortKeysDescending(d_temp_storage,
+                                        temp_storage_bytes,
+                                        d_keys,
+                                        num_items,
+                                        num_segments,
+                                        d_begin_offsets,
+                                        d_end_offsets,
+                                        stream);
     }
 };
 
