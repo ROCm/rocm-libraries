@@ -1,6 +1,12 @@
-===================
+.. meta::
+  :description: rocThrust API data type support
+  :keywords: rocThrust, ROCm, API, reference, data type, support
+
+.. _api-reference:
+
+******************************************
 API Reference Guide
-===================
+******************************************
 
 This chapter describes the rocThrust C++ API.
 

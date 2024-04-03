@@ -4,14 +4,16 @@ defaults:
   numbered: False
 root: index
 subtrees:
-- caption: Setup
+- caption: Installation
   entries:
-  - file: setup/installing
-- caption: API
+  - file: install/installing
+    title: Installation guide
+
+- caption: API reference
   entries:
   - file: data-type-support
   - file: cpp_api
+
 - caption: About
   entries:
   - file: license
-  
