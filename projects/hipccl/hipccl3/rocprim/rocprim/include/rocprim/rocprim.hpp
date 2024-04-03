@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,8 @@
 #include "type_traits.hpp"
 #include "iterator.hpp"
 
+#include "thread/radix_key_codec.hpp"
+
 #include "warp/warp_reduce.hpp"
 #include "warp/warp_scan.hpp"
 #include "warp/warp_sort.hpp"
@@ -52,6 +54,7 @@
 
 #include "device/device_adjacent_difference.hpp"
 #include "device/device_binary_search.hpp"
+#include "device/device_copy.hpp"
 #include "device/device_histogram.hpp"
 #include "device/device_memcpy.hpp"
 #include "device/device_merge.hpp"

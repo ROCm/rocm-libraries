@@ -22,9 +22,14 @@
 #define ROCPRIM_TYPE_TRAITS_HPP_
 
 #include "config.hpp"
+#include "functional.hpp"
 #include "types.hpp"
 
+#include "types/tuple.hpp"
+
+#include <functional>
 #include <type_traits>
+#include <utility>
 
 /// \addtogroup utilsmodule_typetraits
 /// @{
@@ -142,9 +147,10 @@ struct get_unsigned_bits_type<T,8>
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 template<typename T, typename UnsignedBits>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto TwiddleIn(UnsignedBits key)
-    -> typename std::enable_if<is_floating_point<T>::value, UnsignedBits>::type
+[[deprecated("TwiddleIn is deprecated."
+             "Use radix_key_codec instead.")]] ROCPRIM_DEVICE ROCPRIM_INLINE auto
+    TwiddleIn(UnsignedBits key) ->
+    typename std::enable_if<is_floating_point<T>::value, UnsignedBits>::type
 {
   static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
   UnsignedBits mask = (key & HIGH_BIT) ? UnsignedBits(-1) : HIGH_BIT;
@@ -152,26 +158,29 @@ auto TwiddleIn(UnsignedBits key)
 }
 
 template<typename T, typename UnsignedBits>
-static ROCPRIM_DEVICE ROCPRIM_INLINE
-auto TwiddleIn(UnsignedBits key)
-    -> typename std::enable_if<is_unsigned<T>::value, UnsignedBits>::type
+[[deprecated("TwiddleIn is deprecated."
+             "Use radix_key_codec instead.")]] static ROCPRIM_DEVICE ROCPRIM_INLINE auto
+    TwiddleIn(UnsignedBits key) ->
+    typename std::enable_if<is_unsigned<T>::value, UnsignedBits>::type
 {
     return key ;
 };
 
 template<typename T, typename UnsignedBits>
-static ROCPRIM_DEVICE ROCPRIM_INLINE
-auto TwiddleIn(UnsignedBits key)
-    -> typename std::enable_if<is_integral<T>::value && is_signed<T>::value, UnsignedBits>::type
+[[deprecated("TwiddleIn is deprecated."
+             "Use radix_key_codec instead.")]] static ROCPRIM_DEVICE ROCPRIM_INLINE auto
+    TwiddleIn(UnsignedBits key) ->
+    typename std::enable_if<is_integral<T>::value && is_signed<T>::value, UnsignedBits>::type
 {
     static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
     return key ^ HIGH_BIT;
 };
 
 template<typename T, typename UnsignedBits>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto TwiddleOut(UnsignedBits key)
-    -> typename std::enable_if<is_floating_point<T>::value, UnsignedBits>::type
+[[deprecated("TwiddleOut is deprecated."
+             "Use radix_key_codec instead.")]] ROCPRIM_DEVICE ROCPRIM_INLINE auto
+    TwiddleOut(UnsignedBits key) ->
+    typename std::enable_if<is_floating_point<T>::value, UnsignedBits>::type
 {
     static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
     UnsignedBits mask = (key & HIGH_BIT) ? HIGH_BIT : UnsignedBits(-1);
@@ -179,17 +188,19 @@ auto TwiddleOut(UnsignedBits key)
 }
 
 template<typename T, typename UnsignedBits>
-static ROCPRIM_DEVICE ROCPRIM_INLINE
-auto TwiddleOut(UnsignedBits key)
-    -> typename std::enable_if<is_unsigned<T>::value, UnsignedBits>::type
+[[deprecated("TwiddleOut is deprecated."
+             "Use radix_key_codec instead.")]] static ROCPRIM_DEVICE ROCPRIM_INLINE auto
+    TwiddleOut(UnsignedBits key) ->
+    typename std::enable_if<is_unsigned<T>::value, UnsignedBits>::type
 {
     return key;
 };
 
 template<typename T, typename UnsignedBits>
-static ROCPRIM_DEVICE ROCPRIM_INLINE
-auto TwiddleOut(UnsignedBits key)
-    -> typename std::enable_if<is_integral<T>::value && is_signed<T>::value, UnsignedBits>::type
+[[deprecated("TwiddleOut is deprecated."
+             "Use radix_key_codec instead.")]] static ROCPRIM_DEVICE ROCPRIM_INLINE auto
+    TwiddleOut(UnsignedBits key) ->
+    typename std::enable_if<is_integral<T>::value && is_signed<T>::value, UnsignedBits>::type
 {
     static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
     return key ^ HIGH_BIT;
@@ -265,6 +276,76 @@ struct invoke_result_impl<decltype(void(INVOKE(std::declval<F>(), std::declval<A
 {
     using type = decltype(INVOKE(std::declval<F>(), std::declval<Args>()...));
 };
+
+template<class T>
+struct is_tuple_of_references
+{
+    static_assert(sizeof(T) == 0, "is_tuple_of_references is only implemented for rocprim::tuple");
+};
+
+template<class... Args>
+struct is_tuple_of_references<::rocprim::tuple<Args...>>
+{
+private:
+    template<size_t Index>
+    ROCPRIM_HOST_DEVICE static constexpr bool is_tuple_of_references_impl()
+    {
+        using tuple_t   = ::rocprim::tuple<Args...>;
+        using element_t = ::rocprim::tuple_element_t<Index, tuple_t>;
+        return std::is_reference<element_t>::value && is_tuple_of_references_impl<Index + 1>();
+    }
+
+    template<>
+    ROCPRIM_HOST_DEVICE static constexpr bool is_tuple_of_references_impl<sizeof...(Args)>()
+    {
+        return true;
+    }
+
+public:
+    static constexpr bool value = is_tuple_of_references_impl<0>();
+};
+
+template<class Key>
+struct float_bit_mask;
+
+template<>
+struct float_bit_mask<float>
+{
+    static constexpr uint32_t sign_bit = 0x80000000;
+    static constexpr uint32_t exponent = 0x7F800000;
+    static constexpr uint32_t mantissa = 0x007FFFFF;
+    using bit_type                     = uint32_t;
+};
+
+template<>
+struct float_bit_mask<double>
+{
+    static constexpr uint64_t sign_bit = 0x8000000000000000;
+    static constexpr uint64_t exponent = 0x7FF0000000000000;
+    static constexpr uint64_t mantissa = 0x000FFFFFFFFFFFFF;
+    using bit_type                     = uint64_t;
+};
+
+template<>
+struct float_bit_mask<rocprim::bfloat16>
+{
+    static constexpr uint16_t sign_bit = 0x8000;
+    static constexpr uint16_t exponent = 0x7F80;
+    static constexpr uint16_t mantissa = 0x007F;
+    using bit_type                     = uint16_t;
+};
+
+template<>
+struct float_bit_mask<rocprim::half>
+{
+    static constexpr uint16_t sign_bit = 0x8000;
+    static constexpr uint16_t exponent = 0x7C00;
+    static constexpr uint16_t mantissa = 0x03FF;
+    using bit_type                     = uint16_t;
+};
+
+template<class...>
+using void_t = void;
 
 } // end namespace detail
 

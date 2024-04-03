@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,9 +24,11 @@
 #include "../common_test_header.hpp"
 
 // required rocprim headers
-#include <rocprim/rocprim.hpp>
 #include "../rocprim/test_seed.hpp"
 #include "../rocprim/test_utils.hpp"
+
+#include <rocprim/device/device_binary_search.hpp>
+#include <rocprim/device/device_merge_sort.hpp>
 
 // required STL headers
 #include <algorithm>
@@ -107,9 +109,6 @@ TEST(TestHipGraphAlgs, SortAndSearch)
     hipStream_t stream = 0;
     HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
 
-    // Begin graph capture
-    hipGraph_t graph = test_utils::createGraphHelper(stream);
-
     // Get temporary storage size required for merge_sort.
     // Note: doing this inside a graph doesn't gain us any benefit,
     // since these calls run entirely on the host - however, it is
@@ -139,11 +138,6 @@ TEST(TestHipGraphAlgs, SortAndSearch)
                                      debug_synchronous
                                      ));
 
-    // End graph capture (since we can't malloc the temp storage inside the graph)
-    // and execute the graph (to get the temp storage size)
-    hipGraphExec_t graph_instance;
-    graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-
     // Allocate the temp storage
     // Note: a single store will be used for both the sort and search algorithms
     size_t temp_storage_bytes = std::max(sort_temp_storage_bytes, search_temp_storage_bytes);
@@ -154,8 +148,8 @@ TEST(TestHipGraphAlgs, SortAndSearch)
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
-    // Re-start graph capture
-    test_utils::resetGraphHelper(graph, graph_instance, stream);
+    // Begin graph capture
+    hipGraph_t graph = test_utils::createGraphHelper(stream);
 
     // Launch merge_sort
     HIP_CHECK(
@@ -186,6 +180,7 @@ TEST(TestHipGraphAlgs, SortAndSearch)
               );
 
     // End graph capture, but do not execute the graph yet.
+    hipGraphExec_t graph_instance;
     graph_instance = test_utils::endCaptureGraphHelper(graph, stream);
 
     std::vector<key_type> sort_input;

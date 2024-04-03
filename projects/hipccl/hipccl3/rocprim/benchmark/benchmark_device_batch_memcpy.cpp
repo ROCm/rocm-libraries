@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,13 +20,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark/benchmark.h"
 #include "benchmark_utils.hpp"
 #include "cmdparser.hpp"
 
-#include <rocprim/rocprim.hpp>
-
+#include <benchmark/benchmark.h>
 #include <hip/hip_runtime.h>
+
+// rocPRIM
+#include <rocprim/detail/various.hpp>
+#include <rocprim/device/device_copy.hpp>
+#include <rocprim/device/device_memcpy.hpp>
+#include <rocprim/device/device_memcpy_config.hpp>
 
 #include <iostream>
 #include <numeric>
@@ -84,6 +88,98 @@ std::vector<T> shuffled_exclusive_scan(const std::vector<S>& input, RandomGenera
 
 using offset_type = size_t;
 
+template<bool IsMemCpy,
+         class ContainerMemCpy,
+         class ContainerCopy,
+         typename std::enable_if<IsMemCpy, int>::type = 0>
+void init_input(ContainerMemCpy& h_input_for_memcpy,
+                ContainerCopy& /*h_input_for_copy*/,
+                std::mt19937_64& rng,
+                offset_type      total_num_bytes)
+{
+    std::independent_bits_engine<std::mt19937_64, 64, uint64_t> bits_engine{rng};
+
+    const size_t num_ints = rocprim::detail::ceiling_div(total_num_bytes, sizeof(uint64_t));
+    h_input_for_memcpy    = std::vector<unsigned char>(num_ints * sizeof(uint64_t));
+
+    // generate_n for uninitialized memory, pragmatically use placement-new, since there are no
+    // uint64_t objects alive yet in the storage.
+    std::for_each(
+        reinterpret_cast<uint64_t*>(h_input_for_memcpy.data()),
+        reinterpret_cast<uint64_t*>(h_input_for_memcpy.data() + num_ints * sizeof(uint64_t)),
+        [&bits_engine](uint64_t& elem) { ::new(&elem) uint64_t{bits_engine()}; });
+}
+
+template<bool IsMemCpy,
+         class ContainerMemCpy,
+         class ContainerCopy,
+         class byte_offset_type,
+         typename std::enable_if<!IsMemCpy, int>::type = 0>
+void init_input(ContainerMemCpy& /*h_input_for_memcpy*/,
+                ContainerCopy&   h_input_for_copy,
+                std::mt19937_64& rng,
+                byte_offset_type total_num_bytes)
+{
+    using value_type = typename ContainerCopy::value_type;
+
+    std::independent_bits_engine<std::mt19937_64, 64, uint64_t> bits_engine{rng};
+
+    const size_t num_ints = rocprim::detail::ceiling_div(total_num_bytes, sizeof(uint64_t));
+    const size_t num_of_elements
+        = rocprim::detail::ceiling_div(num_ints * sizeof(uint64_t), sizeof(value_type));
+    h_input_for_copy = std::vector<value_type>(num_of_elements);
+
+    // generate_n for uninitialized memory, pragmatically use placement-new, since there are no
+    // uint64_t objects alive yet in the storage.
+    std::for_each(reinterpret_cast<uint64_t*>(h_input_for_copy.data()),
+                  reinterpret_cast<uint64_t*>(h_input_for_copy.data()) + num_ints,
+                  [&bits_engine](uint64_t& elem) { ::new(&elem) uint64_t{bits_engine()}; });
+}
+
+template<bool IsMemCpy,
+         class InputBufferItType,
+         class OutputBufferItType,
+         class BufferSizeItType,
+         typename std::enable_if<IsMemCpy, int>::type = 0>
+void batch_copy(void*              temporary_storage,
+                size_t&            storage_size,
+                InputBufferItType  sources,
+                OutputBufferItType destinations,
+                BufferSizeItType   sizes,
+                uint32_t           num_copies,
+                hipStream_t        stream)
+{
+    HIP_CHECK(rocprim::batch_memcpy(temporary_storage,
+                                    storage_size,
+                                    sources,
+                                    destinations,
+                                    sizes,
+                                    num_copies,
+                                    stream));
+}
+
+template<bool IsMemCpy,
+         class InputBufferItType,
+         class OutputBufferItType,
+         class BufferSizeItType,
+         typename std::enable_if<!IsMemCpy, int>::type = 0>
+void batch_copy(void*              temporary_storage,
+                size_t&            storage_size,
+                InputBufferItType  sources,
+                OutputBufferItType destinations,
+                BufferSizeItType   sizes,
+                uint32_t           num_copies,
+                hipStream_t        stream)
+{
+    HIP_CHECK(rocprim::batch_copy(temporary_storage,
+                                  storage_size,
+                                  sources,
+                                  destinations,
+                                  sizes,
+                                  num_copies,
+                                  stream));
+}
+
 template<typename ValueType, typename BufferSizeType>
 struct BatchMemcpyData
 {
@@ -134,7 +230,7 @@ struct BatchMemcpyData
     }
 };
 
-template<class ValueType, class BufferSizeType>
+template<class ValueType, class BufferSizeType, bool IsMemCpy>
 BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_buffers = 1024,
                                                         const int32_t num_wlev_buffers = 1024,
                                                         const int32_t num_blev_buffers = 1024)
@@ -175,16 +271,12 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_b
     result.total_num_elements
         = std::accumulate(h_buffer_num_elements.begin(), h_buffer_num_elements.end(), size_t{0});
 
-    // Generate data.
-    std::independent_bits_engine<std::mt19937_64, 64, uint64_t> bits_engine{rng};
-
-    const size_t num_ints
-        = rocprim::detail::ceiling_div(result.total_num_bytes(), sizeof(uint64_t));
-    auto h_input = std::make_unique<unsigned char[]>(num_ints * sizeof(uint64_t));
-
-    std::for_each(reinterpret_cast<uint64_t*>(h_input.get()),
-                  reinterpret_cast<uint64_t*>(h_input.get() + num_ints * sizeof(uint64_t)),
-                  [&bits_engine](uint64_t& elem) { ::new(&elem) uint64_t{bits_engine()}; });
+    std::vector<unsigned char> h_input_for_memcpy;
+    std::vector<ValueType>     h_input_for_copy;
+    init_input<IsMemCpy>(h_input_for_memcpy,
+                         h_input_for_copy,
+                         rng,
+                         result.total_num_elements * sizeof(ValueType));
 
     HIP_CHECK(hipMalloc(&result.d_input, result.total_num_bytes()));
     HIP_CHECK(hipMalloc(&result.d_output, result.total_num_bytes()));
@@ -228,8 +320,28 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_b
     }
 
     // Prepare the batch memcpy.
-    HIP_CHECK(
-        hipMemcpy(result.d_input, h_input.get(), result.total_num_bytes(), hipMemcpyHostToDevice));
+    if(IsMemCpy)
+    {
+        HIP_CHECK(hipMemcpy(result.d_input,
+                            h_input_for_memcpy.data(),
+                            result.total_num_bytes(),
+                            hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(result.d_buffer_sizes,
+                            h_buffer_num_bytes.data(),
+                            h_buffer_num_bytes.size() * sizeof(BufferSizeType),
+                            hipMemcpyHostToDevice));
+    }
+    else
+    {
+        HIP_CHECK(hipMemcpy(result.d_input,
+                            h_input_for_copy.data(),
+                            result.total_num_bytes(),
+                            hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(result.d_buffer_sizes,
+                            h_buffer_num_elements.data(),
+                            h_buffer_num_elements.size() * sizeof(BufferSizeType),
+                            hipMemcpyHostToDevice));
+    }
     HIP_CHECK(hipMemcpy(result.d_buffer_srcs,
                         h_buffer_srcs.data(),
                         h_buffer_srcs.size() * sizeof(ValueType*),
@@ -238,15 +350,11 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_b
                         h_buffer_dsts.data(),
                         h_buffer_dsts.size() * sizeof(ValueType*),
                         hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(result.d_buffer_sizes,
-                        h_buffer_num_bytes.data(),
-                        h_buffer_num_bytes.size() * sizeof(BufferSizeType),
-                        hipMemcpyHostToDevice));
 
     return result;
 }
 
-template<class ValueType, class BufferSizeType>
+template<class ValueType, class BufferSizeType, bool IsMemCpy>
 void run_benchmark(benchmark::State& state,
                    hipStream_t       stream,
                    const int32_t     num_tlev_buffers = 1024,
@@ -257,30 +365,31 @@ void run_benchmark(benchmark::State& state,
 
     size_t                                     temp_storage_bytes = 0;
     BatchMemcpyData<ValueType, BufferSizeType> data;
-    HIP_CHECK(rocprim::batch_memcpy(nullptr,
-                                    temp_storage_bytes,
-                                    data.d_buffer_srcs,
-                                    data.d_buffer_dsts,
-                                    data.d_buffer_sizes,
-                                    num_buffers));
+    batch_copy<IsMemCpy>(nullptr,
+                         temp_storage_bytes,
+                         data.d_buffer_srcs,
+                         data.d_buffer_dsts,
+                         data.d_buffer_sizes,
+                         num_buffers,
+                         stream);
 
     void* d_temp_storage = nullptr;
     HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
 
-    data = prepare_data<ValueType, BufferSizeType>(num_tlev_buffers,
-                                                   num_wlev_buffers,
-                                                   num_blev_buffers);
+    data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(num_tlev_buffers,
+                                                             num_wlev_buffers,
+                                                             num_blev_buffers);
 
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK(rocprim::batch_memcpy(d_temp_storage,
-                                        temp_storage_bytes,
-                                        data.d_buffer_srcs,
-                                        data.d_buffer_dsts,
-                                        data.d_buffer_sizes,
-                                        num_buffers,
-                                        stream));
+        batch_copy<IsMemCpy>(d_temp_storage,
+                             temp_storage_bytes,
+                             data.d_buffer_srcs,
+                             data.d_buffer_dsts,
+                             data.d_buffer_sizes,
+                             num_buffers,
+                             stream);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -294,13 +403,13 @@ void run_benchmark(benchmark::State& state,
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        HIP_CHECK(rocprim::batch_memcpy(d_temp_storage,
-                                        temp_storage_bytes,
-                                        data.d_buffer_srcs,
-                                        data.d_buffer_dsts,
-                                        data.d_buffer_sizes,
-                                        num_buffers,
-                                        stream));
+        batch_copy<IsMemCpy>(d_temp_storage,
+                             temp_storage_bytes,
+                             data.d_buffer_srcs,
+                             data.d_buffer_dsts,
+                             data.d_buffer_sizes,
+                             num_buffers,
+                             stream);
 
         // Record stop event and wait until it completes
         HIP_CHECK(hipEventRecord(stop, stream));
@@ -312,6 +421,9 @@ void run_benchmark(benchmark::State& state,
     }
     state.SetBytesProcessed(state.iterations() * data.total_num_bytes());
     state.SetItemsProcessed(state.iterations() * data.total_num_elements);
+
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipEventDestroy(stop));
 
     HIP_CHECK(hipFree(d_temp_storage));
 }
@@ -356,7 +468,7 @@ __launch_bounds__(BlockSize) __global__
     }
 }
 
-template<class ValueType, class BufferSizeType>
+template<class ValueType, class BufferSizeType, bool IsMemCpy>
 void run_naive_benchmark(benchmark::State& state,
                          hipStream_t       stream,
                          const int32_t     num_tlev_buffers = 1024,
@@ -365,9 +477,9 @@ void run_naive_benchmark(benchmark::State& state,
 {
     const size_t num_buffers = num_tlev_buffers + num_wlev_buffers + num_blev_buffers;
 
-    const auto data = prepare_data<ValueType, BufferSizeType>(num_tlev_buffers,
-                                                              num_wlev_buffers,
-                                                              num_blev_buffers);
+    const auto data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(num_tlev_buffers,
+                                                                        num_wlev_buffers,
+                                                                        num_blev_buffers);
 
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
@@ -404,28 +516,28 @@ void run_naive_benchmark(benchmark::State& state,
     }
     state.SetBytesProcessed(state.iterations() * data.total_num_bytes());
     state.SetItemsProcessed(state.iterations() * data.total_num_elements);
+
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipEventDestroy(stop));
 }
 
-    #define CREATE_NAIVE_BENCHMARK(item_size,                                                   \
-                                   item_alignment,                                              \
-                                   size_type,                                                   \
-                                   num_tlev,                                                    \
-                                   num_wlev,                                                    \
-                                   num_blev)                                                    \
-        benchmark::RegisterBenchmark(                                                           \
-            bench_naming::format_name(                                                          \
-                "{lvl:device,item_size:" #item_size ",item_alignment:" #item_alignment          \
-                ",size_type:" #size_type ",algo:naive_memcpy,num_tlev:" #num_tlev               \
-                ",num_wlev:" #num_wlev ",num_blev:" #num_blev ",cfg:default_config}")           \
-                .c_str(),                                                                       \
-            [=](benchmark::State& state)                                                        \
-            {                                                                                   \
-                run_naive_benchmark<custom_aligned_type<item_size, item_alignment>, size_type>( \
-                    state,                                                                      \
-                    stream,                                                                     \
-                    num_tlev,                                                                   \
-                    num_wlev,                                                                   \
-                    num_blev);                                                                  \
+    #define CREATE_NAIVE_BENCHMARK(item_size,                                           \
+                                   item_alignment,                                      \
+                                   size_type,                                           \
+                                   num_tlev,                                            \
+                                   num_wlev,                                            \
+                                   num_blev)                                            \
+        benchmark::RegisterBenchmark(                                                   \
+            bench_naming::format_name(                                                  \
+                "{lvl:device,item_size:" #item_size ",item_alignment:" #item_alignment  \
+                ",size_type:" #size_type ",algo:naive_memcpy,num_tlev:" #num_tlev       \
+                ",num_wlev:" #num_wlev ",num_blev:" #num_blev ",cfg:default_config}")   \
+                .c_str(),                                                               \
+            [=](benchmark::State& state)                                                \
+            {                                                                           \
+                run_naive_benchmark<custom_aligned_type<item_size, item_alignment>,     \
+                                    size_type,                                          \
+                                    true>(state, stream, num_tlev, num_wlev, num_blev); \
             })
 
 #endif
@@ -439,11 +551,18 @@ void run_naive_benchmark(benchmark::State& state,
             .c_str(),                                                                             \
         [=](benchmark::State& state)                                                              \
         {                                                                                         \
-            run_benchmark<custom_aligned_type<item_size, item_alignment>, size_type>(state,       \
-                                                                                     stream,      \
-                                                                                     num_tlev,    \
-                                                                                     num_wlev,    \
-                                                                                     num_blev);   \
+            run_benchmark<custom_aligned_type<item_size, item_alignment>, size_type, true>(       \
+                state,                                                                            \
+                stream,                                                                           \
+                num_tlev,                                                                         \
+                num_wlev,                                                                         \
+                num_blev);                                                                        \
+            run_benchmark<custom_aligned_type<item_size, item_alignment>, size_type, false>(      \
+                state,                                                                            \
+                stream,                                                                           \
+                num_tlev,                                                                         \
+                num_wlev,                                                                         \
+                num_blev);                                                                        \
         })
 
 #ifndef BENCHMARK_BATCH_MEMCPY_NAIVE

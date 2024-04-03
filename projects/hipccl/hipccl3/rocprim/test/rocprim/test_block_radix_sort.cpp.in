@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,34 +23,52 @@
 #include "../common_test_header.hpp"
 
 // required rocprim headers
-#include <rocprim/config.hpp>
-#include <rocprim/block/block_discontinuity.hpp>
 #include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_radix_sort.hpp>
 #include <rocprim/block/block_store.hpp>
 
 // required test headers
+#include "test_utils_sort_comparator.hpp"
 #include "test_utils_types.hpp"
 
 // kernel definitions
-#include "test_block_discontinuity.kernels.hpp"
+#include "test_block_radix_sort.kernels.hpp"
 
 // Start stamping out tests
-struct RocprimBlockDiscontinuity;
+struct RocprimBlockRadixSort;
+
+#cmakedefine ROCPRIM_TEST_SLICE @ROCPRIM_TEST_SLICE@
+
+#if ROCPRIM_TEST_SLICE == 0
 
 struct Integral;
-#define suite_name RocprimBlockDiscontinuity
-#define warp_params BlockDiscParamsIntegral
+#define suite_name RocprimBlockRadixSort
+#define warp_params BlockParamsIntegralExtended
 #define name_suffix Integral
 
-#include "test_block_discontinuity.hpp"
-
-#undef suite_name
-#undef warp_params
-#undef name_suffix
+#elif ROCPRIM_TEST_SLICE == 1
 
 struct Floating;
-#define suite_name RocprimBlockDiscontinuity
-#define warp_params BlockDiscParamsFloating
+#define suite_name RocprimBlockRadixSort
+#define warp_params BlockParamsFloating
 #define name_suffix Floating
 
-#include "test_block_discontinuity.hpp"
+#elif ROCPRIM_TEST_SLICE == 2
+
+typedef ::testing::Types<
+    block_param_type(test_utils::custom_test_type<int>, int)
+    , block_param_type(test_utils::custom_test_type<float>, int8_t)
+    , block_param_type(test_utils::custom_test_type<uint8_t>, uint16_t)
+#if ROCPRIM_HAS_INT128_SUPPORT
+    , block_param_type(test_utils::custom_test_type<double>, double)
+#endif
+> BlockParamsCustom;
+
+struct Custom;
+#define suite_name RocprimBlockRadixSort
+#define warp_params BlockParamsCustom
+#define name_suffix Custom
+
+#endif
+
+#include "test_block_radix_sort.hpp"

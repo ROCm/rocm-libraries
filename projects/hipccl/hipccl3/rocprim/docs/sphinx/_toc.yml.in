@@ -30,6 +30,7 @@ subtrees:
           - file: device_ops/adjacent_difference.rst
           - file: device_ops/binary_search.rst
           - file: device_ops/histogram.rst
+          - file: device_ops/device_copy.rst
           - file: device_ops/memcpy.rst
       - file: block_ops/index.rst
         subtrees:
@@ -58,6 +59,10 @@ subtrees:
           - file: warp_ops/sort.rst
           - file: warp_ops/shuffle.rst
           - file: warp_ops/exchange.rst
+      - file: thread_ops/index.rst
+        subtrees:
+        - entries:
+          - file: thread_ops/radix_key_codec.rst
       - file: reference/thread_ops.rst
       - file: reference/iterators.rst
       - file: reference/intrinsics.rst

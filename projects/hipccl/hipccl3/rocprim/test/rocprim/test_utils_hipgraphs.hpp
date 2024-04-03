@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,10 @@
 
 #ifndef ROCPRIM_TEST_UTILS_HIPGRAPHS_HPP
 #define ROCPRIM_TEST_UTILS_HIPGRAPHS_HPP
+
+#include "common_test_header.hpp"
+
+#include <hip/hip_runtime.h>
 
 // Helper functions for testing with hipGraph stream capture.
 // Note: graphs will not work on the default stream.

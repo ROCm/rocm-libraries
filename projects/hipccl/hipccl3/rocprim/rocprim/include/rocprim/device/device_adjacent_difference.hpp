@@ -41,6 +41,7 @@
 #include <chrono>
 #include <iostream>
 #include <iterator>
+#include <type_traits>
 
 #include <cstddef>
 
@@ -110,9 +111,12 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
                                     const hipStream_t    stream,
                                     const bool           debug_synchronous)
 {
-    using value_type = typename std::iterator_traits<InputIt>::value_type;
+    using value_type  = typename std::iterator_traits<InputIt>::value_type;
+    using output_type = rocprim::invoke_result_binary_op_t<value_type, BinaryFunction>;
+    using larger_type
+        = std::conditional_t<(sizeof(value_type) >= sizeof(output_type)), value_type, output_type>;
 
-    using config = wrapped_adjacent_difference_config<Config, InPlace, value_type>;
+    using config = wrapped_adjacent_difference_config<Config, InPlace, larger_type>;
 
     detail::target_arch target_arch;
     hipError_t          result = detail::host_target_arch(stream, target_arch);

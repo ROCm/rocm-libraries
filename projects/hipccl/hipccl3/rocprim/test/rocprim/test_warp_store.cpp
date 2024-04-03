@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "../common_test_header.hpp"
+#include "rocprim/types.hpp"
 #include "test_utils.hpp"
 
 #include <rocprim/warp/warp_store.hpp>
@@ -48,11 +49,6 @@ public:
 };
 
 using WarpStoreTestParams = ::testing::Types<
-    Params<int, 4U, 1U, ::rocprim::warp_store_method::warp_store_direct>,
-    Params<int, 4U, 1U, ::rocprim::warp_store_method::warp_store_striped>,
-    Params<int, 4U, 1U, ::rocprim::warp_store_method::warp_store_vectorize>,
-    Params<int, 4U, 1U, ::rocprim::warp_store_method::warp_store_transpose>,
-
     Params<int, 4U, 8U, ::rocprim::warp_store_method::warp_store_direct>,
     Params<int, 4U, 8U, ::rocprim::warp_store_method::warp_store_striped>,
     Params<int, 4U, 8U, ::rocprim::warp_store_method::warp_store_vectorize>,
@@ -76,8 +72,39 @@ using WarpStoreTestParams = ::testing::Types<
     Params<float2, 4U, 32U, ::rocprim::warp_store_method::warp_store_direct>,
     Params<float2, 4U, 32U, ::rocprim::warp_store_method::warp_store_striped>,
     Params<float2, 4U, 32U, ::rocprim::warp_store_method::warp_store_vectorize>,
-    Params<float2, 4U, 32U, ::rocprim::warp_store_method::warp_store_transpose>
->;
+    Params<float2, 4U, 32U, ::rocprim::warp_store_method::warp_store_transpose>,
+
+    Params<int8_t, 4U, 1U, ::rocprim::warp_store_method::warp_store_direct>,
+    Params<int8_t, 4U, 1U, ::rocprim::warp_store_method::warp_store_striped>,
+    Params<int8_t, 4U, 1U, ::rocprim::warp_store_method::warp_store_vectorize>,
+    Params<int8_t, 4U, 1U, ::rocprim::warp_store_method::warp_store_transpose>,
+
+    Params<uint8_t, 4U, 1U, ::rocprim::warp_store_method::warp_store_direct>,
+    Params<uint8_t, 4U, 1U, ::rocprim::warp_store_method::warp_store_striped>,
+    Params<uint8_t, 4U, 1U, ::rocprim::warp_store_method::warp_store_vectorize>,
+    Params<uint8_t, 4U, 1U, ::rocprim::warp_store_method::warp_store_transpose>,
+
+    Params<float, 4U, 1U, ::rocprim::warp_store_method::warp_store_direct>,
+    Params<float, 4U, 1U, ::rocprim::warp_store_method::warp_store_striped>,
+    Params<float, 4U, 1U, ::rocprim::warp_store_method::warp_store_vectorize>,
+    Params<float, 4U, 1U, ::rocprim::warp_store_method::warp_store_transpose>,
+
+    Params<double, 4U, 1U, ::rocprim::warp_store_method::warp_store_direct>,
+    Params<double, 4U, 1U, ::rocprim::warp_store_method::warp_store_striped>,
+    Params<double, 4U, 1U, ::rocprim::warp_store_method::warp_store_vectorize>,
+    Params<double, 4U, 1U, ::rocprim::warp_store_method::warp_store_transpose>,
+
+    // half should be supported, but is missing some key operators.
+    // we should uncomment these, as soon as these are implemented and the tests compile and work as intended.
+    //Params<rocprim::half, 4U, 1U, ::rocprim::warp_store_method::warp_store_direct>,
+    //Params<rocprim::half, 4U, 1U, ::rocprim::warp_store_method::warp_store_striped>,
+    //Params<rocprim::half, 4U, 1U, ::rocprim::warp_store_method::warp_store_vectorize>,
+    //Params<rocprim::half, 4U, 1U, ::rocprim::warp_store_method::warp_store_transpose>,
+
+    Params<rocprim::bfloat16, 4U, 1U, ::rocprim::warp_store_method::warp_store_direct>,
+    Params<rocprim::bfloat16, 4U, 1U, ::rocprim::warp_store_method::warp_store_striped>,
+    Params<rocprim::bfloat16, 4U, 1U, ::rocprim::warp_store_method::warp_store_vectorize>,
+    Params<rocprim::bfloat16, 4U, 1U, ::rocprim::warp_store_method::warp_store_transpose>>;
 
 template<unsigned int                 BlockSize,
          unsigned int                 ItemsPerThread,

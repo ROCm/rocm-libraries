@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -140,20 +140,26 @@ inline auto convert_to_native(const T& value)
 
 // Helper class to generate a vector of special values for any type
 template<class T>
-struct special_values {
+struct special_values
+{
 private:
     // sign_bit_flip needed because host-side operators for __half are missing. (e.g. -__half unary operator or (-1*) __half*__half binary operator
-    static T sign_bit_flip(T value){
+    static T sign_bit_flip(T value)
+    {
         uint8_t* data = reinterpret_cast<uint8_t*>(&value);
-        data[sizeof(T)-1] ^= 0x80;
+        data[sizeof(T) - 1] ^= 0x80;
         return value;
     }
 
 public:
-    static std::vector<T> vector(){
-        if(std::is_integral<T>::value){
+    static std::vector<T> vector()
+    {
+        if(std::is_integral<T>::value)
+        {
             return std::vector<T>();
-        }else {
+        }
+        else
+        {
             std::vector<T> r = {test_utils::numeric_limits<T>::quiet_NaN(),
                                 sign_bit_flip(test_utils::numeric_limits<T>::quiet_NaN()),
                                 // TODO: switch on when signaling_NaN will be supported on NVIDIA
@@ -169,26 +175,26 @@ public:
 };
 // end of special_values helpers
 
-/// Insert special values of type T at a random place in the source vector
-/// \tparam T
-/// \param source The source vector<T> to modify
-template<class T>
-void add_special_values(std::vector<T>& source, seed_type seed_value)
-{
-    engine_type gen{seed_value};
-    std::vector<T> special_values = test_utils::special_values<T>::vector();
-    if(source.size() > special_values.size())
-    {
-        unsigned int start = gen() % (source.size() - special_values.size());
-        std::copy(special_values.begin(), special_values.end(), source.begin() + start);
-    }
-}
-
 template<typename Iterator>
 using it_value_t = typename std::iterator_traits<Iterator>::value_type;
 
+/// Insert special values of type T at a random place in the source vector
+/// \tparam T
+/// \param source The source vector<T> to modify
 template<class OutputIter, class Generator>
-inline OutputIter segmented_generate_n(OutputIter it, size_t size, Generator gen)
+void add_special_values(OutputIter it, const size_t size, Generator&& gen)
+{
+    using T                       = it_value_t<OutputIter>;
+    std::vector<T> special_values = test_utils::special_values<T>::vector();
+    if(size > special_values.size())
+    {
+        unsigned int start = gen() % (size - special_values.size());
+        std::copy(special_values.begin(), special_values.end(), it + start);
+    }
+}
+
+template<class OutputIter, class Generator>
+inline OutputIter segmented_generate_n(OutputIter it, size_t size, Generator&& gen)
 {
     const size_t segment_size = size / random_data_generation_segments;
     if(segment_size == 0)
@@ -215,7 +221,7 @@ inline OutputIter segmented_generate_n(OutputIter it, size_t size, Generator gen
 }
 
 template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator& gen)
+inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
     -> std::enable_if_t<std::is_same<it_value_t<OutputIter>, __int128_t>::value, OutputIter>
 {
     using T = it_value_t<OutputIter>;
@@ -231,7 +237,7 @@ inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Gen
 }
 
 template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator& gen)
+inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
     -> std::enable_if_t<std::is_same<it_value_t<OutputIter>, __uint128_t>::value, OutputIter>
 {
     using T = it_value_t<OutputIter>;
@@ -247,7 +253,7 @@ inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Gen
 }
 
 template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator& gen)
+inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
     -> std::enable_if_t<rocprim::is_integral<it_value_t<OutputIter>>::value, OutputIter>
 {
     using T = it_value_t<OutputIter>;
@@ -266,7 +272,7 @@ inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Gen
 }
 
 template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator& gen)
+inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
     -> std::enable_if_t<rocprim::is_floating_point<it_value_t<OutputIter>>::value
                             && !is_custom_test_type<it_value_t<OutputIter>>::value,
                         OutputIter>
@@ -286,18 +292,29 @@ inline auto generate_random_data_n(OutputIter             it,
                                    size_t                 size,
                                    it_value_t<OutputIter> min,
                                    it_value_t<OutputIter> max,
-                                   Generator&             gen)
-    -> std::enable_if_t<is_custom_test_type<it_value_t<OutputIter>>::value
-                            && std::is_integral<typename it_value_t<OutputIter>::value_type>::value,
-                        OutputIter>
+                                   Generator&&            gen)
+    -> std::enable_if_t<
+        is_custom_test_type<it_value_t<OutputIter>>::value
+            && rocprim::is_integral<typename it_value_t<OutputIter>::value_type>::value,
+        OutputIter>
 {
     using T = it_value_t<OutputIter>;
+    using value_t = typename T::value_type;
 
-    std::uniform_int_distribution<typename T::value_type> distribution(min.x, max.x);
+    using distribution_t
+        = std::conditional_t<is_valid_for_int_distribution<value_t>::value,
+                             value_t,
+                             std::conditional_t<std::is_signed<value_t>::value, int, unsigned int>>;
+
+    std::uniform_int_distribution<distribution_t> distribution(static_cast<distribution_t>(min.x),
+                                                               static_cast<distribution_t>(max.x));
 
     return segmented_generate_n(it,
                                 size,
-                                [&]() { return T(distribution(gen), distribution(gen)); });
+                                [&]() {
+                                    return T(static_cast<value_t>(distribution(gen)),
+                                             static_cast<value_t>(distribution(gen)));
+                                });
 }
 
 template<class OutputIter, class Generator>
@@ -305,10 +322,10 @@ inline auto generate_random_data_n(OutputIter             it,
                                    size_t                 size,
                                    it_value_t<OutputIter> min,
                                    it_value_t<OutputIter> max,
-                                   Generator&             gen)
+                                   Generator&&            gen)
     -> std::enable_if_t<
         is_custom_test_type<it_value_t<OutputIter>>::value
-            && std::is_floating_point<typename it_value_t<OutputIter>::value_type>::value,
+            && rocprim::is_floating_point<typename it_value_t<OutputIter>::value_type>::value,
         OutputIter>
 {
     using T = typename std::iterator_traits<OutputIter>::value_type;
@@ -325,7 +342,7 @@ inline auto generate_random_data_n(OutputIter                                  i
                                    size_t                                      size,
                                    typename it_value_t<OutputIter>::value_type min,
                                    typename it_value_t<OutputIter>::value_type max,
-                                   Generator&                                  gen)
+                                   Generator&&                                 gen)
     -> std::enable_if_t<is_custom_test_array_type<it_value_t<OutputIter>>::value
                             && std::is_integral<typename it_value_t<OutputIter>::value_type>::value,
                         OutputIter>

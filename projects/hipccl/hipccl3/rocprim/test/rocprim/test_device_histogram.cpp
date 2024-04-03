@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,8 +60,8 @@ std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
 // Generate values ouside the desired histogram range (+-10%)
 // (correctly handling test cases like uchar [0, 256), ushort [0, 65536))
 template<class T, class U>
-inline auto get_random_samples(size_t size, U min, U max, int seed_value)
-    -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
+inline auto get_random_samples(size_t size, U min, U max, int seed_value) ->
+    typename std::enable_if<rocprim::is_integral<T>::value, std::vector<T>>::type
 {
     const long long min1 = static_cast<long long>(min);
     const long long max1 = static_cast<long long>(max);
@@ -75,8 +75,8 @@ inline auto get_random_samples(size_t size, U min, U max, int seed_value)
 }
 
 template<class T, class U>
-inline auto get_random_samples(size_t size, U min, U max, int seed_value)
-    -> typename std::enable_if<std::is_floating_point<T>::value, std::vector<T>>::type
+inline auto get_random_samples(size_t size, U min, U max, int seed_value) ->
+    typename std::enable_if<rocprim::is_floating_point<T>::value, std::vector<T>>::type
 {
     const double min1 = static_cast<double>(min);
     const double max1 = static_cast<double>(max);
@@ -129,6 +129,10 @@ public:
 using custom_config1 = rocprim::histogram_config<rocprim::kernel_config<128, 5>>;
 
 typedef ::testing::Types<params1<int, 10, 0, 10>,
+                         params1<float, 10, 0, 10>,
+                         //params1<rocprim::half, 10, 0, 10>,
+                         params1<rocprim::bfloat16, 10, 0, 10>,
+                         params1<int8_t, 10, 0, 10>,
                          params1<int, 128, 0, 256, int, int, custom_config1>,
                          params1<unsigned int, 12345, 10, 12355, short>,
                          params1<unsigned short, 65536, 0, 65536, int>,
@@ -143,7 +147,6 @@ typedef ::testing::Types<params1<int, 10, 0, 10>,
 
 TYPED_TEST_SUITE(RocprimDeviceHistogramEven, Params1);
 
-template<bool UseGraphs = false>
 void testHistogramEvenIncorrectInput()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -151,49 +154,28 @@ void testHistogramEvenIncorrectInput()
     HIP_CHECK(hipSetDevice(device_id));
 
     hipStream_t stream = 0;
-    hipGraph_t graph;
-    hipGraphExec_t graph_instance;
-    if (UseGraphs)
-    {
-        // Default stream does not support hipGraph stream capture, so create one
-        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-        graph = test_utils::createGraphHelper(stream);
-    }
-    
+
     size_t temporary_storage_bytes = 0;
     int * d_input = nullptr;
     int * d_histogram = nullptr;
 
-    hipError_t result = rocprim::histogram_even(
-                                                nullptr, temporary_storage_bytes,
-                                                d_input, 123,
+    // This check happens on host so there is nothing to capture for hipGraph.
+    hipError_t result = rocprim::histogram_even(nullptr,
+                                                temporary_storage_bytes,
+                                                d_input,
+                                                123,
                                                 d_histogram,
-                                                1, 1, 2, stream
-                                                );
+                                                1,
+                                                1,
+                                                2,
+                                                stream);
 
-    if (UseGraphs)
-        graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-    
-    ASSERT_EQ(
-              result,
-              hipErrorInvalidValue
-    );
-
-    if (UseGraphs)
-    {
-        test_utils::cleanupGraphHelper(graph, graph_instance);
-        HIP_CHECK(hipStreamDestroy(stream));
-    }
+    ASSERT_EQ(result, hipErrorInvalidValue);
 }
 
 TEST(RocprimDeviceHistogramEven, IncorrectInput)
 {
     testHistogramEvenIncorrectInput();
-}
-
-TEST(RocprimDeviceHistogramEven, IncorrectInputWithGraphs)
-{
-    testHistogramEvenIncorrectInput<true>();
 }
 
 TYPED_TEST(RocprimDeviceHistogramEven, Even)
@@ -206,8 +188,8 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
     using counter_type = typename TestFixture::params::counter_type;
     using level_type = typename TestFixture::params::level_type;
     constexpr unsigned int bins = TestFixture::params::bins;
-    constexpr level_type lower_level = TestFixture::params::lower_level;
-    constexpr level_type upper_level = TestFixture::params::upper_level;
+    const level_type       lower_level = static_cast<level_type>(TestFixture::params::lower_level);
+    const level_type       upper_level = static_cast<level_type>(TestFixture::params::upper_level);
 
     hipStream_t stream = 0;
     if (TestFixture::params::use_graphs)
@@ -255,7 +237,7 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
 
             // Calculate expected results on host
             std::vector<counter_type> histogram_expected(bins, 0);
-            const level_type scale = (upper_level - lower_level) / bins;
+            const level_type scale = static_cast<level_type>((upper_level - lower_level) / bins);
             for(size_t row = 0; row < rows; row++)
             {
                 for(size_t column = 0; column < columns; column++)
@@ -272,11 +254,6 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
 
             using config = typename TestFixture::params::config;
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::params::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
@@ -303,17 +280,17 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
                 );
             }
 
-            if (TestFixture::params::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if (TestFixture::params::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             if(rows == 1)
             {
                 HIP_CHECK(
@@ -339,9 +316,12 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
                 );
             }
 
-            if (TestFixture::params::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+            }
+
             std::vector<counter_type> histogram(bins);
             HIP_CHECK(
                 hipMemcpy(
@@ -360,13 +340,17 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
                 ASSERT_EQ(histogram[i], histogram_expected[i]);
             }
 
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
     }
 
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 template<class SampleType,
@@ -413,7 +397,6 @@ typedef ::testing::Types<
 
 TYPED_TEST_SUITE(RocprimDeviceHistogramRange, Params2);
 
-template<bool UseGraphs = false>
 void testHistogramRangeIncorrectInput()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -421,20 +404,13 @@ void testHistogramRangeIncorrectInput()
     HIP_CHECK(hipSetDevice(device_id));
 
     hipStream_t stream = 0;
-    hipGraph_t graph;
-    hipGraphExec_t graph_instance;
-    if (UseGraphs)
-    {
-        // Default stream does not support hipGraph stream capture, so create one
-        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-        graph = test_utils::createGraphHelper(stream);
-    }
-    
+
     size_t temporary_storage_bytes = 0;
     int * d_input = nullptr;
     int * d_histogram = nullptr;
     int * d_levels = nullptr;
 
+    // This check happens on host so there is nothing to capture for hipGraph.
     hipError_t result = rocprim::histogram_range(
                                                  nullptr, temporary_storage_bytes,
                                                  d_input, 123,
@@ -442,31 +418,13 @@ void testHistogramRangeIncorrectInput()
                                                  1, d_levels, stream
                                                  );
 
-    if (UseGraphs)
-        graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-
-    ASSERT_EQ(
-              result,
-              hipErrorInvalidValue
-              );
-    
-    if (UseGraphs)
-    {
-        test_utils::cleanupGraphHelper(graph, graph_instance);
-        HIP_CHECK(hipStreamDestroy(stream));
-    }
+    ASSERT_EQ(result, hipErrorInvalidValue);
 }
 
 TEST(RocprimDeviceHistogramRange, RangeIncorrectInput)
 {
     testHistogramRangeIncorrectInput();
 }
-
-TEST(RocprimDeviceHistogramRange, RangeIncorrectInputWithGraphs)
-{
-    testHistogramRangeIncorrectInput<true>();
-}
-
 
 TYPED_TEST(RocprimDeviceHistogramRange, Range)
 {
@@ -572,11 +530,6 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
 
             using config = typename TestFixture::params::config;
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::params::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
@@ -605,17 +558,17 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
                                                            debug_synchronous));
             }
 
-            if (TestFixture::params::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if (TestFixture::params::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             if(rows == 1)
             {
                 HIP_CHECK(rocprim::histogram_range<config>(d_temporary_storage,
@@ -643,8 +596,11 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
                                                            debug_synchronous));
             }
 
-            if (TestFixture::params::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+            }
 
             std::vector<counter_type> histogram(bins);
             HIP_CHECK(
@@ -665,8 +621,10 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
                 ASSERT_EQ(histogram[i], histogram_expected[i]);
             }
 
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
     }
 
@@ -856,11 +814,6 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
 
             using config = typename TestFixture::params::config;
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::params::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
@@ -893,16 +846,16 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
                     debug_synchronous)));
             }
 
-            if (TestFixture::params::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if (TestFixture::params::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
 
             if(rows == 1)
             {
@@ -935,9 +888,12 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
                     debug_synchronous)));
             }
 
-            if (TestFixture::params::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+            }
+
             std::vector<counter_type> histogram[active_channels];
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
@@ -965,13 +921,17 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
                 }
             }
 
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
     }
 
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 template<class SampleType,
@@ -1176,11 +1136,6 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
 
             using config = typename TestFixture::params::config;
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::params::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
@@ -1207,17 +1162,17 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
                 ));
             }
 
-            if (TestFixture::params::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if (TestFixture::params::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             if(rows == 1)
             {
                 HIP_CHECK((
@@ -1243,9 +1198,12 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
                 ));
             }
 
-            if (TestFixture::params::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+            }
+
             std::vector<counter_type> histogram[active_channels];
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
@@ -1264,8 +1222,10 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
             HIP_CHECK(hipFree(d_temporary_storage));
             HIP_CHECK(hipFree(d_input));
 
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
 
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
@@ -1279,6 +1239,8 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
         }
     }
 
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }

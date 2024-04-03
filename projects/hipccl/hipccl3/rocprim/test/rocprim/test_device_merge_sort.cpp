@@ -1,6 +1,6 @@
 /// MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -144,17 +144,8 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
             // Calculate expected results on host
             std::vector<key_type> expected(input);
-            std::stable_sort(
-                expected.begin(),
-                expected.end(),
-                compare_op
-            );
+            std::stable_sort(expected.begin(), expected.end(), compare_op);
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             // temp storage
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
@@ -167,9 +158,6 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
                 )
             );
 
-            if (TestFixture::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
 
@@ -177,9 +165,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
-            if (TestFixture::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             // Run
             HIP_CHECK(
                 rocprim::merge_sort(
@@ -189,9 +180,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
                 )
             );
 
-            if (TestFixture::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+            }
+
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -314,33 +308,26 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             {
                 expected[i] = key_value(keys_input[i], values_input[i]);
             }
-            std::stable_sort(
-                expected.begin(),
-                expected.end(),
-                [compare_op](const key_value& a, const key_value& b) { return compare_op(a.first, b.first); }
-            );
+            std::stable_sort(expected.begin(),
+                             expected.end(),
+                             [compare_op](const key_value& a, const key_value& b)
+                             { return compare_op(a.first, b.first); });
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             // temp storage
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(
-                rocprim::merge_sort(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_keys_input, d_keys_output,
-                    d_values_input, d_values_output, keys_input.size(),
-                    compare_op, stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(rocprim::merge_sort(d_temp_storage,
+                                          temp_storage_size_bytes,
+                                          d_keys_input,
+                                          d_keys_output,
+                                          d_values_input,
+                                          d_values_output,
+                                          keys_input.size(),
+                                          compare_op,
+                                          stream,
+                                          debug_synchronous));
 
-            if (TestFixture::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
 
@@ -348,9 +335,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
-            if (TestFixture::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             // Run
             HIP_CHECK(
                 rocprim::merge_sort(
@@ -361,9 +351,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                 )
             );
 
-            if (TestFixture::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
-            
+            }
+
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 

@@ -21,6 +21,13 @@
 #ifndef ROCPRIM_BENCHMARK_UTILS_HPP_
 #define ROCPRIM_BENCHMARK_UTILS_HPP_
 
+#include <benchmark/benchmark.h>
+
+// rocPRIM
+#include <rocprim/block/block_scan.hpp>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/types.hpp>
+
 #include <algorithm>
 #include <iostream>
 #include <iterator>
@@ -32,9 +39,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#include "benchmark/benchmark.h"
-#include <rocprim/rocprim.hpp>
 
 #define HIP_CHECK(condition)                                                                \
     {                                                                                       \
@@ -231,6 +235,13 @@ struct custom_type
     {
         return x == rhs.x && y == rhs.y;
     }
+
+    ROCPRIM_HOST_DEVICE custom_type& operator+=(const custom_type& rhs)
+    {
+        this->x += rhs.x;
+        this->y += rhs.y;
+        return *this;
+    }
 };
 
 template<typename>
@@ -238,6 +249,21 @@ struct is_custom_type : std::false_type {};
 
 template<class T, class U>
 struct is_custom_type<custom_type<T,U>> : std::true_type {};
+
+template<class CustomType>
+struct custom_type_decomposer
+{
+    static_assert(is_custom_type<CustomType>::value,
+                  "custom_type_decomposer can only be used with instantiations of custom_type");
+
+    using T = typename CustomType::first_type;
+    using U = typename CustomType::second_type;
+
+    __host__ __device__ ::rocprim::tuple<T&, U&> operator()(CustomType& key) const
+    {
+        return ::rocprim::tuple<T&, U&>{key.x, key.y};
+    }
+};
 
 template<class OutputIterator, class Generator>
 inline auto generate_random_data_n(OutputIterator             it,
@@ -709,6 +735,11 @@ template<>
 inline const char* Traits<custom_type<long long, double>>::name()
 {
     return "custom_type<int64_t,double>";
+}
+template<>
+inline const char* Traits<custom_type<float, int16_t>>::name()
+{
+    return "custom_type<float,int16_t>";
 }
 template<>
 inline const char* Traits<rocprim::empty_type>::name()

@@ -27,6 +27,7 @@
 
 #include <rocprim/device/device_adjacent_difference.hpp>
 
+#include "rocprim/types.hpp"
 #include <rocprim/detail/various.hpp>
 #include <rocprim/iterator/counting_iterator.hpp>
 #include <rocprim/iterator/discard_iterator.hpp>
@@ -237,6 +238,9 @@ using custom_size_limit_config
 using RocprimDeviceAdjacentDifferenceTestsParams = ::testing::Types<
     // Tests with default configuration
     DeviceAdjacentDifferenceParams<int>,
+    DeviceAdjacentDifferenceParams<double>,
+    DeviceAdjacentDifferenceParams<float>,
+    DeviceAdjacentDifferenceParams<rocprim::bfloat16>,
     DeviceAdjacentDifferenceParams<float, double, false>,
     DeviceAdjacentDifferenceParams<int8_t, int8_t, true, api_variant::in_place>,
     DeviceAdjacentDifferenceParams<custom_double2, custom_double2, false, api_variant::in_place>,
@@ -247,13 +251,15 @@ using RocprimDeviceAdjacentDifferenceTestsParams = ::testing::Types<
                                    true,
                                    api_variant::in_place,
                                    false>,
-    // this is changed to not use identity iterator
-    // because the function doesn't work with it, should be changed back, when fixed
     DeviceAdjacentDifferenceParams<custom_int64_array,
                                    custom_int64_array,
                                    false,
                                    api_variant::alias,
-                                   false>,
+                                   true>,
+    // Tests for void value_type
+    DeviceAdjacentDifferenceParams<float, float, true, api_variant::in_place, true>,
+    DeviceAdjacentDifferenceParams<float, float, true, api_variant::no_alias, true>,
+    DeviceAdjacentDifferenceParams<float, float, true, api_variant::alias, true>,
     // Tests for supported config structs
     DeviceAdjacentDifferenceParams<rocprim::bfloat16,
                                    float,
@@ -345,11 +351,6 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
                 = test_utils::wrap_in_indirect_iterator<TestFixture::use_indirect_iterator>(
                     d_input);
 
-            hipGraph_t     graph;
-            hipGraphExec_t graph_instance;
-            if(TestFixture::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-
             // Allocate temporary storage
             std::size_t temp_storage_size;
             void*       d_temp_storage = nullptr;
@@ -364,12 +365,12 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
                                                            stream,
                                                            debug_synchronous));
 
-            if(TestFixture::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-
             ASSERT_GT(temp_storage_size, 0);
 
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size));
+
+            hipGraph_t     graph;
+            hipGraphExec_t graph_instance;
 
             // We might call the API multiple times, with almost the same parameter
             // (in-place and out-of-place)
@@ -377,6 +378,11 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
             // results (maybe with different types) for both.
             auto run_and_verify = [&](const auto output_it, auto* d_output)
             {
+                if(TestFixture::use_graphs)
+                {
+                    graph = test_utils::createGraphHelper(stream);
+                }
+
                 // Run
                 HIP_CHECK(dispatch_adjacent_difference<Config>(left_tag,
                                                                alias_tag,
@@ -416,6 +422,11 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
                     output,
                     expected,
                     std::max(test_utils::precision<T>, test_utils::precision<output_type>));
+
+                if(TestFixture::use_graphs)
+                {
+                    test_utils::cleanupGraphHelper(graph, graph_instance);
+                }
             };
 
             // if api_variant is not in_place we should check the non aliased function call
@@ -423,9 +434,6 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
             {
                 output_type* d_output = nullptr;
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(*d_output)));
-
-                if(TestFixture::use_graphs)
-                    test_utils::resetGraphHelper(graph, graph_instance, stream);
 
                 const auto output_it
                     = test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output);
@@ -438,15 +446,11 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
             // if api_variant is not no_alias we should check the inplace function call
             if(aliasing != api_variant::no_alias)
             {
-                if(TestFixture::use_graphs)
-                    test_utils::resetGraphHelper(graph, graph_instance, stream);
-
                 ASSERT_NO_FATAL_FAILURE(run_and_verify(input_it, d_input));
             }
 
             if(TestFixture::use_graphs)
             {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
                 HIP_CHECK(hipStreamDestroy(stream));
             }
 
@@ -651,11 +655,6 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
             static constexpr auto left_tag     = rocprim::detail::bool_constant<is_left>{};
             static constexpr auto aliasing_tag = std::integral_constant<api_variant, aliasing>{};
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             // Allocate temporary storage
             std::size_t temp_storage_size;
             void*       d_temp_storage = nullptr;
@@ -670,16 +669,20 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
                                                    stream,
                                                    debug_synchronous));
 
-            if (TestFixture::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             ASSERT_GT(temp_storage_size, 0);
 
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size));
 
-            if (TestFixture::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
+            // Capture the memset in the graph so that relaunching will have expected result
+            HIP_CHECK(hipMemsetAsync(d_incorrect_flag, 0, sizeof(*d_incorrect_flag), stream));
+            HIP_CHECK(hipMemsetAsync(d_counter, 0, sizeof(*d_counter), stream));
+
             // Run
             HIP_CHECK(dispatch_adjacent_difference(left_tag,
                                                    aliasing_tag,
@@ -692,8 +695,11 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
                                                    stream,
                                                    debug_synchronous));
 
-            if (TestFixture::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+            }
 
             // Copy output to host
             flag_type incorrect_flag;
@@ -711,8 +717,10 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
             hipFree(d_incorrect_flag);
             hipFree(d_counter);
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
     }
 

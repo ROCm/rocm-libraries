@@ -1,7 +1,7 @@
 // The MIT License (MIT)
 //
 // Copyright (c) 2015 - 2016 Florian Rappl
-// Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+// Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,12 +27,12 @@
 */
 
 #pragma once
+#include <functional>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include <sstream>
-#include <functional>
 
 namespace cli {
     struct CallbackArgs {

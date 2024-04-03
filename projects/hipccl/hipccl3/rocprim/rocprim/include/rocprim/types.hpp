@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -141,6 +141,12 @@ struct empty_binary_op
     /// \brief Invocation operator.
     constexpr empty_type operator()(const empty_type&, const empty_type&) const { return empty_type{}; }
 };
+
+/// \brief A decomposer that must be passed to the radix sort algorithms when
+/// sorting keys that are arithmetic types.
+/// To sort custom types, a custom decomposer should be provided.
+struct identity_decomposer
+{};
 
 /// \brief Half-precision floating point type
 using half = ::__half;

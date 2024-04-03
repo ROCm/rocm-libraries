@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,9 +29,14 @@
 #include <rocprim/device/device_radix_sort.hpp>
 
 // required test headers
+#include "test_seed.hpp"
 #include "test_utils_custom_float_type.hpp"
+#include "test_utils_custom_test_types.hpp"
 #include "test_utils_sort_comparator.hpp"
 #include "test_utils_types.hpp"
+
+#include <iterator>
+#include <type_traits>
 
 template<class Key,
          class Value,
@@ -60,8 +65,164 @@ public:
 
 TYPED_TEST_SUITE_P(RocprimDeviceRadixSort);
 
+template<class KeyIter>
+auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
+    -> std::enable_if_t<
+        rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
+{
+    using key_type = typename std::iterator_traits<KeyIter>::value_type;
+    test_utils::generate_random_data_n(keys_input,
+                                       size,
+                                       static_cast<key_type>(-1000),
+                                       static_cast<key_type>(+1000),
+                                       rng_engine);
+    test_utils::add_special_values(keys_input, size, rng_engine);
+}
+
+template<class KeyIter>
+auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
+    -> std::enable_if_t<
+        !rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
+{
+    using key_type = typename std::iterator_traits<KeyIter>::value_type;
+    test_utils::generate_random_data_n(keys_input,
+                                       size,
+                                       std::numeric_limits<key_type>::min(),
+                                       std::numeric_limits<key_type>::max(),
+                                       rng_engine);
+}
+
+// Working around custom_float_test_type, which is both a float and a custom_test_type
+template<class T>
+constexpr bool is_custom_not_float_test_type
+    = test_utils::is_custom_test_type<T>::value && !rocprim::is_floating_point<T>::value;
+
+template<class Config, bool Descending, class Key>
+auto invoke_sort_keys(void*        d_temporary_storage,
+                      size_t&      temporary_storage_bytes,
+                      Key*         d_keys_input,
+                      Key*         d_keys_output,
+                      size_t       size,
+                      unsigned int start_bit,
+                      unsigned int end_bit,
+                      hipStream_t  stream,
+                      bool         debug_synchronous)
+    -> std::enable_if_t<!Descending && !is_custom_not_float_test_type<Key>, hipError_t>
+{
+    return rocprim::radix_sort_keys<Config>(d_temporary_storage,
+                                            temporary_storage_bytes,
+                                            d_keys_input,
+                                            d_keys_output,
+                                            size,
+                                            start_bit,
+                                            end_bit,
+                                            stream,
+                                            debug_synchronous);
+}
+
+template<class Config, bool Descending, class Key>
+auto invoke_sort_keys(void*        d_temporary_storage,
+                      size_t&      temporary_storage_bytes,
+                      Key*         d_keys_input,
+                      Key*         d_keys_output,
+                      size_t       size,
+                      unsigned int start_bit,
+                      unsigned int end_bit,
+                      hipStream_t  stream,
+                      bool         debug_synchronous)
+    -> std::enable_if_t<Descending && !is_custom_not_float_test_type<Key>, hipError_t>
+{
+    return rocprim::radix_sort_keys_desc<Config>(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys_input,
+                                                 d_keys_output,
+                                                 size,
+                                                 start_bit,
+                                                 end_bit,
+                                                 stream,
+                                                 debug_synchronous);
+}
+
+template<class Config, bool Descending, class Key>
+auto invoke_sort_keys(void*        d_temporary_storage,
+                      size_t&      temporary_storage_bytes,
+                      Key*         d_keys_input,
+                      Key*         d_keys_output,
+                      size_t       size,
+                      unsigned int start_bit,
+                      unsigned int end_bit,
+                      hipStream_t  stream,
+                      bool         debug_synchronous)
+    -> std::enable_if_t<!Descending && is_custom_not_float_test_type<Key>, hipError_t>
+{
+    using decomposer_t = test_utils::custom_test_type_decomposer<Key>;
+    if(start_bit == 0 && end_bit == rocprim::detail::decomposer_max_bits<decomposer_t, Key>::value)
+    {
+        return rocprim::radix_sort_keys<Config>(d_temporary_storage,
+                                                temporary_storage_bytes,
+                                                d_keys_input,
+                                                d_keys_output,
+                                                size,
+                                                decomposer_t{},
+                                                stream,
+                                                debug_synchronous);
+    }
+    else
+    {
+        return rocprim::radix_sort_keys<Config>(d_temporary_storage,
+                                                temporary_storage_bytes,
+                                                d_keys_input,
+                                                d_keys_output,
+                                                size,
+                                                decomposer_t{},
+                                                start_bit,
+                                                end_bit,
+                                                stream,
+                                                debug_synchronous);
+    }
+}
+
+template<class Config, bool Descending, class Key>
+auto invoke_sort_keys(void*        d_temporary_storage,
+                      size_t&      temporary_storage_bytes,
+                      Key*         d_keys_input,
+                      Key*         d_keys_output,
+                      size_t       size,
+                      unsigned int start_bit,
+                      unsigned int end_bit,
+                      hipStream_t  stream,
+                      bool         debug_synchronous)
+    -> std::enable_if_t<Descending && is_custom_not_float_test_type<Key>, hipError_t>
+{
+    using decomposer_t = test_utils::custom_test_type_decomposer<Key>;
+    if(start_bit == 0 && end_bit == rocprim::detail::decomposer_max_bits<decomposer_t, Key>::value)
+    {
+        return rocprim::radix_sort_keys_desc<Config>(d_temporary_storage,
+                                                     temporary_storage_bytes,
+                                                     d_keys_input,
+                                                     d_keys_output,
+                                                     size,
+                                                     decomposer_t{},
+                                                     stream,
+                                                     debug_synchronous);
+    }
+    else
+    {
+        return rocprim::radix_sort_keys_desc<Config>(d_temporary_storage,
+                                                     temporary_storage_bytes,
+                                                     d_keys_input,
+                                                     d_keys_output,
+                                                     size,
+                                                     decomposer_t{},
+                                                     start_bit,
+                                                     end_bit,
+                                                     stream,
+                                                     debug_synchronous);
+    }
+}
+
 template<typename TestFixture>
-inline void sort_keys()
+void sort_keys()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -96,30 +257,18 @@ inline void sort_keys()
         for(size_t size : sizes)
         {
             if(size > (1 << 17) && !check_large_sizes)
+            {
                 break;
+            }
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+            engine_type rng_engine(seed_value);
             in_place = !in_place;
 
             // Generate data
-            std::vector<key_type> keys_input;
-            if(rocprim::is_floating_point<key_type>::value)
-            {
-                keys_input = test_utils::get_random_data<key_type>(size,
-                                                                   static_cast<key_type>(-1000),
-                                                                   static_cast<key_type>(+1000),
-                                                                   seed_value);
-                test_utils::add_special_values(keys_input, seed_value);
-            }
-            else
-            {
-                keys_input
-                    = test_utils::get_random_data<key_type>(size,
-                                                            std::numeric_limits<key_type>::min(),
-                                                            std::numeric_limits<key_type>::max(),
-                                                            seed_value);
-            }
+            auto keys_input = std::make_unique<key_type[]>(size);
+            generate_key_input(keys_input.get(), size, rng_engine);
 
             key_type* d_keys_input;
             key_type* d_keys_output;
@@ -134,12 +283,12 @@ inline void sort_keys()
                     test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             }
             HIP_CHECK(hipMemcpy(d_keys_input,
-                                keys_input.data(),
+                                keys_input.get(),
                                 size * sizeof(key_type),
                                 hipMemcpyHostToDevice));
 
             // Calculate expected results on host
-            std::vector<key_type> expected(keys_input);
+            std::vector<key_type> expected(keys_input.get(), keys_input.get() + size);
             std::stable_sort(
                 expected.begin(),
                 expected.end(),
@@ -151,62 +300,46 @@ inline void sort_keys()
                                                       rocprim::default_config,
                                                       1024 * 512>;
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::params::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             size_t temporary_storage_bytes;
-            HIP_CHECK(rocprim::radix_sort_keys<config>(nullptr,
-                                                       temporary_storage_bytes,
-                                                       d_keys_input,
-                                                       d_keys_output,
-                                                       size,
-                                                       start_bit,
-                                                       end_bit));
-
-            if (TestFixture::params::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+            HIP_CHECK((invoke_sort_keys<config, descending>(nullptr,
+                                                            temporary_storage_bytes,
+                                                            d_keys_input,
+                                                            d_keys_output,
+                                                            size,
+                                                            start_bit,
+                                                            end_bit,
+                                                            stream,
+                                                            debug_synchronous)));
             ASSERT_GT(temporary_storage_bytes, 0);
 
             void* d_temporary_storage;
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if (TestFixture::params::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
-            if(descending)
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
             {
-                HIP_CHECK(rocprim::radix_sort_keys_desc<config>(d_temporary_storage,
-                                                                temporary_storage_bytes,
-                                                                d_keys_input,
-                                                                d_keys_output,
-                                                                size,
-                                                                start_bit,
-                                                                end_bit,
-                                                                stream,
-                                                                debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::radix_sort_keys<config>(d_temporary_storage,
-                                                           temporary_storage_bytes,
-                                                           d_keys_input,
-                                                           d_keys_output,
-                                                           size,
-                                                           start_bit,
-                                                           end_bit,
-                                                           stream,
-                                                           debug_synchronous));
+                graph = test_utils::createGraphHelper(stream);
             }
 
-            if (TestFixture::params::use_graphs)
+            HIP_CHECK((invoke_sort_keys<config, descending>(d_temporary_storage,
+                                                            temporary_storage_bytes,
+                                                            d_keys_input,
+                                                            d_keys_output,
+                                                            size,
+                                                            start_bit,
+                                                            end_bit,
+                                                            stream,
+                                                            debug_synchronous)));
+
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
-            std::vector<key_type> keys_output(size);
-            HIP_CHECK(hipMemcpy(keys_output.data(),
+            }
+
+            auto keys_output = std::make_unique<key_type[]>(size);
+            HIP_CHECK(hipMemcpy(keys_output.get(),
                                 d_keys_output,
                                 size * sizeof(key_type),
                                 hipMemcpyDeviceToHost));
@@ -218,19 +351,170 @@ inline void sort_keys()
                 HIP_CHECK(hipFree(d_keys_output));
             }
 
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
-            
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, expected));
+            }
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output.get(),
+                                                              keys_output.get() + size,
+                                                              expected.begin(),
+                                                              expected.end()));
         }
     }
 
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
+}
+
+template<class Config, bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*        d_temporary_storage,
+                       size_t&      temporary_storage_bytes,
+                       Key*         d_keys_input,
+                       Key*         d_keys_output,
+                       Value*       d_values_input,
+                       Value*       d_values_output,
+                       size_t       size,
+                       unsigned int start_bit,
+                       unsigned int end_bit,
+                       hipStream_t  stream,
+                       bool         debug_synchronous)
+    -> std::enable_if_t<!Descending && !is_custom_not_float_test_type<Key>, hipError_t>
+{
+    return rocprim::radix_sort_pairs<Config>(d_temporary_storage,
+                                             temporary_storage_bytes,
+                                             d_keys_input,
+                                             d_keys_output,
+                                             d_values_input,
+                                             d_values_output,
+                                             size,
+                                             start_bit,
+                                             end_bit,
+                                             stream,
+                                             debug_synchronous);
+}
+
+template<class Config, bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*        d_temporary_storage,
+                       size_t&      temporary_storage_bytes,
+                       Key*         d_keys_input,
+                       Key*         d_keys_output,
+                       Value*       d_values_input,
+                       Value*       d_values_output,
+                       size_t       size,
+                       unsigned int start_bit,
+                       unsigned int end_bit,
+                       hipStream_t  stream,
+                       bool         debug_synchronous)
+    -> std::enable_if_t<Descending && !is_custom_not_float_test_type<Key>, hipError_t>
+{
+    return rocprim::radix_sort_pairs_desc<Config>(d_temporary_storage,
+                                                  temporary_storage_bytes,
+                                                  d_keys_input,
+                                                  d_keys_output,
+                                                  d_values_input,
+                                                  d_values_output,
+                                                  size,
+                                                  start_bit,
+                                                  end_bit,
+                                                  stream,
+                                                  debug_synchronous);
+}
+
+template<class Config, bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*        d_temporary_storage,
+                       size_t&      temporary_storage_bytes,
+                       Key*         d_keys_input,
+                       Key*         d_keys_output,
+                       Value*       d_values_input,
+                       Value*       d_values_output,
+                       size_t       size,
+                       unsigned int start_bit,
+                       unsigned int end_bit,
+                       hipStream_t  stream,
+                       bool         debug_synchronous)
+    -> std::enable_if_t<!Descending && is_custom_not_float_test_type<Key>, hipError_t>
+{
+    using decomposer_t = test_utils::custom_test_type_decomposer<Key>;
+    if(start_bit == 0 && end_bit == rocprim::detail::decomposer_max_bits<decomposer_t, Key>::value)
+    {
+        return rocprim::radix_sort_pairs<Config>(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys_input,
+                                                 d_keys_output,
+                                                 d_values_input,
+                                                 d_values_output,
+                                                 size,
+                                                 decomposer_t{},
+                                                 stream,
+                                                 debug_synchronous);
+    }
+    else
+    {
+        return rocprim::radix_sort_pairs<Config>(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys_input,
+                                                 d_keys_output,
+                                                 d_values_input,
+                                                 d_values_output,
+                                                 size,
+                                                 decomposer_t{},
+                                                 start_bit,
+                                                 end_bit,
+                                                 stream,
+                                                 debug_synchronous);
+    }
+}
+
+template<class Config, bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*        d_temporary_storage,
+                       size_t&      temporary_storage_bytes,
+                       Key*         d_keys_input,
+                       Key*         d_keys_output,
+                       Value*       d_values_input,
+                       Value*       d_values_output,
+                       size_t       size,
+                       unsigned int start_bit,
+                       unsigned int end_bit,
+                       hipStream_t  stream,
+                       bool         debug_synchronous)
+    -> std::enable_if_t<Descending && is_custom_not_float_test_type<Key>, hipError_t>
+{
+    using decomposer_t = test_utils::custom_test_type_decomposer<Key>;
+    if(start_bit == 0 && end_bit == rocprim::detail::decomposer_max_bits<decomposer_t, Key>::value)
+    {
+        return rocprim::radix_sort_pairs_desc<Config>(d_temporary_storage,
+                                                      temporary_storage_bytes,
+                                                      d_keys_input,
+                                                      d_keys_output,
+                                                      d_values_input,
+                                                      d_values_output,
+                                                      size,
+                                                      decomposer_t{},
+                                                      stream,
+                                                      debug_synchronous);
+    }
+    else
+    {
+        return rocprim::radix_sort_pairs_desc<Config>(d_temporary_storage,
+                                                      temporary_storage_bytes,
+                                                      d_keys_input,
+                                                      d_keys_output,
+                                                      d_values_input,
+                                                      d_values_output,
+                                                      size,
+                                                      decomposer_t{},
+                                                      start_bit,
+                                                      end_bit,
+                                                      stream,
+                                                      debug_synchronous);
+    }
 }
 
 template<typename TestFixture>
-inline void sort_pairs()
+void sort_pairs()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -266,30 +550,18 @@ inline void sort_pairs()
         for(size_t size : sizes)
         {
             if(size > (1 << 17) && !check_large_sizes)
+            {
                 break;
+            }
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+            engine_type rng_engine(seed_value);
             in_place = !in_place;
 
             // Generate data
-            std::vector<key_type> keys_input;
-            if(rocprim::is_floating_point<key_type>::value)
-            {
-                keys_input = test_utils::get_random_data<key_type>(size,
-                                                                   static_cast<key_type>(-1000),
-                                                                   static_cast<key_type>(+1000),
-                                                                   seed_value);
-                test_utils::add_special_values(keys_input, seed_value);
-            }
-            else
-            {
-                keys_input
-                    = test_utils::get_random_data<key_type>(size,
-                                                            std::numeric_limits<key_type>::min(),
-                                                            std::numeric_limits<key_type>::max(),
-                                                            seed_value);
-            }
+            auto keys_input = std::make_unique<key_type[]>(size);
+            generate_key_input(keys_input.get(), size, rng_engine);
 
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
@@ -307,7 +579,7 @@ inline void sort_pairs()
                     test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             }
             HIP_CHECK(hipMemcpy(d_keys_input,
-                                keys_input.data(),
+                                keys_input.get(),
                                 size * sizeof(key_type),
                                 hipMemcpyHostToDevice));
 
@@ -361,66 +633,59 @@ inline void sort_pairs()
 
             hipGraph_t graph;
             hipGraphExec_t graph_instance;
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 graph = test_utils::createGraphHelper(stream);
-            
+            }
+
             void*  d_temporary_storage = nullptr;
             size_t temporary_storage_bytes;
-            HIP_CHECK(rocprim::radix_sort_pairs<config>(d_temporary_storage,
-                                                        temporary_storage_bytes,
-                                                        d_keys_input,
-                                                        d_keys_output,
-                                                        d_values_input,
-                                                        d_values_output,
-                                                        size,
-                                                        start_bit,
-                                                        end_bit));
+            HIP_CHECK((invoke_sort_pairs<config, descending>(d_temporary_storage,
+                                                             temporary_storage_bytes,
+                                                             d_keys_input,
+                                                             d_keys_output,
+                                                             d_values_input,
+                                                             d_values_output,
+                                                             size,
+                                                             start_bit,
+                                                             end_bit,
+                                                             stream,
+                                                             debug_synchronous)));
 
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+            }
+
             ASSERT_GT(temporary_storage_bytes, 0);
 
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
-            if(descending)
-            {
-                HIP_CHECK(rocprim::radix_sort_pairs_desc<config>(d_temporary_storage,
-                                                                 temporary_storage_bytes,
-                                                                 d_keys_input,
-                                                                 d_keys_output,
-                                                                 d_values_input,
-                                                                 d_values_output,
-                                                                 size,
-                                                                 start_bit,
-                                                                 end_bit,
-                                                                 stream,
-                                                                 debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::radix_sort_pairs<config>(d_temporary_storage,
-                                                            temporary_storage_bytes,
-                                                            d_keys_input,
-                                                            d_keys_output,
-                                                            d_values_input,
-                                                            d_values_output,
-                                                            size,
-                                                            start_bit,
-                                                            end_bit,
-                                                            stream,
-                                                            debug_synchronous));
             }
 
-            if (TestFixture::params::use_graphs)
+            HIP_CHECK((invoke_sort_pairs<config, descending>(d_temporary_storage,
+                                                             temporary_storage_bytes,
+                                                             d_keys_input,
+                                                             d_keys_output,
+                                                             d_values_input,
+                                                             d_values_output,
+                                                             size,
+                                                             start_bit,
+                                                             end_bit,
+                                                             stream,
+                                                             debug_synchronous)));
+
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
-            std::vector<key_type> keys_output(size);
-            HIP_CHECK(hipMemcpy(keys_output.data(),
+            }
+
+            auto keys_output = std::make_unique<key_type[]>(size);
+            HIP_CHECK(hipMemcpy(keys_output.get(),
                                 d_keys_output,
                                 size * sizeof(key_type),
                                 hipMemcpyDeviceToHost));
@@ -440,20 +705,144 @@ inline void sort_pairs()
                 HIP_CHECK(hipFree(d_values_output));
             }
 
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, keys_expected));
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output.get(),
+                                                              keys_output.get() + size,
+                                                              keys_expected.begin(),
+                                                              keys_expected.end()));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output.begin(),
+                                                              values_output.end(),
+                                                              values_expected.begin(),
+                                                              values_expected.end()));
         }
     }
 
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
+}
+
+template<class Config, bool Descending, class Key>
+auto invoke_sort_keys(void*                        d_temporary_storage,
+                      size_t&                      temporary_storage_bytes,
+                      rocprim::double_buffer<Key>& d_keys,
+                      size_t                       size,
+                      unsigned int                 start_bit,
+                      unsigned int                 end_bit,
+                      hipStream_t                  stream,
+                      bool                         debug_synchronous)
+    -> std::enable_if_t<!Descending && !is_custom_not_float_test_type<Key>, hipError_t>
+{
+    return rocprim::radix_sort_keys<Config>(d_temporary_storage,
+                                            temporary_storage_bytes,
+                                            d_keys,
+                                            size,
+                                            start_bit,
+                                            end_bit,
+                                            stream,
+                                            debug_synchronous);
+}
+
+template<class Config, bool Descending, class Key>
+auto invoke_sort_keys(void*                        d_temporary_storage,
+                      size_t&                      temporary_storage_bytes,
+                      rocprim::double_buffer<Key>& d_keys,
+                      size_t                       size,
+                      unsigned int                 start_bit,
+                      unsigned int                 end_bit,
+                      hipStream_t                  stream,
+                      bool                         debug_synchronous)
+    -> std::enable_if_t<Descending && !is_custom_not_float_test_type<Key>, hipError_t>
+{
+    return rocprim::radix_sort_keys_desc<Config>(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys,
+                                                 size,
+                                                 start_bit,
+                                                 end_bit,
+                                                 stream,
+                                                 debug_synchronous);
+}
+
+template<class Config, bool Descending, class Key>
+auto invoke_sort_keys(void*                        d_temporary_storage,
+                      size_t&                      temporary_storage_bytes,
+                      rocprim::double_buffer<Key>& d_keys,
+                      size_t                       size,
+                      unsigned int                 start_bit,
+                      unsigned int                 end_bit,
+                      hipStream_t                  stream,
+                      bool                         debug_synchronous)
+    -> std::enable_if_t<!Descending && is_custom_not_float_test_type<Key>, hipError_t>
+{
+    using decomposer_t = test_utils::custom_test_type_decomposer<Key>;
+    if(start_bit == 0 && end_bit == rocprim::detail::decomposer_max_bits<decomposer_t, Key>::value)
+    {
+        return rocprim::radix_sort_keys<Config>(d_temporary_storage,
+                                                temporary_storage_bytes,
+                                                d_keys,
+                                                size,
+                                                decomposer_t{},
+                                                stream,
+                                                debug_synchronous);
+    }
+    else
+    {
+        return rocprim::radix_sort_keys<Config>(d_temporary_storage,
+                                                temporary_storage_bytes,
+                                                d_keys,
+                                                size,
+                                                decomposer_t{},
+                                                start_bit,
+                                                end_bit,
+                                                stream,
+                                                debug_synchronous);
+    }
+}
+
+template<class Config, bool Descending, class Key>
+auto invoke_sort_keys(void*                        d_temporary_storage,
+                      size_t&                      temporary_storage_bytes,
+                      rocprim::double_buffer<Key>& d_keys,
+                      size_t                       size,
+                      unsigned int                 start_bit,
+                      unsigned int                 end_bit,
+                      hipStream_t                  stream,
+                      bool                         debug_synchronous)
+    -> std::enable_if_t<Descending && is_custom_not_float_test_type<Key>, hipError_t>
+{
+    using decomposer_t = test_utils::custom_test_type_decomposer<Key>;
+    if(start_bit == 0 && end_bit == rocprim::detail::decomposer_max_bits<decomposer_t, Key>::value)
+    {
+        return rocprim::radix_sort_keys_desc<Config>(d_temporary_storage,
+                                                     temporary_storage_bytes,
+                                                     d_keys,
+                                                     size,
+                                                     decomposer_t{},
+                                                     stream,
+                                                     debug_synchronous);
+    }
+    else
+    {
+        return rocprim::radix_sort_keys_desc<Config>(d_temporary_storage,
+                                                     temporary_storage_bytes,
+                                                     d_keys,
+                                                     size,
+                                                     decomposer_t{},
+                                                     start_bit,
+                                                     end_bit,
+                                                     stream,
+                                                     debug_synchronous);
+    }
 }
 
 template<typename TestFixture>
-inline void sort_keys_double_buffer()
+void sort_keys_double_buffer()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -486,40 +875,29 @@ inline void sort_keys_double_buffer()
         for(size_t size : sizes)
         {
             if(size > (1 << 17) && !check_large_sizes)
+            {
                 break;
+            }
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+            engine_type rng_engine(seed_value);
+
             // Generate data
-            std::vector<key_type> keys_input;
-            if(rocprim::is_floating_point<key_type>::value)
-            {
-                keys_input = test_utils::get_random_data<key_type>(size,
-                                                                   static_cast<key_type>(-1000),
-                                                                   static_cast<key_type>(+1000),
-                                                                   seed_value);
-                test_utils::add_special_values(keys_input, seed_value);
-            }
-            else
-            {
-                keys_input
-                    = test_utils::get_random_data<key_type>(size,
-                                                            std::numeric_limits<key_type>::min(),
-                                                            std::numeric_limits<key_type>::max(),
-                                                            seed_value);
-            }
+            auto keys_input = std::make_unique<key_type[]>(size);
+            generate_key_input(keys_input.get(), size, rng_engine);
 
             key_type* d_keys_input;
             key_type* d_keys_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(hipMemcpy(d_keys_input,
-                                keys_input.data(),
+                                keys_input.get(),
                                 size * sizeof(key_type),
                                 hipMemcpyHostToDevice));
 
             // Calculate expected results on host
-            std::vector<key_type> expected(keys_input);
+            std::vector<key_type> expected(keys_input.get(), keys_input.get() + size);
             std::stable_sort(
                 expected.begin(),
                 expected.end(),
@@ -527,61 +905,49 @@ inline void sort_keys_double_buffer()
 
             rocprim::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::params::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             size_t temporary_storage_bytes;
-            HIP_CHECK(rocprim::radix_sort_keys(nullptr,
-                                               temporary_storage_bytes,
-                                               d_keys,
-                                               size,
-                                               start_bit,
-                                               end_bit));
+            HIP_CHECK(
+                (invoke_sort_keys<rocprim::default_config, descending>(nullptr,
+                                                                       temporary_storage_bytes,
+                                                                       d_keys,
+                                                                       size,
+                                                                       start_bit,
+                                                                       end_bit,
+                                                                       stream,
+                                                                       debug_synchronous)));
 
-            if (TestFixture::params::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             ASSERT_GT(temporary_storage_bytes, 0);
 
             void* d_temporary_storage;
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if (TestFixture::params::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
-            if(descending)
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
             {
-                HIP_CHECK(rocprim::radix_sort_keys_desc(d_temporary_storage,
-                                                        temporary_storage_bytes,
-                                                        d_keys,
-                                                        size,
-                                                        start_bit,
-                                                        end_bit,
-                                                        stream,
-                                                        debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::radix_sort_keys(d_temporary_storage,
-                                                   temporary_storage_bytes,
-                                                   d_keys,
-                                                   size,
-                                                   start_bit,
-                                                   end_bit,
-                                                   stream,
-                                                   debug_synchronous));
+                graph = test_utils::createGraphHelper(stream);
             }
 
-            if (TestFixture::params::use_graphs)
+            HIP_CHECK(
+                (invoke_sort_keys<rocprim::default_config, descending>(d_temporary_storage,
+                                                                       temporary_storage_bytes,
+                                                                       d_keys,
+                                                                       size,
+                                                                       start_bit,
+                                                                       end_bit,
+                                                                       stream,
+                                                                       debug_synchronous)));
+
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+            }
+
             HIP_CHECK(hipFree(d_temporary_storage));
 
-            std::vector<key_type> keys_output(size);
-            HIP_CHECK(hipMemcpy(keys_output.data(),
+            auto keys_output = std::make_unique<key_type[]>(size);
+            HIP_CHECK(hipMemcpy(keys_output.get(),
                                 d_keys.current(),
                                 size * sizeof(key_type),
                                 hipMemcpyDeviceToHost));
@@ -589,19 +955,150 @@ inline void sort_keys_double_buffer()
             HIP_CHECK(hipFree(d_keys_input));
             HIP_CHECK(hipFree(d_keys_output));
 
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
-            
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, expected));
+            }
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output.get(),
+                                                              keys_output.get() + size,
+                                                              expected.begin(),
+                                                              expected.end()));
         }
     }
 
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
+}
+
+template<class Config, bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*                          d_temporary_storage,
+                       size_t&                        temporary_storage_bytes,
+                       rocprim::double_buffer<Key>&   d_keys,
+                       rocprim::double_buffer<Value>& d_values,
+                       size_t                         size,
+                       unsigned int                   start_bit,
+                       unsigned int                   end_bit,
+                       hipStream_t                    stream,
+                       bool                           debug_synchronous)
+    -> std::enable_if_t<!Descending && !is_custom_not_float_test_type<Key>, hipError_t>
+{
+    return rocprim::radix_sort_pairs<Config>(d_temporary_storage,
+                                             temporary_storage_bytes,
+                                             d_keys,
+                                             d_values,
+                                             size,
+                                             start_bit,
+                                             end_bit,
+                                             stream,
+                                             debug_synchronous);
+}
+
+template<class Config, bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*                          d_temporary_storage,
+                       size_t&                        temporary_storage_bytes,
+                       rocprim::double_buffer<Key>&   d_keys,
+                       rocprim::double_buffer<Value>& d_values,
+                       size_t                         size,
+                       unsigned int                   start_bit,
+                       unsigned int                   end_bit,
+                       hipStream_t                    stream,
+                       bool                           debug_synchronous)
+    -> std::enable_if_t<Descending && !is_custom_not_float_test_type<Key>, hipError_t>
+{
+    return rocprim::radix_sort_pairs_desc<Config>(d_temporary_storage,
+                                                  temporary_storage_bytes,
+                                                  d_keys,
+                                                  d_values,
+                                                  size,
+                                                  start_bit,
+                                                  end_bit,
+                                                  stream,
+                                                  debug_synchronous);
+}
+
+template<class Config, bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*                          d_temporary_storage,
+                       size_t&                        temporary_storage_bytes,
+                       rocprim::double_buffer<Key>&   d_keys,
+                       rocprim::double_buffer<Value>& d_values,
+                       size_t                         size,
+                       unsigned int                   start_bit,
+                       unsigned int                   end_bit,
+                       hipStream_t                    stream,
+                       bool                           debug_synchronous)
+    -> std::enable_if_t<!Descending && is_custom_not_float_test_type<Key>, hipError_t>
+{
+    using decomposer_t = test_utils::custom_test_type_decomposer<Key>;
+    if(start_bit == 0 && end_bit == rocprim::detail::decomposer_max_bits<decomposer_t, Key>::value)
+    {
+        return rocprim::radix_sort_pairs<Config>(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys,
+                                                 d_values,
+                                                 size,
+                                                 decomposer_t{},
+                                                 stream,
+                                                 debug_synchronous);
+    }
+    else
+    {
+        return rocprim::radix_sort_pairs<Config>(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys,
+                                                 d_values,
+                                                 size,
+                                                 decomposer_t{},
+                                                 start_bit,
+                                                 end_bit,
+                                                 stream,
+                                                 debug_synchronous);
+    }
+}
+
+template<class Config, bool Descending, class Key, class Value>
+auto invoke_sort_pairs(void*                          d_temporary_storage,
+                       size_t&                        temporary_storage_bytes,
+                       rocprim::double_buffer<Key>&   d_keys,
+                       rocprim::double_buffer<Value>& d_values,
+                       size_t                         size,
+                       unsigned int                   start_bit,
+                       unsigned int                   end_bit,
+                       hipStream_t                    stream,
+                       bool                           debug_synchronous)
+    -> std::enable_if_t<Descending && is_custom_not_float_test_type<Key>, hipError_t>
+{
+    using decomposer_t = test_utils::custom_test_type_decomposer<Key>;
+    if(start_bit == 0 && end_bit == rocprim::detail::decomposer_max_bits<decomposer_t, Key>::value)
+    {
+        return rocprim::radix_sort_pairs_desc<Config>(d_temporary_storage,
+                                                      temporary_storage_bytes,
+                                                      d_keys,
+                                                      d_values,
+                                                      size,
+                                                      decomposer_t{},
+                                                      stream,
+                                                      debug_synchronous);
+    }
+    else
+    {
+        return rocprim::radix_sort_pairs_desc<Config>(d_temporary_storage,
+                                                      temporary_storage_bytes,
+                                                      d_keys,
+                                                      d_values,
+                                                      size,
+                                                      decomposer_t{},
+                                                      start_bit,
+                                                      end_bit,
+                                                      stream,
+                                                      debug_synchronous);
+    }
 }
 
 template<typename TestFixture>
-inline void sort_pairs_double_buffer()
+void sort_pairs_double_buffer()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -635,28 +1132,17 @@ inline void sort_pairs_double_buffer()
         for(size_t size : sizes)
         {
             if(size > (1 << 17) && !check_large_sizes)
+            {
                 break;
+            }
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+            engine_type rng_engine(seed_value);
+
             // Generate data
-            std::vector<key_type> keys_input;
-            if(rocprim::is_floating_point<key_type>::value)
-            {
-                keys_input = test_utils::get_random_data<key_type>(size,
-                                                                   static_cast<key_type>(-1000),
-                                                                   static_cast<key_type>(+1000),
-                                                                   seed_value);
-                test_utils::add_special_values(keys_input, seed_value);
-            }
-            else
-            {
-                keys_input
-                    = test_utils::get_random_data<key_type>(size,
-                                                            std::numeric_limits<key_type>::min(),
-                                                            std::numeric_limits<key_type>::max(),
-                                                            seed_value);
-            }
+            auto keys_input = std::make_unique<key_type[]>(size);
+            generate_key_input(keys_input.get(), size, rng_engine);
 
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
@@ -666,7 +1152,7 @@ inline void sort_pairs_double_buffer()
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(hipMemcpy(d_keys_input,
-                                keys_input.data(),
+                                keys_input.get(),
                                 size * sizeof(key_type),
                                 hipMemcpyHostToDevice));
 
@@ -705,64 +1191,51 @@ inline void sort_pairs_double_buffer()
             rocprim::double_buffer<key_type>   d_keys(d_keys_input, d_keys_output);
             rocprim::double_buffer<value_type> d_values(d_values_input, d_values_output);
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::params::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             void*  d_temporary_storage = nullptr;
             size_t temporary_storage_bytes;
-            HIP_CHECK(rocprim::radix_sort_pairs(d_temporary_storage,
-                                                temporary_storage_bytes,
-                                                d_keys,
-                                                d_values,
-                                                size,
-                                                start_bit,
-                                                end_bit));
+            HIP_CHECK(
+                (invoke_sort_pairs<rocprim::default_config, descending>(d_temporary_storage,
+                                                                        temporary_storage_bytes,
+                                                                        d_keys,
+                                                                        d_values,
+                                                                        size,
+                                                                        start_bit,
+                                                                        end_bit,
+                                                                        stream,
+                                                                        debug_synchronous)));
 
-            if (TestFixture::params::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             ASSERT_GT(temporary_storage_bytes, 0);
 
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if (TestFixture::params::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
-            if(descending)
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
             {
-                HIP_CHECK(rocprim::radix_sort_pairs_desc(d_temporary_storage,
-                                                         temporary_storage_bytes,
-                                                         d_keys,
-                                                         d_values,
-                                                         size,
-                                                         start_bit,
-                                                         end_bit,
-                                                         stream,
-                                                         debug_synchronous));
-            }
-            else
-            {
-                HIP_CHECK(rocprim::radix_sort_pairs(d_temporary_storage,
-                                                    temporary_storage_bytes,
-                                                    d_keys,
-                                                    d_values,
-                                                    size,
-                                                    start_bit,
-                                                    end_bit,
-                                                    stream,
-                                                    debug_synchronous));
+                graph = test_utils::createGraphHelper(stream);
             }
 
-            if (TestFixture::params::use_graphs)
+            HIP_CHECK(
+                (invoke_sort_pairs<rocprim::default_config, descending>(d_temporary_storage,
+                                                                        temporary_storage_bytes,
+                                                                        d_keys,
+                                                                        d_values,
+                                                                        size,
+                                                                        start_bit,
+                                                                        end_bit,
+                                                                        stream,
+                                                                        debug_synchronous)));
+
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+            }
+
             HIP_CHECK(hipFree(d_temporary_storage));
 
-            std::vector<key_type> keys_output(size);
-            HIP_CHECK(hipMemcpy(keys_output.data(),
+            auto keys_output = std::make_unique<key_type[]>(size);
+            HIP_CHECK(hipMemcpy(keys_output.get(),
                                 d_keys.current(),
                                 size * sizeof(key_type),
                                 hipMemcpyDeviceToHost));
@@ -778,20 +1251,30 @@ inline void sort_pairs_double_buffer()
             HIP_CHECK(hipFree(d_values_input));
             HIP_CHECK(hipFree(d_values_output));
 
-            if (TestFixture::params::use_graphs)
+            if(TestFixture::params::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
-            
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, keys_expected));
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
+            }
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output.get(),
+                                                              keys_output.get() + size,
+                                                              keys_expected.begin(),
+                                                              keys_expected.end()));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output.begin(),
+                                                              values_output.end(),
+                                                              values_expected.begin(),
+                                                              values_expected.end()));
         }
     }
 
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 template<bool UseGraphs = false>
-inline void sort_keys_over_4g()
+void sort_keys_over_4g()
 {
     using key_type                                 = uint8_t;
     constexpr unsigned int start_bit               = 0;
@@ -832,11 +1315,6 @@ inline void sort_keys_over_4g()
                         key_type_storage_bytes,
                         hipMemcpyHostToDevice));
 
-    hipGraph_t graph;
-    hipGraphExec_t graph_instance;
-    if (UseGraphs)
-        graph = test_utils::createGraphHelper(stream);
-    
     size_t temporary_storage_bytes;
     HIP_CHECK(rocprim::radix_sort_keys(nullptr,
                                        temporary_storage_bytes,
@@ -848,9 +1326,6 @@ inline void sort_keys_over_4g()
                                        stream,
                                        debug_synchronous));
 
-    if (UseGraphs)
-        graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-    
     ASSERT_GT(temporary_storage_bytes, 0);
 
     hipDeviceProp_t prop;
@@ -866,8 +1341,11 @@ inline void sort_keys_over_4g()
     void* d_temporary_storage;
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-    if (UseGraphs)
-        test_utils::resetGraphHelper(graph, graph_instance, stream);
+    hipGraph_t graph;
+    if(UseGraphs)
+    {
+        graph = test_utils::createGraphHelper(stream);
+    }
 
     HIP_CHECK(rocprim::radix_sort_keys(d_temporary_storage,
                                        temporary_storage_bytes,
@@ -879,9 +1357,12 @@ inline void sort_keys_over_4g()
                                        stream,
                                        debug_synchronous));
 
-    if (UseGraphs)
+    hipGraphExec_t graph_instance;
+    if(UseGraphs)
+    {
         graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-    
+    }
+
     std::vector<key_type> output(keys_input.size());
     HIP_CHECK(hipMemcpy(output.data(),
                         d_keys_input_output,

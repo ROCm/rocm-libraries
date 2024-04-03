@@ -23,11 +23,7 @@
 #ifndef ROCPRIM_BENCHMARK_DEVICE_HISTOGRAM_PARALLEL_HPP_
 #define ROCPRIM_BENCHMARK_DEVICE_HISTOGRAM_PARALLEL_HPP_
 
-#include <chrono>
-#include <cstddef>
-#include <string>
-#include <thread>
-#include <vector>
+#include "benchmark_utils.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -36,10 +32,15 @@
 #include <hip/hip_runtime_api.h>
 
 // rocPRIM
-#include <rocprim/detail/various.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_histogram.hpp>
 
-#include "benchmark_utils.hpp"
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <chrono>
+#include <cstddef>
 
 template<class T>
 std::vector<T> generate(size_t size, int entropy_reduction, int lower_level, int upper_level)

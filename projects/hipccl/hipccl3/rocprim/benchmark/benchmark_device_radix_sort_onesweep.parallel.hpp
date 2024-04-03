@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,9 +23,7 @@
 #ifndef ROCPRIM_BENCHMARK_DEVICE_RADIX_SORT_ONESWEEP_PARALLEL_HPP_
 #define ROCPRIM_BENCHMARK_DEVICE_RADIX_SORT_ONESWEEP_PARALLEL_HPP_
 
-#include <cstddef>
-#include <string>
-#include <vector>
+#include "benchmark_utils.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -34,9 +32,12 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
-#include <rocprim/rocprim.hpp>
+#include <rocprim/device/device_radix_sort.hpp>
 
-#include "benchmark_utils.hpp"
+#include <string>
+#include <vector>
+
+#include <cstddef>
 
 namespace rp = rocprim;
 
@@ -141,6 +142,7 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
                                                                        d_values_ptr,
                                                                        size,
                                                                        is_result_in_output,
+                                                                       rp::identity_decomposer{},
                                                                        0,
                                                                        sizeof(key_type) * 8,
                                                                        stream,
@@ -152,20 +154,22 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
         // Warm-up
         for(size_t i = 0; i < warmup_size; i++)
         {
-            HIP_CHECK((rp::detail::radix_sort_onesweep_impl<Config, false>(d_temporary_storage,
-                                                                           temporary_storage_bytes,
-                                                                           d_keys_input,
-                                                                           nullptr,
-                                                                           d_keys_output,
-                                                                           d_values_ptr,
-                                                                           nullptr,
-                                                                           d_values_ptr,
-                                                                           size,
-                                                                           is_result_in_output,
-                                                                           0,
-                                                                           sizeof(key_type) * 8,
-                                                                           stream,
-                                                                           false)));
+            HIP_CHECK(
+                (rp::detail::radix_sort_onesweep_impl<Config, false>(d_temporary_storage,
+                                                                     temporary_storage_bytes,
+                                                                     d_keys_input,
+                                                                     nullptr,
+                                                                     d_keys_output,
+                                                                     d_values_ptr,
+                                                                     nullptr,
+                                                                     d_values_ptr,
+                                                                     size,
+                                                                     is_result_in_output,
+                                                                     rp::identity_decomposer{},
+                                                                     0,
+                                                                     sizeof(key_type) * 8,
+                                                                     stream,
+                                                                     false)));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -192,6 +196,7 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
                                                                          d_values_ptr,
                                                                          size,
                                                                          is_result_in_output,
+                                                                         rp::identity_decomposer{},
                                                                          0,
                                                                          sizeof(key_type) * 8,
                                                                          stream,
@@ -267,6 +272,7 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
                                                                        d_values_output,
                                                                        size,
                                                                        is_result_in_output,
+                                                                       rp::identity_decomposer{},
                                                                        0,
                                                                        sizeof(key_type) * 8,
                                                                        stream,
@@ -278,20 +284,22 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
         // Warm-up
         for(size_t i = 0; i < warmup_size; i++)
         {
-            HIP_CHECK((rp::detail::radix_sort_onesweep_impl<Config, false>(d_temporary_storage,
-                                                                           temporary_storage_bytes,
-                                                                           d_keys_input,
-                                                                           nullptr,
-                                                                           d_keys_output,
-                                                                           d_values_input,
-                                                                           nullptr,
-                                                                           d_values_output,
-                                                                           size,
-                                                                           is_result_in_output,
-                                                                           0,
-                                                                           sizeof(key_type) * 8,
-                                                                           stream,
-                                                                           false)));
+            HIP_CHECK(
+                (rp::detail::radix_sort_onesweep_impl<Config, false>(d_temporary_storage,
+                                                                     temporary_storage_bytes,
+                                                                     d_keys_input,
+                                                                     nullptr,
+                                                                     d_keys_output,
+                                                                     d_values_input,
+                                                                     nullptr,
+                                                                     d_values_output,
+                                                                     size,
+                                                                     is_result_in_output,
+                                                                     rp::identity_decomposer{},
+                                                                     0,
+                                                                     sizeof(key_type) * 8,
+                                                                     stream,
+                                                                     false)));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -318,6 +326,7 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
                                                                          d_values_output,
                                                                          size,
                                                                          is_result_in_output,
+                                                                         rp::identity_decomposer{},
                                                                          0,
                                                                          sizeof(key_type) * 8,
                                                                          stream,
@@ -373,7 +382,8 @@ struct device_radix_sort_onesweep_benchmark_generator
                                                            ItemsPerThread,
                                                            RadixBits,
                                                            false,
-                                                           RadixRankAlgorithm>::storage_type;
+                                                           RadixRankAlgorithm,
+                                                           rp::identity_decomposer>::storage_type;
         return sizeof(sharedmem_storage) < TUNING_SHARED_MEMORY_MAX;
     }
 

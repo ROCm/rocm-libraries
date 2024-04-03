@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,9 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <cstddef>
-#include <iostream>
-#include <string>
+#include "benchmark_device_adjacent_difference.parallel.hpp"
+#include "benchmark_utils.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -31,14 +30,15 @@
 #include <hip/hip_runtime_api.h>
 
 // rocPRIM
-#include <rocprim/detail/various.hpp>
 #include <rocprim/device/device_adjacent_difference.hpp>
 
 // CmdParser
 #include "cmdparser.hpp"
 
-#include "benchmark_device_adjacent_difference.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include <iostream>
+#include <string>
+
+#include <cstddef>
 
 #ifndef DEFAULT_N
 constexpr std::size_t DEFAULT_N = 1024 * 1024 * 128;

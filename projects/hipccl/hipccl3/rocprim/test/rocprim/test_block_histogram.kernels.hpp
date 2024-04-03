@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,9 @@
 // required test headers
 #include "../common_test_header.hpp"
 #include "test_utils_types.hpp"
+
+#include <algorithm>
+#include <limits>
 
 template<
     unsigned int BlockSize,
@@ -107,7 +110,11 @@ void test_block_histogram_input_arrays()
         SCOPED_TRACE(testing::Message() << "with ItemsPerThread = " << items_per_thread);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 0, bin - 1, seed_value);
+        std::vector<T> output = test_utils::get_random_data<T>(
+            size,
+            0,
+            std::min<size_t>(std::numeric_limits<T>::max(), bin - 1),
+            seed_value);
 
         // Output histogram results
         std::vector<BinType> output_bin(bin_sizes, 0);

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -198,7 +198,11 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
-    std::iota(values.begin(), values.end(), 0);
+    test_utils::iota_modulo(values.begin(),
+                            values.end(),
+                            0,
+                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
+                                             test_utils::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t ti = 0; ti < block_size; ti++)
@@ -209,7 +213,7 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
                 const size_t i0 = offset + ti * items_per_thread + ii;
                 const size_t i1 = offset + ii * block_size + ti;
                 input[i1] = values[i1];
-                expected[i0] = static_cast<output_type>(values[i1]);
+                expected[i0]        = values[i1];
             }
         }
     }
@@ -279,7 +283,11 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
-    std::iota(values.begin(), values.end(), 0);
+    test_utils::iota_modulo(values.begin(),
+                            values.end(),
+                            0,
+                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
+                                             test_utils::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t ti = 0; ti < block_size; ti++)
@@ -367,7 +375,11 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 2>:
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
-    std::iota(values.begin(), values.end(), 0);
+    test_utils::iota_modulo(values.begin(),
+                            values.end(),
+                            0,
+                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
+                                             test_utils::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t wi = 0; wi < warps_no; wi++)
@@ -463,7 +475,11 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 3>:
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
-    std::iota(values.begin(), values.end(), 0);
+    test_utils::iota_modulo(values.begin(),
+                            values.end(),
+                            0,
+                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
+                                             test_utils::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t wi = 0; wi < warps_no; wi++)
@@ -557,7 +573,11 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
         std::shuffle(block_ranks, block_ranks + items_per_block, std::mt19937{std::random_device{}()});
     }
     std::vector<type> values(size);
-    std::iota(values.begin(), values.end(), 0);
+    test_utils::iota_modulo(values.begin(),
+                            values.end(),
+                            0,
+                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
+                                             test_utils::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t ti = 0; ti < block_size; ti++)
@@ -656,7 +676,11 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
         std::shuffle(block_ranks, block_ranks + items_per_block, std::mt19937{std::random_device{}()});
     }
     std::vector<type> values(size);
-    std::iota(values.begin(), values.end(), 0);
+    test_utils::iota_modulo(values.begin(),
+                            values.end(),
+                            0,
+                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
+                                             test_utils::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t ti = 0; ti < block_size; ti++)

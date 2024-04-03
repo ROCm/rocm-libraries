@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,6 @@
 #include <vector>
 
 #include "../config.hpp"
-#include "../detail/radix_sort.hpp"
 #include "../detail/various.hpp"
 #include "config_types.hpp"
 
@@ -39,6 +38,7 @@
 #include "../block/block_load.hpp"
 #include "../iterator/counting_iterator.hpp"
 #include "../iterator/reverse_iterator.hpp"
+#include "../thread/radix_key_codec.hpp"
 #include "detail/device_segmented_radix_sort.hpp"
 #include "device_partition.hpp"
 #include "device_segmented_radix_sort_config.hpp"

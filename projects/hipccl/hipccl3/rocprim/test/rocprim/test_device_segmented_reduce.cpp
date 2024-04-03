@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -241,11 +241,6 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_aggregates_output,
                                                          segments_count * sizeof(output_type)));
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::params::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             size_t temporary_storage_bytes;
 
             HIP_CHECK(rocprim::segmented_reduce<Config>(nullptr,
@@ -260,18 +255,18 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
                                                         stream,
                                                         debug_synchronous));
 
-            if (TestFixture::params::use_graphs)
-               graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             ASSERT_GT(temporary_storage_bytes, 0);
 
             void* d_temporary_storage;
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if (TestFixture::params::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             HIP_CHECK(rocprim::segmented_reduce<Config>(
                 d_temporary_storage,
                 temporary_storage_bytes,
@@ -285,8 +280,11 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
                 stream,
                 debug_synchronous));
 
-            if (TestFixture::params::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+            }
 
             HIP_CHECK(hipFree(d_temporary_storage));
 

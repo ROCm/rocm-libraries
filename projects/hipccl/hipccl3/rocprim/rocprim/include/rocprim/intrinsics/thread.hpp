@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -341,6 +341,13 @@ namespace detail
     void memory_fence_device()
     {
         ::__threadfence();
+        // Hotfix: On GFX10 (Navi 10/RDNA1, Navi 20/RDNA2) ISA and GFX11 ISA (Navi 30 GPUs),
+        // the compiler emits the L0 and L1 invalidate in the wrong order.
+        //
+        // See: https://github.com/llvm/llvm-project/pull/81450
+#if defined(__GFX10__) || defined(__GFX11__)
+        asm volatile("buffer_gl0_inv");
+#endif
     }
 }
 

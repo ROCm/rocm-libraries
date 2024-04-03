@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,35 +23,43 @@
 #include "../common_test_header.hpp"
 
 // required rocprim headers
+#include <rocprim/config.hpp>
+#include <rocprim/block/block_discontinuity.hpp>
 #include <rocprim/block/block_load.hpp>
 #include <rocprim/block/block_store.hpp>
-#include <rocprim/block/block_radix_sort.hpp>
-
 
 // required test headers
 #include "test_utils_types.hpp"
-#include "test_utils_sort_comparator.hpp"
 
 // kernel definitions
-#include "test_block_radix_sort.kernels.hpp"
+#include "test_block_discontinuity.kernels.hpp"
 
 // Start stamping out tests
-struct RocprimBlockRadixSort;
+struct RocprimBlockDiscontinuity;
+
+#cmakedefine ROCPRIM_TEST_SLICE @ROCPRIM_TEST_SLICE@
+
+#if   ROCPRIM_TEST_SLICE == 0
 
 struct Integral;
-#define suite_name RocprimBlockRadixSort
-#define warp_params BlockParamsIntegralExtended
+#define suite_name RocprimBlockDiscontinuity
+#define warp_params BlockDiscParamsIntegral
 #define name_suffix Integral
 
-#include "test_block_radix_sort.hpp"
-
-#undef suite_name
-#undef warp_params
-#undef name_suffix
+#elif ROCPRIM_TEST_SLICE == 1
 
 struct Floating;
-#define suite_name RocprimBlockRadixSort
-#define warp_params BlockParamsFloating
+#define suite_name RocprimBlockDiscontinuity
+#define warp_params BlockDiscParamsFloating
 #define name_suffix Floating
 
-#include "test_block_radix_sort.hpp"
+#elif ROCPRIM_TEST_SLICE == 2
+
+struct FloatingHalf;
+#define suite_name RocprimBlockDiscontinuity
+#define warp_params BlockDiscParamsFloatingHalf
+#define name_suffix FloatingHalf
+
+#endif
+
+#include "test_block_discontinuity.hpp"

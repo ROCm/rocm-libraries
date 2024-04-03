@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,16 +23,19 @@
 #ifndef ROCPRIM_BENCHMARK_BINARY_SEARCH_PARALLEL_HPP_
 #define ROCPRIM_BENCHMARK_BINARY_SEARCH_PARALLEL_HPP_
 
-#include <cstddef>
+#include "benchmark_utils.hpp"
+
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/device_binary_search.hpp>
+
+#include <benchmark/benchmark.h>
+
+#include <hip/hip_runtime_api.h>
+
 #include <string>
 #include <vector>
 
-#include "benchmark_utils.hpp"
-#include "rocprim/device/config_types.hpp"
-#include "rocprim/device/detail/device_config_helper.hpp"
-#include <benchmark/benchmark.h>
-#include <hip/hip_runtime_api.h>
-#include <rocprim/device/device_binary_search.hpp>
+#include <cstddef>
 
 struct binary_search_subalgorithm
 {

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,19 +20,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <cstdio>
-#include <cstdlib>
+#include "benchmark_utils.hpp"
+// CmdParser
+#include "cmdparser.hpp"
+
+// Google Benchmark
+#include <benchmark/benchmark.h>
+// rocPRIM
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+
 #include <iostream>
 #include <string>
 
-// Google Benchmark
-#include "benchmark/benchmark.h"
-// CmdParser
-#include "cmdparser.hpp"
-// rocPRIM
-#include <rocprim/rocprim.hpp>
-
-#include "benchmark_utils.hpp"
+#include <cstdio>
+#include <cstdlib>
 
 enum memory_operation_method
 {

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,6 +54,8 @@
     INSTANTIATE(params<__int128_t,          __int128_t>)
     INSTANTIATE(params<__uint128_t,         __uint128_t>)
 #endif
+    INSTANTIATE(params<bool,                int, true>)
+    INSTANTIATE(params<bool,                int, false>)
     INSTANTIATE(params<signed char,         double, true>)
     INSTANTIATE(params<int,                 short>)
     INSTANTIATE(params<short,               int,    true>)
@@ -104,4 +106,15 @@
 
     // test with graphs
     INSTANTIATE(params<int, int, false, 0, sizeof(int) * 8, false, true>)
+#elif ROCPRIM_TEST_TYPE_SLICE == 2
+    // custom types using a custom decomposer (ascending + descending)
+    INSTANTIATE(params<test_utils::custom_test_type<int>,       int>)
+    INSTANTIATE(params<test_utils::custom_test_type<int>,       int,    true>)
+    INSTANTIATE(params<test_utils::custom_test_type<uint64_t>,  float>)
+    INSTANTIATE(params<test_utils::custom_test_type<double>,    int8_t, true>)
+
+    // start_bit and end_bit
+    INSTANTIATE(params<test_utils::custom_test_type<int>,       int,    false,  7,  55>)
+    INSTANTIATE(params<test_utils::custom_test_type<int>,       int,    true,   0,  32>)
+    INSTANTIATE(params<test_utils::custom_test_type<uint64_t>,  float,  false,  64, 99>)
 #endif
