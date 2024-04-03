@@ -1,6 +1,6 @@
  /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -40,6 +40,7 @@
 #include <thrust/pair.h>
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/general/temp_storage.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
 
@@ -72,25 +73,6 @@ namespace hip_rocprim
 namespace __unique_by_key
 {
 
-    template <class KeyType, class ValueType, class Predicate>
-    struct predicate_wrapper
-    {
-        Predicate                                  predicate;
-        typedef rocprim::tuple<KeyType, ValueType> pair_type;
-
-        THRUST_HIP_FUNCTION
-        predicate_wrapper(Predicate p)
-            : predicate(p)
-        {
-        }
-
-        bool THRUST_HIP_DEVICE_FUNCTION operator()(pair_type const& lhs,
-                                                   pair_type const& rhs) const
-        {
-            return predicate(rocprim::get<0>(lhs), rocprim::get<0>(rhs));
-        }
-    }; // struct predicate_wrapper
-
     template <typename Derived,
               typename KeyInputIt,
               typename ValInputIt,
@@ -107,12 +89,8 @@ namespace __unique_by_key
                   ValOutputIt                values_result,
                   BinaryPred                 binary_pred)
     {
+        using namespace thrust::system::hip_rocprim::temp_storage;
         typedef size_t size_type;
-
-        typedef typename iterator_traits<KeyInputIt>::value_type KeyType;
-        typedef typename iterator_traits<ValInputIt>::value_type ValueType;
-
-        predicate_wrapper<KeyType, ValueType, BinaryPred> wrapped_binary_pred(binary_pred);
 
         size_type   num_items = static_cast<size_type>(thrust::distance(keys_first, keys_last));
         size_t      temp_storage_bytes = 0;
@@ -123,39 +101,49 @@ namespace __unique_by_key
             return thrust::make_pair(keys_result, values_result);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(
-            rocprim::unique(
-                NULL,
-                temp_storage_bytes,
-                rocprim::make_zip_iterator(rocprim::make_tuple(keys_first, values_first)),
-                rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, values_result)),
-                reinterpret_cast<size_type*>(NULL),
-                num_items,
-                wrapped_binary_pred,
-                stream,
-                debug_sync),
-            "unique_by_key failed on 1st step");
+        hip_rocprim::throw_on_error(rocprim::unique_by_key(NULL,
+                                                           temp_storage_bytes,
+                                                           keys_first,
+                                                           values_first,
+                                                           keys_result,
+                                                           values_result,
+                                                           reinterpret_cast<size_type*>(NULL),
+                                                           num_items,
+                                                           binary_pred,
+                                                           stream,
+                                                           debug_sync),
+                                    "unique_by_key failed on 1st step");
+
+        size_t     storage_size;
+        void*      ptr       = nullptr;
+        void*      temp_stor = nullptr;
+        size_type* d_num_selected_out;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
-            tmp(policy, temp_storage_bytes + sizeof(size_type));
-        void *ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out = reinterpret_cast<size_type*>(
-            reinterpret_cast<char*>(ptr) + temp_storage_bytes);
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
-        hip_rocprim::throw_on_error(
-            rocprim::unique(
-                ptr,
-                temp_storage_bytes,
-                rocprim::make_zip_iterator(rocprim::make_tuple(keys_first, values_first)),
-                rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, values_result)),
-                d_num_selected_out,
-                num_items,
-                wrapped_binary_pred,
-                stream,
-                debug_sync),
-            "unique_by_key failed on 2nd step");
+        hip_rocprim::throw_on_error(rocprim::unique_by_key(ptr,
+                                                           temp_storage_bytes,
+                                                           keys_first,
+                                                           values_first,
+                                                           keys_result,
+                                                           values_result,
+                                                           d_num_selected_out,
+                                                           num_items,
+                                                           binary_pred,
+                                                           stream,
+                                                           debug_sync),
+                                    "unique_by_key failed on 2nd step");
 
         size_type num_selected = get_value(policy, d_num_selected_out);
 

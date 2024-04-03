@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2023 Advanced Micro Devices, Inc.
+# Copyright 2019-2024 Advanced Micro Devices, Inc.
 # ########################################################################
 
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
@@ -167,6 +167,7 @@ add_rocthrust_test("mr_disjoint_pool")
 add_rocthrust_test("mr_new")
 add_rocthrust_test("mr_pool")
 add_rocthrust_test("mr_pool_options")
+add_rocthrust_test("optional")
 add_rocthrust_test("pair")
 add_rocthrust_test("pair_reduce")
 add_rocthrust_test("pair_scan")
@@ -201,7 +202,9 @@ add_rocthrust_test("scatter")
 add_rocthrust_test("sequence")
 add_rocthrust_test("stable_sort")
 add_rocthrust_test("stable_sort_by_key")
-add_rocthrust_test("stable_sort_by_key_large")
+add_rocthrust_test("stable_sort_by_key_large_keys_and_values")
+add_rocthrust_test("stable_sort_by_key_large_keys")
+add_rocthrust_test("stable_sort_by_key_large_values")
 add_rocthrust_test("stable_sort_large")
 add_rocthrust_test("sort")
 add_rocthrust_test("sort_by_key")

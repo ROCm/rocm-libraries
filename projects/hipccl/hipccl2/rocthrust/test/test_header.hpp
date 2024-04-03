@@ -15,6 +15,8 @@
  *  limitations under the License.
  */
 
+#include "../testing/unittest/random.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>

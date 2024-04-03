@@ -17,12 +17,12 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-
-#include <thrust/iterator/transform_iterator.h>
-#include <thrust/iterator/iterator_adaptor.h>
-#include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
+#include <thrust/iterator/iterator_adaptor.h>
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/type_traits/remove_cvref.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -44,21 +44,15 @@ struct transform_iterator_base
     >::type reference;
 
     // To get the default for Value: remove any reference on the
-    // result type, but retain any constness to signal
-    // non-writability.  Note that if we adopt Thomas' suggestion
-    // to key non-writability *only* on the Reference argument,
-    // we'd need to strip constness here as well.
-    typedef typename thrust::detail::ia_dflt_help<
-      Value,
-      thrust::detail::remove_reference<reference>
-    >::type cv_value_type;
+    using value_type =
+      typename thrust::detail::ia_dflt_help<Value, thrust::remove_cvref<reference>>::type;
 
  public:
     typedef thrust::iterator_adaptor
     <
         transform_iterator<UnaryFunc, Iterator, Reference, Value>
       , Iterator
-      , cv_value_type
+      , value_type
       , thrust::use_default   // Leave the system alone
         //, thrust::use_default   // Leave the traversal alone
         // use the Iterator's category to let any system iterators remain random access even though

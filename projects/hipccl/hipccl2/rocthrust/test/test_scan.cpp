@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -761,4 +761,54 @@ TEST(ScanTests, TestInclusiveScanWithUserDefinedType)
         vec.begin());
 
     ASSERT_EQ(static_cast<Int>(vec.back()).i, 5);
+}
+
+template <typename T>
+struct const_ref_plus_mod3
+{
+    T* table;
+
+    const_ref_plus_mod3(T* table)
+        : table(table)
+    {
+    }
+
+    __host__ __device__ const T& operator()(T a, T b)
+    {
+        return table[(int)(a + b)];
+    }
+};
+
+TEST(ScanTests, TestInclusiveScanWithConstAccumulator)
+{
+    // add numbers modulo 3 with external lookup table
+    thrust::device_vector<int> data(7);
+    data[0] = 0;
+    data[1] = 1;
+    data[2] = 2;
+    data[3] = 1;
+    data[4] = 2;
+    data[5] = 0;
+    data[6] = 1;
+
+    thrust::device_vector<int> table(6);
+    table[0] = 0;
+    table[1] = 1;
+    table[2] = 2;
+    table[3] = 0;
+    table[4] = 1;
+    table[5] = 2;
+
+    thrust::inclusive_scan(data.begin(),
+                           data.end(),
+                           data.begin(),
+                           const_ref_plus_mod3<int>(thrust::raw_pointer_cast(&table[0])));
+
+    ASSERT_EQ(data[0], 0);
+    ASSERT_EQ(data[1], 1);
+    ASSERT_EQ(data[2], 0);
+    ASSERT_EQ(data[3], 1);
+    ASSERT_EQ(data[4], 0);
+    ASSERT_EQ(data[5], 0);
+    ASSERT_EQ(data[6], 1);
 }
