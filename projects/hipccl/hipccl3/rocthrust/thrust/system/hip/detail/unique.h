@@ -1,6 +1,6 @@
  /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -38,6 +38,7 @@
 #include <thrust/functional.h>
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/general/temp_storage.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
 
@@ -79,6 +80,7 @@ namespace __unique
                          ItemsOutputIt              items_result,
                          BinaryPred                 binary_pred)
     {
+        using namespace thrust::system::hip_rocprim::temp_storage;
         typedef size_t size_type;
 
         size_type num_items = static_cast<size_type>(thrust::distance(items_first, items_last));
@@ -101,13 +103,23 @@ namespace __unique
                                                     debug_sync),
                                     "unique failed on 1st step");
 
-        // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
-            tmp(policy, temp_storage_bytes + sizeof(size_type));
-        void *ptr = static_cast<void*>(tmp.data().get());
+        size_t     storage_size;
+        void*      ptr       = nullptr;
+        void*      temp_stor = nullptr;
+        size_type* d_num_selected_out;
 
-        size_type* d_num_selected_out = reinterpret_cast<size_type*>(
-            reinterpret_cast<char*>(ptr) + temp_storage_bytes);
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
+
+        // Allocate temporary storage.
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
+
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         hip_rocprim::throw_on_error(rocprim::unique(ptr,
                                                     temp_storage_bytes,

@@ -28,6 +28,7 @@
 #pragma once
 
 #include <cstdio>
+#include <exception>
 #include <thrust/detail/config.h>
 #include <thrust/iterator/iterator_traits.h>
 // Not present in rocPRIM
@@ -408,7 +409,7 @@ struct transform_pair_of_input_iterators_t
 
     // BinaryOp might not be copy assignable, such as when it is a lambda.
     // Define an explicit copy assignment operator that doesn't try to assign it.
-    self_t& operator=(const self_t& o)
+    THRUST_HIP_FUNCTION self_t& operator=(const self_t& o)
     {
         input1 = o.input1;
         input2 = o.input2;

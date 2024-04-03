@@ -158,32 +158,6 @@ struct aligned_type;
 /// suitable for use as uninitialized storage for any object whose size is at
 /// most `Len` bytes and whose alignment requirement is a divisor of `Align`.
 ///
-/// The behavior is undefined if `Len` is 0 or `Align` is not a power of 2.
-///
-/// It is an implementation of C++11's \p std::aligned_storage.
-#if THRUST_CPP_DIALECT >= 2011
-    template <std::size_t Len, std::size_t Align>
-    using aligned_storage = std::aligned_storage<Len, Align>;
-#else
-    template <std::size_t Len, std::size_t Align>
-    struct aligned_storage
-    {
-        union type
-        {
-            unsigned char data[Len];
-            // We put this into the union in case the alignment requirement of
-            // an array of `unsigned char` of length `Len` is greater than
-            // `Align`.
-
-            typename aligned_type<Align>::type align;
-        };
-    };
-#endif
-
-/// \p max_align_t is a trivial type whose alignment requirement is at least as
-/// strict (as large) as that of every scalar type.
-///
-/// It is an implementation of C++11's \p std::max_align_t.
 #if THRUST_CPP_DIALECT >= 2011                                                     \
   && (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC)                        \
   && (THRUST_GCC_VERSION >= 40900)

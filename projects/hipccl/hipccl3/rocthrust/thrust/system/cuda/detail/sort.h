@@ -58,7 +58,6 @@ namespace cuda_cub {
 
 namespace __merge_sort {
 
-
   template <class KeysIt,
             class ItemsIt,
             class Size,

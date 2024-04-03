@@ -3,11 +3,22 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## (Unreleased) rocThrust 3.0.1 for ROCm 6.2
+## (Unreleased) rocThrust 3.1.0 for ROCm 6.2
+
+### Additions
+
+* Merged changes from upstream CCCL/thrust 2.2.0
+  * Updated the contents of `system/hip` and `test` with the upstream changes to `system/cuda` and `testing`
 
 ### Changes
 
 * Updated internal calls to `rocprim::detail::invoke_result` to use the public API `rocprim::invoke_result`.
+* Use `rocprim::device_adjacent_difference` for `adjacent_difference` API call.
+* Updated internal use of custom iterator in `thrust::detail::unique_by_key` to use rocPRIM's `rocprim::unique_by_key`.
+* Updated `adjecent_difference` to make use of `rocprim:adjecent_difference` when iterators are comparable and not equal otherwise use `rocprim:adjacent_difference_inplace`.
+
+### Known issues
+* `thrust::reduce_by_key` outputs are not bit-wise reproducible, as run-to-run results for pseudo-associative reduction operators (e.g. floating-point arithmetic operators) are not deterministic on the same device.
 
 ## rocThrust 3.0.0 for ROCm 6.0
 

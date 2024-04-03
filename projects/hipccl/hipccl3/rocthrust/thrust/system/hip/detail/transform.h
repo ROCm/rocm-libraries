@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -218,6 +218,9 @@ namespace __transform
         typedef unary_transform_f<InputIt, OutputIt, StencilIt, TransformOp, Predicate>
             unary_transform_t;
 
+        // We use 'parallel_for' instead of 'rocprim::transform', since 'thrust::transform' allows
+        // the function to modify the input iterator! 'rocprim::transform' does not write any
+        // effects on the input iterator back to memory.
         hip_rocprim::parallel_for(
             policy,
             unary_transform_t(items, result, stencil, transform_op, predicate),
@@ -254,6 +257,9 @@ namespace __transform
                                    Predicate>
             binary_transform_t;
 
+        // We use 'parallel_for' instead of 'rocprim::transform', since 'thrust::transform' allows
+        // the function to modify the input iterator! 'rocprim::transform' does not write any
+        // effects on the input iterator back to memory.
         hip_rocprim::parallel_for(
             policy,
             binary_transform_t(items1, items2, result, stencil, transform_op, predicate),

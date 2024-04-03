@@ -27,6 +27,7 @@
 #pragma once
 
 #include <cstdio>
+#include <exception>
 #include <thrust/detail/config.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/cuda/detail/execution_policy.h>
@@ -317,6 +318,7 @@ struct transform_input_iterator_t
 
   // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
   // an explicit copy assignment operator that doesn't try to assign it.
+  __host__ __device__ 
   self_t& operator=(const self_t& o)
   {
     input = o.input;
@@ -431,6 +433,7 @@ struct transform_pair_of_input_iterators_t
 
   // BinaryOp might not be copy assignable, such as when it is a lambda.
   // Define an explicit copy assignment operator that doesn't try to assign it.
+  __host__ __device__
   self_t& operator=(const self_t& o)
   {
     input1 = o.input1;

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -35,6 +35,7 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/system/hip/config.h>
+#include <thrust/system/hip/detail/general/temp_storage.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
 
@@ -77,6 +78,7 @@ namespace __copy_if
     THRUST_HIP_RUNTIME_FUNCTION OutputIt
     copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
     {
+        using namespace thrust::system::hip_rocprim::temp_storage;
         typedef typename iterator_traits<InputIt>::difference_type size_type;
 
         size_type   num_items          = thrust::distance(first, last);
@@ -99,15 +101,23 @@ namespace __copy_if
                                                     debug_sync),
                                     "copy_if failed on 1st step");
 
-        size_t storage_size = temp_storage_bytes + sizeof(size_type);
+        size_t     storage_size;
+        void*      ptr       = nullptr;
+        void*      temp_stor = nullptr;
+        size_type* d_num_selected_out;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
-            tmp(policy, storage_size);
-        void *ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out
-		    = reinterpret_cast<size_type*>(reinterpret_cast<char*>(ptr) + temp_storage_bytes);
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         hip_rocprim::throw_on_error(rocprim::select(ptr,
                                                     temp_storage_bytes,
@@ -134,6 +144,7 @@ namespace __copy_if
             OutputIt                   output,
             Predicate                  predicate)
     {
+        using namespace thrust::system::hip_rocprim::temp_storage;
         typedef typename iterator_traits<InputIt>::difference_type size_type;
 
         size_type   num_items          = thrust::distance(first, last);
@@ -158,15 +169,29 @@ namespace __copy_if
                                                     debug_sync),
                                     "copy_if failed on 1st step");
 
-        size_t storage_size = temp_storage_bytes + sizeof(size_type);
+        size_t     storage_size;
+        void*      ptr       = nullptr;
+        void*      temp_stor = nullptr;
+        size_type* d_num_selected_out;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_selected_out, 1));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(
+            partition(ptr,
+                      storage_size,
+                      l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
-            tmp(policy, storage_size);
-        void *ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out
-		    = reinterpret_cast<size_type*>(reinterpret_cast<char*>(ptr) + temp_storage_bytes);
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(
+            partition(ptr,
+                      storage_size,
+                      l_part));
 
         hip_rocprim::throw_on_error(rocprim::select(ptr,
                                                     temp_storage_bytes,

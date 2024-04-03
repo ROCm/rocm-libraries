@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -42,6 +42,7 @@
 #include <thrust/pair.h>
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/general/temp_storage.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
 
@@ -87,6 +88,8 @@ namespace __reduce_by_key
                   EqualityOp                 equality_op,
                   ReductionOp                reduction_op)
     {
+        using namespace thrust::system::hip_rocprim::temp_storage;
+
         typedef size_t size_type;
         size_type   num_items = static_cast<size_type>(thrust::distance(keys_first, keys_last));
         size_t      temp_storage_bytes = 0;
@@ -110,15 +113,23 @@ namespace __reduce_by_key
                                                            debug_sync),
                                     "reduce_by_key failed on 1st step");
 
-        size_t storage_size = temp_storage_bytes + sizeof(size_type);
+        size_t     storage_size;
+        void*      ptr       = nullptr;
+        void*      temp_stor = nullptr;
+        size_type* d_num_runs_out;
+
+        auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
+                                            ptr_aligned_array(&d_num_runs_out, 1));
+
+        // Calculate storage_size including alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
-            tmp(policy, storage_size);
-        void *ptr = static_cast<void*>(tmp.data().get());
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_runs_out = reinterpret_cast<size_type*>(
-            reinterpret_cast<char*>(ptr) + temp_storage_bytes);
+        // Create pointers with alignment
+        hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         hip_rocprim::throw_on_error(rocprim::reduce_by_key(ptr,
                                                            temp_storage_bytes,
