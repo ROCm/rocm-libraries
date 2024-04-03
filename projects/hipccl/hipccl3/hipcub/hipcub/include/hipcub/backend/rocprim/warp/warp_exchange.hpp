@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,32 +33,57 @@
 #include "../../../config.hpp"
 #include "../util_type.hpp"
 
-#include <rocprim/warp/warp_exchange.hpp>
+#include "specializations/warp_exchange_shfl.hpp"
+#include "specializations/warp_exchange_smem.hpp"
+
+#include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
 
-template <
-    typename InputT,
-    int ITEMS_PER_THREAD,
-    int LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS,
-    int ARCH = HIPCUB_ARCH
->
-class WarpExchange
+enum WarpExchangeAlgorithm
 {
-    using base_type = typename rocprim::warp_exchange<InputT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS>;
+    WARP_EXCHANGE_SMEM,
+    WARP_EXCHANGE_SHUFFLE,
+};
+
+namespace detail
+{
+
+template<typename InputT,
+         int                   ITEMS_PER_THREAD,
+         int                   LOGICAL_WARP_THREADS,
+         WarpExchangeAlgorithm WARP_EXCHANGE_ALGORITHM>
+using InternalWarpExchangeImpl
+    = std::conditional_t<WARP_EXCHANGE_ALGORITHM == WARP_EXCHANGE_SMEM,
+                         WarpExchangeSmem<InputT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS>,
+                         WarpExchangeShfl<InputT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS>>;
+
+} // namespace detail
+
+template<typename InputT,
+         int                   ITEMS_PER_THREAD,
+         int                   LOGICAL_WARP_THREADS    = HIPCUB_DEVICE_WARP_THREADS,
+         int                   ARCH                    = HIPCUB_ARCH,
+         WarpExchangeAlgorithm WARP_EXCHANGE_ALGORITHM = WARP_EXCHANGE_SMEM>
+class WarpExchange
+    : private detail::InternalWarpExchangeImpl<InputT,
+                                               ITEMS_PER_THREAD,
+                                               LOGICAL_WARP_THREADS,
+                                               WARP_EXCHANGE_ALGORITHM>
+{
+    using base_type = detail::InternalWarpExchangeImpl<InputT,
+                                                       ITEMS_PER_THREAD,
+                                                       LOGICAL_WARP_THREADS,
+                                                       WARP_EXCHANGE_ALGORITHM>;
 
 public:
-    using TempStorage = typename base_type::storage_type;
-
-private:
-    TempStorage &temp_storage;
+    using TempStorage = typename base_type::TempStorage;
 
 public:
     WarpExchange() = delete;
 
-    explicit HIPCUB_DEVICE __forceinline__
-    WarpExchange(TempStorage &temp_storage) :
-        temp_storage(temp_storage)
+    explicit HIPCUB_DEVICE __forceinline__ WarpExchange(TempStorage& temp_storage)
+        : base_type(temp_storage)
     {
     }
 
@@ -68,8 +93,7 @@ public:
         const InputT (&input_items)[ITEMS_PER_THREAD],
         OutputT (&output_items)[ITEMS_PER_THREAD])
     {
-        base_type rocprim_warp_exchange;
-        rocprim_warp_exchange.blocked_to_striped(input_items, output_items, temp_storage);
+        base_type::BlockedToStriped(input_items, output_items);
     }
 
     template <typename OutputT>
@@ -78,8 +102,7 @@ public:
         const InputT (&input_items)[ITEMS_PER_THREAD],
         OutputT (&output_items)[ITEMS_PER_THREAD])
     {
-        base_type rocprim_warp_exchange;
-        rocprim_warp_exchange.striped_to_blocked(input_items, output_items, temp_storage);
+        base_type::StripedToBlocked(input_items, output_items);
     }
 
     template <typename OffsetT>
@@ -88,7 +111,7 @@ public:
         InputT (&items)[ITEMS_PER_THREAD],
         OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
-        ScatterToStriped(items, items, ranks);
+        base_type::ScatterToStriped(items, ranks);
     }
 
     template <typename OutputT,
@@ -99,8 +122,7 @@ public:
         OutputT (&output_items)[ITEMS_PER_THREAD],
         OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
-        base_type rocprim_warp_exchange;
-        rocprim_warp_exchange.scatter_to_striped(input_items, output_items, ranks, temp_storage);
+        base_type::ScatterToStriped(input_items, output_items, ranks);
     }
 };
 

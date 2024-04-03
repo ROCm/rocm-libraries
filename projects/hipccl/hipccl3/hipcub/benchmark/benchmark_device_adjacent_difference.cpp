@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -106,8 +106,6 @@ void run_benchmark(benchmark::State& state, const std::size_t size, const hipStr
 {
     using output_type = T;
 
-    static constexpr bool debug_synchronous = false;
-
     // Generate data
     const std::vector<T> input = benchmark_utils::get_random_data<T>(size, 1, 100);
 
@@ -129,7 +127,8 @@ void run_benchmark(benchmark::State& state, const std::size_t size, const hipStr
     std::size_t temp_storage_size{};
     void*       d_temp_storage = nullptr;
 
-    const auto launch = [&] {
+    const auto launch = [&]
+    {
         return dispatch_adjacent_difference(left_tag,
                                             copy_tag,
                                             d_temp_storage,
@@ -138,8 +137,7 @@ void run_benchmark(benchmark::State& state, const std::size_t size, const hipStr
                                             d_output,
                                             size,
                                             hipcub::Sum{},
-                                            stream,
-                                            debug_synchronous);
+                                            stream);
     };
     HIP_CHECK(launch());
     HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));

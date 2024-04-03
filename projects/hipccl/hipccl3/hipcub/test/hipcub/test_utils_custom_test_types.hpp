@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,9 @@
 #ifndef HIPCUB_TEST_HIPCUB_TEST_UTILS_CUSTOM_TEST_TYPES_HPP_
 #define HIPCUB_TEST_HIPCUB_TEST_UTILS_CUSTOM_TEST_TYPES_HPP_
 
-#include "test_utils_half.hpp"
 #include "test_utils_bfloat16.hpp"
+#include "test_utils_functional.hpp"
+#include "test_utils_half.hpp"
 
 namespace test_utils {
 

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 // hipcub API
 #include "hipcub/device/device_adjacent_difference.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
+#include "hipcub/iterator/discard_output_iterator.hpp"
 #include "hipcub/iterator/transform_input_iterator.hpp"
 #include "test_utils_data_generation.hpp"
 
@@ -181,8 +182,7 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
     static constexpr std::integral_constant<bool, TestFixture::params::left> left_constant{};
     static constexpr std::integral_constant<bool, TestFixture::params::copy> copy_constant{};
     using output_type = std::conditional_t<copy_constant, input_type, typename TestFixture::params::output_type>;
-    static constexpr hipStream_t stream = 0;
-    static constexpr bool debug_synchronous = false;
+    static constexpr hipStream_t          stream = 0;
     static constexpr ::hipcub::Difference op;
 
     const auto sizes = get_sizes();
@@ -218,13 +218,15 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
             const auto expected = get_expected_result<output_type>(input, op, left_constant);
 
             size_t temporary_storage_bytes = 0;
-            HIP_CHECK(
-                dispatch_adjacent_difference(
-                    left_constant, copy_constant,
-                    nullptr, temporary_storage_bytes,
-                    d_input, d_output, size, op, stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(dispatch_adjacent_difference(left_constant,
+                                                   copy_constant,
+                                                   nullptr,
+                                                   temporary_storage_bytes,
+                                                   d_input,
+                                                   d_output,
+                                                   size,
+                                                   op,
+                                                   stream));
 
 #ifdef __HIP_PLATFORM_AMD__
             ASSERT_GT(temporary_storage_bytes, 0U);
@@ -233,13 +235,15 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            HIP_CHECK(
-                dispatch_adjacent_difference(
-                    left_constant, copy_constant,
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_input, d_output, size, op, stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(dispatch_adjacent_difference(left_constant,
+                                                   copy_constant,
+                                                   d_temporary_storage,
+                                                   temporary_storage_bytes,
+                                                   d_input,
+                                                   d_output,
+                                                   size,
+                                                   op,
+                                                   stream));
 
             std::vector<output_type> output(size);
             HIP_CHECK(
@@ -276,7 +280,6 @@ class HipcubDeviceAdjacentDifferenceLargeTests : public ::testing::Test
 public:
     static constexpr bool left              = Params::left;
     static constexpr bool copy              = Params::copy;
-    static constexpr bool debug_synchronous = false;
 };
 
 using HipcubDeviceAdjacentDifferenceLargeTestsParams
@@ -301,61 +304,6 @@ struct discard_write
     {
         return *this;
     }
-};
-
-class discard_iterator
-{
-public:
-    struct discard_value
-    {
-        inline discard_value() = default;
-
-        template<class T>
-        HIPCUB_HOST_DEVICE inline discard_value(T){};
-
-        inline ~discard_value() = default;
-
-        template<class T>
-        HIPCUB_HOST_DEVICE inline discard_value& operator=(const T&)
-        {
-            return *this;
-        }
-    };
-
-    typedef discard_iterator self_type; ///< My own type
-    typedef discard_value    value_type; ///< The type of the element the iterator can point to
-    typedef discard_value*
-        pointer; ///< The type of a pointer to an element the iterator can point to
-    typedef discard_value
-        reference; ///< The type of a reference to an element the iterator can point to
-    typedef ptrdiff_t                       difference_type;
-    typedef std::random_access_iterator_tag iterator_category; ///< The iterator category
-    /// \brief Creates a new discard_iterator.
-    ///
-    /// \param index - optional index of discard iterator (default = 0).
-    HIPCUB_HOST_DEVICE inline discard_iterator(size_t index = 0) : index_(index) {}
-
-    inline ~discard_iterator() = default;
-
-    HIPCUB_HOST_DEVICE inline discard_value operator*() const
-    {
-        return discard_value();
-    }
-
-    HIPCUB_HOST_DEVICE inline discard_value operator[](difference_type distance) const
-    {
-        discard_iterator i = (*this) + distance;
-        return *i;
-    }
-
-    HIPCUB_HOST_DEVICE inline discard_iterator operator+(difference_type distance) const
-    {
-        auto i = static_cast<size_t>(static_cast<difference_type>(index_) + distance);
-        return discard_iterator(i);
-    }
-
-private:
-    mutable size_t index_;
 };
 
 template<class T, class InputIterator, class UnaryFunction>
@@ -424,10 +372,9 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T                                 = size_t;
-    using OutputIterator                    = discard_iterator;
+    using OutputIterator                    = hipcub::DiscardOutputIterator<>;
     static constexpr bool left              = TestFixture::left;
     static constexpr bool copy              = TestFixture::copy;
-    const bool            debug_synchronous = TestFixture::debug_synchronous;
 
     SCOPED_TRACE(testing::Message() << "left = " << left << ", copy = " << copy);
 
@@ -485,8 +432,7 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
                                                    output,
                                                    size,
                                                    flag_expected,
-                                                   stream,
-                                                   debug_synchronous));
+                                                   stream));
 
 #ifdef __HIP_PLATFORM_AMD__
             ASSERT_GT(temp_storage_size, 0U);
@@ -502,8 +448,7 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
                                                    output,
                                                    size,
                                                    flag_expected,
-                                                   stream,
-                                                   debug_synchronous));
+                                                   stream));
 
             // Copy output to host
             HIP_CHECK(hipMemcpy(flags, d_flags, sizeof(flags), hipMemcpyDeviceToHost));

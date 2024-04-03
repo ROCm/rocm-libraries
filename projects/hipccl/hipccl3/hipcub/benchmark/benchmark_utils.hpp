@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,8 @@
     #include "hipcub/config.hpp"
     #include <cub/util_ptx.cuh>
 #endif
+
+#include "hipcub/tuple.hpp"
 
 #ifndef HIPCUB_CUB_API
 #define HIPCUB_WARP_THREADS_MACRO warpSize
@@ -275,7 +277,12 @@ struct custom_type
        return !(*this == other);
     }
 
-
+    HIPCUB_HOST_DEVICE custom_type& operator+=(const custom_type& rhs)
+    {
+       this->x += rhs.x;
+       this->y += rhs.y;
+       return *this;
+    }
 };
 
 template<typename>
@@ -283,6 +290,21 @@ struct is_custom_type : std::false_type {};
 
 template<class T, class U>
 struct is_custom_type<custom_type<T,U>> : std::true_type {};
+
+template<class CustomType>
+struct custom_type_decomposer
+{
+    static_assert(is_custom_type<CustomType>::value,
+                  "custom_type_decomposer can only be used with instantiations of custom_type");
+
+    using T = typename CustomType::first_type;
+    using U = typename CustomType::second_type;
+
+    HIPCUB_HOST_DEVICE ::hipcub::tuple<T&, U&> operator()(CustomType& key) const
+    {
+       return ::hipcub::tuple<T&, U&>{key.x, key.y};
+    }
+};
 
 template<class T>
 inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
@@ -353,13 +375,9 @@ bool is_warp_size_supported(const unsigned required_warp_size)
     return HIPCUB_HOST_WARP_THREADS >= required_warp_size;
 }
 
-template<unsigned LogicalWarpSize>
-struct DeviceSelectWarpSize
-{
-    static constexpr unsigned value = HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize
-                                          ? LogicalWarpSize
-                                          : HIPCUB_DEVICE_WARP_THREADS;
-};
+template<unsigned int LogicalWarpSize>
+__device__ constexpr bool device_test_enabled_for_warp_size_v
+    = HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize;
 
 template<typename Iterator>
 using it_value_t = typename std::iterator_traits<Iterator>::value_type;
@@ -430,6 +448,10 @@ namespace std
         using T = typename benchmark_utils::custom_type<int>;
 
         public:
+            static constexpr inline T min()
+            {
+        return std::numeric_limits<typename T::first_type>::min();
+            }
 
         static constexpr inline T max()
         {
@@ -448,6 +470,10 @@ namespace std
         using T = typename benchmark_utils::custom_type<float>;
 
         public:
+            static constexpr inline T min()
+            {
+            return std::numeric_limits<typename T::first_type>::min();
+            }
 
         static constexpr inline T max()
         {

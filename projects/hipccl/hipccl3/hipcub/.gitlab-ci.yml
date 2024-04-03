@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -94,6 +94,7 @@ copyright-date:
       -D BUILD_TEST=OFF
       -D BUILD_EXAMPLE=OFF
       -D ROCM_DEP_ROCMCORE=OFF
+      -D GPU_TARGETS="$GPU_TARGETS"
       -B $CI_PROJECT_DIR/rocPRIM/build
       -S $CI_PROJECT_DIR/rocPRIM
     - cd $CI_PROJECT_DIR/rocPRIM/build
@@ -113,7 +114,7 @@ build:rocm:
     - cmake
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
-      -D CMAKE_CXX_FLAGS="-Wall -Wextra"
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror -Wno-error=pass-failed"
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON

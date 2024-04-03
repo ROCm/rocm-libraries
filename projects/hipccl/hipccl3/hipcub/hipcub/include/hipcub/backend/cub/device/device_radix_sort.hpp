@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,28 +31,28 @@
 #define HIPCUB_CUB_DEVICE_DEVICE_RADIX_SORT_HPP_
 
 #include "../../../config.hpp"
+#include "../../../util_deprecated.hpp"
 
 #include <cub/device/device_radix_sort.cuh>
+
+#include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
 
 struct DeviceRadixSort
 {
     template<typename KeyT, typename ValueT, typename NumItemsT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortPairs(void * d_temp_storage,
-                         size_t& temp_storage_bytes,
-                         const KeyT * d_keys_in,
-                         KeyT * d_keys_out,
-                         const ValueT * d_values_in,
-                         ValueT * d_values_out,
-                         NumItemsT num_items,
-                         int begin_bit = 0,
-                         int end_bit = sizeof(KeyT) * 8,
-                         hipStream_t stream = 0,
-                         bool debug_synchronous = false)
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairs(void*         d_temp_storage,
+                                                        size_t&       temp_storage_bytes,
+                                                        const KeyT*   d_keys_in,
+                                                        KeyT*         d_keys_out,
+                                                        const ValueT* d_values_in,
+                                                        ValueT*       d_values_out,
+                                                        NumItemsT     num_items,
+                                                        int           begin_bit = 0,
+                                                        int           end_bit   = sizeof(KeyT) * 8,
+                                                        hipStream_t   stream    = 0)
     {
-        (void)debug_synchronous;
         return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortPairs(d_temp_storage,
                                                                         temp_storage_bytes,
                                                                         d_keys_in,
@@ -66,18 +66,92 @@ struct DeviceRadixSort
     }
 
     template<typename KeyT, typename ValueT, typename NumItemsT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortPairs(void * d_temp_storage,
-                         size_t& temp_storage_bytes,
-                         DoubleBuffer<KeyT>& d_keys,
-                         DoubleBuffer<ValueT>& d_values,
-                         NumItemsT num_items,
-                         int begin_bit = 0,
-                         int end_bit = sizeof(KeyT) * 8,
-                         hipStream_t stream = 0,
-                         bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortPairs(void*         d_temp_storage,
+                  size_t&       temp_storage_bytes,
+                  const KeyT*   d_keys_in,
+                  KeyT*         d_keys_out,
+                  const ValueT* d_values_in,
+                  ValueT*       d_values_out,
+                  NumItemsT     num_items,
+                  int           begin_bit,
+                  int           end_bit,
+                  hipStream_t   stream,
+                  bool          debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortPairs(d_temp_storage,
+                         temp_storage_bytes,
+                         d_keys_in,
+                         d_keys_out,
+                         d_values_in,
+                         d_values_out,
+                         num_items,
+                         begin_bit,
+                         end_bit,
+                         stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortPairs(void*         d_temp_storage,
+                                                  size_t&       temp_storage_bytes,
+                                                  const KeyT*   d_keys_in,
+                                                  KeyT*         d_keys_out,
+                                                  const ValueT* d_values_in,
+                                                  ValueT*       d_values_out,
+                                                  NumItemsT     num_items,
+                                                  DecomposerT   decomposer,
+                                                  int           begin_bit,
+                                                  int           end_bit,
+                                                  hipStream_t   stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                                                        temp_storage_bytes,
+                                                                        d_keys_in,
+                                                                        d_keys_out,
+                                                                        d_values_in,
+                                                                        d_values_out,
+                                                                        num_items,
+                                                                        decomposer,
+                                                                        begin_bit,
+                                                                        end_bit,
+                                                                        stream));
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortPairs(void*         d_temp_storage,
+                                                  size_t&       temp_storage_bytes,
+                                                  const KeyT*   d_keys_in,
+                                                  KeyT*         d_keys_out,
+                                                  const ValueT* d_values_in,
+                                                  ValueT*       d_values_out,
+                                                  NumItemsT     num_items,
+                                                  DecomposerT   decomposer,
+                                                  hipStream_t   stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                                                        temp_storage_bytes,
+                                                                        d_keys_in,
+                                                                        d_keys_out,
+                                                                        d_values_in,
+                                                                        d_values_out,
+                                                                        num_items,
+                                                                        decomposer,
+                                                                        stream));
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairs(void*                 d_temp_storage,
+                                                        size_t&               temp_storage_bytes,
+                                                        DoubleBuffer<KeyT>&   d_keys,
+                                                        DoubleBuffer<ValueT>& d_values,
+                                                        NumItemsT             num_items,
+                                                        int                   begin_bit = 0,
+                                                        int         end_bit = sizeof(KeyT) * 8,
+                                                        hipStream_t stream  = 0)
+    {
         return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortPairs(d_temp_storage,
                                                                         temp_storage_bytes,
                                                                         d_keys,
@@ -89,20 +163,82 @@ struct DeviceRadixSort
     }
 
     template<typename KeyT, typename ValueT, typename NumItemsT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortPairsDescending(void * d_temp_storage,
-                                   size_t& temp_storage_bytes,
-                                   const KeyT * d_keys_in,
-                                   KeyT * d_keys_out,
-                                   const ValueT * d_values_in,
-                                   ValueT * d_values_out,
-                                   NumItemsT num_items,
-                                   int begin_bit = 0,
-                                   int end_bit = sizeof(KeyT) * 8,
-                                   hipStream_t stream = 0,
-                                   bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortPairs(void*                 d_temp_storage,
+                  size_t&               temp_storage_bytes,
+                  DoubleBuffer<KeyT>&   d_keys,
+                  DoubleBuffer<ValueT>& d_values,
+                  NumItemsT             num_items,
+                  int                   begin_bit,
+                  int                   end_bit,
+                  hipStream_t           stream,
+                  bool                  debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortPairs(d_temp_storage,
+                         temp_storage_bytes,
+                         d_keys,
+                         d_values,
+                         num_items,
+                         begin_bit,
+                         end_bit,
+                         stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortPairs(void*                 d_temp_storage,
+                                                  size_t&               temp_storage_bytes,
+                                                  DoubleBuffer<KeyT>&   d_keys,
+                                                  DoubleBuffer<ValueT>& d_values,
+                                                  NumItemsT             num_items,
+                                                  DecomposerT           decomposer,
+                                                  int                   begin_bit,
+                                                  int                   end_bit,
+                                                  hipStream_t           stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                                                        temp_storage_bytes,
+                                                                        d_keys,
+                                                                        d_values,
+                                                                        num_items,
+                                                                        decomposer,
+                                                                        begin_bit,
+                                                                        end_bit,
+                                                                        stream));
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortPairs(void*                 d_temp_storage,
+                                                  size_t&               temp_storage_bytes,
+                                                  DoubleBuffer<KeyT>&   d_keys,
+                                                  DoubleBuffer<ValueT>& d_values,
+                                                  NumItemsT             num_items,
+                                                  DecomposerT           decomposer,
+                                                  hipStream_t           stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                                                        temp_storage_bytes,
+                                                                        d_keys,
+                                                                        d_values,
+                                                                        num_items,
+                                                                        decomposer,
+                                                                        stream));
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairsDescending(void*         d_temp_storage,
+                                                                  size_t&       temp_storage_bytes,
+                                                                  const KeyT*   d_keys_in,
+                                                                  KeyT*         d_keys_out,
+                                                                  const ValueT* d_values_in,
+                                                                  ValueT*       d_values_out,
+                                                                  NumItemsT     num_items,
+                                                                  int           begin_bit = 0,
+                                                                  int end_bit = sizeof(KeyT) * 8,
+                                                                  hipStream_t stream = 0)
+    {
         return hipCUDAErrorTohipError(
             ::cub::DeviceRadixSort::SortPairsDescending(d_temp_storage,
                                                         temp_storage_bytes,
@@ -117,18 +253,94 @@ struct DeviceRadixSort
     }
 
     template<typename KeyT, typename ValueT, typename NumItemsT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortPairsDescending(void * d_temp_storage,
-                                   size_t& temp_storage_bytes,
-                                   DoubleBuffer<KeyT>& d_keys,
-                                   DoubleBuffer<ValueT>& d_values,
-                                   NumItemsT num_items,
-                                   int begin_bit = 0,
-                                   int end_bit = sizeof(KeyT) * 8,
-                                   hipStream_t stream = 0,
-                                   bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortPairsDescending(void*         d_temp_storage,
+                            size_t&       temp_storage_bytes,
+                            const KeyT*   d_keys_in,
+                            KeyT*         d_keys_out,
+                            const ValueT* d_values_in,
+                            ValueT*       d_values_out,
+                            NumItemsT     num_items,
+                            int           begin_bit,
+                            int           end_bit,
+                            hipStream_t   stream,
+                            bool          debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortPairsDescending(d_temp_storage,
+                                   temp_storage_bytes,
+                                   d_keys_in,
+                                   d_keys_out,
+                                   d_values_in,
+                                   d_values_out,
+                                   num_items,
+                                   begin_bit,
+                                   end_bit,
+                                   stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortPairsDescending(void*         d_temp_storage,
+                                                            size_t&       temp_storage_bytes,
+                                                            const KeyT*   d_keys_in,
+                                                            KeyT*         d_keys_out,
+                                                            const ValueT* d_values_in,
+                                                            ValueT*       d_values_out,
+                                                            NumItemsT     num_items,
+                                                            DecomposerT   decomposer,
+                                                            int           begin_bit,
+                                                            int           end_bit,
+                                                            hipStream_t   stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceRadixSort::SortPairsDescending(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys_in,
+                                                        d_keys_out,
+                                                        d_values_in,
+                                                        d_values_out,
+                                                        num_items,
+                                                        decomposer,
+                                                        begin_bit,
+                                                        end_bit,
+                                                        stream));
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortPairsDescending(void*         d_temp_storage,
+                                                            size_t&       temp_storage_bytes,
+                                                            const KeyT*   d_keys_in,
+                                                            KeyT*         d_keys_out,
+                                                            const ValueT* d_values_in,
+                                                            ValueT*       d_values_out,
+                                                            NumItemsT     num_items,
+                                                            DecomposerT   decomposer,
+                                                            hipStream_t   stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceRadixSort::SortPairsDescending(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys_in,
+                                                        d_keys_out,
+                                                        d_values_in,
+                                                        d_values_out,
+                                                        num_items,
+                                                        decomposer,
+                                                        stream));
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortPairsDescending(void*   d_temp_storage,
+                                                                  size_t& temp_storage_bytes,
+                                                                  DoubleBuffer<KeyT>&   d_keys,
+                                                                  DoubleBuffer<ValueT>& d_values,
+                                                                  NumItemsT             num_items,
+                                                                  int begin_bit = 0,
+                                                                  int end_bit   = sizeof(KeyT) * 8,
+                                                                  hipStream_t stream = 0)
+    {
         return hipCUDAErrorTohipError(
             ::cub::DeviceRadixSort::SortPairsDescending(d_temp_storage,
                                                         temp_storage_bytes,
@@ -140,19 +352,83 @@ struct DeviceRadixSort
                                                         stream));
     }
 
-    template<typename KeyT, typename NumItemsT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortKeys(void * d_temp_storage,
-                        size_t& temp_storage_bytes,
-                        const KeyT * d_keys_in,
-                        KeyT * d_keys_out,
-                        NumItemsT num_items,
-                        int begin_bit = 0,
-                        int end_bit = sizeof(KeyT) * 8,
-                        hipStream_t stream = 0,
-                        bool debug_synchronous = false)
+    template<typename KeyT, typename ValueT, typename NumItemsT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortPairsDescending(void*                 d_temp_storage,
+                            size_t&               temp_storage_bytes,
+                            DoubleBuffer<KeyT>&   d_keys,
+                            DoubleBuffer<ValueT>& d_values,
+                            NumItemsT             num_items,
+                            int                   begin_bit,
+                            int                   end_bit,
+                            hipStream_t           stream,
+                            bool                  debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortPairsDescending(d_temp_storage,
+                                   temp_storage_bytes,
+                                   d_keys,
+                                   d_values,
+                                   num_items,
+                                   begin_bit,
+                                   end_bit,
+                                   stream);
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortPairsDescending(void*               d_temp_storage,
+                                                            size_t&             temp_storage_bytes,
+                                                            DoubleBuffer<KeyT>& d_keys,
+                                                            DoubleBuffer<ValueT>& d_values,
+                                                            NumItemsT             num_items,
+                                                            DecomposerT           decomposer,
+                                                            int                   begin_bit,
+                                                            int                   end_bit,
+                                                            hipStream_t           stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceRadixSort::SortPairsDescending(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys,
+                                                        d_values,
+                                                        num_items,
+                                                        decomposer,
+                                                        begin_bit,
+                                                        end_bit,
+                                                        stream));
+    }
+
+    template<typename KeyT, typename ValueT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortPairsDescending(void*               d_temp_storage,
+                                                            size_t&             temp_storage_bytes,
+                                                            DoubleBuffer<KeyT>& d_keys,
+                                                            DoubleBuffer<ValueT>& d_values,
+                                                            NumItemsT             num_items,
+                                                            DecomposerT           decomposer,
+                                                            hipStream_t           stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceRadixSort::SortPairsDescending(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys,
+                                                        d_values,
+                                                        num_items,
+                                                        decomposer,
+                                                        stream));
+    }
+
+    template<typename KeyT, typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeys(void*       d_temp_storage,
+                                                       size_t&     temp_storage_bytes,
+                                                       const KeyT* d_keys_in,
+                                                       KeyT*       d_keys_out,
+                                                       NumItemsT   num_items,
+                                                       int         begin_bit = 0,
+                                                       int         end_bit   = sizeof(KeyT) * 8,
+                                                       hipStream_t stream    = 0)
+    {
         return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeys(d_temp_storage,
                                                                        temp_storage_bytes,
                                                                        d_keys_in,
@@ -164,17 +440,79 @@ struct DeviceRadixSort
     }
 
     template<typename KeyT, typename NumItemsT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortKeys(void * d_temp_storage,
-                        size_t& temp_storage_bytes,
-                        DoubleBuffer<KeyT>& d_keys,
-                        NumItemsT num_items,
-                        int begin_bit = 0,
-                        int end_bit = sizeof(KeyT) * 8,
-                        hipStream_t stream = 0,
-                        bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortKeys(void*       d_temp_storage,
+                 size_t&     temp_storage_bytes,
+                 const KeyT* d_keys_in,
+                 KeyT*       d_keys_out,
+                 NumItemsT   num_items,
+                 int         begin_bit,
+                 int         end_bit,
+                 hipStream_t stream,
+                 bool        debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortKeys(d_temp_storage,
+                        temp_storage_bytes,
+                        d_keys_in,
+                        d_keys_out,
+                        num_items,
+                        begin_bit,
+                        end_bit,
+                        stream);
+    }
+
+    template<typename KeyT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortKeys(void*       d_temp_storage,
+                                                 size_t&     temp_storage_bytes,
+                                                 const KeyT* d_keys_in,
+                                                 KeyT*       d_keys_out,
+                                                 NumItemsT   num_items,
+                                                 DecomposerT decomposer,
+                                                 int         begin_bit,
+                                                 int         end_bit,
+                                                 hipStream_t stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeys(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       d_keys_in,
+                                                                       d_keys_out,
+                                                                       num_items,
+                                                                       decomposer,
+                                                                       begin_bit,
+                                                                       end_bit,
+                                                                       stream));
+    }
+
+    template<typename KeyT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortKeys(void*       d_temp_storage,
+                                                 size_t&     temp_storage_bytes,
+                                                 const KeyT* d_keys_in,
+                                                 KeyT*       d_keys_out,
+                                                 NumItemsT   num_items,
+                                                 DecomposerT decomposer,
+                                                 hipStream_t stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeys(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       d_keys_in,
+                                                                       d_keys_out,
+                                                                       num_items,
+                                                                       decomposer,
+                                                                       stream));
+    }
+
+    template<typename KeyT, typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeys(void*               d_temp_storage,
+                                                       size_t&             temp_storage_bytes,
+                                                       DoubleBuffer<KeyT>& d_keys,
+                                                       NumItemsT           num_items,
+                                                       int                 begin_bit = 0,
+                                                       int         end_bit = sizeof(KeyT) * 8,
+                                                       hipStream_t stream  = 0)
+    {
         return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeys(d_temp_storage,
                                                                        temp_storage_bytes,
                                                                        d_keys,
@@ -185,18 +523,74 @@ struct DeviceRadixSort
     }
 
     template<typename KeyT, typename NumItemsT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortKeysDescending(void * d_temp_storage,
-                                  size_t& temp_storage_bytes,
-                                  const KeyT * d_keys_in,
-                                  KeyT * d_keys_out,
-                                  NumItemsT num_items,
-                                  int begin_bit = 0,
-                                  int end_bit = sizeof(KeyT) * 8,
-                                  hipStream_t stream = 0,
-                                  bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortKeys(void*               d_temp_storage,
+                 size_t&             temp_storage_bytes,
+                 DoubleBuffer<KeyT>& d_keys,
+                 NumItemsT           num_items,
+                 int                 begin_bit,
+                 int                 end_bit,
+                 hipStream_t         stream,
+                 bool                debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortKeys(d_temp_storage,
+                        temp_storage_bytes,
+                        d_keys,
+                        num_items,
+                        begin_bit,
+                        end_bit,
+                        stream);
+    }
+
+    template<typename KeyT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortKeys(void*               d_temp_storage,
+                                                 size_t&             temp_storage_bytes,
+                                                 DoubleBuffer<KeyT>& d_keys,
+                                                 NumItemsT           num_items,
+                                                 DecomposerT         decomposer,
+                                                 int                 begin_bit,
+                                                 int                 end_bit,
+                                                 hipStream_t         stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeys(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       d_keys,
+                                                                       num_items,
+                                                                       decomposer,
+                                                                       begin_bit,
+                                                                       end_bit,
+                                                                       stream));
+    }
+
+    template<typename KeyT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortKeys(void*               d_temp_storage,
+                                                 size_t&             temp_storage_bytes,
+                                                 DoubleBuffer<KeyT>& d_keys,
+                                                 NumItemsT           num_items,
+                                                 DecomposerT         decomposer,
+                                                 hipStream_t         stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeys(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       d_keys,
+                                                                       num_items,
+                                                                       decomposer,
+                                                                       stream));
+    }
+
+    template<typename KeyT, typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeysDescending(void*       d_temp_storage,
+                                                                 size_t&     temp_storage_bytes,
+                                                                 const KeyT* d_keys_in,
+                                                                 KeyT*       d_keys_out,
+                                                                 NumItemsT   num_items,
+                                                                 int         begin_bit = 0,
+                                                                 int end_bit = sizeof(KeyT) * 8,
+                                                                 hipStream_t stream = 0)
+    {
         return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeysDescending(d_temp_storage,
                                                                                  temp_storage_bytes,
                                                                                  d_keys_in,
@@ -208,23 +602,144 @@ struct DeviceRadixSort
     }
 
     template<typename KeyT, typename NumItemsT>
-    HIPCUB_RUNTIME_FUNCTION static
-    hipError_t SortKeysDescending(void * d_temp_storage,
-                                  size_t& temp_storage_bytes,
-                                  DoubleBuffer<KeyT>& d_keys,
-                                  NumItemsT num_items,
-                                  int begin_bit = 0,
-                                  int end_bit = sizeof(KeyT) * 8,
-                                  hipStream_t stream = 0,
-                                  bool debug_synchronous = false)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortKeysDescending(void*       d_temp_storage,
+                           size_t&     temp_storage_bytes,
+                           const KeyT* d_keys_in,
+                           KeyT*       d_keys_out,
+                           NumItemsT   num_items,
+                           int         begin_bit,
+                           int         end_bit,
+                           hipStream_t stream,
+                           bool        debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortKeysDescending(d_temp_storage,
+                                  temp_storage_bytes,
+                                  d_keys_in,
+                                  d_keys_out,
+                                  num_items,
+                                  begin_bit,
+                                  end_bit,
+                                  stream);
+    }
+
+    template<typename KeyT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortKeysDescending(void*       d_temp_storage,
+                                                           size_t&     temp_storage_bytes,
+                                                           const KeyT* d_keys_in,
+                                                           KeyT*       d_keys_out,
+                                                           NumItemsT   num_items,
+                                                           DecomposerT decomposer,
+                                                           int         begin_bit,
+                                                           int         end_bit,
+                                                           hipStream_t stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeysDescending(d_temp_storage,
+                                                                                 temp_storage_bytes,
+                                                                                 d_keys_in,
+                                                                                 d_keys_out,
+                                                                                 num_items,
+                                                                                 decomposer,
+                                                                                 begin_bit,
+                                                                                 end_bit,
+                                                                                 stream));
+    }
+
+    template<typename KeyT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortKeysDescending(void*       d_temp_storage,
+                                                           size_t&     temp_storage_bytes,
+                                                           const KeyT* d_keys_in,
+                                                           KeyT*       d_keys_out,
+                                                           NumItemsT   num_items,
+                                                           DecomposerT decomposer,
+                                                           hipStream_t stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeysDescending(d_temp_storage,
+                                                                                 temp_storage_bytes,
+                                                                                 d_keys_in,
+                                                                                 d_keys_out,
+                                                                                 num_items,
+                                                                                 decomposer,
+                                                                                 stream));
+    }
+
+    template<typename KeyT, typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t SortKeysDescending(void*   d_temp_storage,
+                                                                 size_t& temp_storage_bytes,
+                                                                 DoubleBuffer<KeyT>& d_keys,
+                                                                 NumItemsT           num_items,
+                                                                 int                 begin_bit = 0,
+                                                                 int end_bit = sizeof(KeyT) * 8,
+                                                                 hipStream_t stream = 0)
+    {
         return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeysDescending(d_temp_storage,
                                                                                  temp_storage_bytes,
                                                                                  d_keys,
                                                                                  num_items,
                                                                                  begin_bit,
                                                                                  end_bit,
+                                                                                 stream));
+    }
+
+    template<typename KeyT, typename NumItemsT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        SortKeysDescending(void*               d_temp_storage,
+                           size_t&             temp_storage_bytes,
+                           DoubleBuffer<KeyT>& d_keys,
+                           NumItemsT           num_items,
+                           int                 begin_bit,
+                           int                 end_bit,
+                           hipStream_t         stream,
+                           bool                debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return SortKeysDescending(d_temp_storage,
+                                  temp_storage_bytes,
+                                  d_keys,
+                                  num_items,
+                                  begin_bit,
+                                  end_bit,
+                                  stream);
+    }
+
+    template<typename KeyT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortKeysDescending(void*               d_temp_storage,
+                                                           size_t&             temp_storage_bytes,
+                                                           DoubleBuffer<KeyT>& d_keys,
+                                                           NumItemsT           num_items,
+                                                           DecomposerT         decomposer,
+                                                           int                 begin_bit,
+                                                           int                 end_bit,
+                                                           hipStream_t         stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeysDescending(d_temp_storage,
+                                                                                 temp_storage_bytes,
+                                                                                 d_keys,
+                                                                                 num_items,
+                                                                                 decomposer,
+                                                                                 begin_bit,
+                                                                                 end_bit,
+                                                                                 stream));
+    }
+
+    template<typename KeyT, typename NumItemsT, typename DecomposerT>
+    HIPCUB_RUNTIME_FUNCTION static auto SortKeysDescending(void*               d_temp_storage,
+                                                           size_t&             temp_storage_bytes,
+                                                           DoubleBuffer<KeyT>& d_keys,
+                                                           NumItemsT           num_items,
+                                                           DecomposerT         decomposer,
+                                                           hipStream_t         stream = 0)
+        -> std::enable_if_t<!std::is_convertible<DecomposerT, int>::value, hipError_t>
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeysDescending(d_temp_storage,
+                                                                                 temp_storage_bytes,
+                                                                                 d_keys,
+                                                                                 num_items,
+                                                                                 decomposer,
                                                                                  stream));
     }
 };

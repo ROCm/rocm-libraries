@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,23 @@ struct helper_blocked_blocked
         hipcub::BlockRadixSort<T, BlockSize, ItemsPerThread, T> sort;
         sort.Sort(keys, values);
     }
+
+    template<unsigned int BlockSize, class T, unsigned int ItemsPerThread>
+    HIPCUB_DEVICE static void sort(benchmark_utils::custom_type<T> (&keys)[ItemsPerThread])
+    {
+        using custom_t = benchmark_utils::custom_type<T>;
+        hipcub::BlockRadixSort<custom_t, BlockSize, ItemsPerThread> sort;
+        sort.Sort(keys, benchmark_utils::custom_type_decomposer<custom_t>{});
+    }
+
+    template<unsigned int BlockSize, class T, unsigned int ItemsPerThread>
+    HIPCUB_DEVICE static void sort(benchmark_utils::custom_type<T> (&keys)[ItemsPerThread],
+                                   benchmark_utils::custom_type<T> (&values)[ItemsPerThread])
+    {
+        using custom_t = benchmark_utils::custom_type<T>;
+        hipcub::BlockRadixSort<custom_t, BlockSize, ItemsPerThread, custom_t> sort;
+        sort.Sort(keys, values, benchmark_utils::custom_type_decomposer<custom_t>{});
+    }
 };
 
 struct helper_blocked_striped
@@ -84,6 +101,25 @@ struct helper_blocked_striped
         hipcub::BlockRadixSort<T, BlockSize, ItemsPerThread, T> sort;
         sort.SortBlockedToStriped(keys, values);
     }
+
+    template<unsigned int BlockSize, class T, unsigned int ItemsPerThread>
+    HIPCUB_DEVICE static void sort(benchmark_utils::custom_type<T> (&keys)[ItemsPerThread])
+    {
+        using custom_t = benchmark_utils::custom_type<T>;
+        hipcub::BlockRadixSort<custom_t, BlockSize, ItemsPerThread> sort;
+        sort.SortBlockedToStriped(keys, benchmark_utils::custom_type_decomposer<custom_t>{});
+    }
+
+    template<unsigned int BlockSize, class T, unsigned int ItemsPerThread>
+    HIPCUB_DEVICE static void sort(benchmark_utils::custom_type<T> (&keys)[ItemsPerThread],
+                                   benchmark_utils::custom_type<T> (&values)[ItemsPerThread])
+    {
+        using custom_t = benchmark_utils::custom_type<T>;
+        hipcub::BlockRadixSort<custom_t, BlockSize, ItemsPerThread, custom_t> sort;
+        sort.SortBlockedToStriped(keys,
+                                  values,
+                                  benchmark_utils::custom_type_decomposer<custom_t>{});
+    }
 };
 
 template<class Helper,
@@ -93,8 +129,8 @@ template<class Helper,
          unsigned int Trials>
 __global__ __launch_bounds__(BlockSize) void sort_keys_kernel(const T* input, T* output)
 {
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+    const unsigned int lid          = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
     T keys[ItemsPerThread];
     Helper::template load<BlockSize>(lid, input + block_offset, keys);
@@ -115,8 +151,8 @@ template<class Helper,
          unsigned int Trials>
 __global__ __launch_bounds__(BlockSize) void sort_pairs_kernel(const T* input, T* output)
 {
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+    const unsigned int lid          = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
     T keys[ItemsPerThread];
     T values[ItemsPerThread];
@@ -186,25 +222,13 @@ void run_benchmark(benchmark::State& state,
 
         if(benchmark_kind == benchmark_kinds::sort_keys)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(sort_keys_kernel<Helper, T, BlockSize, ItemsPerThread, Trials>),
-                dim3(size / items_per_block),
-                dim3(BlockSize),
-                0,
-                stream,
-                d_input,
-                d_output);
+            sort_keys_kernel<Helper, T, BlockSize, ItemsPerThread, Trials>
+                <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
         }
         else if(benchmark_kind == benchmark_kinds::sort_pairs)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(sort_pairs_kernel<Helper, T, BlockSize, ItemsPerThread, Trials>),
-                dim3(size / items_per_block),
-                dim3(BlockSize),
-                0,
-                stream,
-                d_input,
-                d_output);
+            sort_pairs_kernel<Helper, T, BlockSize, ItemsPerThread, Trials>
+                <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
         }
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
@@ -246,27 +270,24 @@ void add_benchmarks(benchmark_kinds                               benchmark_kind
                     hipStream_t                                   stream,
                     size_t                                        size)
 {
+    using custom_int_t = benchmark_utils::custom_type<int>;
+
     std::vector<benchmark::internal::Benchmark*> bs = {
-        BENCHMARK_TYPE(int, 64),
-        BENCHMARK_TYPE(int, 128),
-        BENCHMARK_TYPE(int, 192),
-        BENCHMARK_TYPE(int, 256),
-        BENCHMARK_TYPE(int, 320),
-        BENCHMARK_TYPE(int, 512),
+        BENCHMARK_TYPE(int, 64),           BENCHMARK_TYPE(int, 128),
+        BENCHMARK_TYPE(int, 192),          BENCHMARK_TYPE(int, 256),
+        BENCHMARK_TYPE(int, 320),          BENCHMARK_TYPE(int, 512),
 
-        BENCHMARK_TYPE(int8_t, 64),
-        BENCHMARK_TYPE(int8_t, 128),
-        BENCHMARK_TYPE(int8_t, 192),
-        BENCHMARK_TYPE(int8_t, 256),
-        BENCHMARK_TYPE(int8_t, 320),
-        BENCHMARK_TYPE(int8_t, 512),
+        BENCHMARK_TYPE(int8_t, 64),        BENCHMARK_TYPE(int8_t, 128),
+        BENCHMARK_TYPE(int8_t, 192),       BENCHMARK_TYPE(int8_t, 256),
+        BENCHMARK_TYPE(int8_t, 320),       BENCHMARK_TYPE(int8_t, 512),
 
-        BENCHMARK_TYPE(long long, 64),
-        BENCHMARK_TYPE(long long, 128),
-        BENCHMARK_TYPE(long long, 192),
-        BENCHMARK_TYPE(long long, 256),
-        BENCHMARK_TYPE(long long, 320),
-        BENCHMARK_TYPE(long long, 512),
+        BENCHMARK_TYPE(long long, 64),     BENCHMARK_TYPE(long long, 128),
+        BENCHMARK_TYPE(long long, 192),    BENCHMARK_TYPE(long long, 256),
+        BENCHMARK_TYPE(long long, 320),    BENCHMARK_TYPE(long long, 512),
+
+        BENCHMARK_TYPE(custom_int_t, 64),  BENCHMARK_TYPE(custom_int_t, 128),
+        BENCHMARK_TYPE(custom_int_t, 192), BENCHMARK_TYPE(custom_int_t, 256),
+        BENCHMARK_TYPE(custom_int_t, 320), BENCHMARK_TYPE(custom_int_t, 512),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());

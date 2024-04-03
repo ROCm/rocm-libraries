@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/warp/warp_store.hpp"
+
+#include <type_traits>
 
 template<
     class T,
@@ -65,70 +67,68 @@ using HipcubWarpStoreTestParams = ::testing::Types<
     Params<int, 64U, ::hipcub::WARP_STORE_TRANSPOSE>
 >;
 
-template<
-    class T,
-    unsigned BlockSize,
-    unsigned ItemsPerThread,
-    unsigned LogicalWarpSize,
-    ::hipcub::WarpStoreAlgorithm Algorithm
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_store_kernel(
-    T* d_input,
-    T* d_output)
+template<unsigned                     BlockSize,
+         unsigned                     ItemsPerThread,
+         unsigned                     LogicalWarpSize,
+         ::hipcub::WarpStoreAlgorithm Algorithm,
+         class T>
+__device__ auto warp_store_test(T* d_input, T* d_output)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     T thread_data[ItemsPerThread];
     for (unsigned i = 0; i < ItemsPerThread; ++i)
     {
-        thread_data[i] = d_input[hipThreadIdx_x * ItemsPerThread + i];
+        thread_data[i] = d_input[threadIdx.x * ItemsPerThread + i];
     }
 
-    using WarpStoreT = ::hipcub::WarpStore<
-        T,
-        ItemsPerThread,
-        Algorithm,
-        ::test_utils::DeviceSelectWarpSize<LogicalWarpSize>::value
-    >;
+    using WarpStoreT = ::hipcub::WarpStore<T, ItemsPerThread, Algorithm, LogicalWarpSize>;
     constexpr unsigned warps_in_block = BlockSize / LogicalWarpSize;
     constexpr int tile_size = ItemsPerThread * LogicalWarpSize;
 
-    const unsigned warp_id = hipThreadIdx_x / LogicalWarpSize;
+    const unsigned                              warp_id = threadIdx.x / LogicalWarpSize;
     __shared__ typename WarpStoreT::TempStorage temp_storage[warps_in_block];
 
     WarpStoreT(temp_storage[warp_id]).Store(d_output + warp_id * tile_size, thread_data);
 }
 
-template<
-    class T,
-    unsigned BlockSize,
-    unsigned ItemsPerThread,
-    unsigned LogicalWarpSize,
-    ::hipcub::WarpStoreAlgorithm Algorithm
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_store_guarded_kernel(
-    T* d_input,
-    T* d_output,
-    int valid_items)
+template<unsigned                     BlockSize,
+         unsigned                     ItemsPerThread,
+         unsigned                     LogicalWarpSize,
+         ::hipcub::WarpStoreAlgorithm Algorithm,
+         class T>
+__device__ auto warp_store_test(T* /*d_input*/, T* /*d_output*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned                     BlockSize,
+         unsigned                     ItemsPerThread,
+         unsigned                     LogicalWarpSize,
+         ::hipcub::WarpStoreAlgorithm Algorithm,
+         class T>
+__global__ __launch_bounds__(BlockSize) void warp_store_kernel(T* d_input, T* d_output)
+{
+    warp_store_test<BlockSize, ItemsPerThread, LogicalWarpSize, Algorithm>(d_input, d_output);
+}
+
+template<unsigned                     BlockSize,
+         unsigned                     ItemsPerThread,
+         unsigned                     LogicalWarpSize,
+         ::hipcub::WarpStoreAlgorithm Algorithm,
+         class T>
+__device__ auto warp_store_guarded_test(T* d_input, T* d_output, int valid_items)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     T thread_data[ItemsPerThread];
     for (unsigned i = 0; i < ItemsPerThread; ++i)
     {
-        thread_data[i] = d_input[hipThreadIdx_x * ItemsPerThread + i];
+        thread_data[i] = d_input[threadIdx.x * ItemsPerThread + i];
     }
 
-    using WarpStoreT = ::hipcub::WarpStore<
-        T,
-        ItemsPerThread,
-        Algorithm,
-        ::test_utils::DeviceSelectWarpSize<LogicalWarpSize>::value
-    >;
+    using WarpStoreT = ::hipcub::WarpStore<T, ItemsPerThread, Algorithm, LogicalWarpSize>;
     constexpr unsigned warps_in_block = BlockSize / LogicalWarpSize;
     constexpr int tile_size = ItemsPerThread * LogicalWarpSize;
 
-    const unsigned warp_id = hipThreadIdx_x / LogicalWarpSize;
+    const unsigned                              warp_id = threadIdx.x / LogicalWarpSize;
     __shared__ typename WarpStoreT::TempStorage temp_storage[warps_in_block];
 
     WarpStoreT(temp_storage[warp_id]).Store(
@@ -136,6 +136,29 @@ void warp_store_guarded_kernel(
         thread_data,
         valid_items
     );
+}
+
+template<unsigned                     BlockSize,
+         unsigned                     ItemsPerThread,
+         unsigned                     LogicalWarpSize,
+         ::hipcub::WarpStoreAlgorithm Algorithm,
+         class T>
+__device__ auto warp_store_guarded_test(T* /*d_input*/, T* /*d_output*/, int /*valid_items*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
+
+template<unsigned                     BlockSize,
+         unsigned                     ItemsPerThread,
+         unsigned                     LogicalWarpSize,
+         ::hipcub::WarpStoreAlgorithm Algorithm,
+         class T>
+__global__ __launch_bounds__(BlockSize) void warp_store_guarded_kernel(T*  d_input,
+                                                                       T*  d_output,
+                                                                       int valid_items)
+{
+    warp_store_guarded_test<BlockSize, ItemsPerThread, LogicalWarpSize, Algorithm>(d_input,
+                                                                                   d_output,
+                                                                                   valid_items);
 }
 
 template<class T>
@@ -179,19 +202,8 @@ TYPED_TEST(HipcubWarpStoreTest, WarpStore)
     T* d_output{};
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, items_count * sizeof(T)));
 
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            warp_store_kernel<
-                T,
-                block_size,
-                items_per_thread,
-                warp_size,
-                algorithm
-            >
-        ),
-        dim3(1), dim3(block_size), 0, 0,
-        d_input, d_output
-    );
+    warp_store_kernel<block_size, items_per_thread, warp_size, algorithm>
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output);
     HIP_CHECK(hipPeekAtLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -236,19 +248,8 @@ TYPED_TEST(HipcubWarpStoreTest, WarpStoreGuarded)
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, items_count * sizeof(T)));
     HIP_CHECK(hipMemset(d_output, 0, items_count * sizeof(T)));
 
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            warp_store_guarded_kernel<
-                T,
-                block_size,
-                items_per_thread,
-                warp_size,
-                algorithm
-            >
-        ),
-        dim3(1), dim3(block_size), 0, 0,
-        d_input, d_output, valid_items
-    );
+    warp_store_guarded_kernel<block_size, items_per_thread, warp_size, algorithm>
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output, valid_items);
     HIP_CHECK(hipPeekAtLastError());
     HIP_CHECK(hipDeviceSynchronize());
 

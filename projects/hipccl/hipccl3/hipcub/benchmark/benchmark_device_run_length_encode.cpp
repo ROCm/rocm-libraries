@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -81,14 +81,14 @@ void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
 
-    HIP_CHECK(
-        hipcub::DeviceRunLengthEncode::Encode(
-            nullptr, temporary_storage_bytes,
-            d_input,
-            d_unique_output, d_counts_output, d_runs_count_output,
-            size, stream, false
-        )
-    );
+    HIP_CHECK(hipcub::DeviceRunLengthEncode::Encode(nullptr,
+                                                    temporary_storage_bytes,
+                                                    d_input,
+                                                    d_unique_output,
+                                                    d_counts_output,
+                                                    d_runs_count_output,
+                                                    size,
+                                                    stream));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
@@ -96,15 +96,14 @@ void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        HIP_CHECK(
-            hipcub::DeviceRunLengthEncode::Encode(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input,
-                d_unique_output, d_counts_output, d_runs_count_output,
-                size,
-                stream, false
-            )
-        );
+        HIP_CHECK(hipcub::DeviceRunLengthEncode::Encode(d_temporary_storage,
+                                                        temporary_storage_bytes,
+                                                        d_input,
+                                                        d_unique_output,
+                                                        d_counts_output,
+                                                        d_runs_count_output,
+                                                        size,
+                                                        stream));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -115,13 +114,14 @@ void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            hipcub::DeviceRunLengthEncode::Encode(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input,
-                d_unique_output, d_counts_output, d_runs_count_output,
-                size,
-                stream, false
-            );
+            hipcub::DeviceRunLengthEncode::Encode(d_temporary_storage,
+                                                  temporary_storage_bytes,
+                                                  d_input,
+                                                  d_unique_output,
+                                                  d_counts_output,
+                                                  d_runs_count_output,
+                                                  size,
+                                                  stream);
         }
         HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -186,14 +186,14 @@ void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
 
-    HIP_CHECK(
-        hipcub::DeviceRunLengthEncode::NonTrivialRuns(
-            nullptr, temporary_storage_bytes,
-            d_input,
-            d_offsets_output, d_counts_output, d_runs_count_output, size,
-            stream, false
-        )
-    );
+    HIP_CHECK(hipcub::DeviceRunLengthEncode::NonTrivialRuns(nullptr,
+                                                            temporary_storage_bytes,
+                                                            d_input,
+                                                            d_offsets_output,
+                                                            d_counts_output,
+                                                            d_runs_count_output,
+                                                            size,
+                                                            stream));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
@@ -201,14 +201,14 @@ void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, 
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        HIP_CHECK(
-            hipcub::DeviceRunLengthEncode::NonTrivialRuns(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input,
-                d_offsets_output, d_counts_output, d_runs_count_output, size,
-                stream, false
-            )
-        );
+        HIP_CHECK(hipcub::DeviceRunLengthEncode::NonTrivialRuns(d_temporary_storage,
+                                                                temporary_storage_bytes,
+                                                                d_input,
+                                                                d_offsets_output,
+                                                                d_counts_output,
+                                                                d_runs_count_output,
+                                                                size,
+                                                                stream));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -219,12 +219,14 @@ void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, 
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            hipcub::DeviceRunLengthEncode::NonTrivialRuns(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input,
-                d_offsets_output, d_counts_output, d_runs_count_output, size,
-                stream, false
-            );
+            hipcub::DeviceRunLengthEncode::NonTrivialRuns(d_temporary_storage,
+                                                          temporary_storage_bytes,
+                                                          d_input,
+                                                          d_offsets_output,
+                                                          d_counts_output,
+                                                          d_runs_count_output,
+                                                          size,
+                                                          stream);
         }
         HIP_CHECK(hipStreamSynchronize(stream));
 

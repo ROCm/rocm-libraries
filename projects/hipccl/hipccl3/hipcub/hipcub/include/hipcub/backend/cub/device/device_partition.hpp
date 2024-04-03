@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,6 +31,7 @@
 #define HIPCUB_CUB_DEVICE_DEVICE_PARTITION_HPP_
 
 #include "../../../config.hpp"
+#include "../../../util_deprecated.hpp"
 
 #include <cub/device/device_partition.cuh>
 
@@ -38,24 +39,19 @@ BEGIN_HIPCUB_NAMESPACE
 
 struct DevicePartition
 {
-    template <
-        typename                    InputIteratorT,
-        typename                    FlagIterator,
-        typename                    OutputIteratorT,
-        typename                    NumSelectedIteratorT>
-    HIPCUB_RUNTIME_FUNCTION __forceinline__
-    static hipError_t Flagged(
-        void*               d_temp_storage,                ///< [in] %Device-accessible allocation of temporary storage.  When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
-        size_t                      &temp_storage_bytes,            ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
-        InputIteratorT              d_in,                           ///< [in] Pointer to the input sequence of data items
-        FlagIterator                d_flags,                        ///< [in] Pointer to the input sequence of selection flags
-        OutputIteratorT             d_out,                          ///< [out] Pointer to the output sequence of partitioned data items
-        NumSelectedIteratorT        d_num_selected_out,             ///< [out] Pointer to the output total number of items selected (i.e., the offset of the unselected partition)
-        int                         num_items,                      ///< [in] Total number of items to select from
-        hipStream_t                 stream             = 0,         ///< [in] <b>[optional]</b> hip stream to launch kernels within.  Default is stream<sub>0</sub>.
-        bool                        debug_synchronous  = false)     ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  May cause significant slowdown.  Default is \p false.
+    template<typename InputIteratorT,
+             typename FlagIterator,
+             typename OutputIteratorT,
+             typename NumSelectedIteratorT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t Flagged(void*                d_temp_storage,
+                                                      size_t&              temp_storage_bytes,
+                                                      InputIteratorT       d_in,
+                                                      FlagIterator         d_flags,
+                                                      OutputIteratorT      d_out,
+                                                      NumSelectedIteratorT d_num_selected_out,
+                                                      int                  num_items,
+                                                      hipStream_t          stream = 0)
     {
-        (void)debug_synchronous;
         return hipCUDAErrorTohipError(::cub::DevicePartition::Flagged(d_temp_storage,
                                                                       temp_storage_bytes,
                                                                       d_in,
@@ -66,24 +62,45 @@ struct DevicePartition
                                                                       stream));
     }
 
-    template <
-        typename                    InputIteratorT,
-        typename                    OutputIteratorT,
-        typename                    NumSelectedIteratorT,
-        typename                    SelectOp>
-    HIPCUB_RUNTIME_FUNCTION __forceinline__
-    static hipError_t If(
-        void*               d_temp_storage,                ///< [in] %Device-accessible allocation of temporary storage.  When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
-        size_t                      &temp_storage_bytes,            ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
-        InputIteratorT              d_in,                           ///< [in] Pointer to the input sequence of data items
-        OutputIteratorT             d_out,                          ///< [out] Pointer to the output sequence of partitioned data items
-        NumSelectedIteratorT        d_num_selected_out,             ///< [out] Pointer to the output total number of items selected (i.e., the offset of the unselected partition)
-        int                         num_items,                      ///< [in] Total number of items to select from
-        SelectOp                    select_op,                      ///< [in] Unary selection operator
-        hipStream_t                 stream             = 0,         ///< [in] <b>[optional]</b> hip stream to launch kernels within.  Default is stream<sub>0</sub>.
-        bool                        debug_synchronous  = false)     ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  May cause significant slowdown.  Default is \p false.
+    template<typename InputIteratorT,
+             typename FlagIterator,
+             typename OutputIteratorT,
+             typename NumSelectedIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        Flagged(void*                d_temp_storage,
+                size_t&              temp_storage_bytes,
+                InputIteratorT       d_in,
+                FlagIterator         d_flags,
+                OutputIteratorT      d_out,
+                NumSelectedIteratorT d_num_selected_out,
+                int                  num_items,
+                hipStream_t          stream,
+                bool                 debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return Flagged(d_temp_storage,
+                       temp_storage_bytes,
+                       d_in,
+                       d_flags,
+                       d_out,
+                       d_num_selected_out,
+                       num_items,
+                       stream);
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumSelectedIteratorT,
+             typename SelectOp>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t If(void*                d_temp_storage,
+                                                 size_t&              temp_storage_bytes,
+                                                 InputIteratorT       d_in,
+                                                 OutputIteratorT      d_out,
+                                                 NumSelectedIteratorT d_num_selected_out,
+                                                 int                  num_items,
+                                                 SelectOp             select_op,
+                                                 hipStream_t          stream = 0)
+    {
         return hipCUDAErrorTohipError(::cub::DevicePartition::If(d_temp_storage,
                                                                  temp_storage_bytes,
                                                                  d_in,
@@ -94,28 +111,51 @@ struct DevicePartition
                                                                  stream));
     }
 
-    template <typename InputIteratorT,
-              typename FirstOutputIteratorT,
-              typename SecondOutputIteratorT,
-              typename UnselectedOutputIteratorT,
-              typename NumSelectedIteratorT,
-              typename SelectFirstPartOp,
-              typename SelectSecondPartOp>
-    HIPCUB_RUNTIME_FUNCTION __forceinline__ static hipError_t
-    If(void *d_temp_storage,
-       std::size_t &temp_storage_bytes,
-       InputIteratorT d_in,
-       FirstOutputIteratorT d_first_part_out,
-       SecondOutputIteratorT d_second_part_out,
-       UnselectedOutputIteratorT d_unselected_out,
-       NumSelectedIteratorT d_num_selected_out,
-       int num_items,
-       SelectFirstPartOp select_first_part_op,
-       SelectSecondPartOp select_second_part_op,
-       hipStream_t stream     = 0,
-       bool debug_synchronous = false)
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename NumSelectedIteratorT,
+             typename SelectOp>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        If(void*                d_temp_storage,
+           size_t&              temp_storage_bytes,
+           InputIteratorT       d_in,
+           OutputIteratorT      d_out,
+           NumSelectedIteratorT d_num_selected_out,
+           int                  num_items,
+           SelectOp             select_op,
+           hipStream_t          stream,
+           bool                 debug_synchronous)
     {
-        (void)debug_synchronous;
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return If(d_temp_storage,
+                  temp_storage_bytes,
+                  d_in,
+                  d_out,
+                  d_num_selected_out,
+                  num_items,
+                  select_op,
+                  stream);
+    }
+
+    template<typename InputIteratorT,
+             typename FirstOutputIteratorT,
+             typename SecondOutputIteratorT,
+             typename UnselectedOutputIteratorT,
+             typename NumSelectedIteratorT,
+             typename SelectFirstPartOp,
+             typename SelectSecondPartOp>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t If(void*                     d_temp_storage,
+                                                 std::size_t&              temp_storage_bytes,
+                                                 InputIteratorT            d_in,
+                                                 FirstOutputIteratorT      d_first_part_out,
+                                                 SecondOutputIteratorT     d_second_part_out,
+                                                 UnselectedOutputIteratorT d_unselected_out,
+                                                 NumSelectedIteratorT      d_num_selected_out,
+                                                 int                       num_items,
+                                                 SelectFirstPartOp         select_first_part_op,
+                                                 SelectSecondPartOp        select_second_part_op,
+                                                 hipStream_t               stream = 0)
+    {
         return hipCUDAErrorTohipError(::cub::DevicePartition::If(d_temp_storage,
                                                                  temp_storage_bytes,
                                                                  d_in,
@@ -127,6 +167,41 @@ struct DevicePartition
                                                                  select_first_part_op,
                                                                  select_second_part_op,
                                                                  stream));
+    }
+
+    template<typename InputIteratorT,
+             typename FirstOutputIteratorT,
+             typename SecondOutputIteratorT,
+             typename UnselectedOutputIteratorT,
+             typename NumSelectedIteratorT,
+             typename SelectFirstPartOp,
+             typename SelectSecondPartOp>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
+        If(void*                     d_temp_storage,
+           std::size_t&              temp_storage_bytes,
+           InputIteratorT            d_in,
+           FirstOutputIteratorT      d_first_part_out,
+           SecondOutputIteratorT     d_second_part_out,
+           UnselectedOutputIteratorT d_unselected_out,
+           NumSelectedIteratorT      d_num_selected_out,
+           int                       num_items,
+           SelectFirstPartOp         select_first_part_op,
+           SelectSecondPartOp        select_second_part_op,
+           hipStream_t               stream,
+           bool                      debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return If(d_temp_storage,
+                  temp_storage_bytes,
+                  d_in,
+                  d_first_part_out,
+                  d_second_part_out,
+                  d_unselected_out,
+                  d_num_selected_out,
+                  num_items,
+                  select_first_part_op,
+                  select_second_part_op,
+                  stream);
     }
 };
 

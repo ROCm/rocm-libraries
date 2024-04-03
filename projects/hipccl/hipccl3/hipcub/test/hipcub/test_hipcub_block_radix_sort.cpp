@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,11 +23,13 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_radix_sort.hpp"
 #include "hipcub/block/block_load.hpp"
+#include "hipcub/block/block_radix_sort.hpp"
 #include "hipcub/block/block_store.hpp"
+#include "test_utils_custom_test_types.hpp"
+#include "test_utils_sort_comparator.hpp"
 
-
+#include <cstdint>
 
 template<
     class Key,
@@ -96,51 +98,197 @@ typedef ::testing::Types<
     // Stability (a number of key values is lower than BlockSize * ItemsPerThread: some keys appear
     // multiple times with different values or key parts outside [StartBit, EndBit))
     params<unsigned char, int, 512U, 2, false, true>,
-    params<unsigned short, double, 60U, 1, true, false, 8, 11>>
+    params<unsigned short, double, 60U, 1, true, false, 8, 11>,
+
+    // Sorting keys of a custom type with a custom decomposer
+    params<test_utils::custom_test_type<int16_t>, int, 128, 4>,
+    params<test_utils::custom_test_type<float>, int, 129, 2, true, false>,
+    params<test_utils::custom_test_type<uint8_t>, float, 255, 1, false, true, 1, 12>>
     Params;
 
 TYPED_TEST_SUITE(HipcubBlockRadixSort, Params);
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class key_type
->
-__global__
-__launch_bounds__(BlockSize)
-void sort_key_kernel(
-    key_type* device_keys_output,
-    bool to_striped,
-    bool descending,
-    unsigned int start_bit,
-    unsigned int end_bit)
+template<bool Striped, bool Descending>
+struct SortDispatch;
+
+template<>
+struct SortDispatch<false, false>
+{
+    template<class BlockSort, class... Args>
+    __device__ static void sort(BlockSort&& block_sort, Args&&... args)
+    {
+        block_sort.Sort(std::forward<Args>(args)...);
+    }
+};
+
+template<>
+struct SortDispatch<false, true>
+{
+    template<class BlockSort, class... Args>
+    __device__ static void sort(BlockSort&& block_sort, Args&&... args)
+    {
+        block_sort.SortDescending(std::forward<Args>(args)...);
+    }
+};
+
+template<>
+struct SortDispatch<true, false>
+{
+    template<class BlockSort, class... Args>
+    __device__ static void sort(BlockSort&& block_sort, Args&&... args)
+    {
+        block_sort.SortBlockedToStriped(std::forward<Args>(args)...);
+    }
+};
+
+template<>
+struct SortDispatch<true, true>
+{
+    template<class BlockSort, class... Args>
+    __device__ static void sort(BlockSort&& block_sort, Args&&... args)
+    {
+        block_sort.SortDescendingBlockedToStriped(std::forward<Args>(args)...);
+    }
+};
+
+template<unsigned int BlockSize, unsigned int ItemsPerThread, bool Striped, bool Descending>
+struct SortOp
+{
+    using dispatch_t = SortDispatch<Striped, Descending>;
+
+    template<class Key>
+    __device__ void operator()(Key (&keys)[ItemsPerThread], int start_bit, int end_bit) const
+    {
+        hipcub::BlockRadixSort<Key, BlockSize, ItemsPerThread> block_sort;
+        if(start_bit == 0 && end_bit == sizeof(Key) * 8)
+        {
+            dispatch_t::sort(block_sort, keys);
+        } else
+        {
+            dispatch_t::sort(block_sort, keys, start_bit, end_bit);
+        }
+    }
+
+    template<class InnerT>
+    __device__ void operator()(test_utils::custom_test_type<InnerT> (&keys)[ItemsPerThread],
+                               int start_bit,
+                               int end_bit) const
+    {
+        using custom_test_t = test_utils::custom_test_type<InnerT>;
+        hipcub::BlockRadixSort<custom_test_t, BlockSize, ItemsPerThread> block_sort;
+        test_utils::custom_test_type_decomposer<custom_test_t>           decomposer;
+        if(start_bit == 0 && end_bit == sizeof(custom_test_t) * 8)
+        {
+            dispatch_t::sort(block_sort, keys, decomposer);
+        } else
+        {
+            dispatch_t::sort(block_sort, keys, decomposer, start_bit, end_bit);
+        }
+    }
+
+    template<class Key, class Value>
+    __device__ void operator()(Key (&keys)[ItemsPerThread],
+                               Value (&values)[ItemsPerThread],
+                               int start_bit,
+                               int end_bit) const
+    {
+        hipcub::BlockRadixSort<Key, BlockSize, ItemsPerThread, Value> block_sort;
+        if(start_bit == 0 && end_bit == sizeof(Key) * 8)
+        {
+            dispatch_t::sort(block_sort, keys, values);
+        } else
+        {
+            dispatch_t::sort(block_sort, keys, values, start_bit, end_bit);
+        }
+    }
+
+    template<class InnerT, class Value>
+    __device__ void operator()(test_utils::custom_test_type<InnerT> (&keys)[ItemsPerThread],
+                               Value (&values)[ItemsPerThread],
+                               int start_bit,
+                               int end_bit) const
+    {
+        using custom_test_t = test_utils::custom_test_type<InnerT>;
+        hipcub::BlockRadixSort<custom_test_t, BlockSize, ItemsPerThread, Value> block_sort;
+        test_utils::custom_test_type_decomposer<custom_test_t>                  decomposer;
+        if(start_bit == 0 && end_bit == sizeof(custom_test_t) * 8)
+        {
+            dispatch_t::sort(block_sort, keys, values, decomposer);
+        } else
+        {
+            dispatch_t::sort(block_sort, keys, values, decomposer, start_bit, end_bit);
+        }
+    }
+};
+
+template<unsigned int BlockSize, unsigned int ItemsPerThread, bool Striped>
+struct StoreOp;
+
+template<unsigned int BlockSize, unsigned int ItemsPerThread>
+struct StoreOp<BlockSize, ItemsPerThread, false>
+{
+    static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+
+    template<class Key>
+    __device__ void operator()(Key (&keys)[ItemsPerThread], Key* keys_output) const
+    {
+        const unsigned int block_offset = blockIdx.x * items_per_block;
+        hipcub::StoreDirectBlocked(threadIdx.x, keys_output + block_offset, keys);
+    }
+
+    template<class Key, class Value>
+    __device__ void operator()(Key (&keys)[ItemsPerThread],
+                               Value (&values)[ItemsPerThread],
+                               Key*   keys_output,
+                               Value* values_output) const
+    {
+        const unsigned int block_offset = blockIdx.x * items_per_block;
+        hipcub::StoreDirectBlocked(threadIdx.x, keys_output + block_offset, keys);
+        hipcub::StoreDirectBlocked(threadIdx.x, values_output + block_offset, values);
+    }
+};
+
+template<unsigned int BlockSize, unsigned int ItemsPerThread>
+struct StoreOp<BlockSize, ItemsPerThread, true>
+{
+    static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+
+    template<class Key>
+    __device__ void operator()(Key (&keys)[ItemsPerThread], Key* keys_output) const
+    {
+        const unsigned int block_offset = blockIdx.x * items_per_block;
+        hipcub::StoreDirectStriped<BlockSize>(threadIdx.x, keys_output + block_offset, keys);
+    }
+
+    template<class Key, class Value>
+    __device__ void operator()(Key (&keys)[ItemsPerThread],
+                               Value (&values)[ItemsPerThread],
+                               Key*   keys_output,
+                               Value* values_output) const
+    {
+        const unsigned int block_offset = blockIdx.x * items_per_block;
+        hipcub::StoreDirectStriped<BlockSize>(threadIdx.x, keys_output + block_offset, keys);
+        hipcub::StoreDirectStriped<BlockSize>(threadIdx.x, values_output + block_offset, values);
+    }
+};
+
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         bool         Striped,
+         bool         Descending,
+         class key_type>
+__global__ __launch_bounds__(BlockSize) void sort_key_kernel(key_type*    device_keys_output,
+                                                             unsigned int start_bit,
+                                                             unsigned int end_bit)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
+    const unsigned int     block_offset    = blockIdx.x * items_per_block;
 
     key_type keys[ItemsPerThread];
-    hipcub::LoadDirectBlocked(lid, device_keys_output + block_offset, keys);
+    hipcub::LoadDirectBlocked(threadIdx.x, device_keys_output + block_offset, keys);
 
-    hipcub::BlockRadixSort<key_type, BlockSize, ItemsPerThread> bsort;
-    if(to_striped)
-    {
-        if(descending)
-            bsort.SortDescendingBlockedToStriped(keys, start_bit, end_bit);
-        else
-            bsort.SortBlockedToStriped(keys, start_bit, end_bit);
-
-        hipcub::StoreDirectStriped<BlockSize>(lid, device_keys_output + block_offset, keys);
-    }
-    else
-    {
-        if(descending)
-            bsort.SortDescending(keys, start_bit, end_bit);
-        else
-            bsort.Sort(keys, start_bit, end_bit);
-
-        hipcub::StoreDirectBlocked(lid, device_keys_output + block_offset, keys);
-    }
+    SortOp<BlockSize, ItemsPerThread, Striped, Descending>{}(keys, start_bit, end_bit);
+    StoreOp<BlockSize, ItemsPerThread, Striped>{}(keys, device_keys_output);
 }
 
 TYPED_TEST(HipcubBlockRadixSort, SortKeys)
@@ -173,22 +321,22 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
 
         // Generate data
         std::vector<key_type> keys_output;
+        using limits_t = typename test_utils::inner_type<key_type>::type;
         if(test_utils::is_floating_point<key_type>::value)
         {
             keys_output = test_utils::get_random_data<key_type>(
                 size,
-                test_utils::convert_to_device<key_type>(-1000),
-                test_utils::convert_to_device<key_type>(+1000),
+                test_utils::convert_to_device<limits_t>(-1000),
+                test_utils::convert_to_device<limits_t>(+1000),
                 seed_value);
         }
         else
         {
-            keys_output = test_utils::get_random_data<key_type>(
-                size,
-                std::numeric_limits<key_type>::min(),
-                std::numeric_limits<key_type>::max(),
-                seed_value
-            );
+            keys_output
+                = test_utils::get_random_data<key_type>(size,
+                                                        std::numeric_limits<limits_t>::min(),
+                                                        std::numeric_limits<limits_t>::max(),
+                                                        seed_value);
         }
 
         // Calculate expected results on host
@@ -215,11 +363,8 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
         );
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(sort_key_kernel<block_size, items_per_thread, key_type>),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_keys_output, to_striped, descending, start_bit, end_bit
-        );
+        sort_key_kernel<block_size, items_per_thread, to_striped, descending>
+            <<<dim3(grid_size), dim3(block_size), 0, 0>>>(device_keys_output, start_bit, end_bit);
 
         // Getting results to host
         HIP_CHECK(
@@ -234,61 +379,40 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
         for(size_t i = 0; i < size; i++)
         {
             ASSERT_EQ(test_utils::convert_to_native(keys_output[i]),
-                      test_utils::convert_to_native(expected[i]));
+                      test_utils::convert_to_native(expected[i]))
+                << "at index: " << i;
         }
 
         HIP_CHECK(hipFree(device_keys_output));
     }
 }
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class key_type,
-    class value_type
->
-__global__
-__launch_bounds__(BlockSize)
-void sort_key_value_kernel(
-    key_type* device_keys_output,
-    value_type* device_values_output,
-    bool to_striped,
-    bool descending,
-    unsigned int start_bit,
-    unsigned int end_bit)
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         bool         Striped,
+         bool         Descending,
+         class key_type,
+         class value_type>
+__global__ __launch_bounds__(BlockSize) void sort_key_value_kernel(key_type*   device_keys_output,
+                                                                   value_type* device_values_output,
+                                                                   unsigned int start_bit,
+                                                                   unsigned int end_bit)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
+    const unsigned int     lid             = threadIdx.x;
+    const unsigned int     block_offset    = blockIdx.x * items_per_block;
 
     key_type keys[ItemsPerThread];
     value_type values[ItemsPerThread];
     hipcub::LoadDirectBlocked(lid, device_keys_output + block_offset, keys);
     hipcub::LoadDirectBlocked(lid, device_values_output + block_offset, values);
 
-    hipcub::BlockRadixSort<key_type, BlockSize, ItemsPerThread, value_type> bsort;
-    if(to_striped)
-    {
-        if(descending)
-            bsort.SortDescendingBlockedToStriped(keys, values, start_bit, end_bit);
-        else
-            bsort.SortBlockedToStriped(keys, values, start_bit, end_bit);
-
-        hipcub::StoreDirectStriped<BlockSize>(lid, device_keys_output + block_offset, keys);
-        hipcub::StoreDirectStriped<BlockSize>(lid, device_values_output + block_offset, values);
-    }
-    else
-    {
-        if(descending)
-            bsort.SortDescending(keys, values, start_bit, end_bit);
-        else
-            bsort.Sort(keys, values, start_bit, end_bit);
-
-        hipcub::StoreDirectBlocked(lid, device_keys_output + block_offset, keys);
-        hipcub::StoreDirectBlocked(lid, device_values_output + block_offset, values);
-    }
+    SortOp<BlockSize, ItemsPerThread, Striped, Descending>{}(keys, values, start_bit, end_bit);
+    StoreOp<BlockSize, ItemsPerThread, Striped>{}(keys,
+                                                  values,
+                                                  device_keys_output,
+                                                  device_values_output);
 }
-
 
 TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
 {
@@ -321,22 +445,22 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
 
         // Generate data
         std::vector<key_type> keys_output;
+        using limits_t = typename test_utils::inner_type<key_type>::type;
         if(test_utils::is_floating_point<key_type>::value)
         {
             keys_output = test_utils::get_random_data<key_type>(
                 size,
-                test_utils::convert_to_device<key_type>(-1000),
-                test_utils::convert_to_device<key_type>(+1000),
+                test_utils::convert_to_device<limits_t>(-1000),
+                test_utils::convert_to_device<limits_t>(+1000),
                 seed_value);
         }
         else
         {
-            keys_output = test_utils::get_random_data<key_type>(
-                size,
-                std::numeric_limits<key_type>::min(),
-                std::numeric_limits<key_type>::max(),
-                seed_value
-            );
+            keys_output
+                = test_utils::get_random_data<key_type>(size,
+                                                        std::numeric_limits<limits_t>::min(),
+                                                        std::numeric_limits<limits_t>::max(),
+                                                        seed_value);
         }
 
         std::vector<value_type> values_output;
@@ -398,11 +522,11 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
         );
 
         // Running kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(sort_key_value_kernel<block_size, items_per_thread, key_type, value_type>),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_keys_output, device_values_output, to_striped, descending, start_bit, end_bit
-        );
+        sort_key_value_kernel<block_size, items_per_thread, to_striped, descending>
+            <<<dim3(grid_size), dim3(block_size), 0, 0>>>(device_keys_output,
+                                                          device_values_output,
+                                                          start_bit,
+                                                          end_bit);
 
         // Getting results to host
         HIP_CHECK(
@@ -424,9 +548,11 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
         for(size_t i = 0; i < size; i++)
         {
             ASSERT_EQ(test_utils::convert_to_native(keys_output[i]),
-                      test_utils::convert_to_native(expected[i].first));
+                      test_utils::convert_to_native(expected[i].first))
+                << "at index: " << i;
             ASSERT_EQ(test_utils::convert_to_native(values_output[i]),
-                      test_utils::convert_to_native(expected[i].second));
+                      test_utils::convert_to_native(expected[i].second))
+                << "at index: " << i;
         }
 
         HIP_CHECK(hipFree(device_keys_output));

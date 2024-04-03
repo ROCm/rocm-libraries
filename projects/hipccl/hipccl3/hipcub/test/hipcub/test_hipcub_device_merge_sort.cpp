@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -88,8 +88,6 @@ TYPED_TEST(HipcubDeviceMergeSort, SortKeys)
 
     hipStream_t stream = 0;
 
-    const bool debug_synchronous = false;
-
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size: sizes)
     {
@@ -134,8 +132,7 @@ TYPED_TEST(HipcubDeviceMergeSort, SortKeys)
                                                         d_keys_input,
                                                         size,
                                                         compare_function(),
-                                                        stream,
-                                                        debug_synchronous));
+                                                        stream));
 
             HIP_CHECK(hipFree(d_temporary_storage));
 
@@ -165,8 +162,6 @@ TYPED_TEST(HipcubDeviceMergeSort, SortKeysCopy)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size: sizes)
@@ -216,8 +211,7 @@ TYPED_TEST(HipcubDeviceMergeSort, SortKeysCopy)
                                                             d_keys_output,
                                                             size,
                                                             compare_function(),
-                                                            stream,
-                                                            debug_synchronous));
+                                                            stream));
 
             HIP_CHECK(hipFree(d_temporary_storage));
             HIP_CHECK(hipFree(d_keys_input));
@@ -248,8 +242,6 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortKeys)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size: sizes)
@@ -295,8 +287,7 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortKeys)
                                                         d_keys_input,
                                                         size,
                                                         compare_function(),
-                                                        stream,
-                                                        debug_synchronous));
+                                                        stream));
 
             HIP_CHECK(hipFree(d_temporary_storage));
 
@@ -326,7 +317,6 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortKeysCopy)
     using key_type                   = typename TestFixture::params::key_type;
     using compare_function           = typename TestFixture::params::compare_function;
     constexpr bool check_huge_sizes  = TestFixture::params::check_huge_sizes;
-    constexpr bool debug_synchronous = false;
 
     hipStream_t stream = hipStreamDefault;
 
@@ -379,8 +369,7 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortKeysCopy)
                                                                   d_keys_output,
                                                                   size,
                                                                   compare_function(),
-                                                                  stream,
-                                                                  debug_synchronous));
+                                                                  stream));
             HIP_CHECK(hipFree(d_temporary_storage));
             HIP_CHECK(hipFree(d_keys_input));
 
@@ -413,8 +402,6 @@ TYPED_TEST(HipcubDeviceMergeSort, SortPairs)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size: sizes)
@@ -481,8 +468,7 @@ TYPED_TEST(HipcubDeviceMergeSort, SortPairs)
                                                          d_values_input,
                                                          size,
                                                          compare_op,
-                                                         stream,
-                                                         debug_synchronous));
+                                                         stream));
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
@@ -495,8 +481,7 @@ TYPED_TEST(HipcubDeviceMergeSort, SortPairs)
                                                          d_values_input,
                                                          size,
                                                          compare_op,
-                                                         stream,
-                                                         debug_synchronous));
+                                                         stream));
 
             HIP_CHECK(hipFree(d_temporary_storage));
 
@@ -541,8 +526,6 @@ TYPED_TEST(HipcubDeviceMergeSort, SortPairsCopy)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size: sizes)
@@ -624,8 +607,7 @@ TYPED_TEST(HipcubDeviceMergeSort, SortPairsCopy)
                                                              d_values_output,
                                                              size,
                                                              compare_op,
-                                                             stream,
-                                                             debug_synchronous));
+                                                             stream));
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
@@ -640,8 +622,7 @@ TYPED_TEST(HipcubDeviceMergeSort, SortPairsCopy)
                                                              d_values_output,
                                                              size,
                                                              compare_op,
-                                                             stream,
-                                                             debug_synchronous));
+                                                             stream));
 
             HIP_CHECK(hipFree(d_temporary_storage));
             HIP_CHECK(hipFree(d_keys_input));
@@ -680,8 +661,6 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortPairs)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-
-    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size: sizes)
@@ -742,13 +721,12 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortPairs)
             void * d_temporary_storage     = nullptr;
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(hipcub::DeviceMergeSort::StableSortPairs(d_temporary_storage,
-                                                         temporary_storage_bytes,
-                                                         d_keys_input,
-                                                         d_values_input,
-                                                         size,
-                                                         compare_op,
-                                                         stream,
-                                                         debug_synchronous));
+                                                               temporary_storage_bytes,
+                                                               d_keys_input,
+                                                               d_values_input,
+                                                               size,
+                                                               compare_op,
+                                                               stream));
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
@@ -756,13 +734,12 @@ TYPED_TEST(HipcubDeviceMergeSort, StableSortPairs)
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             HIP_CHECK(hipcub::DeviceMergeSort::StableSortPairs(d_temporary_storage,
-                                                         temporary_storage_bytes,
-                                                         d_keys_input,
-                                                         d_values_input,
-                                                         size,
-                                                         compare_op,
-                                                         stream,
-                                                         debug_synchronous));
+                                                               temporary_storage_bytes,
+                                                               d_keys_input,
+                                                               d_values_input,
+                                                               size,
+                                                               compare_op,
+                                                               stream));
 
             HIP_CHECK(hipFree(d_temporary_storage));
 
