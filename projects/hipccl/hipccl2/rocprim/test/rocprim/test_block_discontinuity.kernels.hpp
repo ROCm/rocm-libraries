@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -75,17 +75,18 @@ void flag_heads_kernel(Type* device_input, long long* device_heads)
     Type input[ItemsPerThread];
     rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
 
-    rocprim::block_discontinuity<Type, BlockSize> bdiscontinuity;
+    rocprim::block_discontinuity<Type, BlockSize>              bdiscontinuity;
+    __shared__ typename decltype(bdiscontinuity)::storage_type storage;
 
     FlagType head_flags[ItemsPerThread];
     if(blockIdx.x % 2 == 1)
     {
         const Type tile_predecessor_item = device_input[block_offset - 1];
-        bdiscontinuity.flag_heads(head_flags, tile_predecessor_item, input, FlagOpType());
+        bdiscontinuity.flag_heads(head_flags, tile_predecessor_item, input, FlagOpType(), storage);
     }
     else
     {
-        bdiscontinuity.flag_heads(head_flags, input, FlagOpType());
+        bdiscontinuity.flag_heads(head_flags, input, FlagOpType(), storage);
     }
 
     rocprim::block_store_direct_blocked(lid, device_heads + block_offset, head_flags);
@@ -109,17 +110,18 @@ void flag_tails_kernel(Type* device_input, long long* device_tails)
     Type input[ItemsPerThread];
     rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
 
-    rocprim::block_discontinuity<Type, BlockSize> bdiscontinuity;
+    rocprim::block_discontinuity<Type, BlockSize>              bdiscontinuity;
+    __shared__ typename decltype(bdiscontinuity)::storage_type storage;
 
     FlagType tail_flags[ItemsPerThread];
     if(blockIdx.x % 2 == 0)
     {
         const Type tile_successor_item = device_input[block_offset + items_per_block];
-        bdiscontinuity.flag_tails(tail_flags, tile_successor_item, input, FlagOpType());
+        bdiscontinuity.flag_tails(tail_flags, tile_successor_item, input, FlagOpType(), storage);
     }
     else
     {
-        bdiscontinuity.flag_tails(tail_flags, input, FlagOpType());
+        bdiscontinuity.flag_tails(tail_flags, input, FlagOpType(), storage);
     }
 
     rocprim::block_store_direct_blocked(lid, device_tails + block_offset, tail_flags);
@@ -143,29 +145,46 @@ void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, lo
     Type input[ItemsPerThread];
     rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
 
-    rocprim::block_discontinuity<Type, BlockSize> bdiscontinuity;
+    rocprim::block_discontinuity<Type, BlockSize>              bdiscontinuity;
+    __shared__ typename decltype(bdiscontinuity)::storage_type storage;
 
     FlagType head_flags[ItemsPerThread];
     FlagType tail_flags[ItemsPerThread];
     if(blockIdx.x % 4 == 0)
     {
         const Type tile_successor_item = device_input[block_offset + items_per_block];
-        bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, tile_successor_item, input, FlagOpType());
+        bdiscontinuity.flag_heads_and_tails(head_flags,
+                                            tail_flags,
+                                            tile_successor_item,
+                                            input,
+                                            FlagOpType(),
+                                            storage);
     }
     else if(blockIdx.x % 4 == 1)
     {
         const Type tile_predecessor_item = device_input[block_offset - 1];
-        const Type tile_successor_item = device_input[block_offset + items_per_block];
-        bdiscontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, tile_successor_item, input, FlagOpType());
+        const Type tile_successor_item   = device_input[block_offset + items_per_block];
+        bdiscontinuity.flag_heads_and_tails(head_flags,
+                                            tile_predecessor_item,
+                                            tail_flags,
+                                            tile_successor_item,
+                                            input,
+                                            FlagOpType(),
+                                            storage);
     }
     else if(blockIdx.x % 4 == 2)
     {
         const Type tile_predecessor_item = device_input[block_offset - 1];
-        bdiscontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, input, FlagOpType());
+        bdiscontinuity.flag_heads_and_tails(head_flags,
+                                            tile_predecessor_item,
+                                            tail_flags,
+                                            input,
+                                            FlagOpType(),
+                                            storage);
     }
     else if(blockIdx.x % 4 == 3)
     {
-        bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, input, FlagOpType());
+        bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, input, FlagOpType(), storage);
     }
 
     rocprim::block_store_direct_blocked(lid, device_heads + block_offset, head_flags);
@@ -185,11 +204,15 @@ auto test_block_discontinuity()
 {
     using type = Type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
+    // rocprim::half/rocprim::bfloat16 are special cases that cannot be compared '=='
+    // in ASSERT_EQ
     using stored_flag_type = typename std::conditional<
-                               std::is_same<bool, FlagType>::value,
-                               int,
-                               FlagType
-                           >::type;
+        std::is_same<bool, FlagType>::value,
+        int,
+        typename std::conditional<std::is_same<rocprim::half, FlagType>::value
+                                      || std::is_same<rocprim::bfloat16, FlagType>::value,
+                                  float,
+                                  FlagType>::type>::type;
     using flag_type = FlagType;
     using flag_op_type = FlagOpType;
     static constexpr size_t block_size = BlockSize;
@@ -223,9 +246,8 @@ auto test_block_discontinuity()
                 const size_t i = bi * items_per_block + ii;
                 if(ii == 0)
                 {
-                    expected_heads[i] = bi % 2 == 1
-                        ? apply(flag_op, input[i - 1], input[i], ii)
-                        : flag_type(true);
+                    expected_heads[i] = bi % 2 == 1 ? apply(flag_op, input[i - 1], input[i], ii)
+                                                    : stored_flag_type(true);
                 }
                 else
                 {
@@ -296,11 +318,15 @@ auto test_block_discontinuity()
 {
     using type = Type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
+    // rocprim::half/rocprim::bfloat16 are special cases that cannot be compared '=='
+    // in ASSERT_EQ
     using stored_flag_type = typename std::conditional<
-                               std::is_same<bool, FlagType>::value,
-                               int,
-                               FlagType
-                           >::type;
+        std::is_same<bool, FlagType>::value,
+        int,
+        typename std::conditional<std::is_same<rocprim::half, FlagType>::value
+                                      || std::is_same<rocprim::bfloat16, FlagType>::value,
+                                  float,
+                                  FlagType>::type>::type;
     using flag_type = FlagType;
     using flag_op_type = FlagOpType;
     static constexpr size_t block_size = BlockSize;
@@ -334,9 +360,8 @@ auto test_block_discontinuity()
                 const size_t i = bi * items_per_block + ii;
                 if(ii == items_per_block - 1)
                 {
-                    expected_tails[i] = bi % 2 == 0
-                        ? apply(flag_op, input[i], input[i + 1], ii + 1)
-                        : flag_type(true);
+                    expected_tails[i] = bi % 2 == 0 ? apply(flag_op, input[i], input[i + 1], ii + 1)
+                                                    : stored_flag_type(true);
                 }
                 else
                 {
@@ -407,11 +432,15 @@ auto test_block_discontinuity()
 {
     using type = Type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
+    // rocprim::half/rocprim::bfloat16 are special cases that cannot be compared '=='
+    // in ASSERT_EQ
     using stored_flag_type = typename std::conditional<
-                               std::is_same<bool, FlagType>::value,
-                               int,
-                               FlagType
-                           >::type;
+        std::is_same<bool, FlagType>::value,
+        int,
+        typename std::conditional<std::is_same<rocprim::half, FlagType>::value
+                                      || std::is_same<rocprim::bfloat16, FlagType>::value,
+                                  float,
+                                  FlagType>::type>::type;
     using flag_type = FlagType;
     using flag_op_type = FlagOpType;
     static constexpr size_t block_size = BlockSize;
@@ -448,8 +477,8 @@ auto test_block_discontinuity()
                 if(ii == 0)
                 {
                     expected_heads[i] = (bi % 4 == 1 || bi % 4 == 2)
-                        ? apply(flag_op, input[i - 1], input[i], ii)
-                        : flag_type(true);
+                                            ? apply(flag_op, input[i - 1], input[i], ii)
+                                            : stored_flag_type(true);
                 }
                 else
                 {
@@ -458,8 +487,8 @@ auto test_block_discontinuity()
                 if(ii == items_per_block - 1)
                 {
                     expected_tails[i] = (bi % 4 == 0 || bi % 4 == 1)
-                        ? apply(flag_op, input[i], input[i + 1], ii + 1)
-                        : flag_type(true);
+                                            ? apply(flag_op, input[i], input[i + 1], ii + 1)
+                                            : stored_flag_type(true);
                 }
                 else
                 {

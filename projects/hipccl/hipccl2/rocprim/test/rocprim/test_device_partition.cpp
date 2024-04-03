@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,17 +60,18 @@ public:
     static constexpr bool use_graphs = Params::use_graphs;
 };
 
-typedef ::testing::Types<
-    DevicePartitionParams<int, int, unsigned char, true>,
-    DevicePartitionParams<unsigned int, unsigned long>,
-    DevicePartitionParams<unsigned char, float>,
-    DevicePartitionParams<int8_t, int8_t>,
-    DevicePartitionParams<uint8_t, uint8_t>,
-    DevicePartitionParams<rocprim::half, rocprim::half>,
-    DevicePartitionParams<rocprim::bfloat16, rocprim::bfloat16>,
-    DevicePartitionParams<test_utils::custom_test_type<long long>>,
-    DevicePartitionParams<int, int, unsigned int, false, true>
-> RocprimDevicePartitionTestsParams;
+typedef ::testing::Types<DevicePartitionParams<int, int, unsigned char, true>,
+                         DevicePartitionParams<unsigned int, unsigned long>,
+                         DevicePartitionParams<unsigned char, float>,
+                         DevicePartitionParams<float, float>,
+                         DevicePartitionParams<double, double>,
+                         DevicePartitionParams<int8_t, int8_t>,
+                         DevicePartitionParams<uint8_t, uint8_t>,
+                         DevicePartitionParams<rocprim::half, rocprim::half>,
+                         DevicePartitionParams<rocprim::bfloat16, rocprim::bfloat16>,
+                         DevicePartitionParams<test_utils::custom_test_type<long long>>,
+                         DevicePartitionParams<int, int, unsigned int, false, true>>
+    RocprimDevicePartitionTestsParams;
 
 TYPED_TEST_SUITE(RocprimDevicePartitionTests, RocprimDevicePartitionTestsParams);
 
@@ -137,11 +138,6 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
             }
             std::reverse(expected_rejected.begin(), expected_rejected.end());
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
@@ -156,9 +152,6 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
                 stream,
                 debug_synchronous));
 
-            if (TestFixture::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
 
@@ -166,9 +159,12 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
             void* d_temp_storage = nullptr;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
-            if (TestFixture::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             // Run
             HIP_CHECK(rocprim::partition(
                 d_temp_storage,
@@ -181,9 +177,12 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
                 stream,
                 debug_synchronous));
 
-            if (TestFixture::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+            }
+
             // Check if number of selected value is as expected_selected
             unsigned int selected_count_output = 0;
             HIP_CHECK(hipMemcpy(&selected_count_output,
@@ -213,14 +212,18 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
             hipFree(d_output);
             hipFree(d_selected_count_output);
             hipFree(d_temp_storage);
-            
-            if (TestFixture::use_graphs)
+
+            if(TestFixture::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
     }
 
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
@@ -257,17 +260,10 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
                         hipMemcpyHostToDevice));
 
     test_utils::out_of_bounds_flag out_of_bounds;
-    test_utils::bounds_checking_iterator<U> d_checking_output(
-        d_output,
-        out_of_bounds.device_pointer(),
-        0
-    );
+    test_utils::bounds_checking_iterator<U> d_checking_output(d_output,
+                                                              out_of_bounds.device_pointer(),
+                                                              0);
 
-    hipGraph_t graph;
-    hipGraphExec_t graph_instance;
-    if (TestFixture::use_graphs)
-        graph = test_utils::createGraphHelper(stream);
-    
     // temp storage
     size_t temp_storage_size_bytes;
     // Get size of d_temp_storage
@@ -281,16 +277,16 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
                                  stream,
                                  debug_synchronous));
 
-    if (TestFixture::use_graphs)
-        graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-    
     // allocate temporary storage
     void* d_temp_storage = nullptr;
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
-    if (TestFixture::use_graphs)
-        test_utils::resetGraphHelper(graph, graph_instance, stream);
-    
+    hipGraph_t graph;
+    if(TestFixture::use_graphs)
+    {
+        graph = test_utils::createGraphHelper(stream);
+    }
+
     // Run
     HIP_CHECK(rocprim::partition(d_temp_storage,
                                  temp_storage_size_bytes,
@@ -302,8 +298,11 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
                                  stream,
                                  debug_synchronous));
 
-    if (TestFixture::use_graphs)
+    hipGraphExec_t graph_instance;
+    if(TestFixture::use_graphs)
+    {
         graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+    }
 
     HIP_CHECK(hipDeviceSynchronize());
     ASSERT_FALSE(out_of_bounds.get());
@@ -392,11 +391,6 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
             }
             std::reverse(expected_rejected.begin(), expected_rejected.end());
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
@@ -411,9 +405,6 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
                 stream,
                 debug_synchronous));
 
-            if (TestFixture::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
 
@@ -421,9 +412,12 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
             void* d_temp_storage = nullptr;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
-            if (TestFixture::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             // Run
             HIP_CHECK(rocprim::partition(
                 d_temp_storage,
@@ -436,8 +430,11 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
                 stream,
                 debug_synchronous));
 
-            if (TestFixture::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+            }
 
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -470,13 +467,17 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
             hipFree(d_selected_count_output);
             hipFree(d_temp_storage);
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
     }
 
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
@@ -548,11 +549,6 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
                 }
             }
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
@@ -567,9 +563,6 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
                 stream,
                 debug_synchronous));
 
-            if (TestFixture::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
 
@@ -577,9 +570,12 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
             void* d_temp_storage = nullptr;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
-            if (TestFixture::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             // Run
             HIP_CHECK(rocprim::partition_two_way(
                 d_temp_storage,
@@ -593,8 +589,11 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
                 stream,
                 debug_synchronous));
 
-            if (TestFixture::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+            }
 
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -629,13 +628,17 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
             hipFree(d_selected_count_output);
             hipFree(d_temp_storage);
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
+            {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
     }
 
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 namespace {
@@ -728,17 +731,13 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
                     static_cast<unsigned int>(second_partiton_point - partion_point)
                 };
 
-                const auto expected = [&]{
+                const auto expected = [&]
+                {
                     auto result = std::vector<U>(copy.size());
                     std::copy(copy.cbegin(), copy.cend(), result.begin());
                     return result;
                 }();
 
-                hipGraph_t graph;
-                hipGraphExec_t graph_instance;
-                if (TestFixture::use_graphs)
-                    graph = test_utils::createGraphHelper(stream);
-                
                 // temp storage
                 size_t temp_storage_size_bytes;
                 // Get size of d_temp_storage
@@ -757,9 +756,6 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
                     stream,
                     debug_synchronous));
 
-                if (TestFixture::use_graphs)
-                    graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-                
                 // temp_storage_size_bytes must be >0
                 ASSERT_GT(temp_storage_size_bytes, 0);
 
@@ -767,9 +763,12 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
                 void* d_temp_storage = nullptr;
                 HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-                if (TestFixture::use_graphs)
-                    test_utils::resetGraphHelper(graph, graph_instance, stream);
-                
+                hipGraph_t graph;
+                if(TestFixture::use_graphs)
+                {
+                    graph = test_utils::createGraphHelper(stream);
+                }
+
                 // Run
                 HIP_CHECK(rocprim::partition_three_way(
                     d_temp_storage,
@@ -786,8 +785,11 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
                     stream,
                     debug_synchronous));
 
-                if (TestFixture::use_graphs)
+                hipGraphExec_t graph_instance;
+                if(TestFixture::use_graphs)
+                {
                     graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+                }
 
                 HIP_CHECK(hipDeviceSynchronize());
 
@@ -838,14 +840,18 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
                 hipFree(d_selected_counts);
                 hipFree(d_temp_storage);
 
-                if (TestFixture::use_graphs)
+                if(TestFixture::use_graphs)
+                {
                     test_utils::cleanupGraphHelper(graph, graph_instance);
+                }
             }
         }
     }
 
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 namespace
@@ -1130,11 +1136,6 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
         size_t* d_count_output{};
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_count_output, sizeof(*d_count_output)));
 
-        hipGraph_t graph;
-        hipGraphExec_t graph_instance;
-        if (use_graphs)
-            graph = test_utils::createGraphHelper(stream);
-        
         void*  d_temporary_storage{};
         size_t temporary_storage_size{};
         HIP_CHECK(rocprim::partition(d_temporary_storage,
@@ -1147,15 +1148,15 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
                                      stream,
                                      debug_synchronous));
 
-        if (use_graphs)
-            graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-        
         ASSERT_NE(0, temporary_storage_size);
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_size));
 
-        if (use_graphs)
-            test_utils::resetGraphHelper(graph, graph_instance, stream);
-        
+        hipGraph_t graph;
+        if(use_graphs)
+        {
+            graph = test_utils::createGraphHelper(stream);
+        }
+
         HIP_CHECK(rocprim::partition(d_temporary_storage,
                                      temporary_storage_size,
                                      input_iterator,
@@ -1166,9 +1167,12 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
                                      stream,
                                      debug_synchronous));
 
-        if (use_graphs)
+        hipGraphExec_t graph_instance;
+        if(use_graphs)
+        {
             graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-        
+        }
+
         size_t count_output{};
         HIP_CHECK(hipMemcpyWithStream(&count_output,
                                       d_count_output,
@@ -1192,12 +1196,16 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
         HIP_CHECK(hipFree(d_count_output));
         HIP_CHECK(hipFree(d_incorrect_flag));
 
-        if (use_graphs)
+        if(use_graphs)
+        {
             test_utils::cleanupGraphHelper(graph, graph_instance);
+        }
     }
 
-    if (use_graphs)
+    if(use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionTwoWay)
@@ -1248,11 +1256,6 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionTwoWay)
         size_t* d_count_output{};
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_count_output, sizeof(*d_count_output)));
 
-        hipGraph_t graph;
-        hipGraphExec_t graph_instance;
-        if (use_graphs)
-            graph = test_utils::createGraphHelper(stream);
-        
         void*  d_temporary_storage{};
         size_t temporary_storage_size{};
         HIP_CHECK(rocprim::partition_two_way(d_temporary_storage,
@@ -1266,15 +1269,15 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionTwoWay)
                                              stream,
                                              debug_synchronous));
 
-        if (use_graphs)
-            graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-        
         ASSERT_NE(0, temporary_storage_size);
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_size));
 
-        if (use_graphs)
-            test_utils::resetGraphHelper(graph, graph_instance, stream);
-        
+        hipGraph_t graph;
+        if(use_graphs)
+        {
+            graph = test_utils::createGraphHelper(stream);
+        }
+
         HIP_CHECK(rocprim::partition_two_way(d_temporary_storage,
                                              temporary_storage_size,
                                              input_iterator,
@@ -1286,9 +1289,12 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionTwoWay)
                                              stream,
                                              debug_synchronous));
 
-        if (use_graphs)
+        hipGraphExec_t graph_instance;
+        if(use_graphs)
+        {
             graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-        
+        }
+
         size_t count_output{};
         HIP_CHECK(hipMemcpyWithStream(&count_output,
                                       d_count_output,
@@ -1320,12 +1326,16 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionTwoWay)
         HIP_CHECK(hipFree(d_incorrect_select_flag));
         HIP_CHECK(hipFree(d_incorrect_reject_flag));
 
-        if (use_graphs)
+        if(use_graphs)
+        {
             test_utils::cleanupGraphHelper(graph, graph_instance);
+        }
     }
 
-    if (use_graphs)
+    if(use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
@@ -1373,11 +1383,6 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
         size_t* d_count_output{};
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_count_output, 2 * sizeof(*d_count_output)));
 
-        hipGraph_t graph;
-        hipGraphExec_t graph_instance;
-        if (use_graphs)
-            graph = test_utils::createGraphHelper(stream);
-        
         void*  d_temporary_storage{};
         size_t temporary_storage_size{};
         HIP_CHECK(rocprim::partition_three_way(d_temporary_storage,
@@ -1393,15 +1398,15 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
                                                stream,
                                                debug_synchronous));
 
-        if (use_graphs)
-            graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-        
         ASSERT_NE(0, temporary_storage_size);
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_size));
 
-        if (use_graphs)
-            test_utils::resetGraphHelper(graph, graph_instance, stream);
-        
+        hipGraph_t graph;
+        if(use_graphs)
+        {
+            graph = test_utils::createGraphHelper(stream);
+        }
+
         HIP_CHECK(rocprim::partition_three_way(d_temporary_storage,
                                                temporary_storage_size,
                                                input_iterator,
@@ -1415,9 +1420,12 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
                                                stream,
                                                debug_synchronous));
 
-        if (use_graphs)
+        hipGraphExec_t graph_instance;
+        if(use_graphs)
+        {
             graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-        
+        }
+
         size_t count_output[2]{};
         HIP_CHECK(hipMemcpyWithStream(&count_output,
                                       d_count_output,
@@ -1445,10 +1453,14 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
         HIP_CHECK(hipFree(d_count_output));
         HIP_CHECK(hipFree(d_incorrect_flag));
 
-        if (use_graphs)
+        if(use_graphs)
+        {
             test_utils::cleanupGraphHelper(graph, graph_instance);
+        }
     }
 
-    if (use_graphs)
+    if(use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }

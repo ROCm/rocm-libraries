@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -67,24 +67,23 @@ using custom_short2  = test_utils::custom_test_type<short>;
 using custom_int2    = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
 
-typedef ::testing::Types<
-    DeviceTransformParams<int, int, true>,
-    DeviceTransformParams<int8_t, int8_t>,
-    DeviceTransformParams<uint8_t, uint8_t>,
-    DeviceTransformParams<rocprim::half, rocprim::half>,
-    DeviceTransformParams<rocprim::bfloat16, rocprim::bfloat16>,
-    DeviceTransformParams<unsigned long>,
-    DeviceTransformParams<short, int, true>,
-    DeviceTransformParams<custom_short2, custom_int2, true>,
-    DeviceTransformParams<int, float>,
-    DeviceTransformParams<custom_double2, custom_double2>,
-    DeviceTransformParams<int, int, false, 512>,
-    DeviceTransformParams<float, float, false, 2048>,
-    DeviceTransformParams<int, int, false, 4096>,
-    DeviceTransformParams<int, int, false, 2097152>,
-    DeviceTransformParams<int, int, false, 1073741824>,
-    DeviceTransformParams<int, int, false, ROCPRIM_GRID_SIZE_LIMIT, true>
-> RocprimDeviceTransformTestsParams;
+typedef ::testing::Types<DeviceTransformParams<int, int, true>,
+                         DeviceTransformParams<int8_t, int8_t>,
+                         DeviceTransformParams<uint8_t, uint8_t>,
+                         DeviceTransformParams<rocprim::half, rocprim::half>,
+                         DeviceTransformParams<rocprim::bfloat16, rocprim::bfloat16>,
+                         DeviceTransformParams<unsigned long>,
+                         DeviceTransformParams<short, int, true>,
+                         DeviceTransformParams<custom_short2, custom_int2, true>,
+                         DeviceTransformParams<int, float>,
+                         DeviceTransformParams<custom_double2, custom_double2>,
+                         DeviceTransformParams<int, int, false, 512>,
+                         DeviceTransformParams<float, float, false, 2048>,
+                         DeviceTransformParams<double, double, false, 4096>,
+                         DeviceTransformParams<int, int, false, 2097152>,
+                         DeviceTransformParams<int, int, false, 1073741824>,
+                         DeviceTransformParams<int, int, false, ROCPRIM_GRID_SIZE_LIMIT, true>>
+    RocprimDeviceTransformTestsParams;
 
 template <unsigned int SizeLimit>
 struct size_limit_config {
@@ -160,10 +159,11 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
             std::transform(input.begin(), input.end(), expected.begin(), transform<U>());
 
             hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
+            {
                 graph = test_utils::createGraphHelper(stream);
-            
+            }
+
             // Run
             HIP_CHECK(
                 rocprim::transform<Config>(
@@ -173,9 +173,12 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
                 )
             );
 
-            if (TestFixture::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::use_graphs)
+            {
                 graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
-            
+            }
+
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -279,9 +282,10 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
             );
 
             hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
+            {
                 graph = test_utils::createGraphHelper(stream);
+            }
 
             // Run
             HIP_CHECK(
@@ -292,9 +296,12 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
                 )
             );
 
-            if (TestFixture::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::use_graphs)
+            {
                 graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
-            
+            }
+
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -384,16 +391,20 @@ void testLargeIndices()
             };
 
             hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (UseGraphs)
+            if(UseGraphs)
+            {
                 graph = test_utils::createGraphHelper(stream);
+            }
 
             // Run
             HIP_CHECK(
                 rocprim::transform(input, output, size, flag_expected, stream, debug_synchronous));
 
-            if (UseGraphs)
+            hipGraphExec_t graph_instance;
+            if(UseGraphs)
+            {
                 graph_instance = graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+            }
 
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
@@ -412,8 +423,10 @@ void testLargeIndices()
         }
     }
 
-    if (UseGraphs)
-        HIP_CHECK(hipStreamDestroy(stream));    
+    if(UseGraphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 TEST(RocprimDeviceTransformTests, LargeIndices)

@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 #include "test_utils_custom_test_types.hpp"
 
 // For radix_key_codec
-#include <rocprim/detail/radix_sort.hpp>
+#include <rocprim/thread/radix_key_codec.hpp>
 
 #include <ostream>
 #include <type_traits>

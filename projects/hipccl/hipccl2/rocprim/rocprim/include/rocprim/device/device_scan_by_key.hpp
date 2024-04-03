@@ -314,8 +314,11 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 ///
 /// \par Overview
 /// * Supports non-commutative scan operators. However, a scan operator should be
-/// associative. When used with non-associative functions the results may be non-deterministic
-/// and/or vary in precision.
+/// associative.
+/// * When used with non-associative functions (e.g. floating point arithmetic operations):
+///    - the results may be non-deterministic and/or vary in precision,
+///    - and bit-wise reproducibility is not guaranteed, that is, results from multiple runs
+///      using the same input values on the same device may not be bit-wise identical.
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
@@ -448,8 +451,11 @@ inline hipError_t inclusive_scan_by_key(void* const                temporary_sto
 ///
 /// \par Overview
 /// * Supports non-commutative scan operators. However, a scan operator should be
-/// associative. When used with non-associative functions the results may be non-deterministic
-/// and/or vary in precision.
+/// associative.
+/// * When used with non-associative functions (e.g. floating point arithmetic operations):
+///    - the results may be non-deterministic and/or vary in precision,
+///    - and bit-wise reproducibility is not guaranteed, that is, results from multiple runs
+///      using the same input values on the same device may not be bit-wise identical.
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have

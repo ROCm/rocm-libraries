@@ -8,16 +8,15 @@
  Sort
 ********************************************************************
 
-generic
-=========
-
+Generic Block Sort
+==================
 
 .. doxygenclass:: rocprim::block_sort
    :members:
 
 .. doxygenenum:: rocprim::block_sort_algorithm
 
-radix sort
+Radix sort
 ===========
 
 .. doxygenclass:: rocprim::block_radix_sort

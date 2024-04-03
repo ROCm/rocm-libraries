@@ -394,6 +394,25 @@ ROCPRIM_HOST_DEVICE ROCPRIM_INLINE DstPtr cast_align_down(Src* pointer)
 #endif
 }
 
+template<typename Destination, typename Source>
+ROCPRIM_HOST_DEVICE auto bit_cast(const Source& source)
+    -> std::enable_if_t<sizeof(Destination) == sizeof(Source)
+                            && std::is_trivially_copyable<Destination>::value
+                            && std::is_trivially_copyable<Source>::value,
+                        Destination>
+{
+#if defined(__has_builtin) && __has_builtin(__builtin_bit_cast)
+    return __builtin_bit_cast(Destination, source);
+#else
+    static_assert(
+        std::is_trivially_constructable<Destination>::value,
+        "Fallback implementation of bit_cast requires Destination to be trivially constructible");
+    Destination dest;
+    memcpy(&dest, &source, sizeof(Destination));
+    return dest;
+#endif
+}
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 

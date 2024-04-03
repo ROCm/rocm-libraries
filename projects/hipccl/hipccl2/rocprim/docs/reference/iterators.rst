@@ -53,6 +53,20 @@ Transform
      transform(sequence(1))
      ...
 
+Predicate
+---------
+
+.. doxygenclass:: rocprim::predicate_iterator
+   :members:
+
+.. note::
+   ``predicate_iterator(sequence, test, predicate)`` generates the sequence::
+
+     predicate(test[0]) ? sequence[0] : default
+     predicate(test[1]) ? sequence[1] : default
+     predicate(test[2]) ? sequence[2] : default
+     ...
+
 Pairing Values with Indices
 =============================
 

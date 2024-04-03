@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -177,7 +177,7 @@ public:
     ///
     /// \tparam Counter - [inferred] counter type of histogram.
     ///
-    /// \param [in] input - reference to an array containing thread input values.
+    /// \param [in] input - reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
     /// \param [out] hist - histogram bin count.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
@@ -237,7 +237,7 @@ public:
     ///
     /// \tparam Counter - [inferred] counter type of histogram.
     ///
-    /// \param [in] input - reference to an array containing thread input values.
+    /// \param [in] input - reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
     /// \param [out] hist - histogram bin count.
     template<class Counter>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
@@ -252,7 +252,7 @@ public:
     ///
     /// \tparam Counter - [inferred] counter type of histogram.
     ///
-    /// \param [in] input - reference to an array containing thread input values.
+    /// \param [in] input - reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
     /// \param [out] hist - histogram bin count.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
@@ -307,7 +307,7 @@ public:
     ///
     /// \tparam Counter - [inferred] counter type of histogram.
     ///
-    /// \param [in] input - reference to an array containing thread input values.
+    /// \param [in] input - reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
     /// \param [out] hist - histogram bin count.
     template<class Counter>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,6 @@
 #include <utility>
 
 #include "../config.hpp"
-#include "../detail/radix_sort.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 
@@ -35,6 +34,7 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
+#include "../type_traits.hpp"
 #include "detail/config/device_radix_sort_onesweep.hpp"
 #include "detail/device_radix_sort.hpp"
 #include "device_transform.hpp"
@@ -68,6 +68,30 @@ namespace detail
 
 #endif
 
+template<class Tuple, size_t Index>
+constexpr auto tuple_bit_size_impl()
+    -> std::enable_if_t<Index == ::rocprim::tuple_size<Tuple>::value, size_t>
+{
+    return 0;
+}
+
+template<class Tuple, size_t Index>
+constexpr auto tuple_bit_size_impl()
+    -> std::enable_if_t<Index != ::rocprim::tuple_size<Tuple>::value, size_t>
+{
+    using element_t = std::decay_t<::rocprim::tuple_element_t<Index, Tuple>>;
+    return 8 * sizeof(element_t) + tuple_bit_size_impl<Tuple, Index + 1>();
+}
+
+template<class Decomposer, class Key>
+struct decomposer_max_bits
+    : public std::integral_constant<
+          unsigned int,
+          tuple_bit_size_impl<std::decay_t<decltype(std::declval<Decomposer>()(
+                                  std::declval<std::add_lvalue_reference_t<Key>>()))>,
+                              0>()>
+{};
+
 template<class Size>
 using offset_type_t = std::conditional_t<
     sizeof(Size) <= 4,
@@ -75,13 +99,14 @@ using offset_type_t = std::conditional_t<
     size_t
 >;
 
-template<class Config, bool Descending, class KeysInputIterator, class Offset>
+template<class Config, bool Descending, class KeysInputIterator, class Offset, class Decomposer>
 ROCPRIM_KERNEL
     __launch_bounds__(device_params<Config>().histogram.block_size) void onesweep_histograms_kernel(
         KeysInputIterator  keys_input,
         Offset*            global_digit_counts,
         const Offset       size,
         const Offset       full_blocks,
+        Decomposer         decomposer,
         const unsigned int begin_bit,
         const unsigned int end_bit)
 {
@@ -93,6 +118,7 @@ ROCPRIM_KERNEL
                                     global_digit_counts,
                                     size,
                                     full_blocks,
+                                    decomposer,
                                     begin_bit,
                                     end_bit);
 }
@@ -111,16 +137,18 @@ template<class Config,
          bool Descending,
          class KeysInputIterator,
          class ValuesInputIterator,
-         class Offset>
-inline hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
-                                                     ValuesInputIterator,
-                                                     Offset*            global_digit_offsets,
-                                                     const Offset       size,
-                                                     const unsigned int digit_places,
-                                                     const unsigned     begin_bit,
-                                                     const unsigned     end_bit,
-                                                     const hipStream_t  stream,
-                                                     const bool         debug_synchronous)
+         class Offset,
+         class Decomposer>
+hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
+                                              ValuesInputIterator,
+                                              Offset*            global_digit_offsets,
+                                              const Offset       size,
+                                              const unsigned int digit_places,
+                                              Decomposer         decomposer,
+                                              const unsigned     begin_bit,
+                                              const unsigned     end_bit,
+                                              const hipStream_t  stream,
+                                              const bool         debug_synchronous)
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -168,6 +196,7 @@ inline hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_inpu
                        global_digit_offsets,
                        size,
                        full_blocks,
+                       decomposer,
                        begin_bit,
                        end_bit);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("compute_global_digit_histograms", size, start);
@@ -195,7 +224,8 @@ template<class Config,
          class KeysOutputIterator,
          class ValuesInputIterator,
          class ValuesOutputIterator,
-         class Offset>
+         class Offset,
+         class Decomposer>
 ROCPRIM_KERNEL
     __launch_bounds__(device_params<Config>().sort.block_size) void onesweep_iteration_kernel(
         KeysInputIterator        keys_input,
@@ -206,6 +236,7 @@ ROCPRIM_KERNEL
         Offset*                  global_digit_offsets_in,
         Offset*                  global_digit_offsets_out,
         onesweep_lookback_state* lookback_states,
+        Decomposer               decomposer,
         const unsigned int       bit,
         const unsigned int       current_radix_bits,
         const unsigned int       full_blocks)
@@ -223,6 +254,7 @@ ROCPRIM_KERNEL
                                                     global_digit_offsets_in,
                                                     global_digit_offsets_out,
                                                     lookback_states,
+                                                    decomposer,
                                                     bit,
                                                     current_radix_bits,
                                                     full_blocks);
@@ -234,8 +266,9 @@ template<class Config,
          class KeysOutputIterator,
          class ValuesInputIterator,
          class ValuesOutputIterator,
-         class Offset>
-inline hipError_t radix_sort_onesweep_iteration(
+         class Offset,
+         class Decomposer>
+hipError_t radix_sort_onesweep_iteration(
     KeysInputIterator                                               keys_input,
     typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
     KeysOutputIterator                                              keys_output,
@@ -248,6 +281,7 @@ inline hipError_t radix_sort_onesweep_iteration(
     onesweep_lookback_state*                                        lookback_states,
     const bool                                                      from_input,
     const bool                                                      to_output,
+    Decomposer                                                      decomposer,
     const unsigned int                                              bit,
     const unsigned int                                              end_bit,
     const hipStream_t                                               stream,
@@ -331,6 +365,7 @@ inline hipError_t radix_sort_onesweep_iteration(
                                global_digit_offsets_in,
                                global_digit_offsets_out,
                                lookback_states,
+                               decomposer,
                                bit,
                                current_radix_bits,
                                full_blocks);
@@ -350,6 +385,7 @@ inline hipError_t radix_sort_onesweep_iteration(
                                global_digit_offsets_in,
                                global_digit_offsets_out,
                                lookback_states,
+                               decomposer,
                                bit,
                                current_radix_bits,
                                full_blocks);
@@ -369,6 +405,7 @@ inline hipError_t radix_sort_onesweep_iteration(
                                global_digit_offsets_in,
                                global_digit_offsets_out,
                                lookback_states,
+                               decomposer,
                                bit,
                                current_radix_bits,
                                full_blocks);
@@ -388,6 +425,7 @@ inline hipError_t radix_sort_onesweep_iteration(
                                global_digit_offsets_in,
                                global_digit_offsets_out,
                                lookback_states,
+                               decomposer,
                                bit,
                                current_radix_bits,
                                full_blocks);
@@ -406,8 +444,9 @@ template<class Config,
          class KeysOutputIterator,
          class ValuesInputIterator,
          class ValuesOutputIterator,
-         class Size>
-inline hipError_t radix_sort_onesweep_impl(
+         class Size,
+         class Decomposer>
+hipError_t radix_sort_onesweep_impl(
     void*                                                           temporary_storage,
     size_t&                                                         storage_size,
     KeysInputIterator                                               keys_input,
@@ -418,6 +457,7 @@ inline hipError_t radix_sort_onesweep_impl(
     ValuesOutputIterator                                            values_output,
     const Size                                                      size,
     bool&                                                           is_result_in_output,
+    Decomposer                                                      decomposer,
     const unsigned int                                              begin_bit,
     const unsigned int                                              end_bit,
     const hipStream_t                                               stream,
@@ -500,6 +540,7 @@ inline hipError_t radix_sort_onesweep_impl(
                                                                      global_digit_offsets,
                                                                      static_cast<offset_type>(size),
                                                                      places,
+                                                                     decomposer,
                                                                      begin_bit,
                                                                      end_bit,
                                                                      stream,
@@ -568,6 +609,7 @@ inline hipError_t radix_sort_onesweep_impl(
             lookback_states,
             from_input,
             to_output,
+            decomposer,
             bit,
             end_bit,
             stream,
@@ -589,8 +631,9 @@ template<class Config,
          class KeysOutputIterator,
          class ValuesInputIterator,
          class ValuesOutputIterator,
-         class Size>
-inline hipError_t
+         class Size,
+         class Decomposer>
+hipError_t
     radix_sort_impl(void*                                                         temporary_storage,
                     size_t&                                                       storage_size,
                     KeysInputIterator                                             keys_input,
@@ -601,6 +644,7 @@ inline hipError_t
                     ValuesOutputIterator                                            values_output,
                     Size                                                            size,
                     bool&        is_result_in_output,
+                    Decomposer   decomposer,
                     unsigned int begin_bit,
                     unsigned int end_bit,
                     hipStream_t  stream,
@@ -642,6 +686,11 @@ inline hipError_t
                                                         default_block_sort_config,
                                                         typename Config::single_sort_config>::type;
 
+    if(::rocprim::is_floating_point<key_type>::value
+       && ((begin_bit != 0) || (end_bit != sizeof(key_type) * 8)))
+    {
+        return hipErrorInvalidValue;
+    }
     unsigned int single_sort_items_per_block
         = block_sort_config::block_size * block_sort_config::items_per_thread;
     if(size <= single_sort_items_per_block)
@@ -665,6 +714,7 @@ inline hipError_t
                                                                     values_output,
                                                                     static_cast<unsigned int>(size),
                                                                     single_sort_items_per_block,
+                                                                    decomposer,
                                                                     begin_bit,
                                                                     end_bit,
                                                                     stream,
@@ -686,6 +736,7 @@ inline hipError_t
                                                                     values_tmp,
                                                                     values_output,
                                                                     static_cast<unsigned int>(size),
+                                                                    decomposer,
                                                                     begin_bit,
                                                                     end_bit,
                                                                     stream,
@@ -705,6 +756,7 @@ inline hipError_t
                                                                      values_output,
                                                                      size,
                                                                      is_result_in_output,
+                                                                     decomposer,
                                                                      begin_bit,
                                                                      end_bit,
                                                                      stream,
@@ -724,7 +776,7 @@ inline hipError_t
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
 /// * Returns the required size of \p temporary_storage in \p storage_size
-/// if \p temporary_storage in a null pointer.
+/// if \p temporary_storage is a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
@@ -732,28 +784,28 @@ inline hipError_t
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam Size - integral type that represents the problem size.
+/// \tparam Size integral type that represents the problem size.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - pointer to the first element in the range to sort.
-/// \param [out] keys_output - pointer to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -791,35 +843,681 @@ inline hipError_t
 /// // keys_output: [0.08, 0.2, 0.3, 0.4, 0.6, 0.65, 0.7, 1]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class Size,
-    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
->
-inline
-hipError_t radix_sort_keys(void * temporary_storage,
-                           size_t& storage_size,
-                           KeysInputIterator keys_input,
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type>
+hipError_t radix_sort_keys(void*              temporary_storage,
+                           size_t&            storage_size,
+                           KeysInputIterator  keys_input,
                            KeysOutputIterator keys_output,
-                           Size size,
-                           unsigned int begin_bit = 0,
-                           unsigned int end_bit = 8 * sizeof(Key),
-                           hipStream_t stream = 0,
-                           bool debug_synchronous = false)
+                           Size               size,
+                           unsigned int       begin_bit         = 0,
+                           unsigned int       end_bit           = 8 * sizeof(Key),
+                           hipStream_t        stream            = 0,
+                           bool               debug_synchronous = false)
 {
     static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     empty_type * values = nullptr;
     bool ignored;
+    return detail::radix_sort_impl<Config, false>(temporary_storage,
+                                                  storage_size,
+                                                  keys_input,
+                                                  nullptr,
+                                                  keys_output,
+                                                  values,
+                                                  nullptr,
+                                                  values,
+                                                  size,
+                                                  ignored,
+                                                  identity_decomposer{},
+                                                  begin_bit,
+                                                  end_bit,
+                                                  stream,
+                                                  debug_synchronous);
+}
+
+/// \brief Parallel ascending radix sort primitive for device level.
+///
+/// \p radix_sort_keys function performs a device-wide radix sort
+/// of keys. Function sorts input keys in ascending order.
+///
+/// \par Overview
+/// * The contents of both buffers of \p keys may be altered by the sorting function.
+/// * \p current() of \p keys is used as the input.
+/// * The function will update \p current() of \p keys to point to the buffer
+/// that contains the output range.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * The function requires small \p temporary_storage as it does not need
+/// a temporary buffer of \p size elements.
+/// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
+/// type).
+/// * Buffers of \p keys must have at least \p size elements.
+/// * If \p Key is an integer type and the range of keys is known in advance, the performance
+/// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Size integral type that represents the problem size.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
+/// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
+/// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending radix sort is performed on an array of
+/// \p float values.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
+/// size_t input_size;  // e.g., 8
+/// float * input;      // e.g., [0.6, 0.3, 0.65, 0.4, 0.2, 0.08, 1, 0.7]
+/// float * tmp;        // empty array of 8 elements
+/// // Create double-buffer
+/// rocprim::double_buffer<float> keys(input, tmp);
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_keys(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_keys(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size
+/// );
+/// // keys.current(): [0.08, 0.2, 0.3, 0.4, 0.6, 0.65, 0.7, 1]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class Key, class Size>
+hipError_t radix_sort_keys(void*               temporary_storage,
+                           size_t&             storage_size,
+                           double_buffer<Key>& keys,
+                           Size                size,
+                           unsigned int        begin_bit         = 0,
+                           unsigned int        end_bit           = 8 * sizeof(Key),
+                           hipStream_t         stream            = 0,
+                           bool                debug_synchronous = false)
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    empty_type * values = nullptr;
+    bool         is_result_in_output;
+    hipError_t   error = detail::radix_sort_impl<Config, false>(temporary_storage,
+                                                              storage_size,
+                                                              keys.current(),
+                                                              keys.current(),
+                                                              keys.alternate(),
+                                                              values,
+                                                              values,
+                                                              values,
+                                                              size,
+                                                              is_result_in_output,
+                                                              identity_decomposer{},
+                                                              begin_bit,
+                                                              end_bit,
+                                                              stream,
+                                                              debug_synchronous);
+    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
+    {
+        keys.swap();
+    }
+    return error;
+}
+
+/// \brief Parallel ascending radix sort primitive for device level.
+///
+/// \p radix_sort_keys function performs a device-wide radix sort
+/// of keys. Function sorts input keys in ascending order.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+/// * \p begin_bit and \p end_bit can be provided to control the radix range that is considered in the
+/// decomposed tuple. For example, if the decomposer returns `rocprim::tuple<int16_t&, uint8_t&>`,
+/// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
+/// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
+/// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator Random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator Random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size Integral type that represents the problem size.
+/// \tparam Key The value type of the input and output iterators.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] begin_bit index of the first (least significant) bit used in
+/// key comparison.
+/// \param [in] end_bit past-the-end index (most significant) bit used in
+/// key comparison.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending radix sort is performed on an array of
+/// values of a custom type, using a custom decomposer.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;      // e.g., 8
+/// custom_type * input;    // e.g., [{2, 0.6}, {-3, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1}, {-1, 0.7}]
+/// custom_type * output;   // empty array of 8 elements
+///
+/// constexpr unsigned int begin_bit = 0;
+/// constexpr unsigned int end_bit = 96;
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_keys(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_keys(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+/// // keys_output: [{-3, 0.3}, {-1, 0.7}, {0, 0.2}, {0, 0.4}, {2, 0.6}, {2, 0.65}, {11, 0.08}, {11, 1.0}]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type,
+         class Decomposer>
+auto radix_sort_keys(void*              temporary_storage,
+                     size_t&            storage_size,
+                     KeysInputIterator  keys_input,
+                     KeysOutputIterator keys_output,
+                     Size               size,
+                     Decomposer         decomposer,
+                     unsigned int       begin_bit,
+                     unsigned int       end_bit,
+                     hipStream_t        stream            = 0,
+                     bool               debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    empty_type* values = nullptr;
+    bool        ignored;
+    return detail::radix_sort_impl<Config, false>(temporary_storage,
+                                                  storage_size,
+                                                  keys_input,
+                                                  nullptr,
+                                                  keys_output,
+                                                  values,
+                                                  nullptr,
+                                                  values,
+                                                  size,
+                                                  ignored,
+                                                  decomposer,
+                                                  begin_bit,
+                                                  end_bit,
+                                                  stream,
+                                                  debug_synchronous);
+}
+
+/// \brief Parallel ascending radix sort primitive for device level.
+///
+/// \p radix_sort_keys function performs a device-wide radix sort
+/// of keys. Function sorts input keys in ascending order.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator Random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator Random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size Integral type that represents the problem size.
+/// \tparam Key The value type of the input and output iterators.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending radix sort is performed on an array of
+/// values of a custom type, using a custom decomposer.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;      // e.g., 8
+/// custom_type * input;    // e.g., [{2, 0.6}, {-3, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1}, {-1, 0.7}]
+/// custom_type * output;   // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_keys(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, custom_type_decomposer{}
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_keys(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, custom_type_decomposer{}
+/// );
+/// // keys_output: [{-3, 0.3}, {-1, 0.7}, {0, 0.2}, {0, 0.4}, {2, 0.6}, {2, 0.65}, {11, 0.08}, {11, 1.0}]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type,
+         class Decomposer>
+auto radix_sort_keys(void*              temporary_storage,
+                     size_t&            storage_size,
+                     KeysInputIterator  keys_input,
+                     KeysOutputIterator keys_output,
+                     Size               size,
+                     Decomposer         decomposer,
+                     hipStream_t        stream            = 0,
+                     bool               debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    empty_type* values = nullptr;
+    bool        ignored;
     return detail::radix_sort_impl<Config, false>(
-        temporary_storage, storage_size,
-        keys_input, nullptr, keys_output,
-        values, nullptr, values,
-        size, ignored,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+        temporary_storage,
+        storage_size,
+        keys_input,
+        nullptr,
+        keys_output,
+        values,
+        nullptr,
+        values,
+        size,
+        ignored,
+        decomposer,
+        0,
+        detail::decomposer_max_bits<Decomposer, Key>::value,
+        stream,
+        debug_synchronous);
+}
+
+/// \brief Parallel ascending radix sort primitive for device level.
+///
+/// \p radix_sort_keys function performs a device-wide radix sort
+/// of keys. Function sorts input keys in ascending order.
+///
+/// \par Overview
+/// * The contents of both buffers of \p keys may be altered by the sorting function.
+/// * \p current() of \p keys is used as the input.
+/// * The function will update \p current() of \p keys to point to the buffer
+/// that contains the output range.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * The function requires small \p temporary_storage as it does not need
+/// a temporary buffer of \p size elements.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+/// * \p begin_bit and \p end_bit can be provided to control the radix range that is considered in the
+/// decomposed tuple. For example, if the decomposer returns `rocprim::tuple<int16_t&, uint8_t&>`,
+/// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
+/// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
+/// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] begin_bit index of the first (least significant) bit used in
+/// key comparison.
+/// \param [in] end_bit past-the-end index (most significant) bit used in
+/// key comparison.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending radix sort is performed on an array of
+/// values of a custom type, using a custom decomposer.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
+/// constexpr unsigned int begin_bit = 0;
+/// constexpr unsigned int end_bit = 96;
+/// size_t input_size;   // e.g., 8
+/// custom_type * input; // e.g., [{2, 0.6}, {-3, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1}, {-1, 0.7}]
+/// custom_type * tmp;   // empty array of 8 elements
+/// // Create double-buffer
+/// rocprim::double_buffer<custom_type> keys(input, tmp);
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_keys(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_keys(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+/// // keys.current(): [{-3, 0.3}, {-1, 0.7}, {0, 0.2}, {0, 0.4}, {2, 0.6}, {2, 0.65}, {11, 0.08}, {11, 1.0}]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class Key, class Size, class Decomposer>
+auto radix_sort_keys(void*               temporary_storage,
+                     size_t&             storage_size,
+                     double_buffer<Key>& keys,
+                     Size                size,
+                     Decomposer          decomposer,
+                     unsigned int        begin_bit,
+                     unsigned int        end_bit,
+                     hipStream_t         stream            = 0,
+                     bool                debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    empty_type* values = nullptr;
+    bool        is_result_in_output;
+    hipError_t  error = detail::radix_sort_impl<Config, false>(temporary_storage,
+                                                              storage_size,
+                                                              keys.current(),
+                                                              keys.current(),
+                                                              keys.alternate(),
+                                                              values,
+                                                              values,
+                                                              values,
+                                                              size,
+                                                              is_result_in_output,
+                                                              decomposer,
+                                                              begin_bit,
+                                                              end_bit,
+                                                              stream,
+                                                              debug_synchronous);
+    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
+    {
+        keys.swap();
+    }
+    return error;
+}
+
+/// \brief Parallel ascending radix sort primitive for device level.
+///
+/// \p radix_sort_keys function performs a device-wide radix sort
+/// of keys. Function sorts input keys in ascending order.
+///
+/// \par Overview
+/// * The contents of both buffers of \p keys may be altered by the sorting function.
+/// * \p current() of \p keys is used as the input.
+/// * The function will update \p current() of \p keys to point to the buffer
+/// that contains the output range.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * The function requires small \p temporary_storage as it does not need
+/// a temporary buffer of \p size elements.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending radix sort is performed on an array of
+/// values of a custom type, using a custom decomposer.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
+/// size_t input_size;   // e.g., 8
+/// custom_type * input; // e.g., [{2, 0.6}, {-3, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1}, {-1, 0.7}]
+/// custom_type * tmp;   // empty array of 8 elements
+/// // Create double-buffer
+/// rocprim::double_buffer<custom_type> keys(input, tmp);
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_keys(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size, custom_type_decomposer{}
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_keys(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size, custom_type_decomposer{}
+/// );
+/// // keys.current(): [{-3, 0.3}, {-1, 0.7}, {0, 0.2}, {0, 0.4}, {2, 0.6}, {2, 0.65}, {11, 0.08}, {11, 1.0}]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class Key, class Size, class Decomposer>
+auto radix_sort_keys(void*               temporary_storage,
+                     size_t&             storage_size,
+                     double_buffer<Key>& keys,
+                     Size                size,
+                     Decomposer          decomposer,
+                     hipStream_t         stream            = 0,
+                     bool                debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    empty_type* values = nullptr;
+    bool        is_result_in_output;
+    hipError_t  error = detail::radix_sort_impl<Config, false>(
+        temporary_storage,
+        storage_size,
+        keys.current(),
+        keys.current(),
+        keys.alternate(),
+        values,
+        values,
+        values,
+        size,
+        is_result_in_output,
+        decomposer,
+        0,
+        detail::decomposer_max_bits<Decomposer, Key>::value,
+        stream,
+        debug_synchronous);
+    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
+    {
+        keys.swap();
+    }
+    return error;
 }
 
 /// \brief Parallel descending radix sort primitive for device level.
@@ -830,7 +1528,7 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
 /// * Returns the required size of \p temporary_storage in \p storage_size
-/// if \p temporary_storage in a null pointer.
+/// if \p temporary_storage is a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
@@ -838,28 +1536,28 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam Size - integral type that represents the problem size.
+/// \tparam Size integral type that represents the problem size.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - pointer to the first element in the range to sort.
-/// \param [out] keys_output - pointer to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -897,46 +1595,693 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// // keys_output: [8, 7, 6, 5, 4, 3, 2, 1]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class Size,
-    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
->
-inline
-hipError_t radix_sort_keys_desc(void * temporary_storage,
-                                size_t& storage_size,
-                                KeysInputIterator keys_input,
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type>
+
+hipError_t radix_sort_keys_desc(void*              temporary_storage,
+                                size_t&            storage_size,
+                                KeysInputIterator  keys_input,
                                 KeysOutputIterator keys_output,
-                                Size size,
-                                unsigned int begin_bit = 0,
-                                unsigned int end_bit = 8 * sizeof(Key),
-                                hipStream_t stream = 0,
-                                bool debug_synchronous = false)
+                                Size               size,
+                                unsigned int       begin_bit         = 0,
+                                unsigned int       end_bit           = 8 * sizeof(Key),
+                                hipStream_t        stream            = 0,
+                                bool               debug_synchronous = false)
 {
     static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
-    empty_type * values = nullptr;
-    bool ignored;
+    empty_type* values = nullptr;
+    bool        ignored;
+    return detail::radix_sort_impl<Config, true>(temporary_storage,
+                                                 storage_size,
+                                                 keys_input,
+                                                 nullptr,
+                                                 keys_output,
+                                                 values,
+                                                 nullptr,
+                                                 values,
+                                                 size,
+                                                 ignored,
+                                                 identity_decomposer{},
+                                                 begin_bit,
+                                                 end_bit,
+                                                 stream,
+                                                 debug_synchronous);
+}
+
+/// \brief Parallel descending radix sort primitive for device level.
+///
+/// \p radix_sort_keys_desc function performs a device-wide radix sort
+/// of keys. Function sorts input keys in descending order.
+///
+/// \par Overview
+/// * The contents of both buffers of \p keys may be altered by the sorting function.
+/// * \p current() of \p keys is used as the input.
+/// * The function will update \p current() of \p keys to point to the buffer
+/// that contains the output range.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * The function requires small \p temporary_storage as it does not need
+/// a temporary buffer of \p size elements.
+/// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
+/// type).
+/// * Buffers of \p keys must have at least \p size elements.
+/// * If \p Key is an integer type and the range of keys is known in advance, the performance
+/// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Size integral type that represents the problem size.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
+/// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
+/// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level descending radix sort is performed on an array of
+/// integer values.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
+/// size_t input_size;  // e.g., 8
+/// int * input;        // e.g., [6, 3, 5, 4, 2, 8, 1, 7]
+/// int * tmp;          // empty array of 8 elements
+/// // Create double-buffer
+/// rocprim::double_buffer<int> keys(input, tmp);
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_keys_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_keys_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size
+/// );
+/// // keys.current(): [8, 7, 6, 5, 4, 3, 2, 1]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class Key, class Size>
+hipError_t radix_sort_keys_desc(void*               temporary_storage,
+                                size_t&             storage_size,
+                                double_buffer<Key>& keys,
+                                Size                size,
+                                unsigned int        begin_bit         = 0,
+                                unsigned int        end_bit           = 8 * sizeof(Key),
+                                hipStream_t         stream            = 0,
+                                bool                debug_synchronous = false)
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    empty_type* values = nullptr;
+    bool        is_result_in_output;
+    hipError_t  error = detail::radix_sort_impl<Config, true>(temporary_storage,
+                                                             storage_size,
+                                                             keys.current(),
+                                                             keys.current(),
+                                                             keys.alternate(),
+                                                             values,
+                                                             values,
+                                                             values,
+                                                             size,
+                                                             is_result_in_output,
+                                                             identity_decomposer{},
+                                                             begin_bit,
+                                                             end_bit,
+                                                             stream,
+                                                             debug_synchronous);
+    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
+    {
+        keys.swap();
+    }
+    return error;
+}
+
+/// \brief Parallel descending radix sort primitive for device level.
+///
+/// \p radix_sort_keys_desc function performs a device-wide radix sort
+/// of keys. Function sorts input keys in descending order.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+/// * \p begin_bit and \p end_bit can be provided to control the radix range that is considered in the
+/// decomposed tuple. For example, if the decomposer returns `rocprim::tuple<int16_t&, uint8_t&>`,
+/// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
+/// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
+/// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Key The value type of the input and output iterators.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] begin_bit index of the first (least significant) bit used in
+/// key comparison.
+/// \param [in] end_bit past-the-end index (most significant) bit used in
+/// key comparison.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level descending radix sort is performed on an array of
+/// values of a custom type, using a custom decomposer.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// constexpr unsigned int begin_bit = 0;
+/// constexpr unsigned int end_bit = 96;
+/// size_t input_size;      // e.g., 8
+/// custom_type * input;    // e.g., [{2, 0.6}, {-3, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1}, {-1, 0.7}]
+/// custom_type * output;   // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_keys_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_keys_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+/// // keys_output: [{11, 1.0}, {11, 0.08}, {2, 0.65}, {2, 0.6}, {0, 0.4}, {0, 0.2}, {-1, 0.7}, {-3, 0.3},]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type,
+         class Decomposer>
+auto radix_sort_keys_desc(void*              temporary_storage,
+                          size_t&            storage_size,
+                          KeysInputIterator  keys_input,
+                          KeysOutputIterator keys_output,
+                          Size               size,
+                          Decomposer         decomposer,
+                          unsigned int       begin_bit,
+                          unsigned int       end_bit,
+                          hipStream_t        stream            = 0,
+                          bool               debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    empty_type* values = nullptr;
+    bool        ignored;
+    return detail::radix_sort_impl<Config, true>(temporary_storage,
+                                                 storage_size,
+                                                 keys_input,
+                                                 nullptr,
+                                                 keys_output,
+                                                 values,
+                                                 nullptr,
+                                                 values,
+                                                 size,
+                                                 ignored,
+                                                 decomposer,
+                                                 begin_bit,
+                                                 end_bit,
+                                                 stream,
+                                                 debug_synchronous);
+}
+
+/// \brief Parallel descending radix sort primitive for device level.
+///
+/// \p radix_sort_keys_desc function performs a device-wide radix sort
+/// of keys. Function sorts input keys in descending order.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Key The value type of the input and output iterators.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level descending radix sort is performed on an array of
+/// values of a custom type, using a custom decomposer.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;      // e.g., 8
+/// custom_type * input;    // e.g., [{2, 0.6}, {-3, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1}, {-1, 0.7}]
+/// custom_type * output;   // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_keys_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, custom_type_decomposer{}
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_keys_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, custom_type_decomposer{}
+/// );
+/// // keys_output: [{11, 1.0}, {11, 0.08}, {2, 0.65}, {2, 0.6}, {0, 0.4}, {0, 0.2}, {-1, 0.7}, {-3, 0.3},]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type,
+         class Decomposer>
+auto radix_sort_keys_desc(void*              temporary_storage,
+                          size_t&            storage_size,
+                          KeysInputIterator  keys_input,
+                          KeysOutputIterator keys_output,
+                          Size               size,
+                          Decomposer         decomposer,
+                          hipStream_t        stream            = 0,
+                          bool               debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    empty_type* values = nullptr;
+    bool        ignored;
     return detail::radix_sort_impl<Config, true>(
-        temporary_storage, storage_size,
-        keys_input, nullptr, keys_output,
-        values, nullptr, values,
-        size, ignored,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+        temporary_storage,
+        storage_size,
+        keys_input,
+        nullptr,
+        keys_output,
+        values,
+        nullptr,
+        values,
+        size,
+        ignored,
+        decomposer,
+        0,
+        detail::decomposer_max_bits<Decomposer, Key>::value,
+        stream,
+        debug_synchronous);
+}
+
+/// \brief Parallel descending radix sort primitive for device level.
+///
+/// \p radix_sort_keys_desc function performs a device-wide radix sort
+/// of keys. Function sorts input keys in descending order.
+///
+/// \par Overview
+/// * The contents of both buffers of \p keys may be altered by the sorting function.
+/// * \p current() of \p keys is used as the input.
+/// * The function will update \p current() of \p keys to point to the buffer
+/// that contains the output range.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * The function requires small \p temporary_storage as it does not need
+/// a temporary buffer of \p size elements.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+/// * \p begin_bit and \p end_bit can be provided to control the radix range that is considered in the
+/// decomposed tuple. For example, if the decomposer returns `rocprim::tuple<int16_t&, uint8_t&>`,
+/// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
+/// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
+/// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
+/// key comparison. Defaults to `0`.
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
+/// key comparison. Defaults to the size of the decomposed tuple's bit range.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level descending radix sort is performed on an array of
+/// values of a custom type, using a custom decomposer.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
+/// constexpr unsigned int begin_bit = 0;
+/// constexpr unsigned int end_bit = 96;
+/// size_t input_size;   // e.g., 8
+/// custom_type * input; // e.g., [{2, 0.6}, {-3, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1}, {-1, 0.7}]
+/// custom_type * tmp;   // empty array of 8 elements
+/// // Create double-buffer
+/// rocprim::double_buffer<custom_type> keys(input, tmp);
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_keys_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_keys_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size, custom_type_decomposer{}
+/// );
+/// // keys.current(): [{11, 1.0}, {11, 0.08}, {2, 0.65}, {2, 0.6}, {0, 0.4}, {0, 0.2}, {-1, 0.7}, {-3, 0.3},]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class Key, class Size, class Decomposer>
+auto radix_sort_keys_desc(void*               temporary_storage,
+                          size_t&             storage_size,
+                          double_buffer<Key>& keys,
+                          Size                size,
+                          Decomposer          decomposer,
+                          unsigned int        begin_bit,
+                          unsigned int        end_bit,
+                          hipStream_t         stream            = 0,
+                          bool                debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    empty_type* values = nullptr;
+    bool        is_result_in_output;
+    hipError_t  error = detail::radix_sort_impl<Config, true>(temporary_storage,
+                                                             storage_size,
+                                                             keys.current(),
+                                                             keys.current(),
+                                                             keys.alternate(),
+                                                             values,
+                                                             values,
+                                                             values,
+                                                             size,
+                                                             is_result_in_output,
+                                                             decomposer,
+                                                             begin_bit,
+                                                             end_bit,
+                                                             stream,
+                                                             debug_synchronous);
+    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
+    {
+        keys.swap();
+    }
+    return error;
+}
+
+/// \brief Parallel descending radix sort primitive for device level.
+///
+/// \p radix_sort_keys_desc function performs a device-wide radix sort
+/// of keys. Function sorts input keys in descending order.
+///
+/// \par Overview
+/// * The contents of both buffers of \p keys may be altered by the sorting function.
+/// * \p current() of \p keys is used as the input.
+/// * The function will update \p current() of \p keys to point to the buffer
+/// that contains the output range.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * The function requires small \p temporary_storage as it does not need
+/// a temporary buffer of \p size elements.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level descending radix sort is performed on an array of
+/// values of a custom type, using a custom decomposer.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
+/// size_t input_size;   // e.g., 8
+/// custom_type * input; // e.g., [{2, 0.6}, {-3, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1}, {-1, 0.7}]
+/// custom_type * tmp;   // empty array of 8 elements
+/// // Create double-buffer
+/// rocprim::double_buffer<custom_type> keys(input, tmp);
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_keys_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size, custom_type_decomposer{}
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_keys_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, input_size, custom_type_decomposer{}
+/// );
+/// // keys.current(): [{11, 1.0}, {11, 0.08}, {2, 0.65}, {2, 0.6}, {0, 0.4}, {0, 0.2}, {-1, 0.7}, {-3, 0.3},]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class Key, class Size, class Decomposer>
+auto radix_sort_keys_desc(void*               temporary_storage,
+                          size_t&             storage_size,
+                          double_buffer<Key>& keys,
+                          Size                size,
+                          Decomposer          decomposer,
+                          hipStream_t         stream            = 0,
+                          bool                debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    empty_type* values = nullptr;
+    bool        is_result_in_output;
+    hipError_t  error
+        = detail::radix_sort_impl<Config, true>(temporary_storage,
+                                                storage_size,
+                                                keys.current(),
+                                                keys.current(),
+                                                keys.alternate(),
+                                                values,
+                                                values,
+                                                values,
+                                                size,
+                                                is_result_in_output,
+                                                decomposer,
+                                                0,
+                                                detail::decomposer_max_bits<Decomposer, Key>::value,
+                                                stream,
+                                                debug_synchronous);
+    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
+    {
+        keys.swap();
+    }
+    return error;
 }
 
 /// \brief Parallel ascending radix sort-by-key primitive for device level.
 ///
-/// \p radix_sort_pairs_desc function performs a device-wide radix sort
+/// \p radix_sort_pairs function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
 /// * Returns the required size of \p temporary_storage in \p storage_size
-/// if \p temporary_storage in a null pointer.
+/// if \p temporary_storage is a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
 /// * Ranges specified by \p keys_input, \p keys_output, \p values_input and \p values_output must
@@ -945,34 +2290,34 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam ValuesInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam Size - integral type that represents the problem size.
+/// \tparam Size integral type that represents the problem size.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - pointer to the first element in the range to sort.
-/// \param [out] keys_output - pointer to the first element in the output range.
-/// \param [in] values_input - pointer to the first element in the range to sort.
-/// \param [out] values_output - pointer to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] values_input pointer to the first element in the range to sort.
+/// \param [out] values_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -1019,388 +2364,47 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// // values_output: [-1, -2, 2, 3, -4, -5, 7, -8]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class Size,
-    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
->
-inline
-hipError_t radix_sort_pairs(void * temporary_storage,
-                            size_t& storage_size,
-                            KeysInputIterator keys_input,
-                            KeysOutputIterator keys_output,
-                            ValuesInputIterator values_input,
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type>
+hipError_t radix_sort_pairs(void*                temporary_storage,
+                            size_t&              storage_size,
+                            KeysInputIterator    keys_input,
+                            KeysOutputIterator   keys_output,
+                            ValuesInputIterator  values_input,
                             ValuesOutputIterator values_output,
-                            Size size,
-                            unsigned int begin_bit = 0,
-                            unsigned int end_bit = 8 * sizeof(Key),
-                            hipStream_t stream = 0,
-                            bool debug_synchronous = false)
+                            Size                 size,
+                            unsigned int         begin_bit         = 0,
+                            unsigned int         end_bit           = 8 * sizeof(Key),
+                            hipStream_t          stream            = 0,
+                            bool                 debug_synchronous = false)
 {
     static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
-    return detail::radix_sort_impl<Config, false>(
-        temporary_storage, storage_size,
-        keys_input, nullptr, keys_output,
-        values_input, nullptr, values_output,
-        size, ignored,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
-}
-
-/// \brief Parallel descending radix sort-by-key primitive for device level.
-///
-/// \p radix_sort_pairs_desc function performs a device-wide radix sort
-/// of (key, value) pairs. Function sorts input pairs in descending order of keys.
-///
-/// \par Overview
-/// * The contents of the inputs are not altered by the sorting function.
-/// * Returns the required size of \p temporary_storage in \p storage_size
-/// if \p temporary_storage in a null pointer.
-/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
-/// an arithmetic type (that is, an integral type or a floating-point type).
-/// * Ranges specified by \p keys_input, \p keys_output, \p values_input and \p values_output must
-/// have at least \p size elements.
-/// * If \p Key is an integer type and the range of keys is known in advance, the performance
-/// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
-///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
-/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
-/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
-/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesOutputIterator - random-access iterator type of the output range. Must meet the
-/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam Size - integral type that represents the problem size.
-///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
-/// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - pointer to the first element in the range to sort.
-/// \param [out] keys_output - pointer to the first element in the output range.
-/// \param [in] values_input - pointer to the first element in the range to sort.
-/// \param [out] values_output - pointer to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
-/// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-/// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
-/// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
-/// launch is forced in order to check for errors. Default value is \p false.
-///
-/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
-/// type \p hipError_t.
-///
-/// \par Example
-/// \parblock
-/// In this example a device-level descending radix sort is performed where input keys are
-/// represented by an array of integers and input values by an array of <tt>double</tt>s.
-///
-/// \code{.cpp}
-/// #include <rocprim/rocprim.hpp>
-///
-/// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// size_t input_size;       // e.g., 8
-/// int * keys_input;        // e.g., [ 6, 3,  5, 4,  1,  8,  1, 7]
-/// double * values_input;   // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
-/// int * keys_output;       // empty array of 8 elements
-/// double * values_output;  // empty array of 8 elements
-///
-/// size_t temporary_storage_size_bytes;
-/// void * temporary_storage_ptr = nullptr;
-/// // Get required size of the temporary storage
-/// rocprim::radix_sort_pairs_desc(
-///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     keys_input, keys_output, values_input, values_output,
-///     input_size
-/// );
-///
-/// // allocate temporary storage
-/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
-///
-/// // perform sort
-/// rocprim::radix_sort_pairs_desc(
-///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     keys_input, keys_output, values_input, values_output,
-///     input_size
-/// );
-/// // keys_output:   [ 8, 7,  6,  5, 4, 3,  1,  1]
-/// // values_output: [-8, 7, -5, -4, 3, 2, -1, -2]
-/// \endcode
-/// \endparblock
-template<
-    class Config = default_config,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class Size,
-    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
->
-inline
-hipError_t radix_sort_pairs_desc(void * temporary_storage,
-                                 size_t& storage_size,
-                                 KeysInputIterator keys_input,
-                                 KeysOutputIterator keys_output,
-                                 ValuesInputIterator values_input,
-                                 ValuesOutputIterator values_output,
-                                 Size size,
-                                 unsigned int begin_bit = 0,
-                                 unsigned int end_bit = 8 * sizeof(Key),
-                                 hipStream_t stream = 0,
-                                 bool debug_synchronous = false)
-{
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
-    bool ignored;
-    return detail::radix_sort_impl<Config, true>(
-        temporary_storage, storage_size,
-        keys_input, nullptr, keys_output,
-        values_input, nullptr, values_output,
-        size, ignored,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
-}
-
-/// \brief Parallel ascending radix sort primitive for device level.
-///
-/// \p radix_sort_keys function performs a device-wide radix sort
-/// of keys. Function sorts input keys in ascending order.
-///
-/// \par Overview
-/// * The contents of both buffers of \p keys may be altered by the sorting function.
-/// * \p current() of \p keys is used as the input.
-/// * The function will update \p current() of \p keys to point to the buffer
-/// that contains the output range.
-/// * Returns the required size of \p temporary_storage in \p storage_size
-/// if \p temporary_storage in a null pointer.
-/// * The function requires small \p temporary_storage as it does not need
-/// a temporary buffer of \p size elements.
-/// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
-/// type).
-/// * Buffers of \p keys must have at least \p size elements.
-/// * If \p Key is an integer type and the range of keys is known in advance, the performance
-/// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
-///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
-/// \tparam Size - integral type that represents the problem size.
-///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
-/// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
-/// contains the input range and will be updated to point to the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
-/// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-/// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
-/// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
-/// launch is forced in order to check for errors. Default value is \p false.
-///
-/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
-/// type \p hipError_t.
-///
-/// \par Example
-/// \parblock
-/// In this example a device-level ascending radix sort is performed on an array of
-/// \p float values.
-///
-/// \code{.cpp}
-/// #include <rocprim/rocprim.hpp>
-///
-/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
-/// size_t input_size;  // e.g., 8
-/// float * input;      // e.g., [0.6, 0.3, 0.65, 0.4, 0.2, 0.08, 1, 0.7]
-/// float * tmp;        // empty array of 8 elements
-/// // Create double-buffer
-/// rocprim::double_buffer<float> keys(input, tmp);
-///
-/// size_t temporary_storage_size_bytes;
-/// void * temporary_storage_ptr = nullptr;
-/// // Get required size of the temporary storage
-/// rocprim::radix_sort_keys(
-///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     keys, input_size
-/// );
-///
-/// // allocate temporary storage
-/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
-///
-/// // perform sort
-/// rocprim::radix_sort_keys(
-///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     keys, input_size
-/// );
-/// // keys.current(): [0.08, 0.2, 0.3, 0.4, 0.6, 0.65, 0.7, 1]
-/// \endcode
-/// \endparblock
-template<
-    class Config = default_config,
-    class Key,
-    class Size
->
-inline
-hipError_t radix_sort_keys(void * temporary_storage,
-                           size_t& storage_size,
-                           double_buffer<Key>& keys,
-                           Size size,
-                           unsigned int begin_bit = 0,
-                           unsigned int end_bit = 8 * sizeof(Key),
-                           hipStream_t stream = 0,
-                           bool debug_synchronous = false)
-{
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
-    empty_type * values = nullptr;
-    bool         is_result_in_output;
-    hipError_t error = detail::radix_sort_impl<Config, false>(
-        temporary_storage, storage_size,
-        keys.current(), keys.current(), keys.alternate(),
-        values, values, values,
-        size, is_result_in_output,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
-    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
-    {
-        keys.swap();
-    }
-    return error;
-}
-
-/// \brief Parallel descending radix sort primitive for device level.
-///
-/// \p radix_sort_keys_desc function performs a device-wide radix sort
-/// of keys. Function sorts input keys in descending order.
-///
-/// \par Overview
-/// * The contents of both buffers of \p keys may be altered by the sorting function.
-/// * \p current() of \p keys is used as the input.
-/// * The function will update \p current() of \p keys to point to the buffer
-/// that contains the output range.
-/// * Returns the required size of \p temporary_storage in \p storage_size
-/// if \p temporary_storage in a null pointer.
-/// * The function requires small \p temporary_storage as it does not need
-/// a temporary buffer of \p size elements.
-/// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
-/// type).
-/// * Buffers of \p keys must have at least \p size elements.
-/// * If \p Key is an integer type and the range of keys is known in advance, the performance
-/// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
-///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
-/// \tparam Size - integral type that represents the problem size.
-///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
-/// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
-/// contains the input range and will be updated to point to the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
-/// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-/// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
-/// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
-/// launch is forced in order to check for errors. Default value is \p false.
-///
-/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
-/// type \p hipError_t.
-///
-/// \par Example
-/// \parblock
-/// In this example a device-level descending radix sort is performed on an array of
-/// integer values.
-///
-/// \code{.cpp}
-/// #include <rocprim/rocprim.hpp>
-///
-/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
-/// size_t input_size;  // e.g., 8
-/// int * input;        // e.g., [6, 3, 5, 4, 2, 8, 1, 7]
-/// int * tmp;          // empty array of 8 elements
-/// // Create double-buffer
-/// rocprim::double_buffer<int> keys(input, tmp);
-///
-/// size_t temporary_storage_size_bytes;
-/// void * temporary_storage_ptr = nullptr;
-/// // Get required size of the temporary storage
-/// rocprim::radix_sort_keys_desc(
-///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     keys, input_size
-/// );
-///
-/// // allocate temporary storage
-/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
-///
-/// // perform sort
-/// rocprim::radix_sort_keys_desc(
-///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     keys, input_size
-/// );
-/// // keys.current(): [8, 7, 6, 5, 4, 3, 2, 1]
-/// \endcode
-/// \endparblock
-template<
-    class Config = default_config,
-    class Key,
-    class Size
->
-inline
-hipError_t radix_sort_keys_desc(void * temporary_storage,
-                                size_t& storage_size,
-                                double_buffer<Key>& keys,
-                                Size size,
-                                unsigned int begin_bit = 0,
-                                unsigned int end_bit = 8 * sizeof(Key),
-                                hipStream_t stream = 0,
-                                bool debug_synchronous = false)
-{
-    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
-    empty_type * values = nullptr;
-    bool         is_result_in_output;
-    hipError_t error = detail::radix_sort_impl<Config, true>(
-        temporary_storage, storage_size,
-        keys.current(), keys.current(), keys.alternate(),
-        values, values, values,
-        size, is_result_in_output,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
-    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
-    {
-        keys.swap();
-    }
-    return error;
+    return detail::radix_sort_impl<Config, false>(temporary_storage,
+                                                  storage_size,
+                                                  keys_input,
+                                                  nullptr,
+                                                  keys_output,
+                                                  values_input,
+                                                  nullptr,
+                                                  values_output,
+                                                  size,
+                                                  ignored,
+                                                  identity_decomposer{},
+                                                  begin_bit,
+                                                  end_bit,
+                                                  stream,
+                                                  debug_synchronous);
 }
 
 /// \brief Parallel ascending radix sort-by-key primitive for device level.
 ///
-/// \p radix_sort_pairs_desc function performs a device-wide radix sort
+/// \p radix_sort_pairs function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
 ///
 /// \par Overview
@@ -1409,7 +2413,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// * The function will update \p current() of \p keys and \p values to point to buffers
 /// that contains the output range.
 /// * Returns the required size of \p temporary_storage in \p storage_size
-/// if \p temporary_storage in a null pointer.
+/// if \p temporary_storage is a null pointer.
 /// * The function requires small \p temporary_storage as it does not need
 /// a temporary buffer of \p size elements.
 /// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
@@ -1419,28 +2423,28 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
-/// \tparam Value - value type.
-/// \tparam Size - integral type that represents the problem size.
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Value value type.
+/// \tparam Size integral type that represents the problem size.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in,out] values - reference to the double-buffer of values, its \p current()
+/// \param [in,out] values reference to the double-buffer of values, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in] size number of element in the input range.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -1490,33 +2494,614 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// // values.current(): [-1, -2, 2, 3, -4, -5, 7, -8]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class Key,
-    class Value,
-    class Size
->
-inline
-hipError_t radix_sort_pairs(void * temporary_storage,
-                            size_t& storage_size,
-                            double_buffer<Key>& keys,
+template<class Config = default_config, class Key, class Value, class Size>
+hipError_t radix_sort_pairs(void*                 temporary_storage,
+                            size_t&               storage_size,
+                            double_buffer<Key>&   keys,
                             double_buffer<Value>& values,
-                            Size size,
-                            unsigned int begin_bit = 0,
-                            unsigned int end_bit = 8 * sizeof(Key),
-                            hipStream_t stream = 0,
-                            bool debug_synchronous = false)
+                            Size                  size,
+                            unsigned int          begin_bit         = 0,
+                            unsigned int          end_bit           = 8 * sizeof(Key),
+                            hipStream_t           stream            = 0,
+                            bool                  debug_synchronous = false)
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    bool       is_result_in_output;
+    hipError_t error = detail::radix_sort_impl<Config, false>(temporary_storage,
+                                                              storage_size,
+                                                              keys.current(),
+                                                              keys.current(),
+                                                              keys.alternate(),
+                                                              values.current(),
+                                                              values.current(),
+                                                              values.alternate(),
+                                                              size,
+                                                              is_result_in_output,
+                                                              identity_decomposer{},
+                                                              begin_bit,
+                                                              end_bit,
+                                                              stream,
+                                                              debug_synchronous);
+    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
+    {
+        keys.swap();
+        values.swap();
+    }
+    return error;
+}
+
+/// \brief Parallel ascending radix sort-by-key primitive for device level.
+///
+/// \p radix_sort_pairs function performs a device-wide radix sort
+/// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+/// * \p begin_bit and \p end_bit can be provided to control the radix range that is considered in the
+/// decomposed tuple. For example, if the decomposer returns `rocprim::tuple<int16_t&, uint8_t&>`,
+/// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
+/// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
+/// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Key The value type of the input and output iterators.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] values_input pointer to the first element in the range to sort.
+/// \param [out] values_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] begin_bit index of the first (least significant) bit used in
+/// key comparison.
+/// \param [in] end_bit past-the-end index (most significant) bit used in
+/// key comparison.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending radix sort is performed where input keys are
+/// represented by an array of a custom type and input values by an array of <tt>double</tt>s.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// custom_type * keys_input;   // e.g., [{2, 0.6}, {0, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1.0}, {5, 0.7}]
+/// double * values_input;      // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
+/// custom_type * keys_output;  // empty array of 8 elements
+/// double * values_output;     // empty array of 8 elements
+///
+/// // The integer field of the keys is in range 0-11, which can be represented on 4 bits,
+/// // while for the double member we must specify full bit range [0; 63]. Therefore begin_bit
+/// // is set to 0 and end_bit is set to 68.
+/// constexpr unsigned int begin_bit = 0;
+/// constexpr unsigned int end_bit = 68;
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_pairs(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_pairs(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+/// // keys_output:   [{0, 0.2}, {0, 0.3}, {0, 0.4}, {2, 0.6}, {2, 0.65}, {5, 0.7}, {11, 0.08}, {11, 1.0}]
+/// // values_output: [-1, 2, 3, -5, -4, 7, -8, -2]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type,
+         class Decomposer>
+auto radix_sort_pairs(void*                temporary_storage,
+                      size_t&              storage_size,
+                      KeysInputIterator    keys_input,
+                      KeysOutputIterator   keys_output,
+                      ValuesInputIterator  values_input,
+                      ValuesOutputIterator values_output,
+                      Size                 size,
+                      Decomposer           decomposer,
+                      unsigned int         begin_bit,
+                      unsigned int         end_bit,
+                      hipStream_t          stream            = 0,
+                      bool                 debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    bool ignored;
+    return detail::radix_sort_impl<Config, false>(temporary_storage,
+                                                  storage_size,
+                                                  keys_input,
+                                                  nullptr,
+                                                  keys_output,
+                                                  values_input,
+                                                  nullptr,
+                                                  values_output,
+                                                  size,
+                                                  ignored,
+                                                  decomposer,
+                                                  begin_bit,
+                                                  end_bit,
+                                                  stream,
+                                                  debug_synchronous);
+}
+
+/// \brief Parallel ascending radix sort-by-key primitive for device level.
+///
+/// \p radix_sort_pairs function performs a device-wide radix sort
+/// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Key The value type of the input and output iterators.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] values_input pointer to the first element in the range to sort.
+/// \param [out] values_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending radix sort is performed where input keys are
+/// represented by an array of a custom type and input values by an array of <tt>double</tt>s.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// custom_type * keys_input;   // e.g., [{2, 0.6}, {0, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1.0}, {5, 0.7}]
+/// double * values_input;      // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
+/// custom_type * keys_output;  // empty array of 8 elements
+/// double * values_output;     // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_pairs(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size, custom_type_decomposer{}
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_pairs(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size, custom_type_decomposer{}
+/// );
+/// // keys_output:   [{0, 0.2}, {0, 0.3}, {0, 0.4}, {2, 0.6}, {2, 0.65}, {5, 0.7}, {11, 0.08}, {11, 1.0}]
+/// // values_output: [-1, 2, 3, -5, -4, 7, -8, -2]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type,
+         class Decomposer>
+auto radix_sort_pairs(void*                temporary_storage,
+                      size_t&              storage_size,
+                      KeysInputIterator    keys_input,
+                      KeysOutputIterator   keys_output,
+                      ValuesInputIterator  values_input,
+                      ValuesOutputIterator values_output,
+                      Size                 size,
+                      Decomposer           decomposer,
+                      hipStream_t          stream            = 0,
+                      bool                 debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    bool ignored;
+    return detail::radix_sort_impl<Config, false>(
+        temporary_storage,
+        storage_size,
+        keys_input,
+        nullptr,
+        keys_output,
+        values_input,
+        nullptr,
+        values_output,
+        size,
+        ignored,
+        decomposer,
+        0,
+        detail::decomposer_max_bits<Decomposer, Key>::value,
+        stream,
+        debug_synchronous);
+}
+
+/// \brief Parallel ascending radix sort-by-key primitive for device level.
+///
+/// \p radix_sort_pairs function performs a device-wide radix sort
+/// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
+///
+/// \par Overview
+/// * The contents of both buffers of \p keys and \p values may be altered by the sorting function.
+/// * \p current() of \p keys and \p values are used as the input.
+/// * The function will update \p current() of \p keys and \p values to point to buffers
+/// that contains the output range.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * The function requires small \p temporary_storage as it does not need
+/// a temporary buffer of \p size elements.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+/// * \p begin_bit and \p end_bit can be provided to control the radix range that is considered in the
+/// decomposed tuple. For example, if the decomposer returns `rocprim::tuple<int16_t&, uint8_t&>`,
+/// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
+/// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
+/// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Value value type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in,out] values reference to the double-buffer of values, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] begin_bit index of the first (least significant) bit used in
+/// key comparison.
+/// \param [in] end_bit past-the-end index (most significant) bit used in
+/// key comparison. Defaults to the size of the decomposed tuple's bit range.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending radix sort is performed where input keys are
+/// represented by an array of a custom type and input values by an array of <tt>double</tt>s.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// custom_type * keys_input;   // e.g., [{2, 0.6}, {0, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1.0}, {5, 0.7}]
+/// double * values_input;      // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
+/// custom_type * keys_tmp;     // empty array of 8 elements
+/// double*  values_tmp;        // empty array of 8 elements
+/// // Create double-buffers
+/// rocprim::double_buffer<custom_type> keys(keys_input, keys_tmp);
+/// rocprim::double_buffer<double> values(values_input, values_tmp);
+///
+/// // The integer field of the keys is in range 0-11, which can be represented on 4 bits,
+/// // while for the double member we must specify full bit range [0; 63]. Therefore begin_bit
+/// // is set to 0 and end_bit is set to 68.
+/// constexpr unsigned int begin_bit = 0;
+/// constexpr unsigned int end_bit = 68;
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_pairs(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, values, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_pairs(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, values, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+/// // keys.current():   [{0, 0.2}, {0, 0.3}, {0, 0.4}, {2, 0.6}, {2, 0.65}, {5, 0.7}, {11, 0.08}, {11, 1.0}]
+/// // values.current(): [-1, 2, 3, -5, -4, 7, -8, -2]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class Key, class Value, class Size, class Decomposer>
+auto radix_sort_pairs(void*                 temporary_storage,
+                      size_t&               storage_size,
+                      double_buffer<Key>&   keys,
+                      double_buffer<Value>& values,
+                      Size                  size,
+                      Decomposer            decomposer,
+                      unsigned int          begin_bit,
+                      unsigned int          end_bit,
+                      hipStream_t           stream            = 0,
+                      bool                  debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    bool       is_result_in_output;
+    hipError_t error = detail::radix_sort_impl<Config, false>(temporary_storage,
+                                                              storage_size,
+                                                              keys.current(),
+                                                              keys.current(),
+                                                              keys.alternate(),
+                                                              values.current(),
+                                                              values.current(),
+                                                              values.alternate(),
+                                                              size,
+                                                              is_result_in_output,
+                                                              decomposer,
+                                                              begin_bit,
+                                                              end_bit,
+                                                              stream,
+                                                              debug_synchronous);
+    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
+    {
+        keys.swap();
+        values.swap();
+    }
+    return error;
+}
+
+/// \brief Parallel ascending radix sort-by-key primitive for device level.
+///
+/// \p radix_sort_pairs function performs a device-wide radix sort
+/// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
+///
+/// \par Overview
+/// * The contents of both buffers of \p keys and \p values may be altered by the sorting function.
+/// * \p current() of \p keys and \p values are used as the input.
+/// * The function will update \p current() of \p keys and \p values to point to buffers
+/// that contains the output range.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * The function requires small \p temporary_storage as it does not need
+/// a temporary buffer of \p size elements.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Value value type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in,out] values reference to the double-buffer of values, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending radix sort is performed where input keys are
+/// represented by an array of a custom type and input values by an array of <tt>double</tt>s.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// custom_type * keys_input;   // e.g., [{2, 0.6}, {0, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1.0}, {5, 0.7}]
+/// double * values_input;      // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
+/// custom_type * keys_tmp;     // empty array of 8 elements
+/// double*  values_tmp;        // empty array of 8 elements
+/// // Create double-buffers
+/// rocprim::double_buffer<custom_type> keys(keys_input, keys_tmp);
+/// rocprim::double_buffer<double> values(values_input, values_tmp);
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_pairs(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, values, input_size, custom_type_decomposer{}
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_pairs(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, values, input_size, custom_type_decomposer{}
+/// );
+/// // keys.current():   [{0, 0.2}, {0, 0.3}, {0, 0.4}, {2, 0.6}, {2, 0.65}, {5, 0.7}, {11, 0.08}, {11, 1.0}]
+/// // values.current(): [-1, 2, 3, -5, -4, 7, -8, -2]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class Key, class Value, class Size, class Decomposer>
+auto radix_sort_pairs(void*                 temporary_storage,
+                      size_t&               storage_size,
+                      double_buffer<Key>&   keys,
+                      double_buffer<Value>& values,
+                      Size                  size,
+                      Decomposer            decomposer,
+                      hipStream_t           stream            = 0,
+                      bool                  debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
 {
     static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, false>(
-        temporary_storage, storage_size,
-        keys.current(), keys.current(), keys.alternate(),
-        values.current(), values.current(), values.alternate(),
-        size, is_result_in_output,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+        temporary_storage,
+        storage_size,
+        keys.current(),
+        keys.current(),
+        keys.alternate(),
+        values.current(),
+        values.current(),
+        values.alternate(),
+        size,
+        is_result_in_output,
+        decomposer,
+        0,
+        detail::decomposer_max_bits<Decomposer, Key>::value,
+        stream,
+        debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
         keys.swap();
@@ -1531,12 +3116,137 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// of (key, value) pairs. Function sorts input pairs in descending order of keys.
 ///
 /// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
+/// an arithmetic type (that is, an integral type or a floating-point type).
+/// * Ranges specified by \p keys_input, \p keys_output, \p values_input and \p values_output must
+/// have at least \p size elements.
+/// * If \p Key is an integer type and the range of keys is known in advance, the performance
+/// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size integral type that represents the problem size.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] values_input pointer to the first element in the range to sort.
+/// \param [out] values_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
+/// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
+/// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level descending radix sort is performed where input keys are
+/// represented by an array of integers and input values by an array of <tt>double</tt>s.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;       // e.g., 8
+/// int * keys_input;        // e.g., [ 6, 3,  5, 4,  1,  8,  1, 7]
+/// double * values_input;   // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
+/// int * keys_output;       // empty array of 8 elements
+/// double * values_output;  // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_pairs_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_pairs_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size
+/// );
+/// // keys_output:   [ 8, 7,  6,  5, 4, 3,  1,  1]
+/// // values_output: [-8, 7, -5, -4, 3, 2, -1, -2]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type>
+hipError_t radix_sort_pairs_desc(void*                temporary_storage,
+                                 size_t&              storage_size,
+                                 KeysInputIterator    keys_input,
+                                 KeysOutputIterator   keys_output,
+                                 ValuesInputIterator  values_input,
+                                 ValuesOutputIterator values_output,
+                                 Size                 size,
+                                 unsigned int         begin_bit         = 0,
+                                 unsigned int         end_bit           = 8 * sizeof(Key),
+                                 hipStream_t          stream            = 0,
+                                 bool                 debug_synchronous = false)
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    bool ignored;
+    return detail::radix_sort_impl<Config, true>(temporary_storage,
+                                                 storage_size,
+                                                 keys_input,
+                                                 nullptr,
+                                                 keys_output,
+                                                 values_input,
+                                                 nullptr,
+                                                 values_output,
+                                                 size,
+                                                 ignored,
+                                                 identity_decomposer{},
+                                                 begin_bit,
+                                                 end_bit,
+                                                 stream,
+                                                 debug_synchronous);
+}
+
+/// \brief Parallel descending radix sort-by-key primitive for device level.
+///
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
+/// of (key, value) pairs. Function sorts input pairs in descending order of keys.
+///
+/// \par Overview
 /// * The contents of both buffers of \p keys and \p values may be altered by the sorting function.
 /// * \p current() of \p keys and \p values are used as the input.
 /// * The function will update \p current() of \p keys and \p values to point to buffers
 /// that contains the output range.
 /// * Returns the required size of \p temporary_storage in \p storage_size
-/// if \p temporary_storage in a null pointer.
+/// if \p temporary_storage is a null pointer.
 /// * The function requires small \p temporary_storage as it does not need
 /// a temporary buffer of \p size elements.
 /// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
@@ -1546,28 +3256,28 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
-/// \tparam Value - value type.
-/// \tparam Size - integral type that represents the problem size.
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Value value type.
+/// \tparam Size integral type that represents the problem size.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in,out] values - reference to the double-buffer of values, its \p current()
+/// \param [in,out] values reference to the double-buffer of values, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in] size number of element in the input range.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -1611,33 +3321,614 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// // values.current(): [-8, 7, -5, -4, 3, 2, -1, -2]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class Key,
-    class Value,
-    class Size
->
-inline
-hipError_t radix_sort_pairs_desc(void * temporary_storage,
-                                 size_t& storage_size,
-                                 double_buffer<Key>& keys,
+template<class Config = default_config, class Key, class Value, class Size>
+hipError_t radix_sort_pairs_desc(void*                 temporary_storage,
+                                 size_t&               storage_size,
+                                 double_buffer<Key>&   keys,
                                  double_buffer<Value>& values,
-                                 Size size,
-                                 unsigned int begin_bit = 0,
-                                 unsigned int end_bit = 8 * sizeof(Key),
-                                 hipStream_t stream = 0,
-                                 bool debug_synchronous = false)
+                                 Size                  size,
+                                 unsigned int          begin_bit         = 0,
+                                 unsigned int          end_bit           = 8 * sizeof(Key),
+                                 hipStream_t           stream            = 0,
+                                 bool                  debug_synchronous = false)
 {
     static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     bool       is_result_in_output;
-    hipError_t error = detail::radix_sort_impl<Config, true>(
-        temporary_storage, storage_size,
-        keys.current(), keys.current(), keys.alternate(),
-        values.current(), values.current(), values.alternate(),
-        size, is_result_in_output,
-        begin_bit, end_bit,
-        stream, debug_synchronous
-    );
+    hipError_t error = detail::radix_sort_impl<Config, true>(temporary_storage,
+                                                             storage_size,
+                                                             keys.current(),
+                                                             keys.current(),
+                                                             keys.alternate(),
+                                                             values.current(),
+                                                             values.current(),
+                                                             values.alternate(),
+                                                             size,
+                                                             is_result_in_output,
+                                                             identity_decomposer{},
+                                                             begin_bit,
+                                                             end_bit,
+                                                             stream,
+                                                             debug_synchronous);
+    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
+    {
+        keys.swap();
+        values.swap();
+    }
+    return error;
+}
+
+/// \brief Parallel descending radix sort-by-key primitive for device level.
+///
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
+/// of (key, value) pairs. Function sorts input pairs in descending order of keys.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+/// * \p begin_bit and \p end_bit can be provided to control the radix range that is considered in the
+/// decomposed tuple. For example, if the decomposer returns `rocprim::tuple<int16_t&, uint8_t&>`,
+/// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
+/// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
+/// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Key The value type of the input and output iterators.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] values_input pointer to the first element in the range to sort.
+/// \param [out] values_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] begin_bit index of the first (least significant) bit used in
+/// key comparison.
+/// \param [in] end_bit past-the-end index (most significant) bit used in
+/// key comparison.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level descending radix sort is performed where input keys are
+/// represented by an array of a custom type and input values by an array of <tt>double</tt>s.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// custom_type * keys_input;   // e.g., [{2, 0.6}, {0, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1.0}, {5, 0.7}]
+/// double * values_input;      // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
+/// custom_type * keys_output;  // empty array of 8 elements
+/// double * values_output;     // empty array of 8 elements
+///
+/// // The integer field of the keys is in range 0-11, which can be represented on 4 bits,
+/// // while for the double member we must specify full bit range [0; 63]. Therefore begin_bit
+/// // is set to 0 and end_bit is set to 68.
+/// constexpr unsigned int begin_bit = 0;
+/// constexpr unsigned int end_bit = 68;
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_pairs_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_pairs_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+/// // keys_output:   [{11, 1.0}, {11, 0.08}, {5, 0.7}, {2, 0.65}, {2, 0.6}, {0, 0.4}, {0, 0.3}, {0, 0.2}]
+/// // values_output: [-2, -1, 2, 3, -4, -5, 7, -8]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type,
+         class Decomposer>
+auto radix_sort_pairs_desc(void*                temporary_storage,
+                           size_t&              storage_size,
+                           KeysInputIterator    keys_input,
+                           KeysOutputIterator   keys_output,
+                           ValuesInputIterator  values_input,
+                           ValuesOutputIterator values_output,
+                           Size                 size,
+                           Decomposer           decomposer,
+                           unsigned int         begin_bit,
+                           unsigned int         end_bit,
+                           hipStream_t          stream            = 0,
+                           bool                 debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    bool ignored;
+    return detail::radix_sort_impl<Config, true>(temporary_storage,
+                                                 storage_size,
+                                                 keys_input,
+                                                 nullptr,
+                                                 keys_output,
+                                                 values_input,
+                                                 nullptr,
+                                                 values_output,
+                                                 size,
+                                                 ignored,
+                                                 decomposer,
+                                                 begin_bit,
+                                                 end_bit,
+                                                 stream,
+                                                 debug_synchronous);
+}
+
+/// \brief Parallel descending radix sort-by-key primitive for device level.
+///
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
+/// of (key, value) pairs. Function sorts input pairs in descending order of keys.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesInputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Key The value type of the input and output iterators.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] values_input pointer to the first element in the range to sort.
+/// \param [out] values_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level descending radix sort is performed where input keys are
+/// represented by an array of a custom type and input values by an array of <tt>double</tt>s.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// custom_type * keys_input;   // e.g., [{2, 0.6}, {0, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1.0}, {5, 0.7}]
+/// double * values_input;      // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
+/// custom_type * keys_output;  // empty array of 8 elements
+/// double * values_output;     // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_pairs_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size, custom_type_decomposer{}
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_pairs_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size, custom_type_decomposer{}
+/// );
+/// // keys_output:   [{11, 1.0}, {11, 0.08}, {5, 0.7}, {2, 0.65}, {2, 0.6}, {0, 0.4}, {0, 0.3}, {0, 0.2}]
+/// // values_output: [-2, -1, 2, 3, -4, -5, 7, -8]
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class Size,
+         class Key = typename std::iterator_traits<KeysInputIterator>::value_type,
+         class Decomposer>
+auto radix_sort_pairs_desc(void*                temporary_storage,
+                           size_t&              storage_size,
+                           KeysInputIterator    keys_input,
+                           KeysOutputIterator   keys_output,
+                           ValuesInputIterator  values_input,
+                           ValuesOutputIterator values_output,
+                           Size                 size,
+                           Decomposer           decomposer,
+                           hipStream_t          stream            = 0,
+                           bool                 debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    bool ignored;
+    return detail::radix_sort_impl<Config, true>(
+        temporary_storage,
+        storage_size,
+        keys_input,
+        nullptr,
+        keys_output,
+        values_input,
+        nullptr,
+        values_output,
+        size,
+        ignored,
+        decomposer,
+        0,
+        detail::decomposer_max_bits<Decomposer, Key>::value,
+        stream,
+        debug_synchronous);
+}
+
+/// \brief Parallel descending radix sort-by-key primitive for device level.
+///
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
+/// of (key, value) pairs. Function sorts input pairs in descending order of keys.
+///
+/// \par Overview
+/// * The contents of both buffers of \p keys and \p values may be altered by the sorting function.
+/// * \p current() of \p keys and \p values are used as the input.
+/// * The function will update \p current() of \p keys and \p values to point to buffers
+/// that contains the output range.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * The function requires small \p temporary_storage as it does not need
+/// a temporary buffer of \p size elements.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+/// * \p begin_bit and \p end_bit can be provided to control the radix range that is considered in the
+/// decomposed tuple. For example, if the decomposer returns `rocprim::tuple<int16_t&, uint8_t&>`,
+/// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
+/// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
+/// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Value value type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in,out] values reference to the double-buffer of values, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
+/// key comparison. Defaults to `0`.
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
+/// key comparison. Defaults to the size of the decomposed tuple's bit range.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level descending radix sort is performed where input keys are
+/// represented by an array of a custom type and input values by an array of <tt>double</tt>s.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
+/// size_t input_size;        // e.g., 8
+/// custom_type * keys_input; // e.g., [{2, 0.6}, {0, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1.0}, {5, 0.7}]
+/// double * values_input;    // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
+/// custom_type * keys_tmp;   // empty array of 8 elements
+/// double * values_tmp;      // empty array of 8 elements
+/// // Create double-buffers
+/// rocprim::double_buffer<custom_type> keys(keys_input, keys_tmp);
+/// rocprim::double_buffer<double> values(values_input, values_tmp);
+///
+/// // The integer field of the keys is in range 0-11, which can be represented on 4 bits,
+/// // while for the double member we must specify full bit range [0; 63]. Therefore begin_bit
+/// // is set to 0 and end_bit is set to 68.
+/// constexpr unsigned int begin_bit = 0;
+/// constexpr unsigned int end_bit = 68;
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_pairs_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, values, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_pairs_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, values, input_size, custom_type_decomposer{}, begin_bit, end_bit
+/// );
+/// // keys.current():   [{11, 1.0}, {11, 0.08}, {5, 0.7}, {2, 0.65}, {2, 0.6}, {0, 0.4}, {0, 0.3}, {0, 0.2}]
+/// // values.current(): [-2, -1, 2, 3, -4, -5, 7, -8]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class Key, class Value, class Size, class Decomposer>
+auto radix_sort_pairs_desc(void*                 temporary_storage,
+                           size_t&               storage_size,
+                           double_buffer<Key>&   keys,
+                           double_buffer<Value>& values,
+                           Size                  size,
+                           Decomposer            decomposer,
+                           unsigned int          begin_bit,
+                           unsigned int          end_bit,
+                           hipStream_t           stream            = 0,
+                           bool                  debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    bool       is_result_in_output;
+    hipError_t error = detail::radix_sort_impl<Config, true>(temporary_storage,
+                                                             storage_size,
+                                                             keys.current(),
+                                                             keys.current(),
+                                                             keys.alternate(),
+                                                             values.current(),
+                                                             values.current(),
+                                                             values.alternate(),
+                                                             size,
+                                                             is_result_in_output,
+                                                             decomposer,
+                                                             begin_bit,
+                                                             end_bit,
+                                                             stream,
+                                                             debug_synchronous);
+    if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
+    {
+        keys.swap();
+        values.swap();
+    }
+    return error;
+}
+
+/// \brief Parallel descending radix sort-by-key primitive for device level.
+///
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
+/// of (key, value) pairs. Function sorts input pairs in descending order of keys.
+///
+/// \par Overview
+/// * The contents of both buffers of \p keys and \p values may be altered by the sorting function.
+/// * \p current() of \p keys and \p values are used as the input.
+/// * The function will update \p current() of \p keys and \p values to point to buffers
+/// that contains the output range.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * The function requires small \p temporary_storage as it does not need
+/// a temporary buffer of \p size elements.
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) can be any
+/// trivially copyable type.
+/// * \p decomposer must be a functor that implements `operator()(Key&) const`. This operator
+/// must return a \p rocprim::tuple that contains one or more reference to value(s) of arithmetic types.
+/// These references must point to member variables of `Key`, however not every member variable has to be
+/// exposed this way.
+/// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \tparam Config [optional] configuration of the primitive. It has to be \p radix_sort_config or a class derived from it.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Value value type.
+/// \tparam Size integral type that represents the problem size.
+/// \tparam Decomposer The type of the decomposer functor.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in,out] values reference to the double-buffer of values, its \p current()
+/// contains the input range and will be updated to point to the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] decomposer decomposer functor that produces a tuple of references from the
+/// input key type.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level descending radix sort is performed where input keys are
+/// represented by an array of a custom type and input values by an array of <tt>double</tt>s.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// struct custom_type
+/// {
+///     int i;
+///     double d;
+/// };
+///
+/// struct custom_type_decomposer
+/// {
+///     rocprim::tuple<int&, double&> operator()(custom_type& key) const
+///     {
+///         return rocprim::tuple<int&, double&>(key.i, key.d);
+///     }
+/// };
+///
+/// // Prepare input and tmp (declare pointers, allocate device memory etc.)
+/// size_t input_size;        // e.g., 8
+/// custom_type * keys_input; // e.g., [{2, 0.6}, {0, 0.3}, {2, 0.65}, {0, 0.4}, {0, 0.2}, {11, 0.08}, {11, 1.0}, {5, 0.7}]
+/// double * values_input;    // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
+/// custom_type * keys_tmp;   // empty array of 8 elements
+/// double * values_tmp;      // empty array of 8 elements
+/// // Create double-buffers
+/// rocprim::double_buffer<custom_type> keys(keys_input, keys_tmp);
+/// rocprim::double_buffer<double> values(values_input, values_tmp);
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::radix_sort_pairs_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, values, input_size, custom_type_decomposer{}
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::radix_sort_pairs_desc(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys, values, input_size, custom_type_decomposer{}
+/// );
+/// // keys.current():   [{11, 1.0}, {11, 0.08}, {5, 0.7}, {2, 0.65}, {2, 0.6}, {0, 0.4}, {0, 0.3}, {0, 0.2}]
+/// // values.current(): [-2, -1, 2, 3, -4, -5, 7, -8]
+/// \endcode
+/// \endparblock
+template<class Config = default_config, class Key, class Value, class Size, class Decomposer>
+auto radix_sort_pairs_desc(void*                 temporary_storage,
+                           size_t&               storage_size,
+                           double_buffer<Key>&   keys,
+                           double_buffer<Value>& values,
+                           Size                  size,
+                           Decomposer            decomposer,
+                           hipStream_t           stream            = 0,
+                           bool                  debug_synchronous = false)
+    -> std::enable_if_t<!std::is_convertible<Decomposer, unsigned int>::value, hipError_t>
+{
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
+    bool       is_result_in_output;
+    hipError_t error
+        = detail::radix_sort_impl<Config, true>(temporary_storage,
+                                                storage_size,
+                                                keys.current(),
+                                                keys.current(),
+                                                keys.alternate(),
+                                                values.current(),
+                                                values.current(),
+                                                values.alternate(),
+                                                size,
+                                                is_result_in_output,
+                                                decomposer,
+                                                0,
+                                                detail::decomposer_max_bits<Decomposer, Key>::value,
+                                                stream,
+                                                debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
         keys.swap();

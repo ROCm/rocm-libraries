@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,8 +24,7 @@
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
 #include "../../functional.hpp"
-
-#include "../../detail/radix_sort.hpp"
+#include "../../thread/radix_key_codec.hpp"
 
 #include "../block_scan.hpp"
 
@@ -198,7 +197,7 @@ private:
                                        const unsigned int begin_bit,
                                        const unsigned int pass_bits)
     {
-        using key_codec    = ::rocprim::detail::radix_key_codec<Key, Descending>;
+        using key_codec    = ::rocprim::radix_key_codec<Key, Descending>;
         using bit_key_type = typename key_codec::bit_key_type;
 
         bit_key_type bit_keys[ItemsPerThread];

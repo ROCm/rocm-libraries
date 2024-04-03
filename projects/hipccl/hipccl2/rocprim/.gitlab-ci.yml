@@ -169,10 +169,9 @@ build:cmake-minimum-apt:
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
-      -D CMAKE_BUILD_TYPE=Release
-      -D BUILD_TEST=ON
+      -D CMAKE_BUILD_TYPE="$BUILD_TYPE"
+      -D BUILD_$BUILD_TARGET=ON 
       -D BUILD_EXAMPLE=ON
-      -D BUILD_BENCHMARK=OFF
       -D GPU_TARGETS=$GPU_TARGETS
       -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
       -S $CI_PROJECT_DIR
@@ -180,14 +179,16 @@ build:cmake-minimum-apt:
     - cmake --build $BUILD_DIR
   artifacts:
     paths:
-      - $BUILD_DIR/test/test_*
-      - $BUILD_DIR/test/rocprim/test_*
+      - $BUILD_DIR/.ninja_log
+      - $BUILD_DIR/benchmark/*
+      - $BUILD_DIR/CMakeCache.txt
+      - $BUILD_DIR/CTestTestfile.cmake
+      - $BUILD_DIR/deps/googlebenchmark/
+      - $BUILD_DIR/gtest/
       - $BUILD_DIR/test/CTestTestfile.cmake
       - $BUILD_DIR/test/rocprim/CTestTestfile.cmake
-      - $BUILD_DIR/gtest/
-      - $BUILD_DIR/CMakeCache.txt
-      - $BUILD_DIR/.ninja_log
-      - $BUILD_DIR/CTestTestfile.cmake
+      - $BUILD_DIR/test/rocprim/test_*
+      - $BUILD_DIR/test/test_*
     expire_in: 2 weeks
 
 build:cmake-latest:
@@ -196,13 +197,19 @@ build:cmake-latest:
   extends:
     - .cmake-latest
     - .build:common
+  variables:
+    BUILD_TYPE: Release
+    BUILD_TARGET: TEST
 
 build:cmake-minimum:
-  stage: build
   needs: []
   extends:
     - .cmake-minimum
     - .build:common
+  parallel:
+    matrix:
+      - BUILD_TYPE: [Debug, Release]
+        BUILD_TARGET: [BENCHMARK, TEST]
 
 build:package:
   stage: build
@@ -229,39 +236,6 @@ build:package:
       - $PACKAGE_DIR/rocprim*.zip
     expire_in: 2 weeks
 
-build:benchmark:
-  stage: build
-  needs: []
-  tags:
-    - build
-  extends:
-    - .cmake-minimum
-    - .gpus:rocm-gpus
-    - .rules:build
-  script:
-# If we have a custom config created by autotune:create-config
-    - "[ -d ${AUTOTUNE_CONFIG_DIR} ] && cp -r -f ${AUTOTUNE_CONFIG_DIR}/* ${CI_PROJECT_DIR}/"
-    - mkdir -p $BUILD_DIR
-    - cd $BUILD_DIR
-    - cmake
-      -B $BUILD_DIR
-      -S $CI_PROJECT_DIR
-      -G Ninja
-      -D CMAKE_CXX_COMPILER="$AMDCLANG"
-      -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror -Wno-#pragma-messages"
-      -D CMAKE_BUILD_TYPE=Release
-      -D BUILD_TEST=OFF
-      -D BUILD_EXAMPLE=OFF
-      -D BUILD_BENCHMARK=ON
-      -D GPU_TARGETS=$GPU_TARGETS
-    - cmake --build .
-  artifacts:
-    paths:
-      - $BUILD_DIR/benchmark/*
-      - $BUILD_DIR/.ninja_log
-      - $BUILD_DIR/deps/googlebenchmark/
-    expire_in: 2 weeks
-
 build:windows:
   stage: build
   needs: []
@@ -272,14 +246,9 @@ build:windows:
     - .deps:visual-studio-devshell
   parallel:
     matrix:
-      - BUILD_TYPE:
-        # Disabled due to extensive link times. 
-        # This is tracked in issue 679
-        #- Debug
-        - Release
-        BUILD_TARGET:
-        - BENCHMARK
-        - TEST
+      # Debug is disabled due to extensive link times, tracked in issue 679.
+      - BUILD_TYPE: [Release]
+        BUILD_TARGET: [BENCHMARK, TEST]
   script:
     - mkdir -p $CI_PROJECT_DIR/build
     - cmake -G Ninja 
@@ -360,7 +329,11 @@ test:
     - .rules:test
     - .gpus:rocm
   needs:
-    - build:cmake-minimum
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: TEST
   script:
     - cd $BUILD_DIR
     - cmake
@@ -475,7 +448,11 @@ test:docs:
 
 benchmark:
   needs:
-    - build:benchmark
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: BENCHMARK
   extends:
     - .cmake-minimum
     - .gpus:rocm
@@ -560,8 +537,6 @@ autotune:execute-tuning:
     paths:
       - ${AUTOTUNE_RESULT_DIR}/*.json
   script:
-    # Exclude benchmark that is known to fail on gfx906
-    # On ROCm 5.7 or later, check if this can be removed - the presumption is that the failure is caused by a compiler issue.
     - >
       cd "${CI_PROJECT_DIR}"
     - |

@@ -1,3 +1,6 @@
+
+#include "benchmark_utils.hpp"
+
 #include <rocprim/device/config_types.hpp>
 
 #include <benchmark/benchmark.h>
@@ -5,8 +8,6 @@
 #include <hip/hip_runtime.h>
 
 #include <iostream>
-
-#include "benchmark_utils.hpp"
 
 enum class stream_kind
 {

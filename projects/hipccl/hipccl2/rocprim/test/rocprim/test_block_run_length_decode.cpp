@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,6 +57,8 @@ public:
 
 using HipcubBlockRunLengthDecodeTestParams
     = ::testing::Types<Params<int, int, 256, 4, 4>,
+                       Params<int8_t, int, 256, 4, 4>,
+                       Params<uint8_t, int, 256, 4, 4>,
                        Params<double, char, 256, 4, 4>,
                        Params<char, long long, 256, 4, 4>,
                        Params<float, int, 256, 4, 4>,

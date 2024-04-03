@@ -12,12 +12,45 @@ Documentation for rocPRIM is available at
   * The default accumulator type is still the value type of the input iterator (inclusive scan) or the initial value's type (exclusive scan).
     This is the same behaviour as before this change.
 * New overload for `device_adjacent_difference_inplace` that allows separate input and output iterators, but allows them to point to the same element.
+* New public API for deriving resulting type on device-only functions:
+  * `rocprim::invoke_result`
+  * `rocprim::invoke_result_t`
+  * `rocprim::invoke_result_binary_op`
+  * `rocprim::invoke_result_binary_op_t`
+* New `rocprim::batch_copy` function added. Similar to `rocprim::batch_memcpy`, but copies by element, not with memcpy.
+* Added more test cases, to better cover supported data types.
+* Updated some tests to work with supported data types.
+* An optional `decomposer` argument for all member functions of `rocprim::block_radix_sort` and all functions of `device_radix_sort`. 
+  To sort keys of an user-defined type, a decomposer functor should be passed. The decomposer should produce a `rocprim::tuple`
+  of references to arithmetic types from the key.
+* New `rocprim::predicate_iterator` which acts as a proxy for an underlying iterator based on a predicate. 
+  It iterates over proxies that holds the references to the underlying values, but only allow reading and writing if the predicate is `true`.
+  It can be instantiated with:
+  * `rocprim::make_predicate_iterator`
+  * `rocprim::make_mask_iterator`
+* Added custom radix sizes as the last parameter for `block_radix_sort`. The default value is 4, it can be a number between 0 and 32.
+* New `rocprim::radix_key_codec`, which allows the encoding/decoding of keys for radix-based sorts. For user-defined key types, a decomposer functor should be passed.
+
+### Optimizations
+
+* Improved the performance of `warp_sort_shuffle` and `block_sort_bitonic`.
+* Created an optimized version of the `warp_exchange` functions `blocked_to_striped_shuffle` and `striped_to_blocked_shuffle` when the warpsize is equal to the items per thread.
 
 ### Fixes
 
 * Fixed incorrect results of `warp_exchange::blocked_to_striped_shuffle` and `warp_exchange::striped_to_blocked_shuffle` when the block size is
   larger than the logical warp size. The test suite has been updated with such cases.
 * Fixed incorrect results returned when calling device `unique_by_key` with overlapping `values_input` and `values_output`.
+* Fixed incorrect output type used in `device_adjacent_difference`.
+* Hotfix for incorrect results on the GFX10 (Navi 10/RDNA1, Navi 20/RDNA2) ISA and GFX11 ISA (Navi 30 GPUs) on device scan algorithms `rocprim::inclusive_scan(_by_key)` and `rocprim::exclusive_scan(_by_key)` with large input types.
+* `device_adjacent_difference` now considers both the input and the output type for selecting the appropriate kernel launch config. Previously only the input type was considered, which could result in compilation errors due to excessive shared memory usage.
+* Fixed incorrect data being loaded with `rocprim::thread_load` when compiling with `-O0`.
+
+### Deprecations
+
+* The internal header `detail/match_result_type.hpp` has been deprecated.
+* `TwiddleIn` and `TwiddleOut` have been deprecated in favor of `radix_key_codec`.
+* The internal `::rocprim::detail::radix_key_codec` has been deprecated in favor of the new public utility with the same name.
 
 ## Unreleased rocPRIM-3.1.0 for ROCm 6.1.0
 

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #include "test_utils_types.hpp"
 
 #include "rocprim/detail/various.hpp"
+#include "rocprim/device/device_copy.hpp"
 #include "rocprim/device/device_memcpy.hpp"
 #include "rocprim/intrinsics/thread.hpp"
 
@@ -44,6 +45,7 @@
 
 template<class ValueType,
          class SizeType,
+         bool     IsMemCpy,
          bool     Shuffled   = false,
          uint32_t NumBuffers = 1024,
          uint32_t MaxSize    = 4 * 1024>
@@ -51,6 +53,7 @@ struct DeviceBatchMemcpyParams
 {
     using value_type                      = ValueType;
     using size_type                       = SizeType;
+    static constexpr bool     isMemCpy    = IsMemCpy;
     static constexpr bool     shuffled    = Shuffled;
     static constexpr uint32_t num_buffers = NumBuffers;
     static constexpr uint32_t max_size    = MaxSize;
@@ -61,6 +64,7 @@ struct DeviceBatchMemcpyTests : public ::testing::Test
 {
     using value_type                      = typename Params::value_type;
     using size_type                       = typename Params::size_type;
+    static constexpr bool     isMemCpy    = Params::isMemCpy;
     static constexpr bool     shuffled    = Params::shuffled;
     static constexpr uint32_t num_buffers = Params::num_buffers;
     static constexpr uint32_t max_size    = Params::max_size;
@@ -68,36 +72,42 @@ struct DeviceBatchMemcpyTests : public ::testing::Test
 
 typedef ::testing::Types<
     // Ignore copy/move
-    DeviceBatchMemcpyParams<test_utils::custom_non_copyable_type<uint8_t>, uint32_t, false>,
-    DeviceBatchMemcpyParams<test_utils::custom_non_moveable_type<uint8_t>, uint32_t, false>,
-    DeviceBatchMemcpyParams<test_utils::custom_non_default_type<uint8_t>, uint32_t, false>,
+    DeviceBatchMemcpyParams<test_utils::custom_non_copyable_type<uint8_t>, uint32_t, true, false>,
+    DeviceBatchMemcpyParams<test_utils::custom_non_moveable_type<uint8_t>, uint32_t, true, false>,
+    DeviceBatchMemcpyParams<test_utils::custom_non_default_type<uint8_t>, uint32_t, true, false>,
 
     // Unshuffled inputs and outputs
     // Variable value_type
-    DeviceBatchMemcpyParams<uint8_t, uint32_t, false>,
-    DeviceBatchMemcpyParams<uint32_t, uint32_t, false>,
-    DeviceBatchMemcpyParams<uint64_t, uint32_t, false>,
+    DeviceBatchMemcpyParams<uint8_t, uint32_t, true, false>,
+    DeviceBatchMemcpyParams<uint32_t, uint32_t, true, false>,
+    DeviceBatchMemcpyParams<uint64_t, uint32_t, true, false>,
+    DeviceBatchMemcpyParams<uint8_t, uint32_t, false, false>,
+    DeviceBatchMemcpyParams<uint32_t, uint32_t, false, false>,
+    DeviceBatchMemcpyParams<uint64_t, uint32_t, false, false>,
     // size_type: uint16_t
-    DeviceBatchMemcpyParams<uint8_t, uint16_t, false, 1024, 1024>,
+    DeviceBatchMemcpyParams<uint8_t, uint16_t, true, false, 1024, 1024>,
     // size_type: int64_t
-    DeviceBatchMemcpyParams<uint8_t, int64_t, false, 1024, 64 * 1024>,
-    DeviceBatchMemcpyParams<uint8_t, int64_t, false, 1024, 128 * 1024>,
+    DeviceBatchMemcpyParams<uint8_t, int64_t, true, false, 1024, 64 * 1024>,
+    DeviceBatchMemcpyParams<uint8_t, int64_t, true, false, 1024, 128 * 1024>,
 
     // weird amount of buffers
-    DeviceBatchMemcpyParams<uint8_t, uint32_t, false, 3 * 1023>,
-    DeviceBatchMemcpyParams<uint8_t, uint32_t, false, 3 * 1025>,
-    DeviceBatchMemcpyParams<uint8_t, uint32_t, false, 1024 * 1024, 256>,
+    DeviceBatchMemcpyParams<uint8_t, uint32_t, true, false, 3 * 1023>,
+    DeviceBatchMemcpyParams<uint8_t, uint32_t, true, false, 3 * 1025>,
+    DeviceBatchMemcpyParams<uint8_t, uint32_t, true, false, 1024 * 1024, 256>,
 
     // Shuffled inputs and outputs
     // Variable value_type
-    DeviceBatchMemcpyParams<uint8_t, uint32_t, true>,
-    DeviceBatchMemcpyParams<uint32_t, uint32_t, true>,
-    DeviceBatchMemcpyParams<uint64_t, uint32_t, true>,
+    DeviceBatchMemcpyParams<uint8_t, uint32_t, true, true>,
+    DeviceBatchMemcpyParams<uint32_t, uint32_t, true, true>,
+    DeviceBatchMemcpyParams<uint64_t, uint32_t, true, true>,
+    DeviceBatchMemcpyParams<uint8_t, uint32_t, false, true>,
+    DeviceBatchMemcpyParams<uint32_t, uint32_t, false, true>,
+    DeviceBatchMemcpyParams<uint64_t, uint32_t, false, true>,
     // size_type: uint16_t
-    DeviceBatchMemcpyParams<uint8_t, uint16_t, true, 1024, 1024>,
+    DeviceBatchMemcpyParams<uint8_t, uint16_t, true, true, 1024, 1024>,
     // size_type: int64_t
-    DeviceBatchMemcpyParams<uint8_t, int64_t, true, 1024, 64 * 1024>,
-    DeviceBatchMemcpyParams<uint8_t, int64_t, true, 1024, 128 * 1024>>
+    DeviceBatchMemcpyParams<uint8_t, int64_t, true, true, 1024, 64 * 1024>,
+    DeviceBatchMemcpyParams<uint8_t, int64_t, true, true, 1024, 128 * 1024>>
     DeviceBatchMemcpyTestsParams;
 
 TYPED_TEST_SUITE(DeviceBatchMemcpyTests, DeviceBatchMemcpyTestsParams);
@@ -145,6 +155,161 @@ std::vector<T> shuffled_exclusive_scan(const std::vector<S>& input, RandomGenera
     return result;
 }
 
+template<bool IsMemCpy,
+         class ContainerMemCpy,
+         class ContainerCopy,
+         class byte_offset_type,
+         typename std::enable_if<IsMemCpy, int>::type = 0>
+void init_input(ContainerMemCpy& h_input_for_memcpy,
+                ContainerCopy& /*h_input_for_copy*/,
+                std::mt19937_64& rng,
+                byte_offset_type total_num_bytes)
+{
+    std::independent_bits_engine<std::mt19937_64, 64, uint64_t> bits_engine{rng};
+
+    const size_t num_ints = rocprim::detail::ceiling_div(total_num_bytes, sizeof(uint64_t));
+    h_input_for_memcpy    = std::vector<unsigned char>(num_ints * sizeof(uint64_t));
+
+    // generate_n for uninitialized memory, pragmatically use placement-new, since there are no
+    // uint64_t objects alive yet in the storage.
+    std::for_each(
+        reinterpret_cast<uint64_t*>(h_input_for_memcpy.data()),
+        reinterpret_cast<uint64_t*>(h_input_for_memcpy.data() + num_ints * sizeof(uint64_t)),
+        [&bits_engine](uint64_t& elem) { ::new(&elem) uint64_t{bits_engine()}; });
+}
+
+template<bool IsMemCpy,
+         class ContainerMemCpy,
+         class ContainerCopy,
+         class byte_offset_type,
+         typename std::enable_if<!IsMemCpy, int>::type = 0>
+void init_input(ContainerMemCpy& /*h_input_for_memcpy*/,
+                ContainerCopy&   h_input_for_copy,
+                std::mt19937_64& rng,
+                byte_offset_type total_num_bytes)
+{
+    using value_type = typename ContainerCopy::value_type;
+
+    std::independent_bits_engine<std::mt19937_64, 64, uint64_t> bits_engine{rng};
+
+    const size_t num_ints = rocprim::detail::ceiling_div(total_num_bytes, sizeof(uint64_t));
+    const size_t num_of_elements
+        = rocprim::detail::ceiling_div(num_ints * sizeof(uint64_t), sizeof(value_type));
+    h_input_for_copy = std::vector<value_type>(num_of_elements);
+
+    // generate_n for uninitialized memory, pragmatically use placement-new, since there are no
+    // uint64_t objects alive yet in the storage.
+    std::for_each(reinterpret_cast<uint64_t*>(h_input_for_copy.data()),
+                  reinterpret_cast<uint64_t*>(h_input_for_copy.data()) + num_ints,
+                  [&bits_engine](uint64_t& elem) { ::new(&elem) uint64_t{bits_engine()}; });
+}
+
+template<bool IsMemCpy,
+         class InputBufferItType,
+         class OutputBufferItType,
+         class BufferSizeItType,
+         typename std::enable_if<IsMemCpy, int>::type = 0>
+void batch_copy(void*              temporary_storage,
+                size_t&            storage_size,
+                InputBufferItType  sources,
+                OutputBufferItType destinations,
+                BufferSizeItType   sizes,
+                uint32_t           num_copies,
+                hipStream_t        stream)
+{
+    HIP_CHECK(rocprim::batch_memcpy(temporary_storage,
+                                    storage_size,
+                                    sources,
+                                    destinations,
+                                    sizes,
+                                    num_copies,
+                                    stream));
+}
+
+template<bool IsMemCpy,
+         class InputBufferItType,
+         class OutputBufferItType,
+         class BufferSizeItType,
+         typename std::enable_if<!IsMemCpy, int>::type = 0>
+void batch_copy(void*              temporary_storage,
+                size_t&            storage_size,
+                InputBufferItType  sources,
+                OutputBufferItType destinations,
+                BufferSizeItType   sizes,
+                uint32_t           num_copies,
+                hipStream_t        stream)
+{
+    HIP_CHECK(rocprim::batch_copy(temporary_storage,
+                                  storage_size,
+                                  sources,
+                                  destinations,
+                                  sizes,
+                                  num_copies,
+                                  stream));
+}
+
+template<bool IsMemCpy,
+         class ContainerMemCpy,
+         class ContainerCopy,
+         class ptr,
+         class OffsetContainer,
+         class SizesContainer,
+         class byte_offset_type,
+         typename std::enable_if<IsMemCpy, int>::type = 0>
+void check_result(ContainerMemCpy& h_input_for_memcpy,
+                  ContainerCopy& /*h_input_for_copy*/,
+                  ptr              d_output,
+                  byte_offset_type total_num_bytes,
+                  byte_offset_type /*total_num_elements*/,
+                  int32_t          num_buffers,
+                  OffsetContainer& src_offsets,
+                  OffsetContainer& dst_offsets,
+                  SizesContainer&  h_buffer_num_bytes)
+{
+    using value_type                    = typename ContainerCopy::value_type;
+    std::vector<unsigned char> h_output = std::vector<unsigned char>(total_num_bytes);
+    HIP_CHECK(hipMemcpy(h_output.data(), d_output, total_num_bytes, hipMemcpyDeviceToHost));
+    for(int32_t i = 0; i < num_buffers; ++i)
+    {
+        ASSERT_EQ(std::memcmp(h_input_for_memcpy.data() + src_offsets[i] * sizeof(value_type),
+                              h_output.data() + dst_offsets[i] * sizeof(value_type),
+                              h_buffer_num_bytes[i]),
+                  0)
+            << "with index = " << i;
+    }
+}
+
+template<bool IsMemCpy,
+         class ContainerMemCpy,
+         class ContainerCopy,
+         class ptr,
+         class OffsetContainer,
+         class SizesContainer,
+         class byte_offset_type,
+         typename std::enable_if<!IsMemCpy, int>::type = 0>
+void check_result(ContainerMemCpy& /*h_input_for_memcpy*/,
+                  ContainerCopy&   h_input_for_copy,
+                  ptr              d_output,
+                  byte_offset_type total_num_bytes,
+                  byte_offset_type total_num_elements,
+                  int32_t          num_buffers,
+                  OffsetContainer& src_offsets,
+                  OffsetContainer& dst_offsets,
+                  SizesContainer&  h_buffer_num_bytes)
+{
+    using value_type                 = typename ContainerCopy::value_type;
+    std::vector<value_type> h_output = std::vector<value_type>(total_num_elements);
+    HIP_CHECK(hipMemcpy(h_output.data(), d_output, total_num_bytes, hipMemcpyDeviceToHost));
+    for(int32_t i = 0; i < num_buffers; ++i)
+    {
+        ASSERT_EQ(std::memcmp(h_input_for_copy.data() + src_offsets[i],
+                              h_output.data() + dst_offsets[i],
+                              h_buffer_num_bytes[i]),
+                  0)
+            << "with index = " << i;
+    }
+}
+
 TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
 {
     using value_type         = typename TestFixture::value_type;
@@ -155,6 +320,7 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
     constexpr int32_t num_buffers = TestFixture::num_buffers;
     constexpr int32_t max_size    = TestFixture::max_size;
     constexpr bool    shuffled    = TestFixture::shuffled;
+    constexpr bool    isMemCpy    = TestFixture::isMemCpy;
 
     constexpr int32_t wlev_min_size = rocprim::batch_memcpy_config<>::wlev_size_threshold;
     constexpr int32_t blev_min_size = rocprim::batch_memcpy_config<>::blev_size_threshold;
@@ -198,13 +364,6 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
     // Shuffle the sizes so that size classes aren't clustered
     std::shuffle(h_buffer_num_elements.begin(), h_buffer_num_elements.end(), rng);
 
-    // Get the byte size of each buffer
-    std::vector<buffer_size_type> h_buffer_num_bytes(num_buffers);
-    for(size_t i = 0; i < num_buffers; ++i)
-    {
-        h_buffer_num_bytes[i] = h_buffer_num_elements[i] * sizeof(value_type);
-    }
-
     // And the total byte size
     const byte_offset_type total_num_bytes = total_num_elements * sizeof(value_type);
 
@@ -219,12 +378,13 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
 
     size_t temp_storage_bytes = 0;
 
-    HIP_CHECK(rocprim::batch_memcpy(nullptr,
-                                    temp_storage_bytes,
-                                    d_buffer_srcs,
-                                    d_buffer_dsts,
-                                    d_buffer_sizes,
-                                    num_buffers));
+    batch_copy<isMemCpy>(nullptr,
+                         temp_storage_bytes,
+                         d_buffer_srcs,
+                         d_buffer_dsts,
+                         d_buffer_sizes,
+                         num_buffers,
+                         hipStreamDefault);
 
     void* d_temp_storage = nullptr;
 
@@ -239,16 +399,9 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
     HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
 
     // Generate data.
-    std::independent_bits_engine<std::mt19937_64, 64, uint64_t> bits_engine{rng};
-
-    const size_t num_ints = rocprim::detail::ceiling_div(total_num_bytes, sizeof(uint64_t));
-    auto         h_input  = std::make_unique<unsigned char[]>(num_ints * sizeof(uint64_t));
-
-    // generate_n for uninitialized memory, pragmatically use placement-new, since there are no
-    // uint64_t objects alive yet in the storage.
-    std::for_each(reinterpret_cast<uint64_t*>(h_input.get()),
-                  reinterpret_cast<uint64_t*>(h_input.get() + num_ints * sizeof(uint64_t)),
-                  [&bits_engine](uint64_t& elem) { ::new(&elem) uint64_t{bits_engine()}; });
+    std::vector<unsigned char> h_input_for_memcpy;
+    std::vector<value_type>    h_input_for_copy;
+    init_input<isMemCpy>(h_input_for_memcpy, h_input_for_copy, rng, total_num_bytes);
 
     // Generate the source and shuffled destination offsets.
     std::vector<buffer_offset_type> src_offsets;
@@ -274,6 +427,13 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
                          dst_offsets.begin() + 1);
     }
 
+    // Get the byte size of each buffer
+    std::vector<buffer_size_type> h_buffer_num_bytes(num_buffers);
+    for(size_t i = 0; i < num_buffers; ++i)
+    {
+        h_buffer_num_bytes[i] = h_buffer_num_elements[i] * sizeof(value_type);
+    }
+
     // Generate the source and destination pointers.
     std::vector<value_type*> h_buffer_srcs(num_buffers);
     std::vector<value_type*> h_buffer_dsts(num_buffers);
@@ -285,7 +445,25 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
     }
 
     // Prepare the batch memcpy.
-    HIP_CHECK(hipMemcpy(d_input, h_input.get(), total_num_bytes, hipMemcpyHostToDevice));
+    if(isMemCpy)
+    {
+        HIP_CHECK(
+            hipMemcpy(d_input, h_input_for_memcpy.data(), total_num_bytes, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_buffer_sizes,
+                            h_buffer_num_bytes.data(),
+                            h_buffer_num_bytes.size() * sizeof(*d_buffer_sizes),
+                            hipMemcpyHostToDevice));
+    }
+    else
+    {
+        HIP_CHECK(
+            hipMemcpy(d_input, h_input_for_copy.data(), total_num_bytes, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_buffer_sizes,
+                            h_buffer_num_elements.data(),
+                            h_buffer_num_elements.size() * sizeof(*d_buffer_sizes),
+                            hipMemcpyHostToDevice));
+    }
+
     HIP_CHECK(hipMemcpy(d_buffer_srcs,
                         h_buffer_srcs.data(),
                         h_buffer_srcs.size() * sizeof(*d_buffer_srcs),
@@ -294,31 +472,26 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
                         h_buffer_dsts.data(),
                         h_buffer_dsts.size() * sizeof(*d_buffer_dsts),
                         hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_buffer_sizes,
-                        h_buffer_num_bytes.data(),
-                        h_buffer_num_bytes.size() * sizeof(*d_buffer_sizes),
-                        hipMemcpyHostToDevice));
 
     // Run batched memcpy.
-    HIP_CHECK(rocprim::batch_memcpy(d_temp_storage,
-                                    temp_storage_bytes,
-                                    d_buffer_srcs,
-                                    d_buffer_dsts,
-                                    d_buffer_sizes,
-                                    num_buffers,
-                                    hipStreamDefault));
-    // Verify results.
-    auto h_output = std::make_unique<unsigned char[]>(total_num_bytes);
-    HIP_CHECK(hipMemcpy(h_output.get(), d_output, total_num_bytes, hipMemcpyDeviceToHost));
+    batch_copy<isMemCpy>(d_temp_storage,
+                         temp_storage_bytes,
+                         d_buffer_srcs,
+                         d_buffer_dsts,
+                         d_buffer_sizes,
+                         num_buffers,
+                         hipStreamDefault);
 
-    for(int32_t i = 0; i < num_buffers; ++i)
-    {
-        ASSERT_EQ(std::memcmp(h_input.get() + src_offsets[i] * sizeof(value_type),
-                              h_output.get() + dst_offsets[i] * sizeof(value_type),
-                              h_buffer_num_bytes[i]),
-                  0)
-            << "with index = " << i;
-    }
+    // Verify results.
+    check_result<isMemCpy>(h_input_for_memcpy,
+                           h_input_for_copy,
+                           d_output,
+                           total_num_bytes,
+                           total_num_elements,
+                           num_buffers,
+                           src_offsets,
+                           dst_offsets,
+                           h_buffer_num_bytes);
 
     HIP_CHECK(hipFree(d_temp_storage));
     HIP_CHECK(hipFree(d_buffer_sizes));

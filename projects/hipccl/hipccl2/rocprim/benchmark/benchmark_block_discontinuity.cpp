@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,24 +20,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <cstdio>
-#include <cstdlib>
-#include <iostream>
-#include <limits>
-#include <string>
-#include <vector>
+// CmdParser
+#include "benchmark_utils.hpp"
+#include "cmdparser.hpp"
 
 // Google Benchmark
-#include "benchmark/benchmark.h"
-// CmdParser
-#include "cmdparser.hpp"
-#include "benchmark_utils.hpp"
+#include <benchmark/benchmark.h>
 
 // HIP API
 #include <hip/hip_runtime.h>
 
 // rocPRIM
-#include <rocprim/rocprim.hpp>
+#include <rocprim/block/block_discontinuity.hpp>
+#include <rocprim/block/block_load_func.hpp>
+#include <rocprim/block/block_store_func.hpp>
+
+#include <iostream>
+#include <limits>
+#include <string>
+#include <vector>
+
+#include <cstdio>
+#include <cstdlib>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 128;

@@ -140,27 +140,21 @@ template<typename T>
 struct select_plus_operator_host
 {
     typedef ::rocprim::plus<T> type;
-    typedef T acc_type;
-    // #156 temporarily disable half test due to known issue with converting from double to half
-    //      cast_type is the type that should be used to cast acc_type to T.
-    //      overload needed temporarily due to compiler bug in half conversions
-    typedef T cast_type;
+    typedef T                  acc_type;
 };
 
 template<>
 struct select_plus_operator_host<::rocprim::half>
 {
     typedef ::rocprim::plus<double> type;
-    typedef double acc_type;
-    typedef float                   cast_type;
+    typedef double                  acc_type;
 };
 
 template<>
 struct select_plus_operator_host<::rocprim::bfloat16>
 {
     typedef ::rocprim::plus<double> type;
-    typedef double acc_type;
-    typedef ::rocprim::bfloat16     cast_type;
+    typedef double                  acc_type;
 };
 
 template<class InputIt, class T,
@@ -430,6 +424,51 @@ void iota(ForwardIt first, ForwardIt last, T value)
     while(first != last) {
         *first++ = static_cast<value_type>(value);
         ++value;
+    }
+}
+
+// Like test_utils::iota but applies module 'ubound' to the values generated.
+template<class ForwardIt,
+         class T,
+         typename std::enable_if<!std::is_same<typename std::iterator_traits<ForwardIt>::value_type,
+                                               rocprim::half>::value,
+                                 bool>::type
+         = false>
+void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
+{
+    const T value_mod = static_cast<size_t>(lbound) < ubound ? lbound : 0;
+    using value_type  = typename std::iterator_traits<ForwardIt>::value_type;
+
+    for(T value = value_mod; first != last; value++, *first++)
+    {
+        if(static_cast<size_t>(value) >= ubound)
+        {
+            value = value_mod;
+        }
+        *first = static_cast<value_type>(value);
+    }
+}
+
+// Necessary because for rocprim::half even though lbound < ubound it gets cast as a greater
+// value, as precision is bigger for values closer to the maximum.
+template<class ForwardIt,
+         class T,
+         typename std::enable_if<std::is_same<typename std::iterator_traits<ForwardIt>::value_type,
+                                              rocprim::half>::value,
+                                 bool>::type
+         = true>
+void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
+{
+    const T value_mod = static_cast<size_t>(lbound) < ubound ? lbound : 0;
+    using value_type  = rocprim::half;
+
+    for(T value = value_mod; first != last; value++, *first++)
+    {
+        if(static_cast<float>(static_cast<value_type>(value)) >= ubound)
+        {
+            value = value_mod;
+        }
+        *first = static_cast<value_type>(value);
     }
 }
 

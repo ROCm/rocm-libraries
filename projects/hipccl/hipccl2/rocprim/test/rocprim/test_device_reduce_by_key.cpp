@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include <rocprim/iterator/transform_iterator.hpp>
 
 // required test headers
+#include "rocprim/types.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_types.hpp"
 
@@ -95,7 +96,11 @@ typedef ::testing::Types<
     params<custom_double2, custom_int2, rocprim::plus<custom_int2>, 1, 10>,
     params<unsigned long long, float, rocprim::minimum<float>, 1, 30>,
     params<int, rocprim::half, rocprim::minimum<rocprim::half>, 15, 100>,
+    // half should be supported, but is missing some key operators.
+    // we should uncomment these, as soon as these are implemented and the tests compile and work as intended.
+    //params<rocprim::half, rocprim::half, rocprim::minimum<rocprim::half>, 15, 100>,
     params<int, rocprim::bfloat16, rocprim::minimum<rocprim::bfloat16>, 15, 100>,
+    params<rocprim::bfloat16, rocprim::bfloat16, rocprim::minimum<rocprim::bfloat16>, 15, 100>,
     params<int, unsigned int, rocprim::maximum<unsigned int>, 20, 100>,
     params<float, long long, rocprim::maximum<unsigned long long>, 100, 400, long long, custom_key_compare_op1<float>>,
     params<unsigned int, unsigned char, rocprim::plus<unsigned char>, 200, 600>,
@@ -134,12 +139,10 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         typename std::conditional<
             test_utils::is_valid_for_int_distribution<key_inner_type>::value,
             std::uniform_int_distribution<key_inner_type>,
-            typename std::conditional<std::is_signed<key_inner_type>::value,
-                std::uniform_int_distribution<int>,
-                std::uniform_int_distribution<unsigned int>
-            >::type
-        >::type
-    >::type;
+            typename std::conditional<rocprim::is_signed<key_inner_type>::value,
+                                      std::uniform_int_distribution<int>,
+                                      std::uniform_int_distribution<unsigned int>>::type>::type>::
+        type;
 
     constexpr bool use_identity_iterator = TestFixture::params::use_identity_iterator;
     const bool debug_synchronous = false;
@@ -183,8 +186,8 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             std::vector<value_type> values_input = test_utils::get_random_data<value_type>(size, 0, 100, seed_value);
 
             size_t offset = 0;
-            key_type prev_key = key_distribution_type(0, 100)(gen);
-            key_type current_key = prev_key + key_delta_dis(gen);
+            key_type prev_key    = static_cast<key_type>(key_distribution_type(0, 100)(gen));
+            key_type current_key = static_cast<key_type>(prev_key + key_delta_dis(gen));
             while(offset < size)
             {
                 const size_t key_count = key_count_dis(gen);
@@ -256,34 +259,31 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
             size_t temporary_storage_bytes;
 
-            hipGraph_t graph;
-            hipGraphExec_t graph_instance;
-            if (TestFixture::params::use_graphs)
-                graph = test_utils::createGraphHelper(stream);
-            
-            HIP_CHECK(
-                rocprim::reduce_by_key(
-                    nullptr, temporary_storage_bytes,
-                    d_keys_input, d_values_input, size,
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
-                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_aggregates_output),
-                    d_unique_count_output,
-                    reduce_op, key_compare_op,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(rocprim::reduce_by_key(
+                nullptr,
+                temporary_storage_bytes,
+                d_keys_input,
+                d_values_input,
+                size,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_aggregates_output),
+                d_unique_count_output,
+                reduce_op,
+                key_compare_op,
+                stream,
+                debug_synchronous));
 
-            if (TestFixture::params::use_graphs)
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
             ASSERT_GT(temporary_storage_bytes, 0);
 
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            if (TestFixture::params::use_graphs)
-                test_utils::resetGraphHelper(graph, graph_instance, stream);
-            
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             HIP_CHECK(
                 rocprim::reduce_by_key(
                     d_temporary_storage, temporary_storage_bytes,
@@ -295,9 +295,12 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
                 )
             );
 
-            if (TestFixture::params::use_graphs)
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
                 graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+            }
+
             HIP_CHECK(hipFree(d_temporary_storage));
 
             std::vector<key_type> unique_output(unique_count_expected);
@@ -401,11 +404,6 @@ void large_indices_reduce_by_key()
 
         size_t temporary_storage_bytes;
 
-        hipGraph_t graph;
-        hipGraphExec_t graph_instance;
-        if (use_graphs)
-            graph = test_utils::createGraphHelper(stream);
-        
         HIP_CHECK(rocprim::reduce_by_key(nullptr,
                                          temporary_storage_bytes,
                                          d_keys_input,
@@ -419,17 +417,17 @@ void large_indices_reduce_by_key()
                                          stream,
                                          debug_synchronous));
 
-        if (use_graphs)
-            graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-        
         ASSERT_GT(temporary_storage_bytes, 0);
 
         void* d_temporary_storage;
         HIP_CHECK(
             test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-        if (use_graphs)
-            test_utils::resetGraphHelper(graph, graph_instance, stream);
+        hipGraph_t graph;
+        if(use_graphs)
+        {
+            graph = test_utils::createGraphHelper(stream);
+        }
 
         HIP_CHECK(rocprim::reduce_by_key(d_temporary_storage,
                                          temporary_storage_bytes,
@@ -444,8 +442,11 @@ void large_indices_reduce_by_key()
                                          stream,
                                          debug_synchronous));
 
-        if (use_graphs)
+        hipGraphExec_t graph_instance;
+        if(use_graphs)
+        {
             graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+        }
 
         HIP_CHECK(hipFree(d_temporary_storage));
 
@@ -469,9 +470,11 @@ void large_indices_reduce_by_key()
         HIP_CHECK(hipFree(d_aggregates_output));
         HIP_CHECK(hipFree(d_unique_count_output));
 
-        if (use_graphs)
+        if(use_graphs)
+        {
             test_utils::cleanupGraphHelper(graph, graph_instance);
-        
+        }
+
         ASSERT_EQ(unique_count_output[0], unique_count_expected);
 
         size_t total_size = 0;
@@ -488,8 +491,10 @@ void large_indices_reduce_by_key()
         ASSERT_EQ(value_type(size - total_size), aggregates_output[last_idx]);
     }
 
-    if (use_graphs)
+    if(use_graphs)
+    {
         HIP_CHECK(hipStreamDestroy(stream));
+    }
 }
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeySmallValueType)
@@ -548,11 +553,6 @@ void large_segment_count_reduce_by_key()
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_count_output,
                                                      sizeof(*d_unique_count_output)));
 
-        hipGraph_t graph;
-        hipGraphExec_t graph_instance;
-        if (use_graphs)
-            graph = test_utils::createGraphHelper(stream);
-            
         size_t temporary_storage_bytes;
         HIP_CHECK(rocprim::reduce_by_key(nullptr,
                                          temporary_storage_bytes,
@@ -566,18 +566,19 @@ void large_segment_count_reduce_by_key()
                                          key_compare_op,
                                          stream,
                                          debug_synchronous));
-        if (use_graphs)
-            graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            
+
         ASSERT_GT(temporary_storage_bytes, 0);
 
         void* d_temporary_storage;
         HIP_CHECK(
             test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-        if (use_graphs)
-            test_utils::resetGraphHelper(graph, graph_instance, stream);
-                
+        hipGraph_t graph;
+        if(use_graphs)
+        {
+            graph = test_utils::createGraphHelper(stream);
+        }
+
         HIP_CHECK(rocprim::reduce_by_key(d_temporary_storage,
                                          temporary_storage_bytes,
                                          d_keys_input,
@@ -590,9 +591,13 @@ void large_segment_count_reduce_by_key()
                                          key_compare_op,
                                          stream,
                                          debug_synchronous));
-        if (use_graphs)
+
+        hipGraphExec_t graph_instance;
+        if(use_graphs)
+        {
             graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-        
+        }
+
         HIP_CHECK(hipFree(d_temporary_storage));
 
         size_t unique_count_output;

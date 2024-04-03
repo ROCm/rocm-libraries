@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScan)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
-    using cast_type             = typename test_utils::select_plus_operator_host<T>::cast_type;
+
     constexpr size_t block_size = TestFixture::block_size;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -67,7 +67,7 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScan)
             {
                 auto idx = i * block_size + j;
                 accumulator = binary_op_host(output[idx], accumulator);
-                expected[idx] = static_cast<cast_type>(accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
         }
 
@@ -97,7 +97,7 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanReduce)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
-    using cast_type             = typename test_utils::select_plus_operator_host<T>::cast_type;
+
     constexpr size_t block_size = TestFixture::block_size;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -133,7 +133,7 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanReduce)
             {
                 auto idx = i * block_size + j;
                 accumulator = binary_op_host(output[idx], accumulator);
-                expected[idx] = static_cast<cast_type>(accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
             expected_reductions[i] = expected[(i+1) * block_size - 1];
         }
@@ -172,7 +172,6 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanPrefixCallback)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
-    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     constexpr size_t block_size = TestFixture::block_size;
 
@@ -210,7 +209,7 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanPrefixCallback)
             {
                 auto idx = i * block_size + j;
                 accumulator = binary_op_host(output[idx], accumulator);
-                expected[idx] = static_cast<cast_type>(accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
             expected_block_prefixes[i] = expected[(i+1) * block_size - 1];
         }
@@ -249,7 +248,6 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScan)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
-    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     constexpr size_t block_size = TestFixture::block_size;
 
@@ -286,7 +284,7 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScan)
             {
                 auto idx = i * block_size + j;
                 accumulator = binary_op_host(output[idx-1], accumulator);
-                expected[idx] = static_cast<cast_type>(accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
         }
 
@@ -316,7 +314,6 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanReduce)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
-    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     constexpr size_t block_size = TestFixture::block_size;
 
@@ -356,7 +353,7 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanReduce)
             {
                 auto idx = i * block_size + j;
                 accumulator = binary_op_host(output[idx-1], accumulator);
-                expected[idx] = static_cast<cast_type>(accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
             acc_type accumulator_reductions(0);
             expected_reductions[i] = 0;
@@ -364,7 +361,7 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanReduce)
             {
                 auto idx = i * block_size + j;
                 accumulator_reductions = binary_op_host(accumulator_reductions, output[idx]);
-                expected_reductions[i] = static_cast<cast_type>(accumulator_reductions);
+                expected_reductions[i] = static_cast<T>(accumulator_reductions);
             }
         }
 
@@ -402,7 +399,6 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanPrefixCallback)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
-    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     constexpr size_t block_size = TestFixture::block_size;
 
@@ -441,7 +437,7 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanPrefixCallback)
             {
                 auto idx = i * block_size + j;
                 accumulator = binary_op_host(output[idx-1], accumulator);
-                expected[idx] = static_cast<cast_type>(accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
 
             acc_type accumulator_block_prefixes = block_prefix;
@@ -450,7 +446,7 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanPrefixCallback)
             {
                 auto idx = i * block_size + j;
                 accumulator_block_prefixes = binary_op_host(output[idx], accumulator_block_prefixes);
-                expected_block_prefixes[i] = static_cast<cast_type>(accumulator_block_prefixes);
+                expected_block_prefixes[i] = static_cast<T>(accumulator_block_prefixes);
             }
         }
 

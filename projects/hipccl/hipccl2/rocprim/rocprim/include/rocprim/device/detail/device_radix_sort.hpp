@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,10 +26,9 @@
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
-#include "../../detail/radix_sort.hpp"
 
-#include "../../intrinsics.hpp"
 #include "../../functional.hpp"
+#include "../../intrinsics.hpp"
 #include "../../types.hpp"
 
 #include "../../block/block_discontinuity.hpp"
@@ -40,6 +39,7 @@
 #include "../../block/block_radix_sort.hpp"
 #include "../../block/block_scan.hpp"
 #include "../../block/block_store_func.hpp"
+#include "../../thread/radix_key_codec.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -48,42 +48,51 @@ namespace detail
 
 // Wrapping functions that allow one to call proper methods (with or without values)
 // (a variant with values is enabled only when Value is not empty_type)
-template<bool Descending = false, class SortType, class SortKey, class SortValue, unsigned int ItemsPerThread>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-void sort_block(SortType sorter,
-                SortKey (&keys)[ItemsPerThread],
-                SortValue (&values)[ItemsPerThread],
-                typename SortType::storage_type& storage,
-                unsigned int begin_bit,
-                unsigned int end_bit)
+template<bool Descending = false,
+         class SortType,
+         class SortKey,
+         class SortValue,
+         unsigned int ItemsPerThread,
+         class Decomposer>
+ROCPRIM_DEVICE ROCPRIM_INLINE void sort_block(SortType sorter,
+                                              SortKey (&keys)[ItemsPerThread],
+                                              SortValue (&values)[ItemsPerThread],
+                                              typename SortType::storage_type& storage,
+                                              Decomposer                       decomposer,
+                                              unsigned int                     begin_bit,
+                                              unsigned int                     end_bit)
 {
     if(Descending)
     {
-        sorter.sort_desc(keys, values, storage, begin_bit, end_bit);
+        sorter.sort_desc(keys, values, storage, begin_bit, end_bit, decomposer);
     }
     else
     {
-        sorter.sort(keys, values, storage, begin_bit, end_bit);
+        sorter.sort(keys, values, storage, begin_bit, end_bit, decomposer);
     }
 }
 
-template<bool Descending = false, class SortType, class SortKey, unsigned int ItemsPerThread>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-void sort_block(SortType sorter,
-                SortKey (&keys)[ItemsPerThread],
-                ::rocprim::empty_type (&values)[ItemsPerThread],
-                typename SortType::storage_type& storage,
-                unsigned int begin_bit,
-                unsigned int end_bit)
+template<bool Descending = false,
+         class SortType,
+         class SortKey,
+         unsigned int ItemsPerThread,
+         class Decomposer>
+ROCPRIM_DEVICE ROCPRIM_INLINE void sort_block(SortType sorter,
+                                              SortKey (&keys)[ItemsPerThread],
+                                              ::rocprim::empty_type (&values)[ItemsPerThread],
+                                              typename SortType::storage_type& storage,
+                                              Decomposer                       decomposer,
+                                              unsigned int                     begin_bit,
+                                              unsigned int                     end_bit)
 {
     (void) values;
     if(Descending)
     {
-        sorter.sort_desc(keys, storage, begin_bit, end_bit);
+        sorter.sort_desc(keys, storage, begin_bit, end_bit, decomposer);
     }
     else
     {
-        sorter.sort(keys, storage, begin_bit, end_bit);
+        sorter.sort(keys, storage, begin_bit, end_bit, decomposer);
     }
 }
 
@@ -126,7 +135,7 @@ struct radix_digit_count_helper
 
         using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
 
-        using key_codec = radix_key_codec<key_type, Descending>;
+        using key_codec    = ::rocprim::radix_key_codec<key_type, Descending>;
         using bit_key_type = typename key_codec::bit_key_type;
 
         const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
@@ -203,8 +212,6 @@ struct radix_sort_single_helper
     using key_type = Key;
     using value_type = Value;
 
-    using key_codec = radix_key_codec<key_type, Descending>;
-    using bit_key_type = typename key_codec::bit_key_type;
     using sort_type = ::rocprim::block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type>;
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
@@ -214,21 +221,20 @@ struct radix_sort_single_helper
         typename sort_type::storage_type sort;
     };
 
-    template<
-        class KeysInputIterator,
-        class KeysOutputIterator,
-        class ValuesInputIterator,
-        class ValuesOutputIterator
-    >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void sort_single(KeysInputIterator keys_input,
-                     KeysOutputIterator keys_output,
-                     ValuesInputIterator values_input,
-                     ValuesOutputIterator values_output,
-                     unsigned int size,
-                     unsigned int bit,
-                     unsigned int current_radix_bits,
-                     storage_type& storage)
+    template<class KeysInputIterator,
+             class KeysOutputIterator,
+             class ValuesInputIterator,
+             class ValuesOutputIterator,
+             class Decomposer>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void sort_single(KeysInputIterator    keys_input,
+                                                   KeysOutputIterator   keys_output,
+                                                   ValuesInputIterator  values_input,
+                                                   ValuesOutputIterator values_output,
+                                                   unsigned int         size,
+                                                   Decomposer           decomposer,
+                                                   unsigned int         bit,
+                                                   unsigned int         current_radix_bits,
+                                                   storage_type&        storage)
     {
         const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
         const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
@@ -239,7 +245,6 @@ struct radix_sort_single_helper
         using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
 
         using key_codec = radix_key_codec<key_type, Descending>;
-        using bit_key_type = typename key_codec::bit_key_type;
 
         key_type keys[ItemsPerThread];
         value_type values[ItemsPerThread];
@@ -253,7 +258,7 @@ struct radix_sort_single_helper
         }
         else
         {
-            const key_type out_of_bounds = key_codec::decode(bit_key_type(-1));
+            const key_type out_of_bounds = key_codec::get_out_of_bounds_key(decomposer);
             block_load_direct_blocked(flat_id,
                                       keys_input + block_offset,
                                       keys,
@@ -268,7 +273,13 @@ struct radix_sort_single_helper
             }
         }
 
-        sort_block<Descending>(sort_type(), keys, values, storage.sort, bit, bit + current_radix_bits);
+        sort_block<Descending>(sort_type(),
+                               keys,
+                               values,
+                               storage.sort,
+                               decomposer,
+                               bit,
+                               bit + current_radix_bits);
 
         // Store keys and values
         if(!is_incomplete_block)
@@ -313,7 +324,7 @@ struct radix_sort_and_scatter_helper
     using key_type = Key;
     using value_type = Value;
 
-    using key_codec = radix_key_codec<key_type, Descending>;
+    using key_codec      = ::rocprim::radix_key_codec<key_type, Descending>;
     using bit_key_type = typename key_codec::bit_key_type;
     using keys_load_type = ::rocprim::block_load<
         key_type, BlockSize, ItemsPerThread,
@@ -407,7 +418,13 @@ struct radix_sort_and_scatter_helper
             }
 
             ::rocprim::syncthreads();
-            sort_block<Descending>(sort_type(), keys, values, storage.sort, bit, bit + current_radix_bits);
+            sort_block<Descending>(sort_type(),
+                                   keys,
+                                   values,
+                                   storage.sort,
+                                   identity_decomposer{},
+                                   bit,
+                                   bit + current_radix_bits);
 
             bit_key_type bit_keys[ItemsPerThread];
             unsigned int digits[ItemsPerThread];
@@ -481,23 +498,22 @@ struct radix_sort_and_scatter_helper
     }
 };
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    bool Descending,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator
->
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-void sort_single(KeysInputIterator keys_input,
-                 KeysOutputIterator keys_output,
-                 ValuesInputIterator values_input,
-                 ValuesOutputIterator values_output,
-                 unsigned int size,
-                 unsigned int bit,
-                 unsigned int current_radix_bits)
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         bool         Descending,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class Decomposer>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void sort_single(KeysInputIterator    keys_input,
+                                                     KeysOutputIterator   keys_output,
+                                                     ValuesInputIterator  values_input,
+                                                     ValuesOutputIterator values_output,
+                                                     unsigned int         size,
+                                                     Decomposer           decomposer,
+                                                     unsigned int         bit,
+                                                     unsigned int         current_radix_bits)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -509,11 +525,15 @@ void sort_single(KeysInputIterator keys_input,
 
     ROCPRIM_SHARED_MEMORY typename sort_single_helper::storage_type storage;
 
-    sort_single_helper().template sort_single(
-        keys_input, keys_output, values_input, values_output,
-        size, bit, current_radix_bits,
-        storage
-    );
+    sort_single_helper().template sort_single(keys_input,
+                                              keys_output,
+                                              values_input,
+                                              values_output,
+                                              size,
+                                              decomposer,
+                                              bit,
+                                              current_radix_bits,
+                                              storage);
 }
 
 template<class T>
@@ -528,8 +548,8 @@ auto compare_nan_sensitive(const T& a, const T& b)
     using bit_key_type = typename float_bit_mask<T>::bit_type;
     static constexpr auto sign_bit = float_bit_mask<T>::sign_bit;
 
-    auto a_bits = __builtin_bit_cast(bit_key_type, a);
-    auto b_bits = __builtin_bit_cast(bit_key_type, b);
+    auto a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a);
+    auto b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b);
 
     // convert -0.0 to +0.0
     a_bits = a_bits == sign_bit ? 0 : a_bits;
@@ -543,106 +563,119 @@ auto compare_nan_sensitive(const T& a, const T& b)
 }
 
 template<class T>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto compare_nan_sensitive(const T& a, const T& b)
-    -> typename std::enable_if<!rocprim::is_floating_point<T>::value, bool>::type
+ROCPRIM_DEVICE auto compare_nan_sensitive(const T& a, const T& b) ->
+    typename std::enable_if<!rocprim::is_floating_point<T>::value, bool>::type
 {
     return a > b;
 }
 
-template<
-    bool Descending,
-    bool UseRadixMask,
-    class T,
-    class Enable = void
->
+template<bool Descending, bool UseRadixMask, class T, class Decomposer = identity_decomposer>
 struct radix_merge_compare;
 
 template<class T>
-struct radix_merge_compare<false, false, T>
+struct radix_merge_compare<false, false, T, identity_decomposer>
 {
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    bool operator()(const T& a, const T& b) const
+    ROCPRIM_DEVICE bool operator()(const T& a, const T& b) const
     {
         return compare_nan_sensitive<T>(b, a);
     }
 };
 
 template<class T>
-struct radix_merge_compare<true, false, T>
+struct radix_merge_compare<true, false, T, identity_decomposer>
 {
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    bool operator()(const T& a, const T& b) const
+    ROCPRIM_DEVICE bool operator()(const T& a, const T& b) const
     {
         return compare_nan_sensitive<T>(a, b);
     }
 };
 
-template<class T>
-struct radix_merge_compare<false, true, T, typename std::enable_if<rocprim::is_integral<T>::value>::type>
+template<bool Descending, class T>
+struct radix_merge_compare<Descending, true, T, identity_decomposer>
 {
     T radix_mask;
 
-    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
-    radix_merge_compare(const unsigned int start_bit, const unsigned int current_radix_bits)
+    ROCPRIM_HOST_DEVICE radix_merge_compare(const unsigned int start_bit,
+                                            const unsigned int current_radix_bits,
+                                            identity_decomposer = {})
     {
         T radix_mask_upper  = (T(1) << (current_radix_bits + start_bit)) - 1;
         T radix_mask_bottom = (T(1) << start_bit) - 1;
         radix_mask = radix_mask_upper ^ radix_mask_bottom;
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    bool operator()(const T& a, const T& b) const
+    ROCPRIM_DEVICE bool operator()(const T& a, const T& b) const
     {
         const T masked_key_a  = a & radix_mask;
         const T masked_key_b  = b & radix_mask;
-        return masked_key_b > masked_key_a;
+        return Descending ? masked_key_a > masked_key_b : masked_key_b > masked_key_a;
     }
 };
 
-template<class T>
-struct radix_merge_compare<true, true, T, typename std::enable_if<rocprim::is_integral<T>::value>::type>
+template<bool Descending, class T, class Decomposer>
+struct radix_merge_compare<Descending, true, T, Decomposer>
 {
-    T radix_mask;
+    Decomposer   decomposer_;
+    unsigned int start_bit_;
+    unsigned int radix_bits_;
 
-    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
-    radix_merge_compare(const unsigned int start_bit, const unsigned int current_radix_bits)
+    ROCPRIM_HOST_DEVICE radix_merge_compare(const unsigned int start_bit,
+                                            const unsigned int current_radix_bits,
+                                            Decomposer         decomposer)
+        : decomposer_(decomposer), start_bit_(start_bit), radix_bits_(current_radix_bits)
+    {}
+
+    ROCPRIM_HOST_DEVICE bool operator()(T lhs, T rhs) const
     {
-        T radix_mask_upper  = (T(1) << (current_radix_bits + start_bit)) - 1;
-        T radix_mask_bottom = (T(1) << start_bit) - 1;
-        radix_mask = (radix_mask_upper ^ radix_mask_bottom);
+        using codec_t = radix_key_codec<T, Descending>;
+
+        // Encoding the values considers the ascending / descending nature of the sort
+        codec_t::encode_inplace(lhs, decomposer_);
+        codec_t::encode_inplace(rhs, decomposer_);
+
+        // Digits can be extracted in 32 bit batches, but radix_bits_ can be larger than that
+        static constexpr int digit_batch_size = 32;
+
+        // Moving from MSB to LSB
+        int current_start_bit
+            = rocprim::max(0, static_cast<int>(start_bit_ + radix_bits_) - digit_batch_size);
+        unsigned int remaining_radix_bits = radix_bits_;
+        for(; remaining_radix_bits > 0;)
+        {
+            const unsigned int current_radix_bits
+                = rocprim::min(remaining_radix_bits, static_cast<unsigned int>(digit_batch_size));
+            remaining_radix_bits -= current_radix_bits;
+
+            const unsigned int lhs_digits
+                = codec_t::extract_digit(lhs,
+                                         static_cast<unsigned int>(current_start_bit),
+                                         current_radix_bits,
+                                         decomposer_);
+            const unsigned int rhs_digits
+                = codec_t::extract_digit(rhs,
+                                         static_cast<unsigned int>(current_start_bit),
+                                         current_radix_bits,
+                                         decomposer_);
+
+            // Since we are moving from MSB to LSB, the earlier iteration implies the relation (if digits are not equal)
+            if(lhs_digits != rhs_digits)
+            {
+                return rhs_digits > lhs_digits;
+            }
+            current_start_bit
+                = rocprim::max(current_start_bit - static_cast<int>(current_radix_bits),
+                               static_cast<int>(start_bit_));
+        }
+        return false;
     }
-
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    bool operator()(const T& a, const T& b) const
-    {
-        const T masked_key_a  = a & radix_mask;
-        const T masked_key_b  = b & radix_mask;
-        return masked_key_a > masked_key_b;
-    }
-};
-
-template<bool Descending, class T>
-struct radix_merge_compare<Descending,
-                           true,
-                           T,
-                           typename std::enable_if<!rocprim::is_integral<T>::value>::type>
-{
-    // radix_merge_compare supports masks only for integrals.
-    // even though masks are never used for floating point-types,
-    // it needs to be able to compile.
-    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
-    radix_merge_compare(const unsigned int, const unsigned int){}
-
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    bool operator()(const T&, const T&) const { return false; }
 };
 
 template<class KeyType,
          unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int RadixBits,
-         bool         Descending>
+         bool         Descending,
+         class Decomposer>
 struct onesweep_histograms_helper
 {
     static constexpr unsigned int radix_size = 1u << RadixBits;
@@ -659,7 +692,6 @@ struct onesweep_histograms_helper
 
     using counter_type = uint32_t;
     using key_codec    = radix_key_codec<KeyType, Descending>;
-    using bit_key_type = typename key_codec::bit_key_type;
 
     struct storage_type
     {
@@ -686,8 +718,9 @@ struct onesweep_histograms_helper
     template<bool IsFull>
     ROCPRIM_DEVICE void count_digits_at_place(const unsigned int flat_id,
                                               const unsigned int stripe,
-                                              const bit_key_type (&bit_keys)[ItemsPerThread],
+                                              const KeyType (&keys)[ItemsPerThread],
                                               const unsigned int place,
+                                              Decomposer         decomposer,
                                               const unsigned int start_bit,
                                               const unsigned int current_radix_bits,
                                               const unsigned int valid_count,
@@ -700,7 +733,7 @@ struct onesweep_histograms_helper
             if(IsFull || pos < valid_count)
             {
                 const unsigned int digit
-                    = key_codec::extract_digit(bit_keys[i], start_bit, current_radix_bits);
+                    = key_codec::extract_digit(keys[i], start_bit, current_radix_bits, decomposer);
                 ::rocprim::detail::atomic_add(&get_counter(stripe, place, digit, storage), 1);
             }
         }
@@ -710,6 +743,7 @@ struct onesweep_histograms_helper
     ROCPRIM_DEVICE void count_digits(KeysInputIterator  keys_input,
                                      Offset*            global_digit_counts,
                                      const unsigned int valid_count,
+                                     Decomposer         decomposer,
                                      const unsigned int begin_bit,
                                      const unsigned int end_bit,
                                      storage_type&      storage)
@@ -734,19 +768,19 @@ struct onesweep_histograms_helper
         ::rocprim::syncthreads();
 
         // Compute a shared histogram for each digit and each place.
-        bit_key_type bit_keys[ItemsPerThread];
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-            bit_keys[i] = key_codec::encode(keys[i]);
+            key_codec::encode_inplace(keys[i], decomposer);
         }
 
         for(unsigned int bit = begin_bit, place = 0; bit < end_bit; bit += RadixBits, ++place)
         {
             count_digits_at_place<IsFull>(flat_id,
                                           stripe,
-                                          bit_keys,
+                                          keys,
                                           place,
+                                          decomposer,
                                           bit,
                                           min(RadixBits, end_bit - bit),
                                           valid_count,
@@ -783,17 +817,23 @@ template<unsigned int BlockSize,
          unsigned int RadixBits,
          bool         Descending,
          class KeysInputIterator,
-         class Offset>
+         class Offset,
+         class Decomposer>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void onesweep_histograms(KeysInputIterator  keys_input,
                                                              Offset*            global_digit_counts,
                                                              const Offset       size,
                                                              const Offset       full_blocks,
+                                                             Decomposer         decomposer,
                                                              const unsigned int begin_bit,
                                                              const unsigned int end_bit)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using count_helper_type
-        = onesweep_histograms_helper<key_type, BlockSize, ItemsPerThread, RadixBits, Descending>;
+    using count_helper_type = onesweep_histograms_helper<key_type,
+                                                         BlockSize,
+                                                         ItemsPerThread,
+                                                         RadixBits,
+                                                         Descending,
+                                                         Decomposer>;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -807,6 +847,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void onesweep_histograms(KeysInputIterator  
         count_helper_type{}.template count_digits<true>(keys_input + block_offset,
                                                         global_digit_counts,
                                                         items_per_block,
+                                                        decomposer,
                                                         begin_bit,
                                                         end_bit,
                                                         storage);
@@ -817,6 +858,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void onesweep_histograms(KeysInputIterator  
         count_helper_type{}.template count_digits<false>(keys_input + block_offset,
                                                          global_digit_counts,
                                                          valid_in_last_block,
+                                                         decomposer,
                                                          begin_bit,
                                                          end_bit,
                                                          storage);
@@ -898,7 +940,8 @@ template<class Key,
          unsigned int               ItemsPerThread,
          unsigned int               RadixBits,
          bool                       Descending,
-         block_radix_rank_algorithm RadixRankAlgorithm>
+         block_radix_rank_algorithm RadixRankAlgorithm,
+         class Decomposer>
 struct onesweep_iteration_helper
 {
     static constexpr unsigned int radix_size      = 1u << RadixBits;
@@ -906,7 +949,6 @@ struct onesweep_iteration_helper
     static constexpr bool         with_values = !std::is_same<Value, rocprim::empty_type>::value;
 
     using key_codec       = radix_key_codec<Key, Descending>;
-    using bit_key_type    = typename key_codec::bit_key_type;
     using radix_rank_type = ::rocprim::block_radix_rank<BlockSize, RadixBits, RadixRankAlgorithm>;
 
     static constexpr bool load_warp_striped
@@ -922,7 +964,7 @@ struct onesweep_iteration_helper
             Offset global_digit_offsets[radix_size];
             union
             {
-                bit_key_type ordered_block_keys[items_per_block];
+                Key          ordered_block_keys[items_per_block];
                 Value        ordered_block_values[items_per_block];
             };
         };
@@ -942,6 +984,7 @@ struct onesweep_iteration_helper
                                  Offset*                  global_digit_offsets_in,
                                  Offset*                  global_digit_offsets_out,
                                  onesweep_lookback_state* lookback_states,
+                                 Decomposer               decomposer,
                                  const unsigned int       bit,
                                  const unsigned int       current_radix_bits,
                                  const unsigned int       valid_items,
@@ -972,7 +1015,7 @@ struct onesweep_iteration_helper
             // Note that this will lead to an incorrect digit count. Since this is the very last digit,
             // it does not matter. It does cause the final digit offset to be increased past its end,
             // but again this does not matter since this is the last iteration in which it will be used anyway.
-            const Key out_of_bounds = key_codec::decode(bit_key_type(-1));
+            const Key out_of_bounds = key_codec::get_out_of_bounds_key(decomposer);
             if ROCPRIM_IF_CONSTEXPR(load_warp_striped)
             {
                 block_load_direct_warp_striped(flat_id,
@@ -991,11 +1034,10 @@ struct onesweep_iteration_helper
             }
         }
 
-        bit_key_type bit_keys[ItemsPerThread];
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-            bit_keys[i] = key_codec::encode(keys[i]);
+            key_codec::encode_inplace(keys[i], decomposer);
         }
 
         // Compute the block-based key ranks, the digit counts, and the prefix sum of the digit counts.
@@ -1005,11 +1047,11 @@ struct onesweep_iteration_helper
         // Tile-wide digit count
         unsigned int digit_counts[digits_per_thread];
         radix_rank_type{}.rank_keys(
-            bit_keys,
+            keys,
             ranks,
             storage.rank,
-            [bit, current_radix_bits](const bit_key_type& key)
-            { return key_codec::extract_digit(key, bit, current_radix_bits); },
+            [bit, current_radix_bits, decomposer](const Key& key)
+            { return key_codec::extract_digit(key, bit, current_radix_bits, decomposer); },
             exclusive_digit_prefix,
             digit_counts);
 
@@ -1019,7 +1061,7 @@ struct onesweep_iteration_helper
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-            storage.ordered_block_keys[ranks[i]] = bit_keys[i];
+            storage.ordered_block_keys[ranks[i]] = keys[i];
         }
 
         ::rocprim::syncthreads();
@@ -1082,11 +1124,12 @@ struct onesweep_iteration_helper
             const unsigned int rank = i * BlockSize + flat_id;
             if(IsFull || rank < valid_items)
             {
-                const bit_key_type bit_key = storage.ordered_block_keys[rank];
+                Key                key = storage.ordered_block_keys[rank];
                 const unsigned int digit
-                    = key_codec::extract_digit(bit_key, bit, current_radix_bits);
+                    = key_codec::extract_digit(key, bit, current_radix_bits, decomposer);
+                key_codec::decode_inplace(key, decomposer);
                 const Offset global_offset        = storage.global_digit_offsets[digit];
-                keys_output[rank + global_offset] = key_codec::decode(bit_key);
+                keys_output[rank + global_offset] = key;
             }
         }
 
@@ -1132,8 +1175,8 @@ struct onesweep_iteration_helper
                 const unsigned int rank = i * BlockSize + flat_id;
                 if(IsFull || rank < valid_items)
                 {
-                    const bit_key_type bit_key = storage.ordered_block_keys[rank];
-                    digits[i] = key_codec::extract_digit(bit_key, bit, current_radix_bits);
+                    const Key key = storage.ordered_block_keys[rank];
+                    digits[i] = key_codec::extract_digit(key, bit, current_radix_bits, decomposer);
                 }
             }
 
@@ -1189,7 +1232,8 @@ template<unsigned int               BlockSize,
          class KeysOutputIterator,
          class ValuesInputIterator,
          class ValuesOutputIterator,
-         class Offset>
+         class Offset,
+         class Decomposer>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     onesweep_iteration(KeysInputIterator        keys_input,
                        KeysOutputIterator       keys_output,
@@ -1199,6 +1243,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                        Offset*                  global_digit_offsets_in,
                        Offset*                  global_digit_offsets_out,
                        onesweep_lookback_state* lookback_states,
+                       Decomposer               decomposer,
                        const unsigned int       bit,
                        const unsigned int       current_radix_bits,
                        const unsigned int       full_blocks)
@@ -1213,7 +1258,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                      ItemsPerThread,
                                                                      RadixBits,
                                                                      Descending,
-                                                                     RadixRankAlgorithm>;
+                                                                     RadixRankAlgorithm,
+                                                                     Decomposer>;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int     block_id        = ::rocprim::detail::block_id<0>();
@@ -1229,6 +1275,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                  global_digit_offsets_in,
                                                                  global_digit_offsets_out,
                                                                  lookback_states,
+                                                                 decomposer,
                                                                  bit,
                                                                  current_radix_bits,
                                                                  items_per_block,
@@ -1244,6 +1291,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                   global_digit_offsets_in,
                                                                   global_digit_offsets_out,
                                                                   lookback_states,
+                                                                  decomposer,
                                                                   bit,
                                                                   current_radix_bits,
                                                                   valid_in_last_block,

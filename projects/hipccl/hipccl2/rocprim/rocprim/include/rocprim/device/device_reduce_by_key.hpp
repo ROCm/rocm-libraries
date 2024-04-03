@@ -387,8 +387,11 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 ///
 /// \par Overview
 /// * Supports non-commutative reduction operators. However, a reduction operator should be
-/// associative. When used with non-associative functions the results may be non-deterministic
-/// and/or vary in precision.
+/// associative.
+/// * When used with non-associative functions (e.g. floating point arithmetic operations):
+///    - the results may be non-deterministic and/or vary in precision,
+///    - and bit-wise reproducibility is not guaranteed, that is, results from multiple runs
+///      using the same input values on the same device may not be bit-wise identical.
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p keys_input and \p values_input must have at least \p size elements.

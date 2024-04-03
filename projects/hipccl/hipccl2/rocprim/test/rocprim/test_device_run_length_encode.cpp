@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include <rocprim/device/device_run_length_encode.hpp>
 
 // required test headers
+#include "rocprim/types.hpp"
 #include "test_utils_types.hpp"
 
 template<
@@ -68,15 +69,17 @@ typedef ::testing::Types<
     params<int8_t, int8_t, 100, 2000>,
     params<uint8_t, uint8_t, 100, 2000>,
     params<int, rocprim::half, 100, 2000>,
-    params<rocprim::bfloat16, int, 100, 2000>,
+    // half should be supported, but is missing some key operators.
+    // we should uncomment these, as soon as these are implemented and the tests compile and work as intended.
+    //params<rocprim::half, int, 100, 2000>,
     params<int8_t, int8_t, 1000, 5000>,
     params<uint8_t, uint8_t, 1000, 5000>,
-    params<int, rocprim::half, 1000, 5000>,
+    params<int, rocprim::bfloat16, 1000, 5000>,
     params<rocprim::bfloat16, int, 1000, 5000>,
     params<unsigned int, size_t, 2048, 2048>,
     params<unsigned int, unsigned int, 1000, 50000>,
-    params<unsigned long long, custom_double2, 100000, 100000>
-> Params;
+    params<unsigned long long, custom_double2, 100000, 100000>>
+    Params;
 
 TYPED_TEST_SUITE(RocprimDeviceRunLengthEncode, Params);
 

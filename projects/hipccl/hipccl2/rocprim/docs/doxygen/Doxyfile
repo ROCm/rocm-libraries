@@ -774,6 +774,7 @@ WARN_LOGFILE           =
 
 INPUT                  = mainpage.dox \
                          primitivesmodule.dox \
+                         threadmodule.dox \
                          warpmodule.dox \
                          blockmodule.dox \
                          devicemodule.dox \

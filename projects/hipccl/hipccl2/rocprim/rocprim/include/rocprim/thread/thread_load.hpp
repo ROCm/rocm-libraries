@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -52,30 +52,32 @@ namespace detail
 template<cache_load_modifier MODIFIER = load_default, typename T>
 ROCPRIM_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
 {
-    T retval = 0;
+    T retval{};
     __builtin_memcpy(&retval, ptr, sizeof(T));
     return retval;
 }
 
 #if ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS == 1
 
-// Important for syncing. Check section 9.2.2 or 7.3 in the following document
-// http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
-#define ROCPRIM_ASM_THREAD_LOAD(cache_modifier,                                                                \
-                               llvm_cache_modifier,                                                           \
-                               type,                                                                          \
-                               interim_type,                                                                  \
-                               asm_operator,                                                                  \
-                               output_modifier,                                                               \
-                               wait_cmd)                                                                      \
-    template<>                                                                                                \
-    ROCPRIM_DEVICE __forceinline__ type AsmThreadLoad<cache_modifier, type>(void * ptr)                        \
-    {                                                                                                         \
-        interim_type retval;                                                                                  \
-        asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier : "=" #output_modifier(retval) : "v"(ptr)); \
-        asm volatile("s_waitcnt " wait_cmd "(%0)" : : "I"(0x00));                                             \
-        return retval;                                                                                        \
-    }
+    // Important for syncing. Check section 9.2.2 or 7.3 in the following document
+    // http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
+    #define ROCPRIM_ASM_THREAD_LOAD(cache_modifier,                                        \
+                                    llvm_cache_modifier,                                   \
+                                    type,                                                  \
+                                    interim_type,                                          \
+                                    asm_operator,                                          \
+                                    output_modifier,                                       \
+                                    wait_cmd)                                              \
+        template<>                                                                         \
+        ROCPRIM_DEVICE __forceinline__ type AsmThreadLoad<cache_modifier, type>(void* ptr) \
+        {                                                                                  \
+            interim_type retval;                                                           \
+            asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier "\n\t"               \
+                                       "s_waitcnt " wait_cmd "(%2)"                        \
+                         : "=" #output_modifier(retval)                                    \
+                         : "v"(ptr), "I"(0x00));                                           \
+            return retval;                                                                 \
+        }
 
 // TODO Add specialization for custom larger data types
 #define ROCPRIM_ASM_THREAD_LOAD_GROUP(cache_modifier, llvm_cache_modifier, wait_cmd)                                  \

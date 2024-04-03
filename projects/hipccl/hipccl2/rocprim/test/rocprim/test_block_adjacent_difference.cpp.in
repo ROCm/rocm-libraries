@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -52,6 +52,13 @@ struct Floating;
 #define suite_name RocprimBlockAdjacentDifference
 #define warp_params BlockDiscParamsFloating
 #define name_suffix Floating
+
+#elif ROCPRIM_TEST_SLICE == 2
+
+struct FloatingHalf;
+#define suite_name RocprimBlockAdjacentDifference
+#define warp_params BlockDiscParamsFloatingHalf
+#define name_suffix FloatingHalf
 
 #endif
 

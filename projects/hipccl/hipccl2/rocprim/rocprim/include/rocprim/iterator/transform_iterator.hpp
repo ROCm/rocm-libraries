@@ -206,7 +206,8 @@ public:
         return iterator_ >= other.iterator_;
     }
 
-    friend std::ostream& operator<<(std::ostream& os, const transform_iterator& /* iter */)
+    [[deprecated]] friend std::ostream& operator<<(std::ostream& os,
+                                                   const transform_iterator& /* iter */)
     {
         return os;
     }

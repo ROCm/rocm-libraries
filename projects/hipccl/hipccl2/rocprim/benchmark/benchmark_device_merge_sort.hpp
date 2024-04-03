@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,9 +23,7 @@
 #ifndef ROCPRIM_BENCHMARK_DEVICE_MERGE_SORT_PARALLEL_HPP_
 #define ROCPRIM_BENCHMARK_DEVICE_MERGE_SORT_PARALLEL_HPP_
 
-#include <cstddef>
-#include <string>
-#include <vector>
+#include "benchmark_utils.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -34,9 +32,12 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
-#include <rocprim/rocprim.hpp>
+#include <rocprim/device/device_merge_sort.hpp>
 
-#include "benchmark_utils.hpp"
+#include <string>
+#include <vector>
+
+#include <cstddef>
 
 namespace rp = rocprim;
 

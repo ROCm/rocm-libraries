@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #include "../../detail/various.hpp"
 
 #include "../../config.hpp"
+#include "../../type_traits.hpp"
 #include "device_config_helper.hpp"
 
 #include <hip/hip_runtime.h>
@@ -179,7 +180,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void adjacent_difference_kernel_impl(
     const std::size_t                                         starting_block)
 {
     using input_type  = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = typename std::iterator_traits<OutputIt>::value_type;
+    using output_type = rocprim::invoke_result_binary_op_t<input_type, BinaryFunction>;
 
     static constexpr adjacent_difference_config_params params = device_params<Config>();
 
@@ -195,11 +196,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void adjacent_difference_kernel_impl(
 
     using adjacent_helper = adjacent_diff_helper<input_type, block_size>;
 
-#if defined(__gfx1102__) or defined(__gfx1030__)
-    ROCPRIM_SHARED_MEMORY struct
-#else
     ROCPRIM_SHARED_MEMORY union
-#endif
     {
         typename block_load_type::storage_type  load;
         typename adjacent_helper::storage_type  adjacent_diff;

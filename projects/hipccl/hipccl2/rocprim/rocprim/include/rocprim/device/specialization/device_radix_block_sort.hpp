@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,8 @@ template<class Config,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
-         class ValuesOutputIterator>
+         class ValuesOutputIterator,
+         class Decomposer>
 ROCPRIM_KERNEL
     __launch_bounds__(device_params<Config>().block_size) void radix_sort_block_sort_kernel(
         KeysInputIterator    keys_input,
@@ -59,6 +60,7 @@ ROCPRIM_KERNEL
         ValuesInputIterator  values_input,
         ValuesOutputIterator values_output,
         unsigned int         size,
+        Decomposer           decomposer,
         unsigned int         bit,
         unsigned int         current_radix_bits)
 {
@@ -68,6 +70,7 @@ ROCPRIM_KERNEL
                                                                         values_input,
                                                                         values_output,
                                                                         size,
+                                                                        decomposer,
                                                                         bit,
                                                                         current_radix_bits);
 }
@@ -77,13 +80,15 @@ template<class Config,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
-         class ValuesOutputIterator>
+         class ValuesOutputIterator,
+         class Decomposer>
 inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
                                         KeysOutputIterator   keys_output,
                                         ValuesInputIterator  values_input,
                                         ValuesOutputIterator values_output,
                                         unsigned int         size,
                                         unsigned int&        sort_items_per_block,
+                                        Decomposer           decomposer,
                                         unsigned int         bit,
                                         unsigned int         end_bit,
                                         hipStream_t          stream,
@@ -120,20 +125,19 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
     if(debug_synchronous)
+    {
         start = std::chrono::high_resolution_clock::now();
+    }
 
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(radix_sort_block_sort_kernel<config, Descending>),
-                       dim3(sort_number_of_blocks),
-                       dim3(params.block_size),
-                       0,
-                       stream,
-                       keys_input,
-                       keys_output,
-                       values_input,
-                       values_output,
-                       size,
-                       bit,
-                       current_radix_bits);
+    radix_sort_block_sort_kernel<config, Descending>
+        <<<dim3(sort_number_of_blocks), dim3(params.block_size), 0, stream>>>(keys_input,
+                                                                              keys_output,
+                                                                              values_input,
+                                                                              values_output,
+                                                                              size,
+                                                                              decomposer,
+                                                                              bit,
+                                                                              current_radix_bits);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("radix_sort_block_sort_kernel", size, start)
     return hipSuccess;
 }
