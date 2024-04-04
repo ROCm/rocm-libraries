@@ -149,14 +149,17 @@ hipError_t partition_impl(void * temporary_storage,
     using key_type = typename std::iterator_traits<KeyIterator>::value_type;
     using value_type = typename std::iterator_traits<ValueIterator>::value_type;
 
+    using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
+    using offset_scan_state_with_sleep_type = detail::lookback_scan_state<offset_type, true>;
+
     // Get default config if Config is default_config
     using config = default_or_custom_config<
         Config,
-        default_select_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
+        // Note: the partition algorithm requires some extra shared memory space for an instance of 
+        // offset_scan_state_type. Pass it's size to default_select_config here so that it can select
+        // an appropriate block size (one that ensures that we don't run out of shared memory).
+        default_select_config<ROCPRIM_TARGET_ARCH, key_type, value_type, sizeof(offset_scan_state_type)>
     >;
-
-    using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
-    using offset_scan_state_with_sleep_type = detail::lookback_scan_state<offset_type, true>;
 
     static constexpr unsigned int block_size = config::block_size;
     static constexpr unsigned int items_per_thread = config::items_per_thread;

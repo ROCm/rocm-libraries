@@ -100,10 +100,13 @@ template<
     unsigned int SharedMemoryPerThread,
     // Most kernels require block sizes not smaller than warp
     unsigned int MinBlockSize, 
+    // If kernels require more than MaxBlockSize * SharedMemoryPerThread bytes
+    // (eg. to store some kind of block-wide state), that size can be specified here
+    unsigned int ExtraSharedMemory = 0,
     // Can fit in shared memory?
     // Although GPUs have 64KiB, 32KiB is used here as a "soft" limit,
     // because some additional memory may be required in kernels
-    bool = (MaxBlockSize * SharedMemoryPerThread <= (1u << 15))
+    bool = (MaxBlockSize * SharedMemoryPerThread + ExtraSharedMemory <= (1u << 15))
 >
 struct limit_block_size
 {
@@ -112,16 +115,18 @@ struct limit_block_size
         limit_block_size<
             detail::next_power_of_two(MaxBlockSize) / 2,
             SharedMemoryPerThread,
-            MinBlockSize
+            MinBlockSize,
+            ExtraSharedMemory
         >::value;
 };
 
 template<
     unsigned int MaxBlockSize,
     unsigned int SharedMemoryPerThread,
-    unsigned int MinBlockSize
+    unsigned int MinBlockSize,
+    unsigned int ExtraSharedMemory
 >
-struct limit_block_size<MaxBlockSize, SharedMemoryPerThread, MinBlockSize, true>
+struct limit_block_size<MaxBlockSize, SharedMemoryPerThread, MinBlockSize, ExtraSharedMemory, true>
 {
     static_assert(MaxBlockSize >= MinBlockSize, "Data is too large, it cannot fit in shared memory");
 
