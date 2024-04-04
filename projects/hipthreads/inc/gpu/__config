@@ -454,7 +454,7 @@ typedef __char32_t char32_t;
 
 #  endif
 
-#  if !defined(__cpp_exceptions) || __cpp_exceptions < 199711L
+#  if !defined(__cpp_exceptions) || __cpp_exceptions < 199711L || defined(__HIP_DEVICE_COMPILE__)
 #    define _LIBGPU_HAS_NO_EXCEPTIONS
 #  endif
 
