@@ -19,9 +19,9 @@ __includes(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2, _Sent2 __last2,
            _Comp&& __comp, _Proj1&& __proj1, _Proj2&& __proj2) {
   for (; __first2 != __last2; ++__first1) {
     if (__first1 == __last1 || std::__invoke(
-          __comp, std::__invoke(__proj2, *__first2), std::__invoke(__proj1, *__first1)))
+          __comp, gpu::__invoke(__proj2, *__first2), gpu::__invoke(__proj1, *__first1)))
       return false;
-    if (!std::__invoke(__comp, std::__invoke(__proj1, *__first1), std::__invoke(__proj2, *__first2)))
+    if (!gpu::__invoke(__comp, gpu::__invoke(__proj1, *__first1), gpu::__invoke(__proj2, *__first2)))
       ++__first2;
   }
   return true;

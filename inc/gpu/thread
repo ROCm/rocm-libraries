@@ -125,7 +125,7 @@ struct WorkNode_Header {
     WorkNode_Header **link_to_self = nullptr; // (link_to_self == nullptr || *link_to_self = this)
     // Enables thread::detach() to copy a worknode into memory the gpu can free on its own.
     // Can be either nullptr, &(prev->next), &workListHead, &currentWorkNode[blockIdx.x], or &cpuWorkQueue[i]
-    // Use link_to_self == nullptr to indicate we're locked?
+    // Use link_to_self == nullptr or *link_to_self == nullptr to indicate we're locked?
     WorkNode_Header *next = nullptr; // Must always be device-accessible. Either zero-copy pinned host memory, or device memory
     // TODO: does finishedOrDetached need to be an array?
     uint32_t finishedOrDetached = false; // For join(). Actually operates as a bool, but in some places we use atomic functions to modify it
@@ -785,6 +785,7 @@ __host__ __device__ inline void thread::join() {
         throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::join failed");
     }
 
+    // We don't have to worry about worknode_d getting invalidated by detach because we would have to be the one calling detach
     for (uint32_t finished = false; !finished;) {
         __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&finished, &(worknode_d->finishedOrDetached), sizeof(worknode_d->finishedOrDetached), hipMemcpyDeviceToHost, getEnqueingStream()));
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
