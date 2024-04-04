@@ -122,13 +122,12 @@ typedef void (*WrappedFnPointer)(WorkNode_Header *, WorkNode_Header **);
 struct WorkNode_Header {
     WrappedFnPointer wrapper_fn = nullptr;
 
-    WorkNode_Header **link_to_self = nullptr; // (link_to_self == nullptr || *link_to_self = this)
+    WorkNode_Header **link_to_self = reinterpret_cast<WorkNode_Header **>(1); // (link_to_self == nullptr || *link_to_self = this)
     // Enables thread::detach() to copy a worknode into memory the gpu can free on its own.
     // Can be either nullptr, &(prev->next), &workListHead, &currentWorkNode[blockIdx.x], or &cpuWorkQueue[i]
-    // Use link_to_self == nullptr or *link_to_self == nullptr to indicate we're locked?
+    // link_to_self == nullptr indicates we've either finished or been detached.
+    // Use *link_to_self == nullptr to indicate we're locked?
     WorkNode_Header *next = nullptr; // Must always be device-accessible. Either zero-copy pinned host memory, or device memory
-    // TODO: does finishedOrDetached need to be an array?
-    uint32_t finishedOrDetached = false; // For join(). Actually operates as a bool, but in some places we use atomic functions to modify it
     uint32_t width = 1; // How many threads per block/vthread are active
     thread::id vthread_id = {}; // TODO: should this be a MAX_THREAD_WIDTH array? For now we just store the lowest id.
 };
@@ -295,7 +294,9 @@ __host__ WorkNode<Callable_t>::WorkNode(uint32_t width, Callable_t &&callable) :
 // a bunch of WorkNode_Header's member variables private
 static inline __device__ void insertWorkNode(WorkNode_Header **location, WorkNode_Header *worknode) {
     // TODO: use __shfl_up to allow multiple lanes to call insertWorkNode at once.
-    worknode->link_to_self = location;
+    // If worknode is coming from cpuWorkQueue but has already been detached, don't update link_to_self
+    if (worknode->link_to_self != nullptr)
+        worknode->link_to_self = location;
     *location = worknode;
     if (location != &workListHead) {
         WorkNode_Header* prev = reinterpret_cast<WorkNode_Header*>(reinterpret_cast<char*>(location) - offsetof(WorkNode_Header, next));
@@ -312,12 +313,14 @@ static inline __device__ void setCurrentWorkNode(WorkNode_Header *node) {
     currentWorkNode[blockIdx.x] = node;
     if (node == nullptr)
         return;
-    node->link_to_self = const_cast<WorkNode_Header **>(&currentWorkNode[blockIdx.x]);
+    // Don't update link_to_self if node has already been detached
+    if (node->link_to_self != nullptr)
+        node->link_to_self = const_cast<WorkNode_Header **>(&currentWorkNode[blockIdx.x]);
     // If we're called from pseudo_yield, set node->next to the yielding thread so we can restore later.
     node->next = yieldingWorkNode;
     if (yieldingWorkNode == nullptr) {
         atomicAdd(&activeVcoreCount, 1);
-    else
+    } else if (yieldingWorkNode->link_to_self != nullptr) {
         yieldingWorkNode->link_to_self = &node->next;
     }
 }
@@ -325,9 +328,10 @@ static inline __device__ WorkNode_Header *popWorkNodeFromHead() {
     WorkNode_Header *head = reinterpret_cast<WorkNode_Header *>(atomicAdd(reinterpret_cast<uintptr_t*>(&workListHead), 0));
     if (head == nullptr)
         return nullptr;
-    // assert(head->link_to_self == &workListHead);
+    // assert(head->link_to_self == &workListHead || head->link_to_self == nullptr);
     workListHead = head->next;
-    if (workListHead != nullptr) {
+    // Don't update link_to_self if workListHead has already been detached
+    if (workListHead != nullptr && workListHead->link_to_self != nullptr) {
         workListHead->link_to_self = &workListHead;
     }
     return head;
@@ -402,10 +406,10 @@ static inline __device__ bool invokeNext() {
         if (worknode->next == nullptr) {
             atomicSub(&activeVcoreCount, 1);
         }
-        if (worknode->finishedOrDetached) { // Detach has been called
+        if (worknode->link_to_self == nullptr) { // Detach has been called
             ::free(worknode);
         } else {
-            worknode->finishedOrDetached = true;
+            worknode->link_to_self = nullptr;
         }
 
         setAndUnlockTail(currentTail);
@@ -446,7 +450,7 @@ inline __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t wor
     WorkNode_Header *newWorkNode = static_cast<WorkNode_Header *>(::malloc(worknodeSize));
     WorkNode_Header **currentTail = lockAndFetchTail();
 
-    if (oldWorkNode->finishedOrDetached) {
+    if (oldWorkNode->link_to_self == nullptr) {
         // It's already finished, so oldWorkNode is not in the list, nor in currentWorkNode[]. Thus, we don't have to
         // worry about updating its state or copying it. Just return so gpu::thread can free oldWorkNode.
         setAndUnlockTail(currentTail);
@@ -454,8 +458,8 @@ inline __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t wor
         return;
     }
 
-    oldWorkNode->finishedOrDetached = true;
     *(oldWorkNode->link_to_self) = newWorkNode;
+    oldWorkNode->link_to_self = nullptr;
     gpu::memcpy(newWorkNode, oldWorkNode, worknodeSize);
 
     // Not equivalent to `oldWorkNode->next == nullptr` b/c pseudo_yield uses oldWorkNode->next to store a pointer to
@@ -465,7 +469,7 @@ inline __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t wor
     } else {
         // Using oldWorkNode to access next means nothing in this function requires a read from newWorkNode. Not sure if
         // that matters
-        if (oldWorkNode->next != nullptr)
+        if (oldWorkNode->next != nullptr && oldWorkNode->next->link_to_self != nullptr)
             oldWorkNode->next->link_to_self = &(newWorkNode->next);
         setAndUnlockTail(currentTail);
     }
@@ -767,8 +771,8 @@ __host__ __device__ inline void thread::join() {
     // We don't need to lock here because we know nobody is going to call detach on worknode_d, but we do need to make
     // sure that this does a load from memory and not a cache, so we use an atomicAdd(..., 0).
     //
-    // Note that finishedOrDetached == true implies the thread has finished, since we can't possibly have called detach
-    while (!atomicAdd(&(worknode_d->finishedOrDetached), 0)) {
+    // Note that link_to_self == nullptr implies the thread has finished, since we can't possibly have called detach
+    while (atomicAdd(reinterpret_cast<uintptr_t *>(&(worknode_d->link_to_self)), 0) != 0) {
         // spin while we wait for it to finish.
         __builtin_amdgcn_s_sleep(8);
     }
@@ -786,8 +790,8 @@ __host__ __device__ inline void thread::join() {
     }
 
     // We don't have to worry about worknode_d getting invalidated by detach because we would have to be the one calling detach
-    for (uint32_t finished = false; !finished;) {
-        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&finished, &(worknode_d->finishedOrDetached), sizeof(worknode_d->finishedOrDetached), hipMemcpyDeviceToHost, getEnqueingStream()));
+    for (WorkNode_Header **link_to_self = reinterpret_cast<WorkNode_Header **>(1); link_to_self != nullptr;) {
+        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&link_to_self, &(worknode_d->link_to_self), sizeof(worknode_d->link_to_self), hipMemcpyDeviceToHost, getEnqueingStream()));
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
         // Maybe sleep or yield here? On the other hand, hipStreamSynchronize is a blocking call that is likely to take a while
     }
@@ -810,11 +814,11 @@ __host__ __device__ inline void thread::detach() {
     if (threadIdx.x == 0)
         currentTail = lockAndFetchTail();
 
-    if (worknode_d->finishedOrDetached) {
+    if (worknode_d->link_to_self == nullptr) {
         // It's already finished, so we have the only pointer to worknode_d. Thus, we can just free the memory.
         ::free(worknode_d);
     } else {
-        worknode_d->finishedOrDetached = true;
+        worknode_d->link_to_self = nullptr;
         // Since the gpu::thread instance is in device memory, we know the gpu did the allocation for worknode_d, no need to
         // copy the data to memory the gpu can free on its own.
     }
