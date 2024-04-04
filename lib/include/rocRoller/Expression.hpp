@@ -432,6 +432,14 @@ namespace rocRoller
             constexpr static inline int  Complexity = 1;
         };
 
+        struct Exponential : Unary
+        {
+            constexpr static inline auto            Type = Category::Arithmetic;
+            constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate,
+                                                              EvaluationTime::KernelLaunch};
+            constexpr static inline int             Complexity = 2;
+        };
+
         /**
          * @brief Register value from the coordinate graph.
          *

@@ -1,0 +1,162 @@
+
+#include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/CopyGenerator.hpp>
+#include <rocRoller/CodeGen/MemoryInstructions.hpp>
+#include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Operations/Command.hpp>
+
+#include "GPUContextFixture.hpp"
+#include "GenericContextFixture.hpp"
+#include "TestValues.hpp"
+#include "Utilities.hpp"
+
+#include <cmath>
+
+using namespace rocRoller;
+
+namespace LowerExponentialTest
+{
+    class LowerExponentialTest : public GenericContextFixture
+    {
+    };
+
+    TEST_F(LowerExponentialTest, ExponentialByArgumentExpressions)
+    {
+        auto ExpectCommutative
+            = [&](std::shared_ptr<Expression::Expression> arg, std::string result) {
+                  EXPECT_EQ(Expression::toString(lowerExponential(exp(arg))), result);
+              };
+
+        auto command = std::make_shared<Command>();
+        auto a       = std::make_shared<Expression::Expression>(
+            command->allocateArgument({DataType::Float, PointerType::Value}));
+
+        ExpectCommutative(a,
+                          "Exponential2(Multiply(1.44270f, CommandArgument(user_Float_Value_0)))");
+    }
+
+    class ExecuteLowerExponentialCurrentGPU : public CurrentGPUContextFixture
+    {
+    public:
+        void executeLowerExponentialTest(float a)
+        {
+
+            auto command = std::make_shared<Command>();
+
+            auto result_arg
+                = command->allocateArgument({DataType::Float, PointerType::PointerGlobal});
+            auto a_arg = command->allocateArgument({DataType::Float, PointerType::Value});
+
+            auto result_exp = std::make_shared<Expression::Expression>(result_arg);
+            auto a_exp      = std::make_shared<Expression::Expression>(a_arg);
+
+            auto k = m_context->kernel();
+
+            k->addArgument({"result",
+                            {DataType::Float, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly,
+                            result_exp});
+
+            k->addArgument({"a", DataType::Float, DataDirection::ReadOnly, a_exp});
+
+            auto one  = std::make_shared<Expression::Expression>(1u);
+            auto zero = std::make_shared<Expression::Expression>(0u);
+
+            k->setWorkgroupSize({1, 1, 1});
+            k->setWorkitemCount({one, one, one});
+            k->setDynamicSharedMemBytes(zero);
+
+            m_context->schedule(k->preamble());
+            m_context->schedule(k->prolog());
+
+            auto kb = [&]() -> Generator<Instruction> {
+                Register::ValuePtr s_result, s_a;
+                co_yield m_context->argLoader()->getValue("result", s_result);
+                co_yield m_context->argLoader()->getValue("a", s_a);
+
+                auto v_result
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::Float, PointerType::PointerGlobal},
+                                                   1);
+
+                auto v_a = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Float, 1);
+                auto v_c = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Float, 1);
+
+                co_yield m_context->copier()->copy(v_a, s_a, "Move s_a pointer to v_a");
+
+                co_yield v_result->allocate();
+
+                co_yield m_context->copier()->copy(v_result, s_result, "Move pointer v_result");
+
+                auto a = v_a->expression();
+
+                std::shared_ptr<Expression::Expression> expr;
+                expr = exp(a);
+
+                Register::ValuePtr s_c;
+                co_yield Expression::generate(s_c, expr, m_context);
+
+                co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr v_c to store.");
+                co_yield m_context->mem()->storeFlat(
+                    v_result, v_c, 0, v_c->variableType().getElementSize());
+            };
+
+            m_context->schedule(kb());
+            m_context->schedule(k->postamble());
+            m_context->schedule(k->amdgpu_metadata());
+
+            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+                = m_context->instructions()->getExecutableKernel();
+
+            auto d_result = make_shared_device<float>();
+
+            CommandKernel commandKernel(m_context);
+
+            KernelArguments runtimeArgs;
+            runtimeArgs.append("result", d_result.get());
+            runtimeArgs.append("a", a);
+
+            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+
+            float result;
+            ASSERT_THAT(hipMemcpy(&result, d_result.get(), sizeof(float), hipMemcpyDefault),
+                        HasHipSuccess(0));
+
+            float exp_a = std::exp(a);
+            if((exp_a == 0) || (exp_a == INFINITY))
+            {
+                EXPECT_EQ(result, exp_a)
+                    << "a: " << a << ", result: " << result << ", exp(a): " << exp_a;
+                ;
+            }
+            else
+            {
+                EXPECT_LT(std::abs((result - exp_a) / exp_a), 0.000255)
+                    << "a: " << a << ", result: " << result << ", exp(a): " << exp_a
+                    << "diff: " << std::abs((result - exp_a) / exp_a);
+                ;
+            }
+        }
+    };
+
+    class LowerExponentialTestCurrentGPU : public ExecuteLowerExponentialCurrentGPU,
+                                           public ::testing::WithParamInterface<float>
+    {
+    };
+
+    TEST_P(LowerExponentialTestCurrentGPU, GPU_LowerExponentialTest)
+    {
+        executeLowerExponentialTest(GetParam());
+    }
+
+    INSTANTIATE_TEST_SUITE_P(LowerExponentialTestCurrentGPUs,
+                             LowerExponentialTestCurrentGPU,
+                             ::testing::ValuesIn(TestValues::floatValues));
+}

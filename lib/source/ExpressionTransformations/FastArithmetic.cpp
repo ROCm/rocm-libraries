@@ -21,6 +21,7 @@ namespace rocRoller
 
             x = fastDivision(x, m_context);
             x = simplify(x);
+            x = lowerExponential(x);
             x = fastMultiplication(x);
             x = fuseAssociative(x);
             x = fuseTernary(x);

@@ -82,6 +82,14 @@ namespace rocRoller
         ExpressionPtr dataFlowTagPropagation(ExpressionPtr expr, ContextPtr context);
 
         /**
+         * @brief Attempt to compute e^x operations by using exp2(x * log2(e)).
+         *
+         * @param expr Input expression
+         * @return ExpressionPtr Transformed expression
+         */
+        ExpressionPtr lowerExponential(ExpressionPtr expr);
+
+        /**
          * Helper (lambda/transducer) for applying all fast arithmetic transformations.
          *
          * Usage:

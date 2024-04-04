@@ -560,6 +560,16 @@ namespace rocRoller
         };
 
         template <>
+        struct OperationEvaluatorVisitor<Exponential> : public UnaryEvaluatorVisitor<Exponential>
+        {
+            template <typename T>
+            std::enable_if_t<std::is_floating_point_v<T>, T> evaluate(T const& arg) const
+            {
+                return std::exp(arg);
+            }
+        };
+
+        template <>
         struct OperationEvaluatorVisitor<Negate> : public UnaryEvaluatorVisitor<Negate>
         {
             template <typename T>

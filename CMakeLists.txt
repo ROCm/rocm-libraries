@@ -251,6 +251,7 @@ set(rocroller_src
 
  lib/source/ExpressionTransformations/DataFlowTagPropagation.cpp
  lib/source/ExpressionTransformations/FastArithmetic.cpp
+ lib/source/ExpressionTransformations/LowerExponential.cpp
  lib/source/ExpressionTransformations/FastDivision.cpp
  lib/source/ExpressionTransformations/FastMultiplication.cpp
  lib/source/ExpressionTransformations/FuseAssociative.cpp
@@ -482,6 +483,7 @@ set(
   test/unit/ExpressionTest.cpp
   test/unit/ExpressionTransformationTest.cpp
   test/unit/FastDivisionTest.cpp
+  test/unit/LowerExponentialTest.cpp
   test/unit/FastMultiplicationTest.cpp
   test/unit/FileWritingObserverTest.cpp
   test/unit/GPUArchitectureTest.cpp
