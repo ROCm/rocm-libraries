@@ -76,14 +76,14 @@ struct select_config
 namespace detail
 {
 
-template<class Key>
+template<class Key, unsigned int ExtraSharedMemory>
 struct select_config_803
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
 
     using type = select_config<
-        limit_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
+        limit_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64, ExtraSharedMemory>::value,
         ::rocprim::max(1u, 13u / item_scale),
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_load_method::block_load_transpose,
@@ -92,14 +92,14 @@ struct select_config_803
     >;
 };
 
-template<class Key>
+template<class Key, unsigned int ExtraSharedMemory>
 struct select_config_900
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
 
     using type = select_config<
-        limit_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
+        limit_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64, ExtraSharedMemory>::value,
         ::rocprim::max(1u, 15u / item_scale),
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_load_method::block_load_transpose,
@@ -108,14 +108,14 @@ struct select_config_900
     >;
 };
 
-template<class Value>
+template<class Value, unsigned int ExtraSharedMemory>
 struct select_config_90a
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     using type = select_config<
-        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64, ExtraSharedMemory>::value,
         ::rocprim::max(1u, 15u / item_scale),
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_load_method::block_load_transpose,
@@ -124,14 +124,14 @@ struct select_config_90a
     >;
 };
 
-template<class Value>
+template<class Value, unsigned int ExtraSharedMemory>
 struct select_config_1030
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     using type = select_config<
-        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_32>::value,
+        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_32, ExtraSharedMemory>::value,
         ::rocprim::max(1u, 15u / item_scale),
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_load_method::block_load_transpose,
@@ -141,15 +141,15 @@ struct select_config_1030
 };
 
 
-template<unsigned int TargetArch, class Key, class /*Value*/>
+template<unsigned int TargetArch, class Key, class /*Value*/, unsigned int ExtraSharedMemory = 0>
 struct default_select_config
     : select_arch<
         TargetArch,
-        select_arch_case<803, select_config_803<Key>>,
-        select_arch_case<900, select_config_900<Key>>,
-        select_arch_case<ROCPRIM_ARCH_90a, select_config_90a<Key>>,
-        select_arch_case<1030, select_config_1030<Key>>,
-        select_config_803<Key>
+        select_arch_case<803, select_config_803<Key, ExtraSharedMemory>>,
+        select_arch_case<900, select_config_900<Key, ExtraSharedMemory>>,
+        select_arch_case<ROCPRIM_ARCH_90a, select_config_90a<Key, ExtraSharedMemory>>,
+        select_arch_case<1030, select_config_1030<Key, ExtraSharedMemory>>,
+        select_config_803<Key, ExtraSharedMemory>
     > { };
 
 } // end namespace detail
