@@ -83,6 +83,10 @@ Documentation for rocPRIM is available at
 
 * Build issues with `rmake.py` on Windows when using VS 2017 15.8 or later (due to a breaking fix with
   extended aligned storage)
+* Fix tests for `block_histogram`, `block_exchange`, `device_histogram` and `device_reduce_by_key` for various types
+
+### Known Issues
+* `device_run_length_encode`, `warp_exchange` and `warp_load` tests fail with `rocprim::half`
 
 ## rocPRIM-3.0.0 for ROCm 6.0.0
 
