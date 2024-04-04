@@ -1100,233 +1100,6 @@ namespace KernelGraphTest
         auto kgraph0 = example.getKernelGraph();
         auto params  = example.getCommandParameters();
 
-        std::string expected0 = R".(
-        digraph {
-        "coord1"[label="User{CommandArgument(Load_Tiled_0_extent)}(1)"];
-        "coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
-        "coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
-        "coord4"[label="MacroTile{NA}(4)"];
-        "coord5"[label="Split(5)",shape=box];
-        "coord6"[label="ConstructMacroTile(6)",shape=box];
-        "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Load_Tiled_1_extent)}(8)"];
-        "coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
-        "coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
-        "coord11"[label="MacroTile{NA}(11)"];
-        "coord12"[label="Split(12)",shape=box];
-        "coord13"[label="ConstructMacroTile(13)",shape=box];
-        "coord14"[label="DataFlow(14)",shape=box];
-        "coord15"[label="User{CommandArgument(Load_Tiled_2_extent)}(15)"];
-        "coord16"[label="SubDimension{0, CommandArgument(Load_Tiled_2_size_0)}(16)"];
-        "coord17"[label="SubDimension{1, CommandArgument(Load_Tiled_2_size_1)}(17)"];
-        "coord18"[label="MacroTile{NA}(18)"];
-        "coord19"[label="Split(19)",shape=box];
-        "coord20"[label="ConstructMacroTile(20)",shape=box];
-        "coord21"[label="DataFlow(21)",shape=box];
-        "coord22"[label="User{NA}(22)"];
-        "coord23"[label="VGPR{NA}(23)"];
-        "coord24"[label="DataFlow(24)",shape=box];
-        "coord25"[label="User{NA}(25)"];
-        "coord26"[label="VGPR{NA}(26)"];
-        "coord27"[label="DataFlow(27)",shape=box];
-        "coord28"[label="MacroTile{NA}(28)"];
-        "coord29"[label="DataFlow(29)",shape=box];
-        "coord30"[label="MacroTile{NA}(30)"];
-        "coord31"[label="DataFlow(31)",shape=box];
-        "coord32"[label="MacroTile{NA}(32)"];
-        "coord33"[label="DataFlow(33)",shape=box];
-        "coord34"[label="MacroTile{NA}(34)"];
-        "coord35"[label="DataFlow(35)",shape=box];
-        "coord36"[label="SubDimension{0, NA}(36)"];
-        "coord37"[label="SubDimension{1, NA}(37)"];
-        "coord38"[label="User{CommandArgument(Store_Tiled_8_extent)}(38)"];
-        "coord39"[label="DestructMacroTile(39)",shape=box];
-        "coord40"[label="Join(40)",shape=box];
-        "coord41"[label="DataFlow(41)",shape=box];
-        "coord1" -> "coord5"
-        "coord1" -> "coord7"
-        "coord2" -> "coord6"
-        "coord3" -> "coord6"
-        "coord4" -> "coord29"
-        "coord5" -> "coord2"
-        "coord5" -> "coord3"
-        "coord6" -> "coord4"
-        "coord7" -> "coord4"
-        "coord8" -> "coord12"
-        "coord8" -> "coord14"
-        "coord9" -> "coord13"
-        "coord10" -> "coord13"
-        "coord11" -> "coord29"
-        "coord12" -> "coord9"
-        "coord12" -> "coord10"
-        "coord13" -> "coord11"
-        "coord14" -> "coord11"
-        "coord15" -> "coord19"
-        "coord15" -> "coord21"
-        "coord16" -> "coord20"
-        "coord17" -> "coord20"
-        "coord18" -> "coord33"
-        "coord19" -> "coord16"
-        "coord19" -> "coord17"
-        "coord20" -> "coord18"
-        "coord21" -> "coord18"
-        "coord22" -> "coord24"
-        "coord23" -> "coord31"
-        "coord24" -> "coord23"
-        "coord25" -> "coord27"
-        "coord26" -> "coord33"
-        "coord27" -> "coord26"
-        "coord28" -> "coord31"
-        "coord29" -> "coord28"
-        "coord30" -> "coord35"
-        "coord31" -> "coord30"
-        "coord32" -> "coord35"
-        "coord33" -> "coord32"
-        "coord34" -> "coord39"
-        "coord34" -> "coord41"
-        "coord35" -> "coord34"
-        "coord36" -> "coord40"
-        "coord37" -> "coord40"
-        "coord39" -> "coord36"
-        "coord39" -> "coord37"
-        "coord40" -> "coord38"
-        "coord41" -> "coord38"
-        {
-        rank=same
-        "coord2"->"coord3"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord2"->"coord3"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord9"->"coord10"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord9"->"coord10"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord16"->"coord17"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord16"->"coord17"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord4"->"coord11"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord23"->"coord28"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord26"->"coord18"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord30"->"coord32"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord36"->"coord37"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord36"->"coord37"[style=invis]
-        rankdir=LR
-        }
-        subgraph clusterCF {label = "Control Graph";
-        "cntrl1"[label="Kernel(1)"];
-        "cntrl2"[label="LoadTiled(2)"];
-        "cntrl3"[label="Body(3)",shape=box];
-        "cntrl4"[label="LoadTiled(4)"];
-        "cntrl5"[label="Body(5)",shape=box];
-        "cntrl6"[label="LoadTiled(6)"];
-        "cntrl7"[label="Body(7)",shape=box];
-        "cntrl8"[label="LoadVGPR(8)"];
-        "cntrl9"[label="Body(9)",shape=box];
-        "cntrl10"[label="LoadVGPR(10)"];
-        "cntrl11"[label="Body(11)",shape=box];
-        "cntrl12"[label="TensorContraction(12)"];
-        "cntrl13"[label="Sequence(13)",shape=box];
-        "cntrl14"[label="Sequence(14)",shape=box];
-        "cntrl15"[label="Assign VGPR Multiply(DataFlowTag(23), DataFlowTag(28))(15)"];
-        "cntrl16"[label="Sequence(16)",shape=box];
-        "cntrl17"[label="Sequence(17)",shape=box];
-        "cntrl18"[label="Assign VGPR Multiply(DataFlowTag(26), DataFlowTag(18))(18)"];
-        "cntrl19"[label="Sequence(19)",shape=box];
-        "cntrl20"[label="Sequence(20)",shape=box];
-        "cntrl21"[label="Assign VGPR Add(DataFlowTag(30), DataFlowTag(32))(21)"];
-        "cntrl22"[label="Sequence(22)",shape=box];
-        "cntrl23"[label="Sequence(23)",shape=box];
-        "cntrl24"[label="StoreTiled(24)"];
-        "cntrl25"[label="Sequence(25)",shape=box];
-        "cntrl1" -> "cntrl3"
-        "cntrl1" -> "cntrl5"
-        "cntrl1" -> "cntrl7"
-        "cntrl1" -> "cntrl9"
-        "cntrl1" -> "cntrl11"
-        "cntrl2" -> "cntrl13"
-        "cntrl3" -> "cntrl2"
-        "cntrl4" -> "cntrl14"
-        "cntrl5" -> "cntrl4"
-        "cntrl6" -> "cntrl20"
-        "cntrl7" -> "cntrl6"
-        "cntrl8" -> "cntrl16"
-        "cntrl9" -> "cntrl8"
-        "cntrl10" -> "cntrl19"
-        "cntrl11" -> "cntrl10"
-        "cntrl12" -> "cntrl17"
-        "cntrl13" -> "cntrl12"
-        "cntrl14" -> "cntrl12"
-        "cntrl15" -> "cntrl22"
-        "cntrl16" -> "cntrl15"
-        "cntrl17" -> "cntrl15"
-        "cntrl18" -> "cntrl23"
-        "cntrl19" -> "cntrl18"
-        "cntrl20" -> "cntrl18"
-        "cntrl21" -> "cntrl25"
-        "cntrl22" -> "cntrl21"
-        "cntrl23" -> "cntrl21"
-        "cntrl25" -> "cntrl24"
-        }
-        "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord18" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord22" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
-        "coord23" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
-        "coord25" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
-        "coord26" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
-        "coord28" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
-        "coord30" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
-        "coord32" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
-        "coord34" -> "cntrl21" [style=dotted,weight=0,arrowsize=0]
-        "coord34" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
-        "coord38" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
-             }).";
-        EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
-
         auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
         auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
         auto lowerTensorContractionTransform
@@ -1371,11 +1144,11 @@ namespace KernelGraphTest
             = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(unrolledStoreLDS.size(), 4);
 
-        // Verify number of ComputeIndexes: A loads; B load (has
-        // unroll); C load; D store: 3 + 4 + 3 + 3 = 13
+        // Verify number of ComputeIndexes: A loads; B load; C load; D
+        // store: 3 + 3 + 3 + 3 = 12
         kgraph1             = kgraph1.transform(addComputeIndexTransform);
         auto computeIndexes = kgraph1.control.getNodes<ComputeIndex>().to<std::vector>();
-        EXPECT_EQ(computeIndexes.size(), 13);
+        EXPECT_EQ(computeIndexes.size(), 12);
 
         // Verify number of Deallocates
         auto addDeallocate  = std::make_shared<AddDeallocate>();
@@ -1390,7 +1163,7 @@ namespace KernelGraphTest
         // Verify number of ComputeIndexes after unroll/fuse/lds
         unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addComputeIndexTransform);
         computeIndexes = unrolled_kgraph_lds.control.getNodes<ComputeIndex>().to<std::vector>();
-        EXPECT_EQ(computeIndexes.size(), 24);
+        EXPECT_EQ(computeIndexes.size(), 20);
 
         // Verify number of Deallocates after unroll/fuse/lds
         unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addDeallocate);

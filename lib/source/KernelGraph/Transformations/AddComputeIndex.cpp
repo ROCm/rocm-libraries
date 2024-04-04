@@ -1,6 +1,5 @@
 
 #include <algorithm>
-#include <typeindex>
 #include <variant>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
@@ -21,71 +20,20 @@ namespace rocRoller::KernelGraph
 
     using GD = Graph::Direction;
 
-    enum ComputeIndexChainType
-    {
-        STORE_ELEM,
-        STORE_WAVE_MATRIX_ACCUMULATOR,
-
-        LOAD_ELEM,
-        LOAD_ELEM_MATRIX_A,
-        LOAD_ELEM_MATRIX_B,
-
-        LOAD_WAVE_MATRIX_A,
-        LOAD_WAVE_MATRIX_B,
-        LOAD_WAVE_MATRIX_ACCUMULATOR,
-
-        LOAD_LDS_MATRIX_A,
-        LOAD_LDS_MATRIX_B,
-    };
-
-    std::string toString(ComputeIndexChainType const& x)
-    {
-        switch(x)
-        {
-        case STORE_ELEM:
-            return "STORE_ELEM";
-        case STORE_WAVE_MATRIX_ACCUMULATOR:
-            return "STORE_WAVE_MATRIX_ACCUMULATOR";
-        case LOAD_ELEM:
-            return "LOAD_ELEM";
-        case LOAD_ELEM_MATRIX_A:
-            return "LOAD_ELEM_MATRIX_A";
-        case LOAD_ELEM_MATRIX_B:
-            return "LOAD_ELEM_MATRIX_B";
-        case LOAD_WAVE_MATRIX_A:
-            return "LOAD_WAVE_MATRIX_A";
-        case LOAD_WAVE_MATRIX_B:
-            return "LOAD_WAVE_MATRIX_B";
-        case LOAD_WAVE_MATRIX_ACCUMULATOR:
-            return "LOAD_WAVE_MATRIX_ACCUMULATOR";
-        case LOAD_LDS_MATRIX_A:
-            return "LOAD_LDS_MATRIX_A";
-        case LOAD_LDS_MATRIX_B:
-            return "LOAD_LDS_MATRIX_B";
-        }
-
-        Throw<FatalError>("Invalid ComputeIndexChainType");
-    }
-
-    std::ostream& operator<<(std::ostream& stream, ComputeIndexChainType const& obj)
-    {
-        return stream << toString(obj);
-    }
-
     struct ComputeIndexChainSpecification
     {
-        int                   target;
-        ComputeIndexChainType type;
-        int                   location;
-        Graph::Direction      direction;
-        int                   forLoop          = -1;
-        bool                  replaceWithScope = true;
+        int              target;
+        std::vector<int> coords;
+        int              location;
+        Graph::Direction direction;
+        int              forLoop          = -1;
+        bool             replaceWithScope = true;
     };
 
     bool operator<(const ComputeIndexChainSpecification& a, const ComputeIndexChainSpecification& b)
     {
-        return std::tie(a.target, a.type, a.location, a.direction)
-               < std::tie(b.target, b.type, b.location, b.direction);
+        return std::tie(a.target, a.coords, a.location, a.direction)
+               < std::tie(b.target, b.coords, b.location, b.direction);
     }
 
     struct ComputeIndexChain
@@ -97,12 +45,15 @@ namespace rocRoller::KernelGraph
         int update = -1;
     };
 
-    /*
-     * Helpers
-     */
+    struct RequiredCoordinateInfo
+    {
+        int  coord, base, sdim;
+        bool isUnroll;
+        bool needsUpdate;
+    };
 
     /**
-     * @brief Return existing Buffer edge between src and dst, or
+     * @brief Return existing Buffer edge between `src` and `dst`, or
      * create a new one.
      *
      * Returns -1 if the operation doesn't need a buffer descriptor.
@@ -127,7 +78,7 @@ namespace rocRoller::KernelGraph
     }
 
     /**
-     * @brief True if ForLoopOp has translate-time increment.
+     * @brief True if ForLoopOp has a translate-time increment.
      */
     bool uniformForLoop(std::optional<int> maybeForLoop, KernelGraph const& kgraph)
     {
@@ -185,680 +136,271 @@ namespace rocRoller::KernelGraph
         return ci;
     }
 
-    /*
-     * Helpers for building ComputeIndex chains for specific layouts.
-     */
-
     /**
-     * @brief Add ComputeIndexes for MATRIX_A/B from global.
+     * @brief Get coordinates in `path` attached to `coordinate` via a
+     * CoordinateTransformEdge.
      */
-    ComputeIndexChain computeIndexElementMatrixAB(KernelGraph&                        graph,
-                                                  int                                 load,
-                                                  int                                 sdim,
-                                                  ExpressionPtr                       step,
-                                                  int                                 location,
-                                                  std::map<std::pair<int, int>, int>& bufferMap)
+    int getNeighbourNodeInPath(int                            coordinate,
+                               Graph::Direction               direction,
+                               std::unordered_set<int> const& path,
+                               KernelGraph const&             graph)
     {
-        rocRoller::Log::getLogger()->debug(
-            "KernelGraph::AddComputeIndex()::computeIndexElementMatrixAB({}, {})", load, sdim);
+        auto neighbourNodes
+            = (direction == Graph::Direction::Upstream)
+                  ? graph.coordinates
+                        .getOutputNodeIndices(coordinate,
+                                              rocRoller::KernelGraph::CoordinateGraph::isEdge<
+                                                  CoordinateTransformEdge>)
+                        .to<std::unordered_set>()
+                  : graph.coordinates
+                        .getInputNodeIndices(coordinate,
+                                             rocRoller::KernelGraph::CoordinateGraph::isEdge<
+                                                 CoordinateTransformEdge>)
+                        .to<std::unordered_set>();
 
-        AssertFatal(isOperation<LoadTiled>(graph.control.getElement(load)));
+        for(auto tag : neighbourNodes)
+        {
+            if(path.contains(tag))
+                return tag;
+        }
 
-        auto user  = graph.mapper.get<User>(load);
-        auto mac   = graph.mapper.get<MacroTileNumber>(load, sdim);
-        auto elemX = graph.mapper.get<ElementNumber>(load, 0);
-        auto elemY = graph.mapper.get<ElementNumber>(load, 1);
-
-        auto dtype = graph.control.get<LoadTiled>(load)->varType.dataType;
-
-        auto offsetMac = graph.coordinates.addElement(Offset(), {user}, {mac});
-        auto strideMac = graph.coordinates.addElement(Stride(), {user}, {mac});
-        auto rowOffset = graph.coordinates.addElement(Offset(), {user}, {elemX});
-        auto rowStride = graph.coordinates.addElement(Stride(), {user}, {elemX});
-        auto colOffset = graph.coordinates.addElement(Offset(), {user}, {elemY});
-        auto colStride = graph.coordinates.addElement(Stride(), {user}, {elemY});
-        auto buffer    = getBuffer(graph, load, user, mac, location, bufferMap);
-
-        std::vector<DeferredConnection> connections;
-        connections.push_back(DC<Offset>(offsetMac, -1));
-        connections.push_back(DC<Offset>(rowOffset, 0));
-        connections.push_back(DC<Offset>(colOffset, 1));
-        connections.push_back(DC<Stride>(strideMac, -1));
-        connections.push_back(DC<Stride>(rowStride, 0));
-        connections.push_back(DC<Stride>(colStride, 1));
-        connections.push_back(DC<Buffer>(buffer));
-
-        auto ciMac
-            = makeComputeIndex(graph, user, mac, -1, offsetMac, strideMac, buffer, false, dtype);
-        auto ciRow = makeComputeIndex(
-            graph, user, elemX, offsetMac, rowOffset, rowStride, buffer, false, dtype);
-        auto ciCol = makeComputeIndex(
-            graph, user, elemY, rowOffset, colOffset, colStride, buffer, false, dtype);
-
-        graph.control.addElement(Sequence(), {ciMac}, {ciRow});
-        graph.control.addElement(Sequence(), {ciRow}, {ciCol});
-
-        auto offsetMacExpr = std::make_shared<Expression::Expression>(
-            Expression::DataFlowTag{offsetMac, Register::Type::Vector, DataType::UInt64});
-        auto strideMacExpr = std::make_shared<Expression::Expression>(
-            Expression::DataFlowTag{strideMac, Register::Type::Scalar, DataType::UInt64});
-
-        auto offsetUpdate = graph.control.addElement(
-            Assign{Register::Type::Vector, offsetMacExpr + step * strideMacExpr});
-        graph.mapper.connect(offsetUpdate, offsetMac, NaryArgument::DEST);
-
-        return {ciMac, ciCol, connections, offsetUpdate};
+        return -1;
     }
 
     /**
-     * @brief Add ComputeIndexes for generic MATRIX to/from global.
+     * @brief Get coordinates required by the code-generator.
      */
-    ComputeIndexChain computeIndexElementMatrix(KernelGraph&                        graph,
-                                                int                                 loadstore,
-                                                int                                 source,
-                                                bool                                forward,
-                                                int                                 location,
-                                                std::map<std::pair<int, int>, int>& bufferMap)
+    std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph, int tag)
     {
-        rocRoller::Log::getLogger()->debug(
-            "KernelGraph::AddComputeIndex()::computeIndexElementMatrix({}, {}, {})",
-            loadstore,
-            source,
-            forward);
-
-        auto elemX = graph.mapper.get<ElementNumber>(loadstore, 0);
-        auto elemY = graph.mapper.get<ElementNumber>(loadstore, 1);
-
-        DataType dtype, offsettype = DataType::UInt64;
+        auto [tileTag, tile] = graph.getDimension<MacroTile>(tag);
+        if(tile.memoryType == MemoryType::VGPR)
         {
-            auto l  = graph.control.get<LoadTiled>(loadstore);
-            auto ll = graph.control.get<LoadLDSTile>(loadstore);
-            auto s  = graph.control.get<StoreTiled>(loadstore);
-            auto sl = graph.control.get<StoreLDSTile>(loadstore);
-            if(l)
-                dtype = l->varType.dataType;
-            if(ll)
-            {
-                dtype      = ll->varType.dataType;
-                offsettype = DataType::UInt32;
-            }
-            if(s)
-                dtype = s->dataType;
-            if(sl)
-            {
-                dtype      = sl->dataType;
-                offsettype = DataType::UInt32;
-            }
+            return {graph.mapper.get<ElementNumber>(tag, 0),
+                    graph.mapper.get<ElementNumber>(tag, 1)};
         }
-
-        int rowOffset, rowStride, colOffset, colStride, buffer;
-        if(forward)
+        if(tile.layoutType == LayoutType::MATRIX_A)
         {
-            rowOffset = graph.coordinates.addElement(Offset(), {elemX}, {source});
-            rowStride = graph.coordinates.addElement(Stride(), {elemX}, {source});
-            colOffset = graph.coordinates.addElement(Offset(), {elemY}, {source});
-            colStride = graph.coordinates.addElement(Stride(), {elemY}, {source});
-            buffer    = getBuffer(graph, loadstore, elemX, source, location, bufferMap);
+            return {graph.mapper.get<WaveTileNumber>(tag, 1), graph.mapper.get<VGPR>(tag)};
         }
-        else
+        if(tile.layoutType == LayoutType::MATRIX_B)
         {
-            rowOffset = graph.coordinates.addElement(Offset(), {source}, {elemX});
-            rowStride = graph.coordinates.addElement(Stride(), {source}, {elemX});
-            colOffset = graph.coordinates.addElement(Offset(), {source}, {elemY});
-            colStride = graph.coordinates.addElement(Stride(), {source}, {elemY});
-            buffer    = getBuffer(graph, loadstore, source, elemX, location, bufferMap);
+            return {graph.mapper.get<WaveTileNumber>(tag, 0), graph.mapper.get<VGPR>(tag)};
         }
-
-        std::vector<DeferredConnection> connections;
-        connections.push_back(DC<Offset>(rowOffset, 0));
-        connections.push_back(DC<Offset>(colOffset, 1));
-        connections.push_back(DC<Stride>(rowStride, 0));
-        connections.push_back(DC<Stride>(colStride, 1));
-        if(buffer != -1)
-            connections.push_back(DC<Buffer>(buffer));
-
-        std::vector<int> ciOperations;
-
-        auto [required, path] = findRequiredCoordinates(
-            source, forward ? Graph::Direction::Upstream : Graph::Direction::Downstream, graph);
-
-        auto unrolls = filterCoordinates<Unroll>(required, graph);
-        for(auto unroll : unrolls)
+        if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
         {
-            std::vector<int> neighbourNodes;
-            if(forward)
-                neighbourNodes = graph.coordinates.childNodes(unroll).to<std::vector>();
-            else
-                neighbourNodes = graph.coordinates.parentNodes(unroll).to<std::vector>();
-            for(auto neighbourNode : neighbourNodes)
-            {
-                if(path.contains(neighbourNode))
-                {
-                    int strideUnroll;
-                    if(forward)
-                    {
-                        strideUnroll
-                            = graph.coordinates.addElement(Stride(), {neighbourNode}, {source});
-                    }
-                    else
-                    {
-                        strideUnroll
-                            = graph.coordinates.addElement(Stride(), {source}, {neighbourNode});
-                    }
-                    ciOperations.push_back(makeComputeIndex(graph,
-                                                            source,
-                                                            neighbourNode,
-                                                            -1,
-                                                            -1,
-                                                            strideUnroll,
-                                                            -1,
-                                                            forward,
-                                                            dtype,
-                                                            DataType::Int64,
-                                                            DataType::Int64));
-                }
-            }
-        }
-
-        ciOperations.push_back(makeComputeIndex(graph,
-                                                source,
-                                                elemX,
-                                                -1,
-                                                rowOffset,
-                                                rowStride,
-                                                buffer,
-                                                forward,
-                                                dtype,
-                                                offsettype,
-                                                offsettype));
-        ciOperations.push_back(makeComputeIndex(graph,
-                                                source,
-                                                elemY,
-                                                rowOffset,
-                                                colOffset,
-                                                colStride,
-                                                buffer,
-                                                forward,
-                                                dtype,
-                                                offsettype,
-                                                offsettype));
-
-        for(int i = 1; i < ciOperations.size(); ++i)
-            graph.control.addElement(Sequence(), {ciOperations[i - 1]}, {ciOperations[i]});
-
-        return {ciOperations.front(), ciOperations.back(), connections};
-    }
-
-    /**
-     * @brief Add ComputeIndexes for WAVE MATRIX_A/B from LDS.
-     */
-    ComputeIndexChain computeIndexWaveMatrixABLDS(KernelGraph& graph, int load, int sdim)
-    {
-        rocRoller::Log::getLogger()->debug(
-            "KernelGraph::AddComputeIndex()::computeIndexWaveMatrixABLDS({}, {})", load, sdim);
-
-        AssertFatal(isOperation<LoadLDSTile>(graph.control.getElement(load)));
-        auto lds  = graph.mapper.get<LDS>(load);
-        auto wave = graph.mapper.get<WaveTileNumber>(load, sdim);
-        auto vgpr = graph.mapper.get<VGPR>(load);
-
-        auto dtype = graph.control.get<LoadLDSTile>(load)->varType.dataType;
-
-        auto offsetWave = graph.coordinates.addElement(Offset(), {lds}, {wave});
-        auto strideWave = graph.coordinates.addElement(Stride(), {lds}, {wave});
-        auto offsetVgpr = graph.coordinates.addElement(Offset(), {lds}, {vgpr});
-        auto strideVgpr = graph.coordinates.addElement(Stride(), {lds}, {vgpr});
-
-        std::vector<DeferredConnection> connections;
-        connections.push_back(DC<Offset>(offsetWave, 0));
-        connections.push_back(DC<Offset>(offsetVgpr, 1));
-        connections.push_back(DC<Stride>(strideWave, 0));
-        connections.push_back(DC<Stride>(strideVgpr, 1));
-
-        std::vector<int> ciOperations;
-
-        auto [required, path] = findRequiredCoordinates(lds, Graph::Direction::Downstream, graph);
-        auto unrolls          = filterCoordinates<Unroll>(required, graph);
-        for(auto unroll : unrolls)
-        {
-            auto parents = graph.coordinates.parentNodes(unroll);
-            for(auto parent : parents)
-            {
-                if(path.contains(parent))
-                {
-                    auto strideUnroll = graph.coordinates.addElement(Stride(), {lds}, {parent});
-
-                    ciOperations.push_back(makeComputeIndex(graph,
-                                                            lds,
-                                                            parent,
-                                                            -1,
-                                                            -1,
-                                                            strideUnroll,
-                                                            -1,
-                                                            false,
-                                                            dtype,
-                                                            DataType::Int64,
-                                                            DataType::Int64));
-                }
-            }
-        }
-
-        ciOperations.push_back(makeComputeIndex(graph,
-                                                lds,
-                                                wave,
-                                                -1,
-                                                offsetWave,
-                                                strideWave,
-                                                -1,
-                                                false,
-                                                dtype,
-                                                DataType::UInt32,
-                                                DataType::UInt32));
-        ciOperations.push_back(makeComputeIndex(graph,
-                                                lds,
-                                                vgpr,
-                                                offsetWave,
-                                                offsetVgpr,
-                                                strideVgpr,
-                                                -1,
-                                                false,
-                                                dtype,
-                                                DataType::UInt32,
-                                                DataType::UInt32));
-
-        for(int i = 1; i < ciOperations.size(); ++i)
-            graph.control.addElement(Sequence(), {ciOperations[i - 1]}, {ciOperations[i]});
-
-        return {ciOperations.front(), ciOperations.back(), connections};
-    }
-
-    /**
-     * @brief Add ComputeIndexes for WAVE MATRIX_A/B from global.
-     */
-    ComputeIndexChain computeIndexWaveMatrixAB(KernelGraph&                        graph,
-                                               int                                 load,
-                                               int                                 sdim,
-                                               ExpressionPtr                       step,
-                                               int                                 location,
-                                               std::map<std::pair<int, int>, int>& bufferMap)
-    {
-        rocRoller::Log::getLogger()->debug(
-            "KernelGraph::AddComputeIndex()::computeIndexWaveMatrixAB({}, {})", load, sdim);
-
-        auto user = graph.mapper.get<User>(load);
-        auto mac  = graph.mapper.get<MacroTileNumber>(load, sdim);
-        auto wave = graph.mapper.get<WaveTileNumber>(load, sdim);
-        auto vgpr = graph.mapper.get<VGPR>(load);
-
-        auto dtype = graph.control.get<LoadTiled>(load)->varType.dataType;
-
-        auto offsetMac  = graph.coordinates.addElement(Offset(), {user}, {mac});
-        auto strideMac  = graph.coordinates.addElement(Stride(), {user}, {mac});
-        auto offsetWave = graph.coordinates.addElement(Offset(), {user}, {wave});
-        auto strideWave = graph.coordinates.addElement(Stride(), {user}, {wave});
-        auto offsetVgpr = graph.coordinates.addElement(Offset(), {user}, {vgpr});
-        auto strideVgpr = graph.coordinates.addElement(Stride(), {user}, {vgpr});
-        auto buffer     = getBuffer(graph, load, user, mac, location, bufferMap);
-
-        std::vector<DeferredConnection> connections;
-        connections.push_back(DC<Offset>(offsetMac, -1));
-        connections.push_back(DC<Offset>(offsetWave, 0));
-        connections.push_back(DC<Offset>(offsetVgpr, 1));
-        connections.push_back(DC<Stride>(strideMac, -1));
-        connections.push_back(DC<Stride>(strideWave, 0));
-        connections.push_back(DC<Stride>(strideVgpr, 1));
-        connections.push_back(DC<Buffer>(buffer));
-
-        std::vector<int> ciOperations;
-
-        auto [required, path] = findRequiredCoordinates(user, Graph::Direction::Downstream, graph);
-        auto unrolls          = filterCoordinates<Unroll>(required, graph);
-        for(auto unroll : unrolls)
-        {
-            auto parents = graph.coordinates.parentNodes(unroll);
-            for(auto parent : parents)
-            {
-                if(path.contains(parent))
-                {
-                    auto strideUnroll = graph.coordinates.addElement(Stride(), {user}, {parent});
-
-                    ciOperations.push_back(makeComputeIndex(graph,
-                                                            user,
-                                                            parent,
-                                                            -1,
-                                                            -1,
-                                                            strideUnroll,
-                                                            -1,
-                                                            false,
-                                                            dtype,
-                                                            DataType::Int64,
-                                                            DataType::Int64));
-                }
-            }
-        }
-
-        ciOperations.push_back(
-            makeComputeIndex(graph, user, mac, -1, offsetMac, strideMac, buffer, false, dtype));
-        ciOperations.push_back(makeComputeIndex(
-            graph, user, wave, offsetMac, offsetWave, strideWave, buffer, false, dtype));
-        ciOperations.push_back(makeComputeIndex(
-            graph, user, vgpr, offsetWave, offsetVgpr, strideVgpr, buffer, false, dtype));
-
-        auto offsetMacExpr = std::make_shared<Expression::Expression>(
-            Expression::DataFlowTag{offsetMac, Register::Type::Vector, DataType::UInt64});
-        auto strideMacExpr = std::make_shared<Expression::Expression>(
-            Expression::DataFlowTag{strideMac, Register::Type::Scalar, DataType::UInt64});
-
-        auto offsetUpdate = graph.control.addElement(
-            Assign{Register::Type::Vector, offsetMacExpr + step * strideMacExpr});
-        graph.mapper.connect(offsetUpdate, offsetMac, NaryArgument::DEST);
-
-        for(int i = 1; i < ciOperations.size(); ++i)
-            graph.control.addElement(Sequence(), {ciOperations[i - 1]}, {ciOperations[i]});
-
-        return {ciOperations.front(), ciOperations.back(), connections, offsetUpdate};
-    }
-
-    /**
-     * @brief Add ComputeIndexes for VGPR MATRIX_ACCUMULATOR from global or LDS.
-     */
-    ComputeIndexChain computeIndexMatrixAccumulator(KernelGraph&                        graph,
-                                                    int                                 op,
-                                                    bool                                forward,
-                                                    int                                 location,
-                                                    std::map<std::pair<int, int>, int>& bufferMap)
-    {
-        rocRoller::Log::getLogger()->debug(
-            "KernelGraph::AddComputeIndex()::computeIndexMatrixAccumulator({}, {})", op, forward);
-
-        auto [source, _d] = getOperationTarget(op, graph);
-        AssertFatal(source > 0, "User or LDS dimension not found");
-
-        auto vgprBlock = graph.mapper.get<VGPRBlockNumber>(op);
-        auto vgprIndex = graph.mapper.get<VGPRBlockIndex>(op);
-
-        DataType dtype, offsettype = DataType::UInt64;
-        {
-            auto l  = graph.control.get<LoadTiled>(op);
-            auto ll = graph.control.get<LoadLDSTile>(op);
-            auto s  = graph.control.get<StoreTiled>(op);
-            auto sl = graph.control.get<StoreLDSTile>(op);
-            if(l)
-                dtype = l->varType.dataType;
-            if(ll)
-            {
-                dtype      = ll->varType.dataType;
-                offsettype = DataType::UInt32;
-            }
-            if(s)
-                dtype = s->dataType;
-            if(sl)
-            {
-                dtype      = sl->dataType;
-                offsettype = DataType::UInt32;
-            }
-        }
-
-        int offsetVgprBlock, strideVgprBlock, offsetVgprIndex, strideVgprIndex, buffer;
-        if(forward)
-        {
-            offsetVgprBlock = graph.coordinates.addElement(Offset(), {vgprBlock}, {source});
-            strideVgprBlock = graph.coordinates.addElement(Stride(), {vgprBlock}, {source});
-            offsetVgprIndex = graph.coordinates.addElement(Offset(), {vgprIndex}, {source});
-            strideVgprIndex = graph.coordinates.addElement(Stride(), {vgprIndex}, {source});
-            buffer          = getBuffer(graph, op, vgprIndex, source, location, bufferMap);
-        }
-        else
-        {
-            offsetVgprBlock = graph.coordinates.addElement(Offset(), {source}, {vgprBlock});
-            strideVgprBlock = graph.coordinates.addElement(Stride(), {source}, {vgprBlock});
-            offsetVgprIndex = graph.coordinates.addElement(Offset(), {source}, {vgprIndex});
-            strideVgprIndex = graph.coordinates.addElement(Stride(), {source}, {vgprIndex});
-            buffer          = getBuffer(graph, op, source, vgprIndex, location, bufferMap);
-        }
-
-        std::vector<DeferredConnection> connections;
-        connections.push_back(DC<Offset>(offsetVgprBlock, 0));
-        connections.push_back(DC<Offset>(offsetVgprIndex, 1));
-        connections.push_back(DC<Stride>(strideVgprBlock, 0));
-        connections.push_back(DC<Stride>(strideVgprIndex, 1));
-        if(buffer != -1)
-            connections.push_back(DC<Buffer>(buffer));
-
-        std::vector<int> ciOperations;
-
-        auto [required, path]
-            = findRequiredCoordinates(source, forward ? GD::Upstream : GD::Downstream, graph);
-
-        int baseFor    = -1;
-        int baseUpdate = -1;
-
-        auto maybeForLoop      = findContainingOperation<ForLoopOp>(op, graph);
-        auto maybeForLoopCoord = getForLoopCoord(maybeForLoop, graph, required);
-        if(maybeForLoop && maybeForLoopCoord && uniformForLoop(maybeForLoop, graph))
-        {
-            int forLoop = *maybeForLoopCoord;
-            int offset, stride;
-            if(forward)
-            {
-                offset = graph.coordinates.addElement(Offset(), {forLoop}, {source});
-                stride = graph.coordinates.addElement(Stride(), {forLoop}, {source});
-            }
-            else
-            {
-                offset = graph.coordinates.addElement(Offset(), {source}, {forLoop});
-                stride = graph.coordinates.addElement(Stride(), {source}, {forLoop});
-            }
-            connections.push_back(DC<Offset>(offset, -1));
-            connections.push_back(DC<Stride>(stride, -1));
-
-            auto offsetExpr = std::make_shared<Expression::Expression>(
-                Expression::DataFlowTag{offset, Register::Type::Vector, DataType::UInt64});
-            auto strideExpr = std::make_shared<Expression::Expression>(
-                Expression::DataFlowTag{stride, Register::Type::Scalar, DataType::UInt64});
-
-            baseUpdate
-                = graph.control.addElement(Assign{Register::Type::Vector, offsetExpr + strideExpr});
-            graph.mapper.connect(baseUpdate, offset, NaryArgument::DEST);
-
-            baseFor = offset;
-
-            ciOperations.push_back(makeComputeIndex(graph,
-                                                    source,
-                                                    forLoop,
-                                                    -1,
-                                                    offset,
-                                                    stride,
-                                                    -1,
-                                                    forward,
-                                                    dtype,
-                                                    DataType::UInt64,
-                                                    DataType::UInt64));
-        }
-
-        auto unrolls = filterCoordinates<Unroll>(required, graph);
-        for(auto unroll : unrolls)
-        {
-            std::vector<int> neighbourNodes;
-            if(forward)
-                neighbourNodes = graph.coordinates.childNodes(unroll).to<std::vector>();
-            else
-                neighbourNodes = graph.coordinates.parentNodes(unroll).to<std::vector>();
-            for(auto neighbourNode : neighbourNodes)
-            {
-                if(path.contains(neighbourNode))
-                {
-                    int strideUnroll;
-                    if(forward)
-                        strideUnroll
-                            = graph.coordinates.addElement(Stride(), {neighbourNode}, {source});
-                    else
-                        strideUnroll
-                            = graph.coordinates.addElement(Stride(), {source}, {neighbourNode});
-
-                    ciOperations.push_back(makeComputeIndex(graph,
-                                                            source,
-                                                            neighbourNode,
-                                                            baseFor,
-                                                            -1,
-                                                            strideUnroll,
-                                                            -1,
-                                                            forward,
-                                                            dtype,
-                                                            DataType::Int64,
-                                                            DataType::Int64));
-                }
-            }
-        }
-
-        ciOperations.push_back(makeComputeIndex(graph,
-                                                source,
-                                                vgprBlock,
-                                                baseFor,
-                                                offsetVgprBlock,
-                                                strideVgprBlock,
-                                                buffer,
-                                                forward,
-                                                dtype,
-                                                offsettype,
-                                                offsettype));
-        ciOperations.push_back(makeComputeIndex(graph,
-                                                source,
-                                                vgprIndex,
-                                                offsetVgprBlock,
-                                                offsetVgprIndex,
-                                                strideVgprIndex,
-                                                buffer,
-                                                forward,
-                                                dtype,
-                                                offsettype,
-                                                offsettype));
-
-        for(int i = 1; i < ciOperations.size(); ++i)
-            graph.control.addElement(Sequence(), {ciOperations[i - 1]}, {ciOperations[i]});
-
-        return {ciOperations.front(), ciOperations.back(), connections, baseUpdate};
-    }
-
-    /**
-     * @brief Generic routine to create a ComputeIndex chain for a
-     * load/store operation.
-     *
-     * @param kgraph Kernel graph to add ComputeIndex operations to.
-     * @param tag Load/store operation that needs ComputeIndex operations.
-     */
-    ComputeIndexChainType computeIndexChainType(KernelGraph const& kgraph, int tag)
-    {
-        auto store    = kgraph.control.get<StoreTiled>(tag);
-        auto storeLDS = kgraph.control.get<StoreLDSTile>(tag);
-        if(store || storeLDS)
-        {
-            auto [tileTag, tile] = kgraph.getDimension<MacroTile>(tag);
-            if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::LDS)
-            {
-                return STORE_ELEM;
-            }
-            if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-               && tile.memoryType == MemoryType::WAVE)
-            {
-                return STORE_WAVE_MATRIX_ACCUMULATOR;
-            }
-        }
-
-        auto load = kgraph.control.get<LoadTiled>(tag);
-        if(load)
-        {
-            auto [tileTag, tile] = kgraph.getDimension<MacroTile>(tag);
-            if(tile.memoryType == MemoryType::VGPR && tile.layoutType == LayoutType::MATRIX_A)
-            {
-                return LOAD_ELEM_MATRIX_A;
-            }
-            if(tile.memoryType == MemoryType::VGPR && tile.layoutType == LayoutType::MATRIX_B)
-            {
-                return LOAD_ELEM_MATRIX_B;
-            }
-            if(tile.memoryType == MemoryType::VGPR)
-            {
-                return LOAD_ELEM;
-            }
-            if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
-            {
-                return LOAD_WAVE_MATRIX_ACCUMULATOR;
-            }
-            if(tile.layoutType == LayoutType::MATRIX_A)
-            {
-                return LOAD_WAVE_MATRIX_A;
-            }
-            if(tile.layoutType == LayoutType::MATRIX_B)
-            {
-                return LOAD_WAVE_MATRIX_B;
-            }
-        }
-
-        auto loadLDS = kgraph.control.get<LoadLDSTile>(tag);
-        if(loadLDS)
-        {
-            auto [tileTag, tile] = kgraph.getDimension<MacroTile>(tag);
-            if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::LDS)
-            {
-                return LOAD_ELEM;
-            }
-            if(tile.layoutType == LayoutType::MATRIX_A)
-            {
-                return LOAD_LDS_MATRIX_A;
-            }
-            if(tile.layoutType == LayoutType::MATRIX_B)
-            {
-                return LOAD_LDS_MATRIX_B;
-            }
+            return {graph.mapper.get<VGPRBlockNumber>(tag), graph.mapper.get<VGPRBlockIndex>(tag)};
         }
 
         Throw<FatalError>("Not implemented yet.");
     }
 
     /**
-     * @brief Generic routine to create a ComputeIndex chain for a
-     * load/store operation.
+     * @brief Get list of required coordinates, and how they relate to
+     * each other.
      *
-     * @param kgraph Kernel graph to add ComputeIndex operations to.
-     * @param tag Load/store operation that needs ComputeIndex operations.
+     * Builds a list of coordinates, slow-to-fast, that need
+     * offset/strides for operation `op`.
      */
-    ComputeIndexChain addComputeIndex(KernelGraph&                        kgraph,
-                                      int                                 tag,
-                                      ComputeIndexChainType               chainType,
+    std::vector<RequiredCoordinateInfo>
+        getRequiredCoordinatesInfo(int op, int location, KernelGraph const& graph)
+    {
+        auto [target, direction] = getOperationTarget(op, graph);
+        auto [required, path]    = findRequiredCoordinates(target, direction, graph);
+        auto codegen             = getCodeGeneratorCoordinates(graph, op);
+
+        std::set<int>    isForLoop, isUnroll;
+        std::vector<int> ordered;
+
+        // If location is a ForLoop, it's coordinate is the slowest.
+        if(location != -1)
+        {
+            auto maybeForLoop = graph.control.get<ForLoopOp>(location);
+            if(maybeForLoop)
+            {
+                auto forLoopCoord = graph.mapper.get<ForLoop>(location);
+                auto coord        = getNeighbourNodeInPath(forLoopCoord, direction, path, graph);
+
+                if(coord != -1)
+                {
+                    ordered.push_back(coord);
+                    isForLoop.insert(coord);
+                }
+            }
+        }
+
+        // Next, consider Unroll coordinates.
+        auto unrolls = filterCoordinates<Unroll>(required, graph);
+        for(auto unroll : unrolls)
+        {
+            std::vector<int> neighbourNodes;
+            if(direction == Graph::Direction::Upstream)
+                neighbourNodes = graph.coordinates.childNodes(unroll).to<std::vector>();
+            else
+                neighbourNodes = graph.coordinates.parentNodes(unroll).to<std::vector>();
+            for(auto neighbourNode : neighbourNodes)
+            {
+                if(path.contains(neighbourNode) && !isForLoop.contains(neighbourNode))
+                {
+                    auto it = std::find(codegen.cbegin(), codegen.cend(), neighbourNode);
+                    if(it == codegen.cend())
+                    {
+                        ordered.push_back(neighbourNode);
+                        isUnroll.insert(neighbourNode);
+                    }
+                }
+            }
+        }
+
+        // Finally, the code-gen coordinates are the fastest moving.
+        for(auto x : codegen)
+            ordered.push_back(x);
+
+        // Now build list... the slowest dimension doesn't have a
+        // "base"; subsequent dimensions use the previous one as their
+        // base.
+        std::vector<RequiredCoordinateInfo> rv;
+
+        int base = -1;
+        for(auto coord : ordered)
+        {
+            // Compute the sub-dimension for code-gen coordinates.
+            // TODO Slow to fast; lift this from Tensor directly
+            int sdim = -1;
+            {
+                auto it = std::find(codegen.cbegin(), codegen.cend(), coord);
+                if(it != codegen.cend())
+                    sdim = std::distance(codegen.cbegin(), it);
+            }
+
+            if(!isUnroll.contains(coord))
+            {
+                auto needsUpdate = isForLoop.contains(coord) && uniformForLoop(location, graph);
+                rv.push_back({coord, base, sdim, false, needsUpdate});
+                base = coord;
+            }
+            else
+            {
+                rv.push_back({coord, -1, -1, true, false});
+            }
+        }
+
+        return rv;
+    }
+
+    /**
+     * @brief Return datatype that should be used for the offset when
+     * generating `op`.
+     */
+    DataType getOffsetDataType(int op, KernelGraph const& graph)
+
+    {
+        DataType rv = DataType::UInt64;
+        auto     ll = graph.control.get<LoadLDSTile>(op);
+        auto     sl = graph.control.get<StoreLDSTile>(op);
+        if(ll || sl)
+        {
+            rv = DataType::UInt32;
+        }
+        return rv;
+    }
+
+    /**
+     * @brief Add ComputeIndex nodes required for `op`.
+     */
+    ComputeIndexChain addComputeIndex(KernelGraph&                        graph,
+                                      int                                 op,
                                       ExpressionPtr                       step,
                                       int                                 location,
                                       std::map<std::pair<int, int>, int>& bufferMap)
     {
-        auto [source, _d] = getOperationTarget(tag, kgraph);
+        rocRoller::Log::getLogger()->debug(
+            "KernelGraph::AddComputeIndex()::genericComputeIndex(): op {} location {}",
+            op,
+            location);
 
-        switch(chainType)
+        auto dtype = getDataType(std::get<Operation>(graph.control.getElement(op)));
+
+        auto [target, direction] = getOperationTarget(op, graph);
+
+        int                             update = -1;
+        std::vector<int>                chain;
+        std::vector<DeferredConnection> connections;
+        std::map<int, int>              offsetOfCoord;
+
+        for(auto info : getRequiredCoordinatesInfo(op, location, graph))
         {
-        case STORE_ELEM:
-            return computeIndexElementMatrix(kgraph, tag, source, true, location, bufferMap);
-        case STORE_WAVE_MATRIX_ACCUMULATOR:
-            return computeIndexMatrixAccumulator(kgraph, tag, true, location, bufferMap);
-        case LOAD_ELEM_MATRIX_A:
-            return computeIndexElementMatrixAB(kgraph, tag, 1, step, location, bufferMap);
-        case LOAD_ELEM_MATRIX_B:
-            return computeIndexElementMatrixAB(kgraph, tag, 0, step, location, bufferMap);
-        case LOAD_ELEM:
-            return computeIndexElementMatrix(kgraph, tag, source, false, location, bufferMap);
-        case LOAD_WAVE_MATRIX_ACCUMULATOR:
-            return computeIndexMatrixAccumulator(kgraph, tag, false, location, bufferMap);
-        case LOAD_WAVE_MATRIX_A:
-            return computeIndexWaveMatrixAB(kgraph, tag, 1, step, location, bufferMap);
-        case LOAD_WAVE_MATRIX_B:
-            return computeIndexWaveMatrixAB(kgraph, tag, 0, step, location, bufferMap);
-        case LOAD_LDS_MATRIX_A:
-            return computeIndexWaveMatrixABLDS(kgraph, tag, 1);
-        case LOAD_LDS_MATRIX_B:
-            return computeIndexWaveMatrixABLDS(kgraph, tag, 0);
-        default:
-            Throw<FatalError>("Not implemented yet.");
+            // Add ComputeIndex operation
+            int offset = -1, stride = -1, buffer = -1;
+            if(direction == Graph::Direction::Downstream)
+            {
+                if(!info.isUnroll)
+                    offset = graph.coordinates.addElement(Offset(), {target}, {info.coord});
+                stride = graph.coordinates.addElement(Stride(), {target}, {info.coord});
+                if(info.base == -1 && offset != -1)
+                    buffer = getBuffer(graph, op, target, info.coord, location, bufferMap);
+            }
+            else
+            {
+                if(!info.isUnroll)
+                    offset = graph.coordinates.addElement(Offset(), {info.coord}, {target});
+                stride = graph.coordinates.addElement(Stride(), {info.coord}, {target});
+                if(info.base == -1 && offset != -1)
+                    buffer = getBuffer(graph, op, info.coord, target, location, bufferMap);
+            }
+
+            offsetOfCoord[info.coord] = offset;
+
+            int base = (info.base == -1) ? -1 : offsetOfCoord.at(info.base);
+
+            auto offsetDataType = getOffsetDataType(op, graph);
+            auto strideDataType = DataType::UInt64;
+            if(info.isUnroll)
+            {
+                offsetDataType = DataType::Int64;
+                strideDataType = DataType::Int64;
+            }
+            chain.push_back(makeComputeIndex(graph,
+                                             target,
+                                             info.coord,
+                                             base,
+                                             offset,
+                                             stride,
+                                             buffer,
+                                             direction == Graph::Direction::Upstream,
+                                             dtype,
+                                             offsetDataType,
+                                             strideDataType));
+
+            // Add connections for register allocate, and so tracer
+            // can determine correct lifetimes
+            if(offset != -1)
+                connections.push_back(DC<Offset>(offset, info.sdim));
+            if(stride != -1)
+                connections.push_back(DC<Stride>(stride, info.sdim));
+            if(buffer != -1)
+                connections.push_back(DC<Buffer>(buffer));
+
+            if(info.needsUpdate)
+            {
+                auto offsetExpr = std::make_shared<Expression::Expression>(
+                    Expression::DataFlowTag{offset, Register::Type::Vector, DataType::UInt64});
+                auto strideExpr = std::make_shared<Expression::Expression>(
+                    Expression::DataFlowTag{stride, Register::Type::Scalar, DataType::UInt64});
+
+                if(step == nullptr)
+                    update = graph.control.addElement(
+                        Assign{Register::Type::Vector, offsetExpr + strideExpr});
+                else
+                    update = graph.control.addElement(
+                        Assign{Register::Type::Vector, offsetExpr + step * strideExpr});
+                graph.mapper.connect(update, offset, NaryArgument::DEST);
+            }
         }
 
-        Throw<FatalError>("Not implemented yet.");
+        for(int i = 1; i < chain.size(); ++i)
+            graph.control.addElement(Sequence(), {chain[i - 1]}, {chain[i]});
+
+        return {chain.front(), chain.back(), connections, update};
     }
 
     /**
@@ -880,8 +422,8 @@ namespace rocRoller::KernelGraph
      *
      * During the commit stage, we add ComputeIndex operations to the
      * graphs, and add connections for load/store operations to the
-     * newly Base, Offset, and Stride elements of the coordinate
-     * graph.
+     * newly created Base, Offset, and Stride elements of the
+     * coordinate graph.
      *
      * For each candidate load/store operation:
      *
@@ -918,16 +460,22 @@ namespace rocRoller::KernelGraph
      */
     struct AddComputeIndexer
     {
-        void stageChain(int                   target,
-                        int                   candidate,
-                        int                   location,
-                        ComputeIndexChainType type,
-                        Graph::Direction      direction,
-                        int                   forLoop          = -1,
-                        bool                  replaceWithScope = true)
+        void stageChain(KernelGraph const& graph,
+                        int                target,
+                        int                candidate,
+                        int                location,
+                        Graph::Direction   direction,
+                        int                forLoop          = -1,
+                        bool               replaceWithScope = true)
         {
+            std::vector<int> specCoords;
+            for(auto info : getRequiredCoordinatesInfo(candidate, location, graph))
+            {
+                specCoords.push_back(info.coord);
+            }
+
             ComputeIndexChainSpecification spec{
-                target, type, location, direction, forLoop, replaceWithScope};
+                target, specCoords, location, direction, forLoop, replaceWithScope};
             m_chains[spec].push_back(candidate);
         }
 
@@ -948,13 +496,10 @@ namespace rocRoller::KernelGraph
                 log->debug("  required: {}: {}", r, toString(e));
             }
 
-            auto maybeForLoop = findContainingOperation<ForLoopOp>(candidate, kgraph);
-            auto maybeScope   = findContainingOperation<Scope>(candidate, kgraph);
-            auto hasForLoop   = !forLoopCoordinates.empty();
-            auto hasUnroll    = !unrollCoordinates.empty();
-
-            auto type = computeIndexChainType(kgraph, candidate);
-            log->debug("  type: {}", toString(type));
+            auto maybeForLoop  = findContainingOperation<ForLoopOp>(candidate, kgraph);
+            auto maybeScope    = findContainingOperation<Scope>(candidate, kgraph);
+            auto hasForLoop    = !forLoopCoordinates.empty();
+            auto hasUnroll     = !unrollCoordinates.empty();
             auto isUniformLoop = maybeForLoop && uniformForLoop(maybeForLoop, kgraph);
 
             if(hasForLoop && isUniformLoop)
@@ -962,7 +507,7 @@ namespace rocRoller::KernelGraph
                 log->debug("  staged as: hasForLoop and isUniformLoop, location {} forLoopOp {}",
                            *maybeForLoop,
                            *maybeForLoop);
-                stageChain(target, candidate, *maybeForLoop, type, GD::Upstream, *maybeForLoop);
+                stageChain(kgraph, target, candidate, *maybeForLoop, GD::Upstream, *maybeForLoop);
                 return;
             }
 
@@ -988,7 +533,7 @@ namespace rocRoller::KernelGraph
                            "forLoopOp {}",
                            *maybeForLoop,
                            *maybeForLoop);
-                stageChain(target, candidate, *maybeScope, type, GD::Upstream, -1);
+                stageChain(kgraph, target, candidate, *maybeScope, GD::Upstream, -1);
                 return;
             }
 
@@ -998,7 +543,7 @@ namespace rocRoller::KernelGraph
                 log->debug("  staged as: hasForLoop and not isUniformLoop, location {}, {}",
                            *maybeForLoop,
                            *maybeTopOfLoop);
-                stageChain(target, candidate, *maybeTopOfLoop, type, GD::Upstream, -1, false);
+                stageChain(kgraph, target, candidate, *maybeTopOfLoop, GD::Upstream, -1, false);
                 return;
             }
 
@@ -1007,7 +552,7 @@ namespace rocRoller::KernelGraph
                 log->debug("  staged as: hasUnroll");
 
                 auto kernel = *kgraph.control.roots().begin();
-                stageChain(target, candidate, kernel, type, GD::Downstream, -1);
+                stageChain(kgraph, target, candidate, kernel, GD::Downstream, -1);
                 return;
             }
 
@@ -1016,12 +561,12 @@ namespace rocRoller::KernelGraph
                 auto forLoop = *maybeForLoop;
                 log->debug("  staged as: uniformForLoop, forLoopOp {}", forLoop);
 
-                stageChain(target, candidate, forLoop, type, GD::Upstream, forLoop);
+                stageChain(kgraph, target, candidate, forLoop, GD::Upstream, forLoop);
                 return;
             }
 
             log->debug("  staged as: immediate");
-            stageChain(target, candidate, candidate, type, GD::Upstream);
+            stageChain(kgraph, target, candidate, candidate, GD::Upstream);
         }
 
         KernelGraph commit(KernelGraph const& original) const
@@ -1042,8 +587,7 @@ namespace rocRoller::KernelGraph
                 // Use first candidate to compute indexes
                 rocRoller::Log::getLogger()->debug("KernelGraph::AddComputeIndex()::commit({})",
                                                    candidates[0]);
-                auto chain = addComputeIndex(
-                    kgraph, candidates[0], spec.type, step, spec.location, bufferMap);
+                auto chain = addComputeIndex(kgraph, candidates[0], step, spec.location, bufferMap);
 
                 if(spec.direction == GD::Downstream)
                 {

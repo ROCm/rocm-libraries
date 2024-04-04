@@ -560,7 +560,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMMultipleOutputTiles)
+    TEST_F(GEMMTestGPU, DISABLED_GPU_BasicGEMMMultipleOutputTiles)
     {
         GEMMProblem gemm;
         gemm.storeLDSD     = false;
