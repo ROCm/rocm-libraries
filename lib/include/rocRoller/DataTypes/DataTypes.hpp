@@ -84,7 +84,7 @@ namespace rocRoller
         Half, //< 16bit floating point (IEEE format)
         Halfx2, //< Two 16bit floating point; packed into 32bits
         FP8_NANOO, //< 8bit floating point in NANOO format
-        FP8x4_NANOO, //< Four 8bit floating point in NANOO format; backed into 32bits
+        FP8x4_NANOO, //< Four 8bit floating point in NANOO format; packed into 32bits
         Int8x4, //< Four 8bit signed integers; packed into 32bits
         Int8, //< 8bit signed integer
         Int16, //< 16bit signed integer

@@ -329,9 +329,9 @@ namespace rocRoller
     }
 
     /**
- * \ingroup DataTypes
- * @{
- */
+     * \ingroup DataTypes
+     * @{
+     */
 
     struct FP8_NANOO
     {
@@ -487,8 +487,8 @@ namespace rocRoller
     }
 
     /**
- * @}
- */
+     * @}
+     */
 } // namespace rocRoller
 
 namespace std

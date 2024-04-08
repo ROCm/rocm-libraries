@@ -81,7 +81,7 @@ namespace rocRoller
 
             /**
              * True if we can reach the target.
-            */
+             */
             bool hasPath(std::vector<int> const&, bool forward) const;
 
             /**
