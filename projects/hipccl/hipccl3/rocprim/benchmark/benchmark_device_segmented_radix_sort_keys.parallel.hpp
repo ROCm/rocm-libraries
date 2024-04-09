@@ -291,16 +291,15 @@ struct device_segmented_radix_sort_benchmark_generator
                                     rocprim::segmented_radix_sort_config<
                                         LongBits,
                                         ShortBits,
-                                        BlockSize,
-                                        ItemsPerThread,
-                                        EnableUnpartitionedWarpSort,
+                                        rocprim::kernel_config<BlockSize, ItemsPerThread>,
                                         rocprim::WarpSortConfig<LogicalWarpSizeSmall / 2,
                                                                 ItemsPerThread / 2,
                                                                 BlockSize,
                                                                 PartitioningThreshold,
                                                                 LogicalWarpSizeSmall,
                                                                 ItemsPerThread,
-                                                                BlockSize>>>>());
+                                                                BlockSize>,
+                                        EnableUnpartitionedWarpSort>>>());
                         }
                     };
 
@@ -321,15 +320,15 @@ struct device_segmented_radix_sort_benchmark_generator
                     }
                     else
                     {
-                        storage.emplace_back(std::make_unique<device_segmented_radix_sort_benchmark<
-                                                 Key,
-                                                 rocprim::segmented_radix_sort_config<
-                                                     LongBits,
-                                                     ShortBits,
-                                                     BlockSize,
-                                                     ItemsPerThread,
-                                                     EnableUnpartitionedWarpSort,
-                                                     rocprim::DisabledWarpSortConfig>>>());
+                        storage.emplace_back(
+                            std::make_unique<device_segmented_radix_sort_benchmark<
+                                Key,
+                                rocprim::segmented_radix_sort_config<
+                                    LongBits,
+                                    ShortBits,
+                                    rocprim::kernel_config<BlockSize, ItemsPerThread>,
+                                    rocprim::DisabledWarpSortConfig,
+                                    EnableUnpartitionedWarpSort>>>());
                     }
                 }
             };

@@ -285,6 +285,7 @@ int main(int argc, char* argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
 #ifdef BENCHMARK_CONFIG_TUNING
+    (void)min_size;
     const int parallel_instance  = parser.get<int>("parallel_instance");
     const int parallel_instances = parser.get<int>("parallel_instances");
     config_autotune_register::register_benchmark_subset(benchmarks,
