@@ -546,22 +546,29 @@ struct DisabledWarpSortConfig
     static constexpr unsigned int block_size_medium = 1;
 };
 
-/// \brief Configuration for the device-level segmented radix sort operation.
-/// \tparam LongRadixBits .
-/// \tparam ShortRadixBits .
-/// \tparam BlockSize Number of threads in a block.
-/// \tparam ItemsPerThread Number of items processed by each thread.
-/// \tparam SizeLimit Limit on the number of items for a single kernel launch.
+//// \brief Configuration of device-level segmented radix sort operation.
+///
+/// Radix sort is excecuted in a few iterations (passes) depending on total number of bits to be sorted
+/// (`begin_bit` and `end_bit`), each iteration sorts either `LongRadixBits` or `ShortRadixBits` bits
+/// chosen to cover whole bit range in optimal way.
+///
+/// For example, if `LongRadixBits` is 7, `ShortRadixBits` is 6, `begin_bit` is 0 and `end_bit` is 32
+/// there will be 5 iterations: 7 + 7 + 6 + 6 + 6 = 32 bits.
+///
+/// If a segment's element count is low ( <= warp_sort_config::items_per_thread * warp_sort_config::logical_warp_size ),
+/// it is sorted by a special warp-level sorting method.
+///
+/// \tparam LongRadixBits - number of bits in long iterations.
+/// \tparam ShortRadixBits - number of bits in short iterations, must be equal to or less than `LongRadixBits`.
+/// \tparam SortConfig - configuration of radix sort kernel. Must be `kernel_config`.
+/// \tparam WarpSortConfig - configuration of the warp sort that is used on the short segments.
 template<unsigned int LongRadixBits,
          unsigned int ShortRadixBits,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         EnableUnpartitionedWarpSort = true,
-         class WarpSortConfig                     = DisabledWarpSortConfig,
-         unsigned int SizeLimit                   = ROCPRIM_GRID_SIZE_LIMIT>
+         class SortConfig,
+         class WarpSortConfig             = DisabledWarpSortConfig,
+         bool EnableUnpartitionedWarpSort = true>
 struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_params
 {
-    /// \brief Identifies the algorithm associated to the config.
     /// \brief Identifies the algorithm associated to the config.
     using tag = detail::segmented_radix_sort_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -573,33 +580,33 @@ struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_
     static constexpr unsigned int short_radix_bits = ShortRadixBits;
 
     /// \brief Number of threads in a block.
-    static constexpr unsigned int block_size = BlockSize;
+    static constexpr unsigned int block_size = SortConfig::block_size;
 
     /// \brief Number of items processed by each thread.
-    static constexpr unsigned int items_per_thread = ItemsPerThread;
+    static constexpr unsigned int items_per_thread = SortConfig::items_per_thread;
 
     /// \brief If set to \p true, warp sort can be used to sort the small segments, even if no partitioning happens.
     static constexpr bool enable_unpartitioned_warp_sort = EnableUnpartitionedWarpSort;
 
     /// \brief Limit on the number of items for a single kernel launch.
-    static constexpr unsigned int size_limit = SizeLimit;
+    static constexpr unsigned int size_limit = SortConfig::size_limit;
 
     using warp_sort_config = WarpSortConfig;
 
     constexpr segmented_radix_sort_config()
         : detail::segmented_radix_sort_config_params{
-            {BlockSize, ItemsPerThread, SizeLimit},
+            SortConfig(),
             LongRadixBits,
             ShortRadixBits,
             EnableUnpartitionedWarpSort,
             {warp_sort_config::partitioning_allowed,
-             warp_sort_config::logical_warp_size_small,
-             warp_sort_config::items_per_thread_small,
-             warp_sort_config::block_size_small,
-             warp_sort_config::partitioning_threshold,
-             warp_sort_config::logical_warp_size_medium,
-             warp_sort_config::items_per_thread_medium,
-             warp_sort_config::block_size_medium}
+              warp_sort_config::logical_warp_size_small,
+              warp_sort_config::items_per_thread_small,
+              warp_sort_config::block_size_small,
+              warp_sort_config::partitioning_threshold,
+              warp_sort_config::logical_warp_size_medium,
+              warp_sort_config::items_per_thread_medium,
+              warp_sort_config::block_size_medium}
     }
     {}
 #endif
@@ -619,10 +626,9 @@ struct default_segmented_radix_sort_config_base
         sizeof(unsigned int) + sizeof(unsigned int), sizeof(int));
     using type = segmented_radix_sort_config<LongRadixBits,
                                              ShortRadixBits,
-                                             128,
-                                             17u,
-                                             true,
-                                             WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>>;
+                                             kernel_config<128, 17u>,
+                                             WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
+                                             true>;
 };
 
 } // namespace detail

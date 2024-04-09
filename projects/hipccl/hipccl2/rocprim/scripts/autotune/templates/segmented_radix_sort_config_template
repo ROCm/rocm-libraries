@@ -5,7 +5,19 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SEGMENTED_RADIX_SORT_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-segmented_radix_sort_config<{{ measurement['cfg']['lrb'] }}, {{ measurement['cfg']['srb'] }}, {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}, {{ measurement['cfg']['eupws'] }}, typename std::conditional<{{ measurement['cfg']['wsc']['pa'] }},WarpSortConfig<{{ measurement['cfg']['wsc']['lwss'] }},{{ measurement['cfg']['wsc']['ipts'] }},{{ measurement['cfg']['wsc']['bss'] }},{{ measurement['cfg']['wsc']['pt'] }},{{ measurement['cfg']['wsc']['lwsm'] }},{{ measurement['cfg']['wsc']['iptm'] }},{{ measurement['cfg']['wsc']['bsm'] }}>,DisabledWarpSortConfig>::type> { };
+segmented_radix_sort_config<
+    {{ measurement['cfg']['lrb'] }}, {{ measurement['cfg']['srb'] }},
+    kernel_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}>, 
+    typename std::conditional<
+        {{ measurement['cfg']['wsc']['pa'] }},
+        WarpSortConfig<
+            {{ measurement['cfg']['wsc']['lwss'] }}, {{ measurement['cfg']['wsc']['ipts'] }},
+            {{ measurement['cfg']['wsc']['bss'] }}, {{ measurement['cfg']['wsc']['pt'] }},
+            {{ measurement['cfg']['wsc']['lwsm'] }}, {{ measurement['cfg']['wsc']['iptm'] }},
+            {{ measurement['cfg']['wsc']['bsm'] }}>,
+        DisabledWarpSortConfig
+    >::type,
+    {{ measurement['cfg']['eupws'] }} > { };
 {%- endmacro %}
 
 {% macro general_case() -%}

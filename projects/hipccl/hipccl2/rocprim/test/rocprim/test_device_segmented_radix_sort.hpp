@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,47 +53,45 @@ struct params
     using config                                     = Config;
 };
 
-using config_default = rocprim::segmented_radix_sort_config<4, //< long radix bits
-                                                            3, //< short radix bits
-                                                            256, //< sort block size,
-                                                            4 //< items per thread
-                                                            >;
+using config_default
+    = rocprim::segmented_radix_sort_config<4, //< long radix bits
+                                           3, //< short radix bits
+                                           rocprim::kernel_config<256, //< sort block size,
+                                                                  4>>; //< items per thread
 
 using config_semi_custom
     = rocprim::segmented_radix_sort_config<3, //< long radix bits
                                            2, //< short radix bits
-                                           128, //< sort block size
-                                           4, //< items per thread
-                                           false, //< enable unpartitioned sort
+                                           rocprim::kernel_config<128, //< sort block size
+                                                                  4>, //< items per thread
                                            rocprim::WarpSortConfig<16, //< logical warp size small
-                                                                   8 //< items per thread small
-                                                                   >>;
+                                                                   8>, //< items per thread small
+                                           false>; //< enable unpartitioned sort
 
 using config_semi_custom_warp_config
     = rocprim::segmented_radix_sort_config<3, //< long radix bits
                                            2, //< short radix bits
-                                           128, //< sort block size
-                                           4, //< items per thread
-                                           true, //< enable unpartitioned sort
+                                           rocprim::kernel_config<128, //< sort block size
+                                                                  4>, //< items per thread
                                            rocprim::WarpSortConfig<16, //< logical warp size small
                                                                    2, //< items per thread small
                                                                    512, //< block size small
-                                                                   0>>; //< partitioning threshold
+                                                                   0>, //< partitioning threshold
+                                           true>; //< enable unpartitioned sort
 
 using config_custom
     = rocprim::segmented_radix_sort_config<3, //< long radix bits
                                            2, //< short radix bits
-                                           128, //< sort block size
-                                           4, //< items per thread
-                                           true, //< enable unpartitioned sort
+                                           rocprim::kernel_config<128, //< sort block size
+                                                                  4>, //< items per thread
                                            rocprim::WarpSortConfig<16, //< logical warp size small
                                                                    2, //< items per thread small
                                                                    512, //< block size small
                                                                    0, //< partitioning threshold
                                                                    32, //< logical warp size medium
                                                                    4, //< items per thread medium
-                                                                   256 //< block size medium
-                                                                   >>;
+                                                                   256>, //< block size medium
+                                           true>; //< enable unpartitioned sort
 
 template<class Params>
 class RocprimDeviceSegmentedRadixSort : public ::testing::Test
