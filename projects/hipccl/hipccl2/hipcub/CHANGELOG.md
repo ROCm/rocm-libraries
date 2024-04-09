@@ -16,6 +16,14 @@ Documentation for hipCUB is available at
   type (`key_type`) can be sorted via these overloads, if an appropriate decomposer is passed. The decomposer has to implement
   `operator(const key_type&)` which returns a `hipcub::tuple` of references pointing to members of `key_type`.
 
+* On AMD GPUs (using the HIP backend), it is possible to issue hipCUB API calls inside of
+  hipGraphs, with several exceptions:
+   * CachingDeviceAllocator
+   * GridBarrierLifetime
+   * DeviceSegmentedRadixSort
+   * DeviceRunLengthEncode
+  Currently, these classes rely on one or more synchronous calls to function correctly. Because of this, they cannot be used inside of hipGraphs.
+
 ### Changed
 
 * The NVIDIA backend now requires CUB, Thrust and libcu++ 2.2.0. If it is not found it will be downloaded from the NVIDIA CCCL repository.
