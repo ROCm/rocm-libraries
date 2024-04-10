@@ -1,4 +1,4 @@
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,8 @@
 
 #ifndef TEST_SEED_HPP_
 #define TEST_SEED_HPP_
+
+#include <random>
 
 using engine_type = std::default_random_engine;
 using seed_type = typename engine_type::result_type;

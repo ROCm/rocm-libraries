@@ -109,7 +109,8 @@ struct radix_digit_count_helper
 
     static constexpr unsigned int warp_size = WarpSize;
     static constexpr unsigned int warps_no = BlockSize / warp_size;
-    static_assert(BlockSize % ::rocprim::device_warp_size() == 0, "BlockSize must be divisible by warp size");
+    ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(BlockSize % ::rocprim::device_warp_size() == 0,
+                                        "BlockSize must be divisible by warp size");
     static_assert(radix_size <= BlockSize, "Radix size must not exceed BlockSize");
 
     struct storage_type

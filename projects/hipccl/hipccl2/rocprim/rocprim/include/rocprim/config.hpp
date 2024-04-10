@@ -173,4 +173,12 @@
     #define ROCPRIM_PRAGMA_MESSAGE(x)
 #endif
 
+/// Static asserts that only gets evaluated during device compile.
+#if __HIP_DEVICE_COMPILE__
+    #define ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(expression, message) \
+        static_assert(expression, message)
+#else
+    #define ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(expression, message)
+#endif
+
 #endif // ROCPRIM_CONFIG_HPP_

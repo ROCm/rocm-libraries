@@ -85,8 +85,9 @@ class warp_exchange
 {
     static_assert(::rocprim::detail::is_power_of_two(WarpSize),
                   "Logical warp size must be a power of two.");
-    static_assert(WarpSize <= ::rocprim::device_warp_size(),
-                  "Logical warp size cannot be larger than physical warp size.");
+    ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(
+        WarpSize <= ::rocprim::device_warp_size(),
+        "Logical warp size cannot be larger than physical warp size.");
 
     // Struct used for creating a raw_storage object for this primitive's temporary storage.
     struct storage_type_

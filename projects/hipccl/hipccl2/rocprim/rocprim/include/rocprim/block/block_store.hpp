@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -498,8 +498,8 @@ private:
     using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
 
 public:
-    static_assert(BlockSize % ::rocprim::device_warp_size() == 0,
-                 "BlockSize must be a multiple of hardware warpsize");
+    ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(BlockSize % ::rocprim::device_warp_size() == 0,
+                                        "BlockSize must be a multiple of hardware warpsize");
 
     using storage_type = typename block_exchange_type::storage_type;
 
