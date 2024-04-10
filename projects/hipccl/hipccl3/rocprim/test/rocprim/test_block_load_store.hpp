@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "rocprim/block/block_load.hpp"
+#include "rocprim/block/block_store.hpp"
+#include <rocprim/test_utils.hpp>
 test_suite_type_def(suite_name, name_suffix)
 
 typed_test_suite_def(suite_name, name_suffix, warp_params);
@@ -38,6 +41,19 @@ typed_test_def(suite_name, name_suffix, LoadStoreClass)
     static constexpr auto items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 113;
     const auto grid_size = size / items_per_block;
+
+    if(load_method == rocprim::block_load_method::block_load_warp_transpose
+       || store_method == rocprim::block_store_method::block_store_warp_transpose)
+    {
+        unsigned int host_warp_size;
+        HIP_CHECK(::rocprim::host_warp_size(device_id, host_warp_size));
+        if(block_size % host_warp_size != 0)
+        {
+            GTEST_SKIP() << "Cannot run test of block size " << block_size
+                         << " on a device with warp size " << host_warp_size;
+        }
+    }
+
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
     {
@@ -127,6 +143,18 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassValid)
     if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
     {
         return;
+    }
+
+    if(load_method == rocprim::block_load_method::block_load_warp_transpose
+       || store_method == rocprim::block_store_method::block_store_warp_transpose)
+    {
+        unsigned int host_warp_size;
+        HIP_CHECK(::rocprim::host_warp_size(device_id, host_warp_size));
+        if(block_size % host_warp_size != 0)
+        {
+            GTEST_SKIP() << "Cannot run test of block size " << block_size
+                         << " on a device with warp size " << host_warp_size;
+        }
     }
 
     const size_t valid = items_per_block - 32;
@@ -226,6 +254,18 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassDefault)
     if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
     {
         return;
+    }
+
+    if(load_method == rocprim::block_load_method::block_load_warp_transpose
+       || store_method == rocprim::block_store_method::block_store_warp_transpose)
+    {
+        unsigned int host_warp_size;
+        HIP_CHECK(::rocprim::host_warp_size(device_id, host_warp_size));
+        if(block_size % host_warp_size != 0)
+        {
+            GTEST_SKIP() << "Cannot run test of block size " << block_size
+                         << " on a device with warp size " << host_warp_size;
+        }
     }
 
     const size_t valid = items_per_thread + 1;
