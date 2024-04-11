@@ -68,7 +68,8 @@ namespace rocRoller
             for(auto const& tag : k.control.getNodes())
             {
                 auto x = k.control.getNode(tag);
-                auto y = std::visit([&](auto&& arg) { return visitor.visitOperation(arg); }, x);
+                auto y
+                    = std::visit([&](auto&& arg) { return visitor.visitOperation(tag, arg); }, x);
                 graph.control.setElement(tag, y);
             }
 

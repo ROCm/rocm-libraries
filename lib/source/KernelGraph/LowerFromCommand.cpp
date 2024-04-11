@@ -23,10 +23,11 @@ namespace rocRoller
          * For example, given VGPR and Linear inputs, output should be Linear.
          */
         Dimension
-            promoteDimensions(rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph const& graph,
+            promoteDimensions(int                                                             cTag,
+                              rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph const& graph,
                               std::vector<int> const&                                         dims)
         {
-            Dimension rv = VGPR();
+            Dimension rv = VGPR(cTag);
             for(auto tag : dims)
             {
                 auto element = graph.getElement(tag);
@@ -34,19 +35,19 @@ namespace rocRoller
                 std::visit(
                     rocRoller::overloaded{
                         [](VGPR const& op) {},
-                        [&rv](Linear const& op) {
+                        [&](Linear const& op) {
                             AssertFatal(
                                 !std::holds_alternative<MacroTile>(rv),
                                 "Element operation between Linear and MacroTile dimensions is not "
                                 "well-posed.");
-                            rv = Linear();
+                            rv = Linear(cTag);
                         },
-                        [&rv](MacroTile const& op) {
+                        [&](MacroTile const& op) {
                             AssertFatal(
                                 !std::holds_alternative<Linear>(rv),
                                 "Element operation between Linear and MacroTile dimensions is not "
                                 "well-posed.");
-                            rv = MacroTile();
+                            rv = MacroTile(cTag);
                         },
                         [](auto const& op) {
                             Throw<FatalError>("Invalid argument of element operation.");
@@ -105,8 +106,10 @@ namespace rocRoller
 
                 auto totalSizeExpr = std::make_shared<Expression::Expression>(sizes[0]);
 
-                auto user = m_graph.coordinates.addElement(User(
-                    tload.data()->name(), std::make_shared<Expression::Expression>(tload.limit())));
+                auto user = m_graph.coordinates.addElement(
+                    User(tload.getTag(),
+                         tload.data()->name(),
+                         std::make_shared<Expression::Expression>(tload.limit())));
 
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
@@ -123,7 +126,8 @@ namespace rocRoller
                 m_graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
 
                 auto unit_stride = Expression::literal(1u);
-                auto linear = m_graph.coordinates.addElement(Linear(totalSizeExpr, unit_stride));
+                auto linear      = m_graph.coordinates.addElement(
+                    Linear(tload.getTag(), totalSizeExpr, unit_stride));
 
                 m_graph.coordinates.addElement(Flatten(), dims, std::vector<int>{linear});
                 m_graph.coordinates.addElement(DataFlow(), {user}, {linear});
@@ -151,8 +155,9 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Scalar const& tload)
             {
-                auto user = m_graph.coordinates.addElement(User(tload.data()->name()));
-                auto vgpr = m_graph.coordinates.addElement(VGPR());
+                auto user
+                    = m_graph.coordinates.addElement(User(tload.getTag(), tload.data()->name()));
+                auto vgpr = m_graph.coordinates.addElement(VGPR(tload.getTag()));
 
                 m_graph.coordinates.addElement(DataFlow(), {user}, {vgpr});
 
@@ -204,8 +209,10 @@ namespace rocRoller
                 auto const strides         = tload.strides();
                 auto const literal_strides = tload.literalStrides();
 
-                auto user = m_graph.coordinates.addElement(User(
-                    tload.data()->name(), std::make_shared<Expression::Expression>(tload.limit())));
+                auto user = m_graph.coordinates.addElement(
+                    User(tload.getTag(),
+                         tload.data()->name(),
+                         std::make_shared<Expression::Expression>(tload.limit())));
 
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
@@ -226,7 +233,8 @@ namespace rocRoller
                     dims.push_back(dim);
                 }
 
-                auto tiled = m_graph.coordinates.addElement(MacroTile(sizes.size()));
+                auto tiled
+                    = m_graph.coordinates.addElement(MacroTile(tload.getTag(), sizes.size()));
 
                 m_graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
                 m_graph.coordinates.addElement(ConstructMacroTile(), dims, std::vector<int>{tiled});
@@ -275,7 +283,8 @@ namespace rocRoller
 
                 auto linear = m_dim.at(tstore.getTag());
                 auto user   = m_graph.coordinates.addElement(
-                    User(tstore.data()->name(),
+                    User(tstore.getTag(),
+                         tstore.data()->name(),
                          std::make_shared<Expression::Expression>(tstore.limit())));
 
                 m_graph.coordinates.addElement(Split(), std::vector<int>{linear}, dims);
@@ -327,7 +336,8 @@ namespace rocRoller
 
                 auto tile = m_dim.at(tstore.getTag());
                 auto user = m_graph.coordinates.addElement(
-                    User(tstore.data()->name(),
+                    User(tstore.getTag(),
+                         tstore.data()->name(),
                          std::make_shared<Expression::Expression>(tstore.limit())));
 
                 m_graph.coordinates.addElement(DestructMacroTile(), std::vector<int>{tile}, dims);
@@ -383,16 +393,18 @@ namespace rocRoller
                         coordinate_inputs.push_back(m_dim.at(sinput));
                     }
 
-                    auto coordinateType = promoteDimensions(m_graph.coordinates, coordinate_inputs);
+                    int  cTag = std::visit([](auto const& a) -> int { return a.getTag(); }, *xop);
+                    auto dimension
+                        = promoteDimensions(cTag, m_graph.coordinates, coordinate_inputs);
                     for(auto const& soutput : soutputs)
                     {
                         AssertFatal(m_op.count(soutput) == 0,
                                     "XOp output already exists in kernel graph.");
                         AssertFatal(m_dim.count(soutput) == 0,
                                     "XOp output already exists in kernel graph.");
-                        auto dimension = m_graph.coordinates.addElement(coordinateType);
-                        coordinate_outputs.push_back(dimension);
-                        m_dim.insert_or_assign(soutput, dimension);
+                        auto tag = m_graph.coordinates.addElement(dimension);
+                        coordinate_outputs.push_back(tag);
+                        m_dim.insert_or_assign(soutput, tag);
                     }
 
                     m_graph.coordinates.addElement(

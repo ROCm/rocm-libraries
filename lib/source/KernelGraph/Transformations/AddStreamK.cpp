@@ -270,13 +270,14 @@ namespace rocRoller
             std::vector<unsigned int> jammedSizes = {loopInfo.xLoopSize, loopInfo.yLoopSize};
 
             // Store
-            auto storeScratchTileTag
+            auto jammedStoreScratchTileTag
                 = createInternalTile(graph, varType, macTileTag, jammedSizes, context);
-            graph.coordinates.addElement(View(), {storeScratchTileTag}, {macTileTag});
+            graph.coordinates.addElement(View(), {jammedStoreScratchTileTag}, {macTileTag});
 
-            auto storeScratchTile       = *graph.coordinates.get<MacroTile>(storeScratchTileTag);
-            storeScratchTile.layoutType = LayoutType::SCRATCH;
-            graph.coordinates.setElement(storeScratchTileTag, storeScratchTile);
+            auto jammedStoreScratchTile
+                = *graph.coordinates.get<MacroTile>(jammedStoreScratchTileTag);
+            jammedStoreScratchTile.layoutType = LayoutType::SCRATCH;
+            graph.coordinates.setElement(jammedStoreScratchTileTag, jammedStoreScratchTile);
 
             std::vector<int> storeSubDimensions
                 = {graph.coordinates.addElement(SubDimension(0, sizeX, strideX)),
@@ -290,25 +291,34 @@ namespace rocRoller
 
                 addStoreThreadTileCT(graph,
                                      storeConnections,
-                                     storeScratchTileTag,
+                                     jammedStoreScratchTileTag,
                                      iMacX,
                                      iMacY,
                                      context->kernel()->workgroupSize(),
                                      jammedSizes,
                                      true);
 
-                graph.coordinates.addElement(DataFlow(), {storeScratchTileTag}, {globalScratchTag});
+                graph.coordinates.addElement(
+                    DataFlow(), {jammedStoreScratchTileTag}, {globalScratchTag});
             }
 
-            storeConnections.push_back(DC<MacroTile>(storeScratchTileTag));
+            storeConnections.push_back(DC<MacroTile>(jammedStoreScratchTileTag));
             storeConnections.push_back(DC<User>(globalScratchTag));
 
             // Load
-            auto loadScratchTileTag
+            auto jammedLoadScratchTileTag
                 = createInternalTile(graph, varType, macTileTag, jammedSizes, context);
+            auto jammedLoadScratchTile
+                = *graph.coordinates.get<MacroTile>(jammedLoadScratchTileTag);
+            jammedLoadScratchTile.layoutType = LayoutType::SCRATCH;
+            graph.coordinates.setElement(jammedLoadScratchTileTag, jammedLoadScratchTile);
+
+            auto loadScratchTileTag    = createInternalTile(graph, varType, macTileTag, context);
             auto loadScratchTile       = *graph.coordinates.get<MacroTile>(loadScratchTileTag);
             loadScratchTile.layoutType = LayoutType::SCRATCH;
             graph.coordinates.setElement(loadScratchTileTag, loadScratchTile);
+
+            graph.coordinates.addElement(View(), {jammedLoadScratchTileTag}, {loadScratchTileTag});
 
             std::vector<int> loadSubDimensions
                 = {graph.coordinates.addElement(SubDimension(0, sizeX, strideX)),
@@ -322,7 +332,7 @@ namespace rocRoller
 
                 addLoadThreadTileCT(graph,
                                     loadConnections,
-                                    loadScratchTileTag,
+                                    jammedLoadScratchTileTag,
                                     iMacX,
                                     iMacY,
                                     context->kernel()->workgroupSize(),
@@ -361,7 +371,7 @@ namespace rocRoller
             loadConnections.push_back(DC<MacroTile>(loadScratchTileTag));
             loadConnections.push_back(DC<User>(globalScratchTag));
 
-            return {storeScratchTileTag, loadScratchTileTag, globalScratchTag, setPlusOneTag};
+            return {jammedStoreScratchTileTag, loadScratchTileTag, globalScratchTag, setPlusOneTag};
         }
 
         /**

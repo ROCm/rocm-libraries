@@ -632,6 +632,13 @@ namespace rocRoller
                 else
                 {
                     info.data = m_context->registerTagManager()->getRegister(macTileTag, tmpl);
+
+                    auto viewTileTag = only(
+                        m_graph->coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<View>));
+                    if(viewTileTag)
+                    {
+                        m_context->registerTagManager()->addRegister(*viewTileTag, info.data);
+                    }
                 }
 
                 rocRoller::Log::getLogger()->debug("  tag {} tile coord {} registers {}",

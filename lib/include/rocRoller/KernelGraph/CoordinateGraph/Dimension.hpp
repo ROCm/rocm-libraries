@@ -26,7 +26,13 @@ namespace rocRoller
         {
             Expression::ExpressionPtr size, stride, offset;
 
+            int commandTag = -1;
+
             BaseDimension() noexcept;
+            BaseDimension(int commandTag);
+            BaseDimension(int                       commandTag,
+                          Expression::ExpressionPtr size,
+                          Expression::ExpressionPtr stride);
             BaseDimension(Expression::ExpressionPtr size, Expression::ExpressionPtr stride);
             BaseDimension(Expression::ExpressionPtr size,
                           Expression::ExpressionPtr stride,
@@ -110,7 +116,8 @@ namespace rocRoller
             using BaseDimension::BaseDimension;
 
             User(std::string const& name);
-            User(std::string const& name, Expression::ExpressionPtr size);
+            User(int commandTag, std::string const& name);
+            User(int commandTag, std::string const& name, Expression::ExpressionPtr size);
 
             /**
              * @brief Constructor for a User dimension that is part of the scratch space.
@@ -321,7 +328,8 @@ namespace rocRoller
              * Construct MacroTile dimension with deferred sizes and
              * memory type.
              */
-            MacroTile(int const rank);
+            MacroTile(int commandTag);
+            MacroTile(int commandTag, int rank);
 
             /**
              * Construct MacroTile dimension with fully specified sizes
@@ -527,6 +535,18 @@ namespace rocRoller
         inline void setSize(T& x, Expression::ExpressionPtr size)
         {
             std::visit([size](auto& a) { a.size = size; }, x);
+        }
+
+        template <typename T>
+        inline int getCommandTag(const T& x)
+        {
+            return std::visit([](auto const& a) -> int { return a.commandTag; }, x);
+        }
+
+        template <typename T>
+        inline void setCommandTag(T& x, int commandTag)
+        {
+            std::visit([commandTag](auto& a) { a.commandTag = commandTag; }, x);
         }
 
         template <typename T>

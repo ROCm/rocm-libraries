@@ -937,155 +937,6 @@ namespace KernelGraphTest
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
     }
 
-    TEST_F(KernelGraphTest, TranslateMatrixMultiplyParameters)
-    {
-        auto example = rocRollerTest::Graphs::MatrixMultiply<int>();
-        auto kgraph0 = example.getKernelGraph();
-
-        // macro tile sizes
-        int mac_m = 64;
-        int mac_n = 64;
-        int mac_k = 64;
-
-        int t_m = 4;
-        int t_n = 2;
-
-        auto mac_tile_0 = MacroTile({mac_m, mac_k}, MemoryType::VGPR, {t_m, t_n}); // A
-        auto mac_tile_1 = MacroTile({mac_k, mac_n}, MemoryType::VGPR, {t_m, t_n}); // B
-        auto mac_tile_2 = MacroTile({mac_m, mac_n}, MemoryType::VGPR, {t_m, t_n}); // A * B
-
-        auto params = std::make_shared<CommandParameters>();
-
-        params->setDimensionInfo(4, mac_tile_0);
-        params->setDimensionInfo(11, mac_tile_1);
-        params->setDimensionInfo(15, mac_tile_2);
-
-        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
-
-        kgraph0 = kgraph0.transform(updateParametersTransform);
-
-        std::string expected0 = R".(
-        digraph {
-        "coord1"[label="User{CommandArgument(Load_Tiled_0_extent)}(1)"];
-        "coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
-        "coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
-        "coord4"[label="MacroTile{64,64}(4)"];
-        "coord5"[label="Split(5)",shape=box];
-        "coord6"[label="ConstructMacroTile(6)",shape=box];
-        "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Load_Tiled_1_extent)}(8)"];
-        "coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
-        "coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
-        "coord11"[label="MacroTile{64,64}(11)"];
-        "coord12"[label="Split(12)",shape=box];
-        "coord13"[label="ConstructMacroTile(13)",shape=box];
-        "coord14"[label="DataFlow(14)",shape=box];
-        "coord15"[label="MacroTile{64,64}(15)"];
-        "coord16"[label="DataFlow(16)",shape=box];
-        "coord17"[label="SubDimension{0, NA}(17)"];
-        "coord18"[label="SubDimension{1, NA}(18)"];
-        "coord19"[label="User{CommandArgument(Store_Tiled_2_extent)}(19)"];
-        "coord20"[label="DestructMacroTile(20)",shape=box];
-        "coord21"[label="Join(21)",shape=box];
-        "coord22"[label="DataFlow(22)",shape=box];
-        "coord1" -> "coord5"
-        "coord1" -> "coord7"
-        "coord2" -> "coord6"
-        "coord3" -> "coord6"
-        "coord4" -> "coord16"
-        "coord5" -> "coord2"
-        "coord5" -> "coord3"
-        "coord6" -> "coord4"
-        "coord7" -> "coord4"
-        "coord8" -> "coord12"
-        "coord8" -> "coord14"
-        "coord9" -> "coord13"
-        "coord10" -> "coord13"
-        "coord11" -> "coord16"
-        "coord12" -> "coord9"
-        "coord12" -> "coord10"
-        "coord13" -> "coord11"
-        "coord14" -> "coord11"
-        "coord15" -> "coord20"
-        "coord15" -> "coord22"
-        "coord16" -> "coord15"
-        "coord17" -> "coord21"
-        "coord18" -> "coord21"
-        "coord20" -> "coord17"
-        "coord20" -> "coord18"
-        "coord21" -> "coord19"
-        "coord22" -> "coord19"
-        {
-        rank=same
-        "coord2"->"coord3"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord2"->"coord3"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord9"->"coord10"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord9"->"coord10"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord4"->"coord11"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord17"->"coord18"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord17"->"coord18"[style=invis]
-        rankdir=LR
-        }
-        subgraph clusterCF {label = "Control Graph";
-        "cntrl1"[label="Kernel(1)"];
-        "cntrl2"[label="LoadTiled(2)"];
-        "cntrl3"[label="Body(3)",shape=box];
-        "cntrl4"[label="LoadTiled(4)"];
-        "cntrl5"[label="Body(5)",shape=box];
-        "cntrl6"[label="TensorContraction(6)"];
-        "cntrl7"[label="Sequence(7)",shape=box];
-        "cntrl8"[label="Sequence(8)",shape=box];
-        "cntrl9"[label="StoreTiled(9)"];
-        "cntrl10"[label="Sequence(10)",shape=box];
-        "cntrl1" -> "cntrl3"
-        "cntrl1" -> "cntrl5"
-        "cntrl2" -> "cntrl7"
-        "cntrl3" -> "cntrl2"
-        "cntrl4" -> "cntrl8"
-        "cntrl5" -> "cntrl4"
-        "cntrl6" -> "cntrl10"
-        "cntrl7" -> "cntrl6"
-        "cntrl8" -> "cntrl6"
-        "cntrl10" -> "cntrl9"
-        }
-        "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
-        "coord19" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
-        }).";
-
-        EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
-    }
-
     TEST_F(KernelGraphTest, LowerTensor)
     {
         auto example = rocRollerTest::Graphs::GEMM<float>();
@@ -2312,13 +2163,13 @@ namespace KernelGraphTest
         int mac_n = 64;
         int mac_k = 64;
 
-        auto mac_tile_0 = MacroTile({mac_m, mac_k}, MemoryType::VGPR); // A
-        auto mac_tile_1 = MacroTile({mac_k, mac_n}, MemoryType::VGPR); // B
+        auto macTileA = MacroTile({mac_m, mac_k}, MemoryType::VGPR); // A
+        auto macTileB = MacroTile({mac_k, mac_n}, MemoryType::VGPR); // B
 
         auto params = std::make_shared<CommandParameters>();
 
-        params->setDimensionInfo(4, mac_tile_0);
-        params->setDimensionInfo(11, mac_tile_1);
+        params->setDimensionInfo(0, macTileA);
+        params->setDimensionInfo(1, macTileB);
 
         auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
 
@@ -2340,7 +2191,7 @@ namespace KernelGraphTest
         "coord12"[label="Split(12)",shape=box];
         "coord13"[label="ConstructMacroTile(13)",shape=box];
         "coord14"[label="DataFlow(14)",shape=box];
-        "coord15"[label="MacroTile{NA}(15)"];
+        "coord15"[label="MacroTile{64,64}(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
         "coord1" -> "coord5"
         "coord1" -> "coord7"

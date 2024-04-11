@@ -10,7 +10,6 @@
 #include "CommandArgument_fwd.hpp"
 #include "Operations_fwd.hpp"
 
-#include "../AssemblyKernel_fwd.hpp"
 #include "../DataTypes/DataTypes.hpp"
 #include "../Expression.hpp"
 

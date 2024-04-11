@@ -290,32 +290,32 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto a        = m_command->allocateTag();
-        auto b        = m_command->allocateTag();
-        auto c        = m_command->allocateTag();
+        m_tagA        = m_command->allocateTag();
+        m_tagB        = m_command->allocateTag();
+        m_tagC        = m_command->allocateTag();
         auto alpha    = m_command->allocateTag();
         auto beta     = m_command->allocateTag();
         auto axb      = m_command->allocateTag();
         auto alphaaxb = m_command->allocateTag();
         auto betac    = m_command->allocateTag();
-        auto result   = m_command->allocateTag();
+        m_tagD        = m_command->allocateTag();
 
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, a)); // A
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, b)); // B
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, c)); // C
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, m_tagA)); // A
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, m_tagB)); // B
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, m_tagC)); // C
         m_command->addOperation(rocRoller::Operations::T_Load_Scalar(dataType, alpha)); // alpha
         m_command->addOperation(rocRoller::Operations::T_Load_Scalar(dataType, beta)); // beta
 
-        m_command->addOperation(rocRoller::Operations::T_Mul(axb, a, b)); // A * B
+        m_command->addOperation(rocRoller::Operations::T_Mul(axb, m_tagA, m_tagB)); // A * B
 
         rocRoller::Operations::T_Execute execute;
         execute.addXOp(rocRoller::Operations::E_Mul(alphaaxb, alpha, axb)); // alpha * (A * B)
-        execute.addXOp(rocRoller::Operations::E_Mul(betac, beta, c)); // beta * C
-        execute.addXOp(rocRoller::Operations::E_Add(result, alphaaxb, betac));
+        execute.addXOp(rocRoller::Operations::E_Mul(betac, beta, m_tagC)); // beta * C
+        execute.addXOp(rocRoller::Operations::E_Add(m_tagD, alphaaxb, betac));
         // alpha * (A * B) + beta * C
         m_command->addOperation(std::move(execute));
 
-        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(dataType, 2, result)); // D
+        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(dataType, 2, m_tagD)); // D
     }
 
     template <typename T>
@@ -373,19 +373,9 @@ namespace rocRollerTest::Graphs
         auto macTileC = MacroTile(
             {m_macM, m_macN}, LayoutType::MATRIX_ACCUMULATOR, {m_waveM, m_waveN, m_waveK, m_waveB});
 
-        auto macTileD = MacroTile({m_macM, m_macN},
-                                  LayoutType::MATRIX_ACCUMULATOR,
-                                  {m_waveM, m_waveN, m_waveK, m_waveB},
-                                  m_useLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
-
-        params->setDimensionInfo(4, macTileA);
-        params->setDimensionInfo(11, macTileB);
-        params->setDimensionInfo(18, macTileC);
-        if(m_useLDSD)
-            params->setDimensionInfo(28, macTileC);
-        params->setDimensionInfo(30, macTileC);
-        params->setDimensionInfo(32, macTileC);
-        params->setDimensionInfo(34, macTileD);
+        params->setDimensionInfo(m_tagA, macTileA);
+        params->setDimensionInfo(m_tagB, macTileB);
+        params->setDimensionInfo(m_tagC, macTileC);
 
         // Workgroup size
         uint wavefrontSize  = 64;
@@ -417,22 +407,22 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto a    = m_command->allocateTag();
-        auto b    = m_command->allocateTag();
-        auto aa   = m_command->allocateTag();
-        auto bb   = m_command->allocateTag();
-        auto aabb = m_command->allocateTag();
+        m_tagA  = m_command->allocateTag();
+        m_tagB  = m_command->allocateTag();
+        auto aa = m_command->allocateTag();
+        auto bb = m_command->allocateTag();
+        m_tagD  = m_command->allocateTag();
 
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, a)); // a
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, b)); // b
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, m_tagA)); // a
+        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, m_tagB)); // b
 
         auto execute = rocRoller::Operations::T_Execute();
-        execute.addXOp(rocRoller::Operations::E_Add(aa, a, a)); // a + a
-        execute.addXOp(rocRoller::Operations::E_Add(bb, b, b)); // b + b
-        execute.addXOp(rocRoller::Operations::E_Add(aabb, bb, aa)); // 2a + 2b
+        execute.addXOp(rocRoller::Operations::E_Add(aa, m_tagA, m_tagA)); // a + a
+        execute.addXOp(rocRoller::Operations::E_Add(bb, m_tagB, m_tagB)); // b + b
+        execute.addXOp(rocRoller::Operations::E_Add(m_tagD, bb, aa)); // 2a + 2b
 
         m_command->addOperation(std::move(execute));
-        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(dataType, 2, aabb)); // c
+        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(dataType, 2, m_tagD)); // c
     }
 
     template <typename T>
@@ -469,17 +459,13 @@ namespace rocRollerTest::Graphs
 
         auto params = std::make_shared<CommandParameters>();
 
-        auto macTile0 = MacroTile({m_macM, m_macN}, MemoryType::LDS, {m_thrM, m_thrN});
-        auto macTile1 = MacroTile({m_macM, m_macN}, MemoryType::VGPR, {m_thrM, m_thrN});
-        auto macTile2 = MacroTile({m_macM, m_macN}, MemoryType::VGPR, {m_thrM, m_thrN});
-        auto macTile3 = MacroTile({m_macM, m_macN}, MemoryType::VGPR, {m_thrM, m_thrN});
-        auto macTile4 = MacroTile({m_macM, m_macN}, MemoryType::VGPR, {m_thrM, m_thrN});
+        auto macTileLDS  = MacroTile({m_macM, m_macN}, MemoryType::LDS, {m_thrM, m_thrN});
+        auto macTileVGPR = MacroTile({m_macM, m_macN}, MemoryType::VGPR, {m_thrM, m_thrN});
 
-        params->setDimensionInfo(4, macTile0);
-        params->setDimensionInfo(11, macTile1);
-        params->setDimensionInfo(15, macTile2);
-        params->setDimensionInfo(17, macTile3);
-        params->setDimensionInfo(19, macTile4);
+        params->setDimensionInfo(m_tagA, macTileLDS);
+        params->setDimensionInfo(m_tagB, macTileVGPR);
+        // TODO Fix MemoryType promotion (LDS)
+        params->setDimensionInfo(m_tagD, macTileVGPR);
 
         uint workgroupSizeX = m_macM / m_thrM;
         uint workgroupSizeY = m_macN / m_thrN;
@@ -554,18 +540,12 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto tag = m_command->allocateTag();
+        m_tag = m_command->allocateTag();
 
-        if(!m_literalStrides.empty())
-        {
-            m_command->addOperation(
-                rocRoller::Operations::T_Load_Tiled(dataType, 2, tag, m_literalStrides));
-        }
-        else
-        {
-            m_command->addOperation(rocRoller::Operations::T_Load_Tiled(dataType, 2, tag));
-        }
-        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(dataType, 2, tag));
+        m_command->addOperation(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, m_tag, m_literalStrides));
+        m_command->addOperation(
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, m_tag, m_literalStrides));
     }
 
     template <typename T>
@@ -609,15 +589,7 @@ namespace rocRollerTest::Graphs
         auto params = std::make_shared<CommandParameters>();
 
         auto macTile = MacroTile({m_macM, m_macN}, MemoryType::VGPR, {m_thrM, m_thrN});
-
-        params->setDimensionInfo(4, macTile);
-
-        if(!m_literalStrides.empty())
-        {
-            auto storeColStrideOverride   = SubDimension(1);
-            storeColStrideOverride.stride = Expression::literal(1u);
-            params->setDimensionInfo(9, storeColStrideOverride);
-        }
+        params->setDimensionInfo(m_tag, macTile);
 
         uint workgroupSizeX = m_macM / m_thrM;
         uint workgroupSizeY = m_macN / m_thrN;

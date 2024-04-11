@@ -21,7 +21,6 @@
 
 #include "GEMMProblem.hpp"
 #include "GPUContextFixture.hpp"
-#include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 
@@ -286,13 +285,11 @@ namespace GEMMDriverTest
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
                 gemm.storeLDSD ? MemoryType::JAMMED_WAVE_LDS : MemoryType::WAVE);
 
-            params->setDimensionInfo(4, macTileA);
-            params->setDimensionInfo(11, macTileB);
-            params->setDimensionInfo(18, macTileC);
-            params->setDimensionInfo(28, macTileC);
-            params->setDimensionInfo(30, macTileC);
-            params->setDimensionInfo(32, macTileC);
-            params->setDimensionInfo(34, macTileD);
+            params->setDimensionInfo(tagA, macTileA);
+            params->setDimensionInfo(tagB, macTileB);
+            params->setDimensionInfo(tagC, macTileC);
+            // TODO Fix MemoryType promotion (JAMMED_WAVE_LDS)
+            params->setDimensionInfo(tagD, macTileD);
 
             params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
             params->setManualWorkitemCount({NX, NY, NZ});

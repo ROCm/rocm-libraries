@@ -129,18 +129,15 @@ namespace MatrixMultiplyTest
 
         // TODO: the translate step should figure out that there is a
         // T_Mul and do the right thing for the T_Load_Tiled commands
-        auto mac_tile_0 = KernelGraph::CoordinateGraph::MacroTile({mac_m, mac_k},
-                                                                  LayoutType::MATRIX_A,
-                                                                  {wave_m, wave_n, wave_k, wave_b},
-                                                                  MemoryType::WAVE_LDS);
-        auto mac_tile_1 = KernelGraph::CoordinateGraph::MacroTile(
+        auto macTileA = KernelGraph::CoordinateGraph::MacroTile({mac_m, mac_k},
+                                                                LayoutType::MATRIX_A,
+                                                                {wave_m, wave_n, wave_k, wave_b},
+                                                                MemoryType::WAVE_LDS);
+        auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
             {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_2 = KernelGraph::CoordinateGraph::MacroTile(
-            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 
-        params->setDimensionInfo(4, mac_tile_0);
-        params->setDimensionInfo(11, mac_tile_1);
-        params->setDimensionInfo(15, mac_tile_2);
+        params->setDimensionInfo(tagA, macTileA);
+        params->setDimensionInfo(tagB, macTileB);
 
         auto postParams = std::make_shared<CommandParameters>();
         postParams->setManualWavefrontCount({2u, 2u});
@@ -301,16 +298,13 @@ namespace MatrixMultiplyTest
 
         // TODO: the translate step should figure out that there is a
         // T_Mul and do the right thing for the T_Load_Tiled commands
-        auto mac_tile_A = KernelGraph::CoordinateGraph::MacroTile(
+        auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile(
+        auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
             {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_C = KernelGraph::CoordinateGraph::MacroTile(
-            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 
-        params->setDimensionInfo(4, mac_tile_A);
-        params->setDimensionInfo(11, mac_tile_B);
-        params->setDimensionInfo(15, mac_tile_C);
+        params->setDimensionInfo(tagA, macTileA);
+        params->setDimensionInfo(tagB, macTileB);
 
         auto postParams = std::make_shared<CommandParameters>();
         postParams->setManualWavefrontCount({2u, 2u});
@@ -445,18 +439,16 @@ namespace MatrixMultiplyTest
 
         // TODO: the translate step should figure out that there is a
         // T_Mul and do the right thing for the T_Load_Tiled commands
-        auto mac_tile_0 = KernelGraph::CoordinateGraph::MacroTile(
+        auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_1 = KernelGraph::CoordinateGraph::MacroTile(
+        auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
             {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_2 = KernelGraph::CoordinateGraph::MacroTile(
+        auto macTileC = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 
-        params->setDimensionInfo(4, mac_tile_0);
-        params->setDimensionInfo(11, mac_tile_1);
-        params->setDimensionInfo(18, mac_tile_2);
-        params->setDimensionInfo(22, mac_tile_2);
-        params->setDimensionInfo(24, mac_tile_2);
+        params->setDimensionInfo(tagA, macTileA);
+        params->setDimensionInfo(tagB, macTileB);
+        params->setDimensionInfo(tagC, macTileC);
 
         auto postParams = std::make_shared<CommandParameters>();
         postParams->setManualWavefrontCount({2u, 2u});
@@ -487,5 +479,4 @@ namespace MatrixMultiplyTest
     {
         matrixMultiplyABC<Half>(m_context, 32, 32, 8, 1, 2.e-5);
     }
-
 }

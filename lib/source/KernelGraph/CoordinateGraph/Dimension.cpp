@@ -12,6 +12,20 @@ namespace rocRoller
 
         BaseDimension::BaseDimension() noexcept = default;
 
+        BaseDimension::BaseDimension(int commandTag)
+            : commandTag(commandTag)
+        {
+        }
+
+        BaseDimension::BaseDimension(int                       commandTag,
+                                     Expression::ExpressionPtr size,
+                                     Expression::ExpressionPtr stride)
+            : size(size)
+            , stride(stride)
+            , commandTag(commandTag)
+        {
+        }
+
         BaseDimension::BaseDimension(Expression::ExpressionPtr size,
                                      Expression::ExpressionPtr stride)
             : size(size)
@@ -89,8 +103,14 @@ namespace rocRoller
         {
         }
 
-        User::User(std::string const& name, Expression::ExpressionPtr size)
-            : BaseDimension(size, Expression::literal(1u), Expression::literal(0u))
+        User::User(int commandTag, std::string const& name)
+            : BaseDimension(commandTag)
+            , argumentName(name)
+        {
+        }
+
+        User::User(int commandTag, std::string const& name, Expression::ExpressionPtr size)
+            : BaseDimension(commandTag, size, Expression::literal(1u))
             , argumentName(name)
         {
         }
@@ -126,8 +146,13 @@ namespace rocRoller
 
         MacroTile::MacroTile() = default;
 
-        MacroTile::MacroTile(int const rank)
-            : BaseDimension()
+        MacroTile::MacroTile(int commandTag)
+            : BaseDimension(commandTag)
+        {
+        }
+
+        MacroTile::MacroTile(int commandTag, int rank)
+            : BaseDimension(commandTag)
             , rank(rank)
         {
         }

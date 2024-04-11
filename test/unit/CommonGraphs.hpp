@@ -24,14 +24,14 @@ namespace rocRollerTest
 
         /**
          * @brief Graph for linear: alpha x + beta y.
-     *
-     * Creates a command graph that is essentially:
-     * - LoadScalar(alpha)
-     * - LoadScalar(beta)
-     * - LoadLinear(x)
-     * - LoadLinear(y)
-     * - Assign(z = alpha x + beta y)
-     * - StoreLinear(z)
+         *
+         * Creates a command graph that is essentially:
+         * - LoadScalar(alpha)
+         * - LoadScalar(beta)
+         * - LoadLinear(x)
+         * - LoadLinear(y)
+         * - Assign(z = alpha x + beta y)
+         * - StoreLinear(z)
          */
         template <typename T>
         class VectorAdd
@@ -60,13 +60,13 @@ namespace rocRollerTest
 
         /**
          * @brief Graph for linear: - (x + y) * (x + y).
-     *
-     * Creates a command graph that is essentially:
-     * - LoadLinear(x)
-     * - LoadLinear(y)
-     * - Assign(w = x + y)
-     * - Assign(z = - w * w)
-     * - StoreLinear(z)
+         *
+         * Creates a command graph that is essentially:
+         * - LoadLinear(x)
+         * - LoadLinear(y)
+         * - Assign(w = x + y)
+         * - Assign(z = - w * w)
+         * - StoreLinear(z)
          */
         template <typename T>
         class VectorAddNegSquare
@@ -87,13 +87,13 @@ namespace rocRollerTest
 
         /**
          * @brief Graph for tiled: A B.
-     *
-     * Creates a command graph that is essentially:
-     * - LoadTiled(A)
-     * - LoadTiled(B)
-     * - Assign(D = TensorContraction(A, B))
-     * - StoreTiled(D)
-     */
+         *
+         * Creates a command graph that is essentially:
+         * - LoadTiled(A)
+         * - LoadTiled(B)
+         * - Assign(D = TensorContraction(A, B))
+         * - StoreTiled(D)
+         */
         template <typename T>
         class MatrixMultiply
         {
@@ -110,18 +110,18 @@ namespace rocRollerTest
         };
 
         /**
-     * @brief Graph for GEMM: alpha A B + beta C
-     *
-     * Creates a command graph that is essentially:
-     * - LoadScalar(alpha)
-     * - LoadScalar(beta)
-     * - LoadTiled(A)
-     * - LoadTiled(B)
-     * - LoadTiled(C)
-     * - Assign(AB = TensorContraction(A, B))
-     * - Assign(D = alpha * AB + beta * C)
-     * - StoreTiled(D)
-     */
+         * @brief Graph for GEMM: alpha A B + beta C
+         *
+         * Creates a command graph that is essentially:
+         * - LoadScalar(alpha)
+         * - LoadScalar(beta)
+         * - LoadTiled(A)
+         * - LoadTiled(B)
+         * - LoadTiled(C)
+         * - Assign(AB = TensorContraction(A, B))
+         * - Assign(D = alpha * AB + beta * C)
+         * - StoreTiled(D)
+         */
         template <typename T>
         class GEMM
         {
@@ -144,18 +144,20 @@ namespace rocRollerTest
             int  m_waveM, m_waveN, m_waveK, m_waveB;
             bool m_useLDSA = false, m_useLDSB = false, m_useLDSD = false;
 
+            int m_tagA, m_tagB, m_tagC, m_tagD;
+
             CommandPtr m_command;
         };
 
         /**
-     * @brief Graph for tiled: (x + x) + (y + y).
-     *
-     * Creates a command graph that is essentially:
-     * - LoadTiled(x)
-     * - LoadTiled(y)
-     * - Assign(z = (x + x) + (y + y))
-     * - StoreTiled(z)
-     */
+         * @brief Graph for tiled: (x + x) + (y + y).
+         *
+         * Creates a command graph that is essentially:
+         * - LoadTiled(x)
+         * - LoadTiled(y)
+         * - Assign(z = (x + x) + (y + y))
+         * - StoreTiled(z)
+         */
         template <typename T>
         class TileDoubleAdd
         {
@@ -180,16 +182,18 @@ namespace rocRollerTest
             int m_macM, m_macN;
             int m_thrM, m_thrN;
 
+            int m_tagA, m_tagB, m_tagD;
+
             CommandPtr m_command;
         };
 
         /**
-     * @brief Graph for tiled: x.
-     *
-     * Creates a command graph that is essentially:
-     * - LoadTiled(x)
-     * - StoreTiled(x)
-     */
+         * @brief Graph for tiled: x.
+         *
+         * Creates a command graph that is essentially:
+         * - LoadTiled(x)
+         * - StoreTiled(x)
+         */
         template <typename T>
         class TileCopy
         {
@@ -212,6 +216,7 @@ namespace rocRollerTest
         private:
             void createCommand();
 
+            int m_tag;
             int m_macM, m_macN;
             int m_thrM, m_thrN;
 

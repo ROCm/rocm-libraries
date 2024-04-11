@@ -213,21 +213,21 @@ namespace rocRoller
                 return d;
             }
 
-            Operation visitOperation(Assign const& op)
+            Operation visitOperation(int tag, Assign const& op)
             {
                 auto cleanOp       = op;
                 cleanOp.expression = cleanExpr(op.expression);
                 return cleanOp;
             }
 
-            Operation visitOperation(ConditionalOp const& op)
+            Operation visitOperation(int tag, ConditionalOp const& op)
             {
                 auto cleanOp      = op;
                 cleanOp.condition = cleanExpr(op.condition);
                 return cleanOp;
             }
 
-            Operation visitOperation(ForLoopOp const& op)
+            Operation visitOperation(int tag, ForLoopOp const& op)
             {
                 auto cleanOp      = op;
                 cleanOp.condition = cleanExpr(op.condition);
@@ -235,7 +235,7 @@ namespace rocRoller
             }
 
             template <COperation T>
-            Operation visitOperation(T const& op)
+            Operation visitOperation(int tag, T const& op)
             {
                 return op;
             }

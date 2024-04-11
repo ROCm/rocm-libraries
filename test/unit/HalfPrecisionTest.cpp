@@ -555,15 +555,15 @@ namespace rocRollerTest
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
 
-        auto mac_tile
+        auto macTileVGPR
             = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_lds
+        auto macTileLDS
             = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::LDS, {t_m, t_n});
-        params->setDimensionInfo(4, mac_tile_lds);
-        params->setDimensionInfo(11, mac_tile);
-        params->setDimensionInfo(15, mac_tile);
-        params->setDimensionInfo(17, mac_tile);
-        params->setDimensionInfo(19, mac_tile);
+
+        params->setDimensionInfo(tagA, macTileLDS);
+        params->setDimensionInfo(tagB, macTileVGPR);
+        // TODO Fix MemoryType promotion (LDS)
+        params->setDimensionInfo(tagD, macTileVGPR);
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         params->setManualWorkitemCount({NX, NY, NZ});

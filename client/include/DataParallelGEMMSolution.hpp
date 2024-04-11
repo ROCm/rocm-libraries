@@ -15,6 +15,8 @@ namespace rocRoller
             template <typename A, typename B, typename C, typename D>
             class DataParallelGEMMSolution : public GEMMSolution<A, B, C, D>
             {
+                int m_tagA, m_tagB, m_tagC, m_tagD;
+
             public:
                 DataParallelGEMMSolution(SolutionParameters const& solutionParams)
                     : GEMMSolution<A, B, C, D>(solutionParams.problemParams)
@@ -81,28 +83,30 @@ namespace rocRoller
                     bool no_beta = m_solutionParams.problemParams.beta == 0.0
                                    && m_solutionParams.problemParams.alpha == 1.0;
 
-                    auto tagA       = command->allocateTag();
-                    auto tagB       = command->allocateTag();
-                    auto tagC       = command->allocateTag();
+                    m_tagA          = command->allocateTag();
+                    m_tagB          = command->allocateTag();
+                    m_tagC          = command->allocateTag();
                     auto tagAB      = command->allocateTag();
                     auto tagAlpha   = command->allocateTag();
                     auto tagBeta    = command->allocateTag();
                     auto tagBetaC   = command->allocateTag();
                     auto tagAlphaAB = command->allocateTag();
-                    auto tagD       = command->allocateTag();
+                    m_tagD          = command->allocateTag();
 
                     //TODO: Handle transposed matrices more elegantly
                     switch(m_solutionParams.problemParams.transA)
                     {
                     case TransposeType::T:
-                        command->addOperation(
-                            std::make_shared<Operations::Operation>(Operations::T_Load_Tiled(
-                                TypeInfo<A>::Var.dataType, 2, tagA, {(size_t)0, (size_t)1}))); // AT
+                        command->addOperation(std::make_shared<Operations::Operation>(
+                            Operations::T_Load_Tiled(TypeInfo<A>::Var.dataType,
+                                                     2,
+                                                     m_tagA,
+                                                     {(size_t)0, (size_t)1}))); // AT
                         break;
                     case TransposeType::N:
                         command->addOperation(
                             std::make_shared<Operations::Operation>(Operations::T_Load_Tiled(
-                                TypeInfo<A>::Var.dataType, 2, tagA, {(size_t)1}))); // AN
+                                TypeInfo<A>::Var.dataType, 2, m_tagA, {(size_t)1}))); // AN
                         break;
                     default:
                         Throw<FatalError>("Bad transpose option");
@@ -112,15 +116,17 @@ namespace rocRoller
                     switch(m_solutionParams.problemParams.transB)
                     {
                     case TransposeType::T:
-                        command->addOperation(
-                            std::make_shared<Operations::Operation>(Operations::T_Load_Tiled(
-                                TypeInfo<B>::Var.dataType, 2, tagB, {(size_t)0, (size_t)1}))); // BT
+                        command->addOperation(std::make_shared<Operations::Operation>(
+                            Operations::T_Load_Tiled(TypeInfo<B>::Var.dataType,
+                                                     2,
+                                                     m_tagB,
+                                                     {(size_t)0, (size_t)1}))); // BT
                         break;
                     case TransposeType::N:
                         command->addOperation(std::make_shared<Operations::Operation>(
                             Operations::T_Load_Tiled(TypeInfo<B>::Var.dataType,
                                                      2,
-                                                     tagB,
+                                                     m_tagB,
                                                      {
                                                          (size_t)1,
                                                      }))); // BN
@@ -133,7 +139,8 @@ namespace rocRoller
                     {
                         command->addOperation(
                             std::make_shared<Operations::Operation>(Operations::T_Load_Tiled(
-                                TypeInfo<C>::Var.dataType, 2, tagC, {(size_t)1}))); // C
+                                TypeInfo<C>::Var.dataType, 2, m_tagC, {(size_t)1}))); // C
+
                         command->addOperation(std::make_shared<Operations::Operation>(
                             Operations::T_Load_Scalar(DataType::Float,
                                                       tagAlpha))); // alpha
@@ -142,36 +149,37 @@ namespace rocRoller
                                                       tagBeta))); // beta
 
                         command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Mul(tagAB, tagA, tagB))); // A * B
+                            Operations::T_Mul(tagAB, m_tagA, m_tagB))); // A * B
 
                         Operations::T_Execute execute;
                         execute.addXOp(std::make_shared<Operations::XOp>(
-                            Operations::E_Mul(tagBetaC, tagBeta, tagC))); // beta * C
+                            Operations::E_Mul(tagBetaC, tagBeta, m_tagC))); // beta * C
+
                         execute.addXOp(std::make_shared<Operations::XOp>(
                             Operations::E_Mul(tagAlphaAB, tagAlpha, tagAB))); // alpha * (A * B)
                         if(m_solutionParams.betaInFma)
                         {
                             execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(
-                                tagD, tagBetaC, tagAlphaAB))); // beta * C + alpha * (A * B)
+                                m_tagD, tagBetaC, tagAlphaAB))); // beta * C + alpha * (A * B)
                         }
                         else
                         {
                             execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(
-                                tagD, tagAlphaAB, tagBetaC))); // alpha * (A * B) + beta * C
+                                m_tagD, tagAlphaAB, tagBetaC))); // alpha * (A * B) + beta * C
                         }
                         command->addOperation(std::make_shared<Operations::Operation>(execute));
 
                         command->addOperation(
                             std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
-                                TypeInfo<D>::Var.dataType, 2, tagD, {(size_t)1}))); // D
+                                TypeInfo<D>::Var.dataType, 2, m_tagD, {(size_t)1}))); // D
                     }
                     else
                     {
                         command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Mul(tagD, tagA, tagB))); // A * B
+                            Operations::T_Mul(m_tagD, m_tagA, m_tagB))); // A * B
                         command->addOperation(
                             std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
-                                TypeInfo<D>::Var.dataType, 2, tagD, {(size_t)1}))); // D
+                                TypeInfo<D>::Var.dataType, 2, m_tagD, {(size_t)1}))); // D
                     }
 
                     return command;
@@ -272,41 +280,33 @@ namespace rocRoller
                     params->setWaveTilesPerWavefront(wavetile_per_wavefront_m,
                                                      wavetile_per_wavefront_n);
 
-                    auto mac_tile_A = KernelGraph::CoordinateGraph::MacroTile(
+                    auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {m_solutionParams.macM, m_solutionParams.macK},
                         LayoutType::MATRIX_A,
                         {wave_m, wave_n, wave_k, wave_b},
                         m_solutionParams.loadLDSA ? MemoryType::LDS : MemoryType::WAVE);
-                    auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile(
+                    auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
                         {m_solutionParams.macK, m_solutionParams.macN},
                         LayoutType::MATRIX_B,
                         {wave_m, wave_n, wave_k, wave_b},
                         m_solutionParams.loadLDSB ? MemoryType::LDS : MemoryType::WAVE);
-                    auto mac_tile_C = KernelGraph::CoordinateGraph::MacroTile(
+                    auto macTileC = KernelGraph::CoordinateGraph::MacroTile(
                         {m_solutionParams.macM, m_solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b});
-                    auto mac_tile_D = KernelGraph::CoordinateGraph::MacroTile(
+                    auto macTileD = KernelGraph::CoordinateGraph::MacroTile(
                         {m_solutionParams.macM, m_solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
                         {wave_m, wave_n, wave_k, wave_b},
                         m_solutionParams.storeLDSD ? MemoryType::JAMMED_WAVE_LDS
                                                    : MemoryType::WAVE);
 
-                    params->setDimensionInfo(4, mac_tile_A);
-                    params->setDimensionInfo(11, mac_tile_B);
+                    params->setDimensionInfo(m_tagA, macTileA);
+                    params->setDimensionInfo(m_tagB, macTileB);
                     if(!no_beta)
-                    {
-                        params->setDimensionInfo(18, mac_tile_C);
-                        params->setDimensionInfo(28, mac_tile_C);
-                        params->setDimensionInfo(30, mac_tile_C);
-                        params->setDimensionInfo(32, mac_tile_C);
-                        params->setDimensionInfo(34, mac_tile_D);
-                    }
-                    else
-                    {
-                        params->setDimensionInfo(15, mac_tile_D);
-                    }
+                        params->setDimensionInfo(m_tagC, macTileC);
+                    // TODO Fix MemoryType promotion (JAMMED_WAVE_LDS)
+                    params->setDimensionInfo(m_tagD, macTileD);
 
                     uint workgroup_size_x
                         = m_solutionParams.workgroupSizeX * m_solutionParams.workgroupSizeY;
