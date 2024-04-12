@@ -463,24 +463,24 @@ namespace rocRoller
             auto coords = gi.coords();
 
             int loadA  = gi.findLoadTile(0);
-            int loadB  = gi.findLoadTile(1);
-            int loadC  = gi.findLoadTile(2);
-            int storeD = gi.findStoreTile(8);
+            int loadB  = gi.findLoadTile(2);
+            int loadC  = gi.findLoadTile(4);
+            int storeD = gi.findStoreTile(14);
 
             int ldsA = findLDSNode(coords, loadA, Graph::Direction::Downstream);
             int ldsB = findLDSNode(coords, loadB, Graph::Direction::Downstream);
 
-            writeMacrotileByWorkitem(vfile, gi, loadA, "Load_Tiled_0", "A");
-            writeMacrotileByWorkitem(vfile, gi, loadB, "Load_Tiled_1", "B");
+            writeMacrotileByWorkitem(vfile, gi, loadA, "Tensor_0", "A");
+            writeMacrotileByWorkitem(vfile, gi, loadB, "Tensor_2", "B");
 
             writeLDSByWorkitem(vfile, gi, ldsA, "A");
             writeLDSByWorkitem(vfile, gi, ldsB, "B");
 
-            writeKIterByWorkitem(vfile, gi, loadA, 0, "Load_Tiled_0", "A");
-            writeKIterByWorkitem(vfile, gi, loadB, 1, "Load_Tiled_1", "B");
+            writeKIterByWorkitem(vfile, gi, loadA, 0, "Tensor_0", "A");
+            writeKIterByWorkitem(vfile, gi, loadB, 1, "Tensor_2", "B");
 
-            writeMatByKIter(vfile, gi, loadA, 0, "Load_Tiled_0", "A");
-            writeMatByKIter(vfile, gi, loadB, 1, "Load_Tiled_1", "B");
+            writeMatByKIter(vfile, gi, loadA, 0, "Tensor_0", "A");
+            writeMatByKIter(vfile, gi, loadB, 1, "Tensor_2", "B");
 
             auto cElemNodes = findElementNumberNodes(coords, loadC, Graph::Direction::Downstream);
             auto dElemNodes = findElementNumberNodes(coords, storeD, Graph::Direction::Upstream);

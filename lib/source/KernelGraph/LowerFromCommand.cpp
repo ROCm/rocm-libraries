@@ -16,6 +16,7 @@ namespace rocRoller
         namespace Expression = rocRoller::Expression;
         using namespace CoordinateGraph;
         using namespace ControlGraph;
+        using namespace ControlGraph;
 
         /**
          * @brief Promote inputs to an appropriate output.
@@ -101,15 +102,16 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Linear const& tload)
             {
-                auto sizes   = tload.sizes();
-                auto strides = tload.strides();
+                auto tensor  = m_command->getOperation<Operations::Tensor>(tload.getTensorTag());
+                auto sizes   = tensor.sizes();
+                auto strides = tensor.strides();
 
                 auto totalSizeExpr = std::make_shared<Expression::Expression>(sizes[0]);
 
                 auto user = m_graph.coordinates.addElement(
                     User(tload.getTag(),
-                         tload.data()->name(),
-                         std::make_shared<Expression::Expression>(tload.limit())));
+                         tensor.data()->name(),
+                         std::make_shared<Expression::Expression>(tensor.limit())));
 
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
@@ -132,9 +134,7 @@ namespace rocRoller
                 m_graph.coordinates.addElement(Flatten(), dims, std::vector<int>{linear});
                 m_graph.coordinates.addElement(DataFlow(), {user}, {linear});
 
-                Operations::VariableTypeVisitor variableTypeVisitor;
-                auto vtype = variableTypeVisitor.call(*m_command->findTag(tload.getTag()));
-                auto load  = m_graph.control.addElement(LoadLinear(vtype));
+                auto load = m_graph.control.addElement(LoadLinear(tensor.dataType()));
                 m_graph.control.addElement(Body(), {m_kernel}, {load});
 
                 m_graph.mapper.connect<User>(load, user);
@@ -155,13 +155,16 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Scalar const& tload)
             {
+                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Load_Scalar");
+
+                auto scalar = m_command->getOperation<Operations::Scalar>(tload.getScalarTag());
                 auto user
-                    = m_graph.coordinates.addElement(User(tload.getTag(), tload.data()->name()));
+                    = m_graph.coordinates.addElement(User(tload.getTag(), scalar.data()->name()));
                 auto vgpr = m_graph.coordinates.addElement(VGPR(tload.getTag()));
 
                 m_graph.coordinates.addElement(DataFlow(), {user}, {vgpr});
 
-                auto load = m_graph.control.addElement(LoadVGPR(tload.variableType(), true));
+                auto load = m_graph.control.addElement(LoadVGPR(scalar.variableType(), true));
                 m_graph.control.addElement(Body(), {m_kernel}, {load});
 
                 m_graph.mapper.connect<User>(load, user);
@@ -204,24 +207,25 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
 
-                auto const tag             = tload.getTag();
-                auto const sizes           = tload.sizes();
-                auto const strides         = tload.strides();
-                auto const literal_strides = tload.literalStrides();
+                auto tensor = m_command->getOperation<Operations::Tensor>(tload.getTensorTag());
+
+                auto const sizes          = tensor.sizes();
+                auto const strides        = tensor.strides();
+                auto const literalStrides = tensor.literalStrides();
 
                 auto user = m_graph.coordinates.addElement(
                     User(tload.getTag(),
-                         tload.data()->name(),
-                         std::make_shared<Expression::Expression>(tload.limit())));
+                         tensor.data()->name(),
+                         std::make_shared<Expression::Expression>(tensor.limit())));
 
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
                     auto sizeExpr = std::make_shared<Expression::Expression>(sizes[i]);
                     std::shared_ptr<Expression::Expression> strideExpr;
-                    if(literal_strides.size() > i && literal_strides[i] > 0)
+                    if(literalStrides.size() > i && literalStrides[i] > 0)
                     {
-                        strideExpr = std::make_shared<Expression::Expression>(literal_strides[i]);
+                        strideExpr = std::make_shared<Expression::Expression>(literalStrides[i]);
                     }
                     else
                     {
@@ -240,7 +244,7 @@ namespace rocRoller
                 m_graph.coordinates.addElement(ConstructMacroTile(), dims, std::vector<int>{tiled});
                 m_graph.coordinates.addElement(DataFlow(), {user}, {tiled});
 
-                auto load = m_graph.control.addElement(LoadTiled(tload.variableType()));
+                auto load = m_graph.control.addElement(LoadTiled(tensor.variableType()));
                 m_graph.control.addElement(Body(), {m_kernel}, {load});
 
                 m_graph.mapper.connect<User>(load, user);
@@ -272,8 +276,10 @@ namespace rocRoller
                             "Unknown command tag",
                             ShowValue(tstore.getTag()));
 
+                auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getTensorTag());
+
                 std::vector<int> dims;
-                auto             strides = tstore.strides();
+                auto             strides = tensor.strides();
                 for(size_t i = 0; i < strides.size(); ++i)
                 {
                     auto strideExpr = std::make_shared<Expression::Expression>(strides[i]);
@@ -284,8 +290,8 @@ namespace rocRoller
                 auto linear = m_dim.at(tstore.getTag());
                 auto user   = m_graph.coordinates.addElement(
                     User(tstore.getTag(),
-                         tstore.data()->name(),
-                         std::make_shared<Expression::Expression>(tstore.limit())));
+                         tensor.data()->name(),
+                         std::make_shared<Expression::Expression>(tensor.limit())));
 
                 m_graph.coordinates.addElement(Split(), std::vector<int>{linear}, dims);
                 m_graph.coordinates.addElement(Join(), dims, std::vector<int>{user});
@@ -315,9 +321,11 @@ namespace rocRoller
                             "Unknown command tag",
                             ShowValue(tstore.getTag()));
 
+                auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getTensorTag());
+
                 std::vector<int> dims;
-                auto const       strides        = tstore.strides();
-                auto const       literalStrides = tstore.literalStrides();
+                auto const       strides        = tensor.strides();
+                auto const       literalStrides = tensor.literalStrides();
                 for(size_t i = 0; i < strides.size(); ++i)
                 {
                     std::shared_ptr<Expression::Expression> strideExpr;
@@ -337,14 +345,14 @@ namespace rocRoller
                 auto tile = m_dim.at(tstore.getTag());
                 auto user = m_graph.coordinates.addElement(
                     User(tstore.getTag(),
-                         tstore.data()->name(),
-                         std::make_shared<Expression::Expression>(tstore.limit())));
+                         tensor.data()->name(),
+                         std::make_shared<Expression::Expression>(tensor.limit())));
 
                 m_graph.coordinates.addElement(DestructMacroTile(), std::vector<int>{tile}, dims);
                 m_graph.coordinates.addElement(Join(), dims, std::vector<int>{user});
                 m_graph.coordinates.addElement(DataFlow(), {tile}, {user});
 
-                auto store = m_graph.control.addElement(StoreTiled(tstore.dataType()));
+                auto store = m_graph.control.addElement(StoreTiled(tensor.dataType()));
                 auto last  = m_op.at(tstore.getTag());
                 m_graph.control.addElement(Sequence(), {last}, {store});
 
@@ -362,6 +370,8 @@ namespace rocRoller
              */
             void operator()(Operations::T_Execute const& exec)
             {
+                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Execute");
+
                 for(auto const& xop : exec.getXOps())
                 {
                     auto sinputs = std::visit(
@@ -502,13 +512,13 @@ namespace rocRoller
                 auto A = m_dim.at(mul.a);
                 auto B = m_dim.at(mul.b);
                 auto D = m_graph.coordinates.addElement(MacroTile());
-                m_dim.insert_or_assign(mul.dest, D);
+                m_dim.insert_or_assign(mul.getTag(), D);
 
                 m_graph.coordinates.addElement(DataFlow(), {A, B}, {D});
 
                 // contraction dims are {1} and {0}, which is matrix multiplication
                 auto TC = m_graph.control.addElement(TensorContraction({1}, {0}));
-                m_op.insert_or_assign(mul.dest, TC);
+                m_op.insert_or_assign(mul.getTag(), TC);
 
                 auto loadA = m_op.at(mul.a);
                 auto loadB = m_op.at(mul.b);

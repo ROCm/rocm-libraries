@@ -83,103 +83,108 @@ namespace rocRoller
                     bool no_beta = m_solutionParams.problemParams.beta == 0.0
                                    && m_solutionParams.problemParams.alpha == 1.0;
 
-                    m_tagA          = command->allocateTag();
-                    m_tagB          = command->allocateTag();
-                    m_tagC          = command->allocateTag();
-                    auto tagAB      = command->allocateTag();
-                    auto tagAlpha   = command->allocateTag();
-                    auto tagBeta    = command->allocateTag();
-                    auto tagBetaC   = command->allocateTag();
-                    auto tagAlphaAB = command->allocateTag();
-                    m_tagD          = command->allocateTag();
-
+                    auto tagTensorA = command->allocateTag();
                     //TODO: Handle transposed matrices more elegantly
                     switch(m_solutionParams.problemParams.transA)
                     {
                     case TransposeType::T:
-                        command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Load_Tiled(TypeInfo<A>::Var.dataType,
-                                                     2,
-                                                     m_tagA,
-                                                     {(size_t)0, (size_t)1}))); // AT
+                        command->addOperation(Operations::Tensor(tagTensorA,
+                                                                 2,
+                                                                 TypeInfo<A>::Var.dataType,
+                                                                 {(size_t)0, (size_t)1})); // AT
                         break;
                     case TransposeType::N:
-                        command->addOperation(
-                            std::make_shared<Operations::Operation>(Operations::T_Load_Tiled(
-                                TypeInfo<A>::Var.dataType, 2, m_tagA, {(size_t)1}))); // AN
+                        command->addOperation(Operations::Tensor(
+                            tagTensorA, 2, TypeInfo<A>::Var.dataType, {(size_t)1})); // AN
                         break;
                     default:
                         Throw<FatalError>("Bad transpose option");
                     }
+                    m_tagA = command->allocateTag();
+                    command->addOperation(Operations::T_Load_Tiled(m_tagA, tagTensorA));
 
+                    auto tagTensorB = command->allocateTag();
                     //TODO: Handle transposed matrices more elegantly
                     switch(m_solutionParams.problemParams.transB)
                     {
                     case TransposeType::T:
-                        command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Load_Tiled(TypeInfo<B>::Var.dataType,
-                                                     2,
-                                                     m_tagB,
-                                                     {(size_t)0, (size_t)1}))); // BT
+                        command->addOperation(Operations::Tensor(tagTensorB,
+                                                                 2,
+                                                                 TypeInfo<B>::Var.dataType,
+                                                                 {(size_t)0, (size_t)1})); // BT
                         break;
                     case TransposeType::N:
-                        command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Load_Tiled(TypeInfo<B>::Var.dataType,
-                                                     2,
-                                                     m_tagB,
-                                                     {
-                                                         (size_t)1,
-                                                     }))); // BN
+                        command->addOperation(Operations::Tensor(tagTensorB,
+                                                                 2,
+                                                                 TypeInfo<B>::Var.dataType,
+                                                                 {
+                                                                     (size_t)1,
+                                                                 })); // BN
                         break;
                     default:
                         Throw<FatalError>("Bad transpose option");
                     }
+                    m_tagB = command->allocateTag();
+                    command->addOperation(Operations::T_Load_Tiled(m_tagB, tagTensorB));
 
                     if(!no_beta)
                     {
+                        auto tagTensorC = command->allocateTag();
+                        command->addOperation(Operations::Tensor(
+                            tagTensorC, 2, TypeInfo<C>::Var.dataType, {(size_t)1})); // C
+                        m_tagC = command->allocateTag();
+                        command->addOperation(Operations::T_Load_Tiled(m_tagC, tagTensorC));
+
+                        auto tagScalarAlpha = command->allocateTag();
                         command->addOperation(
-                            std::make_shared<Operations::Operation>(Operations::T_Load_Tiled(
-                                TypeInfo<C>::Var.dataType, 2, m_tagC, {(size_t)1}))); // C
+                            Operations::Scalar(tagScalarAlpha, DataType::Float)); // alpha
+                        auto tagLoadAlpha = command->allocateTag();
+                        command->addOperation(
+                            Operations::T_Load_Scalar(tagLoadAlpha, tagScalarAlpha));
 
-                        command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Load_Scalar(DataType::Float,
-                                                      tagAlpha))); // alpha
-                        command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Load_Scalar(DataType::Float,
-                                                      tagBeta))); // beta
+                        auto tagScalarBeta = command->allocateTag();
+                        command->addOperation(
+                            Operations::Scalar(tagScalarBeta, DataType::Float)); // beta
+                        auto tagLoadBeta = command->allocateTag();
+                        command->addOperation(
+                            Operations::T_Load_Scalar(tagLoadBeta, tagScalarBeta));
 
-                        command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Mul(tagAB, m_tagA, m_tagB))); // A * B
+                        auto tagAB = command->allocateTag();
+                        command->addOperation(Operations::T_Mul(tagAB, m_tagA, m_tagB)); // A * B
 
                         Operations::T_Execute execute;
-                        execute.addXOp(std::make_shared<Operations::XOp>(
-                            Operations::E_Mul(tagBetaC, tagBeta, m_tagC))); // beta * C
-
-                        execute.addXOp(std::make_shared<Operations::XOp>(
-                            Operations::E_Mul(tagAlphaAB, tagAlpha, tagAB))); // alpha * (A * B)
+                        auto                  tagBetaC = command->allocateTag();
+                        execute.addXOp(
+                            Operations::E_Mul(tagBetaC, tagLoadBeta, m_tagC)); // beta * C
+                        auto tagAlphaAB = command->allocateTag();
+                        execute.addXOp(
+                            Operations::E_Mul(tagAlphaAB, tagLoadAlpha, tagAB)); // alpha * (A * B)
+                        m_tagD = command->allocateTag();
                         if(m_solutionParams.betaInFma)
                         {
-                            execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(
-                                m_tagD, tagBetaC, tagAlphaAB))); // beta * C + alpha * (A * B)
+                            execute.addXOp(Operations::E_Add(
+                                m_tagD, tagBetaC, tagAlphaAB)); // beta * C + alpha * (A * B)
                         }
                         else
                         {
-                            execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(
-                                m_tagD, tagAlphaAB, tagBetaC))); // alpha * (A * B) + beta * C
+                            execute.addXOp(Operations::E_Add(
+                                m_tagD, tagAlphaAB, tagBetaC)); // alpha * (A * B) + beta * C
                         }
-                        command->addOperation(std::make_shared<Operations::Operation>(execute));
+                        command->addOperation(std::move(execute));
 
-                        command->addOperation(
-                            std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
-                                TypeInfo<D>::Var.dataType, 2, m_tagD, {(size_t)1}))); // D
+                        auto tagTensorD = command->allocateTag();
+                        command->addOperation(Operations::Tensor(
+                            tagTensorD, 2, TypeInfo<D>::Var.dataType, {(size_t)1})); // D
+                        command->addOperation(Operations::T_Store_Tiled(m_tagD, tagTensorD));
                     }
                     else
                     {
-                        command->addOperation(std::make_shared<Operations::Operation>(
-                            Operations::T_Mul(m_tagD, m_tagA, m_tagB))); // A * B
-                        command->addOperation(
-                            std::make_shared<Operations::Operation>(Operations::T_Store_Tiled(
-                                TypeInfo<D>::Var.dataType, 2, m_tagD, {(size_t)1}))); // D
+                        m_tagD = command->allocateTag();
+                        command->addOperation(Operations::T_Mul(m_tagD, m_tagA, m_tagB)); // A * B
+                        auto tagTensorD = command->allocateTag();
+                        command->addOperation(Operations::Tensor(
+                            tagTensorD, 2, TypeInfo<D>::Var.dataType, {(size_t)1})); // D
+                        command->addOperation(Operations::T_Store_Tiled(m_tagD, tagTensorD));
                     }
 
                     return command;
@@ -421,6 +426,8 @@ namespace rocRoller
                     runtimeArgs.append("d_d_limit",
                                        (size_t)m_solutionParams.problemParams.m
                                            * m_solutionParams.problemParams.n);
+                    runtimeArgs.append("d_d_size_0", (size_t)m_solutionParams.problemParams.m);
+                    runtimeArgs.append("d_d_size_1", (size_t)m_solutionParams.problemParams.n);
                     runtimeArgs.append("d_d_stride_0", (size_t)1);
                     runtimeArgs.append("d_d_stride_1", (size_t)m_solutionParams.problemParams.m);
 

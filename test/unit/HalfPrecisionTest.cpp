@@ -508,28 +508,29 @@ namespace rocRollerTest
         auto command  = std::make_shared<Command>();
         auto dataType = DataType::Half;
 
-        auto tagA  = command->allocateTag();
-        auto tagB  = command->allocateTag();
-        auto tag2A = command->allocateTag();
-        auto tag2B = command->allocateTag();
-        auto tagD  = command->allocateTag();
+        auto tagTensorA = command->allocateTag();
+        command->addOperation(rocRoller::Operations::Tensor(tagTensorA, 2, dataType)); // A
+        auto tagLoadA = command->allocateTag();
+        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadA, tagTensorA));
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, tagA))); // a
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, tagB))); // b
+        auto tagTensorB = command->allocateTag();
+        command->addOperation(rocRoller::Operations::Tensor(tagTensorB, 2, dataType)); // B
+        auto tagLoadB = command->allocateTag();
+        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadB, tagTensorB));
 
         auto execute = rocRoller::Operations::T_Execute();
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(tag2A, tagA, tagA))); // a + a
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(tag2B, tagB, tagB))); // b + b
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(tagD, tag2A, tag2B))); // 2a + 2b
+        auto tag2A   = command->allocateTag();
+        execute.addXOp(rocRoller::Operations::E_Add(tag2A, tagLoadA, tagLoadA)); // A + A
+        auto tag2B = command->allocateTag();
+        execute.addXOp(rocRoller::Operations::E_Add(tag2B, tagLoadB, tagLoadB)); // B + B
+        auto tagC = command->allocateTag();
+        execute.addXOp(rocRoller::Operations::E_Add(tagC, tag2A, tag2B)); // C = 2A + 2B
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(dataType, 2, tagD))); // c
+        command->addOperation(std::move(execute));
+
+        auto tagTensorC = command->allocateTag();
+        command->addOperation(rocRoller::Operations::Tensor(tagTensorC, 2, dataType));
+        command->addOperation(rocRoller::Operations::T_Store_Tiled(tagC, tagTensorC));
 
         KernelArguments runtimeArgs;
 
@@ -549,6 +550,8 @@ namespace rocRollerTest
 
         runtimeArgs.append("user2", d_c.get());
         runtimeArgs.append("d_c_limit", (size_t)nx * ny);
+        runtimeArgs.append("d_c_size_0", (size_t)nx);
+        runtimeArgs.append("d_c_size_1", (size_t)ny);
         runtimeArgs.append("d_c_stride_0", (size_t)(ny));
         runtimeArgs.append("d_c_stride_1", (size_t)(1));
 
@@ -560,10 +563,10 @@ namespace rocRollerTest
         auto macTileLDS
             = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::LDS, {t_m, t_n});
 
-        params->setDimensionInfo(tagA, macTileLDS);
-        params->setDimensionInfo(tagB, macTileVGPR);
+        params->setDimensionInfo(tagLoadA, macTileLDS);
+        params->setDimensionInfo(tagLoadB, macTileVGPR);
         // TODO Fix MemoryType promotion (LDS)
-        params->setDimensionInfo(tagD, macTileVGPR);
+        params->setDimensionInfo(tagC, macTileVGPR);
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         params->setManualWorkitemCount({NX, NY, NZ});

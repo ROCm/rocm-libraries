@@ -125,54 +125,67 @@ namespace GEMMDriverTest
                                                   ? std::vector<size_t>({(size_t)0, (size_t)1})
                                                   : std::vector<size_t>({});
 
-            auto tagA       = command->allocateTag();
-            auto tagB       = command->allocateTag();
-            auto tagC       = command->allocateTag();
-            auto tagAlpha   = command->allocateTag();
-            auto tagBeta    = command->allocateTag();
-            auto tagAB      = command->allocateTag();
-            auto tagBetaC   = command->allocateTag();
-            auto tagAlphaAB = command->allocateTag();
-            auto tagD       = command->allocateTag();
+            auto tagTensorA = command->allocateTag();
+            command->addOperation(rocRoller::Operations::Tensor(
+                tagTensorA, 2, dataType, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
+            auto tagLoadA = command->allocateTag();
+            command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadA, tagTensorA));
 
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Tiled(
-                    dataType, 2, tagA, gemm.transA == "N" ? oneStridesN : oneStridesT))); // A
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Tiled(
-                    dataType, 2, tagB, gemm.transB == "N" ? oneStridesN : oneStridesT))); // B
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Tiled(dataType, 2, tagC, oneStridesN))); // C
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Scalar(DataType::Float, tagAlpha))); // alpha
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Scalar(DataType::Float, tagBeta))); // beta
+            auto tagTensorB = command->allocateTag();
+            command->addOperation(rocRoller::Operations::Tensor(
+                tagTensorB, 2, dataType, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
+            auto tagLoadB = command->allocateTag();
+            command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadB, tagTensorB));
 
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Mul(tagAB, tagA, tagB))); // A * B
+            auto tagTensorC = command->allocateTag();
+            command->addOperation(
+                rocRoller::Operations::Tensor(tagTensorC, 2, dataType, oneStridesN)); // C
+            auto tagLoadC = command->allocateTag();
+            command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadC, tagTensorC));
 
+            auto tagScalarAlpha = command->allocateTag();
+            command->addOperation(
+                rocRoller::Operations::Scalar(tagScalarAlpha, DataType::Float)); // alpha
+            auto tagLoadAlpha = command->allocateTag();
+            command->addOperation(
+                rocRoller::Operations::T_Load_Scalar(tagLoadAlpha, tagScalarAlpha));
+
+            auto tagScalarBeta = command->allocateTag();
+            command->addOperation(
+                rocRoller::Operations::Scalar(tagScalarBeta, DataType::Float)); // beta
+            auto tagLoadBeta = command->allocateTag();
+            command->addOperation(rocRoller::Operations::T_Load_Scalar(tagLoadBeta, tagScalarBeta));
+
+            auto tagAB = command->allocateTag();
+            command->addOperation(rocRoller::Operations::T_Mul(tagAB, tagLoadA, tagLoadB)); // A * B
+
+            auto                             tagBetaC = command->allocateTag();
             rocRoller::Operations::T_Execute execute;
-            execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-                rocRoller::Operations::E_Mul(tagBetaC, tagBeta, tagC))); // beta * C
-            execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-                rocRoller::Operations::E_Mul(tagAlphaAB, tagAlpha, tagAB))); // alpha * (A * B)
+            execute.addXOp(
+                rocRoller::Operations::E_Mul(tagBetaC, tagLoadBeta, tagLoadC)); // beta * C
+
+            auto tagAlphaAB = command->allocateTag();
+            execute.addXOp(
+                rocRoller::Operations::E_Mul(tagAlphaAB, tagLoadAlpha, tagAB)); // alpha * (A * B)
+
+            auto tagStoreD = command->allocateTag();
             if(gemm.betaInFma)
             {
-                execute.addXOp(
-                    std::make_shared<rocRoller::Operations::XOp>(rocRoller::Operations::E_Add(
-                        tagD, tagBetaC, tagAlphaAB))); // beta * C + alpha * (A * B)
+                execute.addXOp(rocRoller::Operations::E_Add(
+                    tagStoreD, tagBetaC, tagAlphaAB)); // beta * C + alpha * (A * B)
             }
             else
             {
-                execute.addXOp(
-                    std::make_shared<rocRoller::Operations::XOp>(rocRoller::Operations::E_Add(
-                        tagD, tagAlphaAB, tagBetaC))); // alpha * (A * B) + beta * C
+                execute.addXOp(rocRoller::Operations::E_Add(
+                    tagStoreD, tagAlphaAB, tagBetaC)); // alpha * (A * B) + beta * C
             }
 
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Store_Tiled(dataType, 2, tagD, oneStridesN))); // D
+            auto tagTensorD = command->allocateTag();
+            command->addOperation(
+                rocRoller::Operations::Tensor(tagTensorD, 2, dataType, oneStridesN)); // D
+            command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
             KernelArguments runtimeArgs;
 
@@ -219,6 +232,8 @@ namespace GEMMDriverTest
 
             runtimeArgs.append("D", deviceD.get());
             runtimeArgs.append("d_d_limit", (size_t)M * N);
+            runtimeArgs.append("d_d_size_0", (size_t)M);
+            runtimeArgs.append("d_d_size_1", (size_t)N);
             runtimeArgs.append("d_d_stride_0", (size_t)1);
             runtimeArgs.append("d_d_stride_1", (size_t)M);
 
@@ -285,11 +300,11 @@ namespace GEMMDriverTest
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
                 gemm.storeLDSD ? MemoryType::JAMMED_WAVE_LDS : MemoryType::WAVE);
 
-            params->setDimensionInfo(tagA, macTileA);
-            params->setDimensionInfo(tagB, macTileB);
-            params->setDimensionInfo(tagC, macTileC);
+            params->setDimensionInfo(tagLoadA, macTileA);
+            params->setDimensionInfo(tagLoadB, macTileB);
+            params->setDimensionInfo(tagLoadC, macTileC);
             // TODO Fix MemoryType promotion (JAMMED_WAVE_LDS)
-            params->setDimensionInfo(tagD, macTileD);
+            params->setDimensionInfo(tagStoreD, macTileD);
 
             params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
             params->setManualWorkitemCount({NX, NY, NZ});
@@ -1069,20 +1084,20 @@ namespace GEMMDriverTest
         std::string output_noLiteralStrides = m_context->instructions()->toString();
 
         //Since we're setting the first dimension to a literal 1, there will be less occurrences of Load_Tiled_0_stride_0.
-        EXPECT_LT(countSubstring(output_literalStrides, "Load_Tiled_0_stride_0"),
-                  countSubstring(output_noLiteralStrides, "Load_Tiled_0_stride_0"));
-        EXPECT_LT(countSubstring(output_literalStrides, "Load_Tiled_1_stride_0"),
-                  countSubstring(output_noLiteralStrides, "Load_Tiled_1_stride_0"));
-        EXPECT_LT(countSubstring(output_literalStrides, "Load_Tiled_2_stride_0"),
-                  countSubstring(output_noLiteralStrides, "Load_Tiled_2_stride_0"));
+        EXPECT_LT(countSubstring(output_literalStrides, "Tensor_0_stride_0"),
+                  countSubstring(output_noLiteralStrides, "Tensor_0_stride_0"));
+        EXPECT_LT(countSubstring(output_literalStrides, "Tensor_2_stride_0"),
+                  countSubstring(output_noLiteralStrides, "Tensor_2_stride_0"));
+        EXPECT_LT(countSubstring(output_literalStrides, "Tensor_4_stride_0"),
+                  countSubstring(output_noLiteralStrides, "Tensor_4_stride_0"));
 
         //Since we're not setting the second dimension to a literal, there will be the same occurrences of Load_Tiled_X_stride_1.
-        EXPECT_EQ(countSubstring(output_literalStrides, "Load_Tiled_0_stride_1"),
-                  countSubstring(output_noLiteralStrides, "Load_Tiled_0_stride_1"));
-        EXPECT_EQ(countSubstring(output_literalStrides, "Load_Tiled_1_stride_1"),
-                  countSubstring(output_noLiteralStrides, "Load_Tiled_1_stride_1"));
-        EXPECT_EQ(countSubstring(output_literalStrides, "Load_Tiled_2_stride_1"),
-                  countSubstring(output_noLiteralStrides, "Load_Tiled_2_stride_1"));
+        EXPECT_EQ(countSubstring(output_literalStrides, "Tensor_0_stride_1"),
+                  countSubstring(output_noLiteralStrides, "Tensor_0_stride_1"));
+        EXPECT_EQ(countSubstring(output_literalStrides, "Tensor_2_stride_1"),
+                  countSubstring(output_noLiteralStrides, "Tensor_2_stride_1"));
+        EXPECT_EQ(countSubstring(output_literalStrides, "Tensor_4_stride_1"),
+                  countSubstring(output_noLiteralStrides, "Tensor_4_stride_1"));
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16AllLDS)

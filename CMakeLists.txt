@@ -374,6 +374,9 @@ set(rocroller_src
  lib/source/Observers/XDLWrite90a.cpp
  lib/source/Observers/MFMAObserver.cpp
 
+ lib/source/Operations/Operation.cpp
+ lib/source/Operations/TensorScalar.cpp
+
  lib/source/Schedulers/CooperativeScheduler.cpp
  lib/source/Schedulers/PriorityScheduler.cpp
  lib/source/Schedulers/RandomScheduler.cpp

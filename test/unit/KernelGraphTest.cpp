@@ -104,16 +104,16 @@ namespace KernelGraphTest
 
         std::string expectedC = R".(
                 digraph {
-                "coord1"[label="User{CommandArgument(Load_Linear_0_extent)}(1)"];
-                "coord2"[label="User{CommandArgument(Load_Linear_1_extent)}(2)"];
-                "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_1_size_0)}(3)"];
+                "coord1"[label="User{CommandArgument(Tensor_2_extent)}(1)"];
+                "coord2"[label="User{CommandArgument(Tensor_3_extent)}(2)"];
+                "coord3"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)}(3)"];
                 "coord4"[label="Split(4)",shape=box];
-                "coord5"[label="Linear{CommandArgument(Load_Linear_1_size_0)}(5)"];
+                "coord5"[label="Linear{CommandArgument(Tensor_2_size_0)}(5)"];
                 "coord6"[label="Flatten(6)",shape=box];
                 "coord7"[label="DataFlow(7)",shape=box];
-                "coord8"[label="SubDimension{0, CommandArgument(Load_Linear_0_size_0)}(8)"];
+                "coord8"[label="SubDimension{0, CommandArgument(Tensor_3_size_0)}(8)"];
                 "coord9"[label="Split(9)",shape=box];
-                "coord10"[label="Linear{CommandArgument(Load_Linear_0_size_0)}(10)"];
+                "coord10"[label="Linear{CommandArgument(Tensor_3_size_0)}(10)"];
                 "coord11"[label="Flatten(11)",shape=box];
                 "coord12"[label="DataFlow(12)",shape=box];
                 "coord13"[label="Linear{NA}(13)"];
@@ -124,13 +124,13 @@ namespace KernelGraphTest
                 "coord18"[label="DataFlow(18)",shape=box];
                 "coord19"[label="SubDimension{0, NA}(19)"];
                 "coord20"[label="Split(20)",shape=box];
-                "coord21"[label="User{CommandArgument(Store_Linear_4_extent)}(21)"];
+                "coord21"[label="User{CommandArgument(Tensor_7_extent)}(21)"];
                 "coord22"[label="Join(22)",shape=box];
                 "coord23"[label="DataFlow(23)",shape=box];
-                "coord1" -> "coord9"
-                "coord1" -> "coord12"
-                "coord2" -> "coord4"
-                "coord2" -> "coord7"
+                "coord1" -> "coord4"
+                "coord1" -> "coord7"
+                "coord2" -> "coord9"
+                "coord2" -> "coord12"
                 "coord3" -> "coord6"
                 "coord4" -> "coord3"
                 "coord5" -> "coord14"
@@ -196,9 +196,9 @@ namespace KernelGraphTest
                 "cntrl13" -> "cntrl11"
                 "cntrl15" -> "cntrl14"
                 }
-                "coord2" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+                "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
                 "coord5" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-                "coord1" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+                "coord2" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
                 "coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
                 "coord13" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
                 "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
@@ -211,16 +211,16 @@ namespace KernelGraphTest
 
         std::string expected0 = R".(
                 digraph {
-                "coord1"[label="User{CommandArgument(Load_Linear_0_extent)}(1)"];
-                "coord2"[label="SubDimension{0, CommandArgument(Load_Linear_0_size_0)}(2)"];
+                "coord1"[label="User{CommandArgument(Tensor_2_extent)}(1)"];
+                "coord2"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)}(2)"];
                 "coord3"[label="Split(3)",shape=box];
-                "coord4"[label="Linear{CommandArgument(Load_Linear_0_size_0)}(4)"];
+                "coord4"[label="Linear{CommandArgument(Tensor_2_size_0)}(4)"];
                 "coord5"[label="Flatten(5)",shape=box];
                 "coord6"[label="DataFlow(6)",shape=box];
-                "coord7"[label="User{CommandArgument(Load_Linear_1_extent)}(7)"];
-                "coord8"[label="SubDimension{0, CommandArgument(Load_Linear_1_size_0)}(8)"];
+                "coord7"[label="User{CommandArgument(Tensor_3_extent)}(7)"];
+                "coord8"[label="SubDimension{0, CommandArgument(Tensor_3_size_0)}(8)"];
                 "coord9"[label="Split(9)",shape=box];
-                "coord10"[label="Linear{CommandArgument(Load_Linear_1_size_0)}(10)"];
+                "coord10"[label="Linear{CommandArgument(Tensor_3_size_0)}(10)"];
                 "coord11"[label="Flatten(11)",shape=box];
                 "coord12"[label="DataFlow(12)",shape=box];
                 "coord13"[label="Linear{NA}(13)"];
@@ -230,7 +230,7 @@ namespace KernelGraphTest
                 "coord17"[label="Linear{NA}(17)"];
                 "coord18"[label="DataFlow(18)",shape=box];
                 "coord19"[label="SubDimension{0, NA}(19)"];
-                "coord20"[label="User{CommandArgument(Store_Linear_4_extent)}(20)"];
+                "coord20"[label="User{CommandArgument(Tensor_7_extent)}(20)"];
                 "coord21"[label="Split(21)",shape=box];
                 "coord22"[label="Join(22)",shape=box];
                 "coord23"[label="DataFlow(23)",shape=box];
@@ -262,7 +262,7 @@ namespace KernelGraphTest
                 "coord23" -> "coord20"
                 {
                 rank=same
-                "coord10"->"coord4"[style=invis]
+                "coord4"->"coord10"[style=invis]
                 rankdir=LR
                 }
                 {
@@ -276,7 +276,7 @@ namespace KernelGraphTest
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadLinear(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
-                "cntrl6"[label="Assign VGPR Add(DataFlowTag(10), DataFlowTag(4))(6)"];
+                "cntrl6"[label="Assign VGPR Add(DataFlowTag(4), DataFlowTag(10))(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
                 "cntrl8"[label="Sequence(8)",shape=box];
                 "cntrl9"[label="Assign VGPR Negate(DataFlowTag(13))(9)"];
@@ -288,9 +288,9 @@ namespace KernelGraphTest
                 "cntrl15"[label="Sequence(15)",shape=box];
                 "cntrl1" -> "cntrl3"
                 "cntrl1" -> "cntrl5"
-                "cntrl2" -> "cntrl8"
+                "cntrl2" -> "cntrl7"
                 "cntrl3" -> "cntrl2"
-                "cntrl4" -> "cntrl7"
+                "cntrl4" -> "cntrl8"
                 "cntrl5" -> "cntrl4"
                 "cntrl6" -> "cntrl10"
                 "cntrl6" -> "cntrl12"
@@ -318,20 +318,20 @@ namespace KernelGraphTest
 
         std::string expected1 = R".(
             digraph {
-        "coord1"[label="User{CommandArgument(Load_Linear_0_extent)}(1)"];
-        "coord2"[label="User{CommandArgument(Load_Linear_1_extent)}(2)"];
-        "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_1_size_0)}(3)"];
+        "coord1"[label="User{CommandArgument(Tensor_2_extent)}(1)"];
+        "coord2"[label="User{CommandArgument(Tensor_3_extent)}(2)"];
+        "coord3"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)}(3)"];
         "coord4"[label="Split(4)",shape=box];
-        "coord5"[label="Linear{CommandArgument(Load_Linear_1_size_0)}(5)"];
+        "coord5"[label="Linear{CommandArgument(Tensor_2_size_0)}(5)"];
         "coord6"[label="Flatten(6)",shape=box];
-        "coord7"[label="SubDimension{0, CommandArgument(Load_Linear_0_size_0)}(7)"];
+        "coord7"[label="SubDimension{0, CommandArgument(Tensor_3_size_0)}(7)"];
         "coord8"[label="Split(8)",shape=box];
-        "coord9"[label="Linear{CommandArgument(Load_Linear_0_size_0)}(9)"];
+        "coord9"[label="Linear{CommandArgument(Tensor_3_size_0)}(9)"];
         "coord10"[label="Flatten(10)",shape=box];
         "coord11"[label="Linear{NA}(11)"];
         "coord12"[label="SubDimension{0, NA}(12)"];
         "coord13"[label="Split(13)",shape=box];
-        "coord14"[label="User{CommandArgument(Store_Linear_4_extent)}(14)"];
+        "coord14"[label="User{CommandArgument(Tensor_7_extent)}(14)"];
         "coord15"[label="Join(15)",shape=box];
         "coord16"[label="VGPR{NA}(16)"];
         "coord17"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(17)"];
@@ -356,10 +356,10 @@ namespace KernelGraphTest
         "coord36"[label="Inherit(36)",shape=box];
         "coord37"[label="Flatten(37)",shape=box];
         "coord38"[label="DataFlow(38)",shape=box];
-        "coord1" -> "coord8"
-        "coord1" -> "coord27"
-        "coord2" -> "coord4"
-        "coord2" -> "coord21"
+        "coord1" -> "coord4"
+        "coord1" -> "coord21"
+        "coord2" -> "coord8"
+        "coord2" -> "coord27"
         "coord3" -> "coord6"
         "coord4" -> "coord3"
         "coord5" -> "coord19"
@@ -473,9 +473,9 @@ namespace KernelGraphTest
         "cntrl13" -> "cntrl11"
         "cntrl15" -> "cntrl14"
         }
-        "coord2" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+        "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
         "coord16" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord1" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+        "coord2" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
         "coord22" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
         "coord28" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
         "coord30" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
@@ -495,11 +495,11 @@ namespace KernelGraphTest
 
         std::string expected2 = R".(
         digraph {
-        "coord1"[label="User{CommandArgument(Load_Linear_0_extent)}(1)"];
-        "coord2"[label="User{CommandArgument(Load_Linear_1_extent)}(2)"];
-        "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_1_size_0)}(3)"];
+        "coord1"[label="User{CommandArgument(Tensor_2_extent)}(1)"];
+        "coord2"[label="User{CommandArgument(Tensor_3_extent)}(2)"];
+        "coord3"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)}(3)"];
         "coord4"[label="Split(4)",shape=box];
-        "coord5"[label="Linear{CommandArgument(Load_Linear_1_size_0)}(5)"];
+        "coord5"[label="Linear{CommandArgument(Tensor_2_size_0)}(5)"];
         "coord6"[label="Flatten(6)",shape=box];
         "coord7"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(7)"];
         "coord8"[label="Workitem{0, 32j}(8)"];
@@ -510,9 +510,9 @@ namespace KernelGraphTest
         "coord13"[label="VGPR{NA}(13)"];
         "coord14"[label="Forget(14)",shape=box];
         "coord15"[label="DataFlow(15)",shape=box];
-        "coord16"[label="SubDimension{0, CommandArgument(Load_Linear_0_size_0)}(16)"];
+        "coord16"[label="SubDimension{0, CommandArgument(Tensor_3_size_0)}(16)"];
         "coord17"[label="Split(17)",shape=box];
-        "coord18"[label="Linear{CommandArgument(Load_Linear_0_size_0)}(18)"];
+        "coord18"[label="Linear{CommandArgument(Tensor_3_size_0)}(18)"];
         "coord19"[label="Flatten(19)",shape=box];
         "coord20"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(20)"];
         "coord21"[label="Workitem{0, 32j}(21)"];
@@ -537,13 +537,13 @@ namespace KernelGraphTest
         "coord40"[label="Flatten(40)",shape=box];
         "coord41"[label="SubDimension{0, NA}(41)"];
         "coord42"[label="Split(42)",shape=box];
-        "coord43"[label="User{CommandArgument(Store_Linear_4_extent)}(43)"];
+        "coord43"[label="User{CommandArgument(Tensor_7_extent)}(43)"];
         "coord44"[label="Join(44)",shape=box];
         "coord45"[label="DataFlow(45)",shape=box];
-        "coord1" -> "coord17"
-        "coord1" -> "coord27"
-        "coord2" -> "coord4"
-        "coord2" -> "coord15"
+        "coord1" -> "coord4"
+        "coord1" -> "coord15"
+        "coord2" -> "coord17"
+        "coord2" -> "coord27"
         "coord3" -> "coord6"
         "coord4" -> "coord3"
         "coord5" -> "coord9"
@@ -684,9 +684,9 @@ namespace KernelGraphTest
         "coord10" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
         "coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
         "coord10" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord2" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
+        "coord1" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
         "coord13" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
-        "coord1" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
+        "coord2" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
         "coord25" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
         "coord28" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
         "coord30" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
@@ -745,7 +745,7 @@ namespace KernelGraphTest
                 "coord12" -> "coord11"
                 {
                 rank=same
-                "coord5"->"coord2"[style=invis]
+                "coord2"->"coord5"[style=invis]
                 rankdir=LR
                 }
                 {
@@ -759,7 +759,7 @@ namespace KernelGraphTest
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadVGPR(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
-                "cntrl6"[label="Assign VGPR Add(DataFlowTag(5), DataFlowTag(2))(6)"];
+                "cntrl6"[label="Assign VGPR Add(DataFlowTag(2), DataFlowTag(5))(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
                 "cntrl8"[label="Sequence(8)",shape=box];
                 "cntrl9"[label="Assign VGPR Negate(DataFlowTag(7))(9)"];
@@ -769,9 +769,9 @@ namespace KernelGraphTest
                 "cntrl13"[label="Sequence(13)",shape=box];
                 "cntrl1" -> "cntrl3"
                 "cntrl1" -> "cntrl5"
-                "cntrl2" -> "cntrl8"
+                "cntrl2" -> "cntrl7"
                 "cntrl3" -> "cntrl2"
-                "cntrl4" -> "cntrl7"
+                "cntrl4" -> "cntrl8"
                 "cntrl5" -> "cntrl4"
                 "cntrl6" -> "cntrl10"
                 "cntrl6" -> "cntrl12"
@@ -817,16 +817,16 @@ namespace KernelGraphTest
 
         std::string expected0 = R".(
         digraph {
-        "coord1"[label="User{CommandArgument(Load_Tiled_0_extent)}(1)"];
-        "coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
-        "coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
+        "coord1"[label="User{CommandArgument(Tensor_0_extent)}(1)"];
+        "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)}(2)"];
+        "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)}(3)"];
         "coord4"[label="MacroTile{NA}(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Load_Tiled_1_extent)}(8)"];
-        "coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
-        "coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
+        "coord8"[label="User{CommandArgument(Tensor_2_extent)}(8)"];
+        "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)}(9)"];
+        "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)}(10)"];
         "coord11"[label="MacroTile{NA}(11)"];
         "coord12"[label="Split(12)",shape=box];
         "coord13"[label="ConstructMacroTile(13)",shape=box];
@@ -835,7 +835,7 @@ namespace KernelGraphTest
         "coord16"[label="DataFlow(16)",shape=box];
         "coord17"[label="SubDimension{0, NA}(17)"];
         "coord18"[label="SubDimension{1, NA}(18)"];
-        "coord19"[label="User{CommandArgument(Store_Tiled_2_extent)}(19)"];
+        "coord19"[label="User{CommandArgument(Tensor_5_extent)}(19)"];
         "coord20"[label="DestructMacroTile(20)",shape=box];
         "coord21"[label="Join(21)",shape=box];
         "coord22"[label="DataFlow(22)",shape=box];
@@ -1079,16 +1079,16 @@ namespace KernelGraphTest
 
         std::string expected0 = R".(
             digraph {
-        "coord1"[label="User{CommandArgument(Load_Tiled_0_extent)}(1)"];
-        "coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
-        "coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
+        "coord1"[label="User{CommandArgument(Tensor_0_extent)}(1)"];
+        "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)}(2)"];
+        "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)}(3)"];
         "coord4"[label="MacroTile{16,8}(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Load_Tiled_1_extent)}(8)"];
-        "coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
-        "coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
+        "coord8"[label="User{CommandArgument(Tensor_2_extent)}(8)"];
+        "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)}(9)"];
+        "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)}(10)"];
         "coord11"[label="MacroTile{16,8}(11)"];
         "coord12"[label="Split(12)",shape=box];
         "coord13"[label="ConstructMacroTile(13)",shape=box];
@@ -1101,7 +1101,7 @@ namespace KernelGraphTest
         "coord20"[label="DataFlow(20)",shape=box];
         "coord21"[label="SubDimension{0, NA}(21)"];
         "coord22"[label="SubDimension{1, NA}(22)"];
-        "coord23"[label="User{CommandArgument(Store_Tiled_4_extent)}(23)"];
+        "coord23"[label="User{CommandArgument(Tensor_7_extent)}(23)"];
         "coord24"[label="DestructMacroTile(24)",shape=box];
         "coord25"[label="Join(25)",shape=box];
         "coord26"[label="DataFlow(26)",shape=box];
@@ -1158,7 +1158,7 @@ namespace KernelGraphTest
         }
         {
         rank=same
-        "coord17"->"coord15"[style=invis]
+        "coord15"->"coord17"[style=invis]
         rankdir=LR
         }
         {
@@ -1183,7 +1183,7 @@ namespace KernelGraphTest
         "cntrl9"[label="Assign VGPR Add(DataFlowTag(11), DataFlowTag(11))(9)"];
         "cntrl10"[label="Sequence(10)",shape=box];
         "cntrl11"[label="Sequence(11)",shape=box];
-        "cntrl12"[label="Assign VGPR Add(DataFlowTag(17), DataFlowTag(15))(12)"];
+        "cntrl12"[label="Assign VGPR Add(DataFlowTag(15), DataFlowTag(17))(12)"];
         "cntrl13"[label="Sequence(13)",shape=box];
         "cntrl14"[label="Sequence(14)",shape=box];
         "cntrl15"[label="StoreTiled(15)"];
@@ -1196,10 +1196,10 @@ namespace KernelGraphTest
         "cntrl4" -> "cntrl10"
         "cntrl4" -> "cntrl11"
         "cntrl5" -> "cntrl4"
-        "cntrl6" -> "cntrl14"
+        "cntrl6" -> "cntrl13"
         "cntrl7" -> "cntrl6"
         "cntrl8" -> "cntrl6"
-        "cntrl9" -> "cntrl13"
+        "cntrl9" -> "cntrl14"
         "cntrl10" -> "cntrl9"
         "cntrl11" -> "cntrl9"
         "cntrl12" -> "cntrl16"
@@ -1249,8 +1249,8 @@ namespace KernelGraphTest
         auto kgraph1 = kgraph0.transform(lowerLinearTransform);
 
         auto user0   = 1;
-        auto block0  = 23;
-        auto thread0 = 24;
+        auto block0  = 17;
+        auto thread0 = 18;
 
         // given block id and thread id, compute regular (user) index for first (0) dataflow array
         auto block_id  = Expression::literal(2);
@@ -1260,12 +1260,12 @@ namespace KernelGraphTest
             {block_id, thread_id}, {user0}, {block0, thread0}, nullptr);
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
-                  "Multiply(Add(Multiply(2i, 32j), 33i), CommandArgument(Load_Linear_0_stride_0))");
+                  "Multiply(Add(Multiply(2i, 32j), 33i), CommandArgument(Tensor_2_stride_0))");
 
         exprs = kgraph1.coordinates.reverse(
             {block_id, thread_id}, {user0}, {block0, thread0}, fastArith);
         sexpr = Expression::toString(exprs[0]);
-        EXPECT_EQ(sexpr, "Multiply(97j, Load_Linear_0_stride_0_1)");
+        EXPECT_EQ(sexpr, "Multiply(97j, Tensor_2_stride_0_1)");
     }
 
 #if 0
@@ -1516,38 +1516,41 @@ namespace KernelGraphTest
 
         constexpr auto dataType = DataType::Float;
 
-        auto xTag = command->allocateTag();
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Linear(dataType, 1, xTag)));
+        auto xTensorTag = command->allocateTag();
+        command->addOperation(rocRoller::Operations::Tensor(xTensorTag, 1, dataType));
+        auto xLoadTag = command->allocateTag();
+        command->addOperation(rocRoller::Operations::T_Load_Linear(xLoadTag, xTensorTag));
 
-        auto alphaTag = command->allocateTag();
+        auto alphaScalarTag = command->allocateTag();
         command->addOperation(
-            std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Scalar(
-                {dataType, PointerType::PointerGlobal}, alphaTag)));
+            rocRoller::Operations::Scalar(alphaScalarTag, {dataType, PointerType::PointerGlobal}));
+        auto alphaLoadTag = command->allocateTag();
+        command->addOperation(rocRoller::Operations::T_Load_Scalar(alphaLoadTag, alphaScalarTag));
 
         // TODO: allow for literal constants
-        auto zeroTag = command->allocateTag();
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar({dataType, PointerType::PointerGlobal}, zeroTag)));
+        auto zeroScalarTag = command->allocateTag();
+        command->addOperation(
+            rocRoller::Operations::Scalar(zeroScalarTag, {dataType, PointerType::PointerGlobal}));
+        auto zeroLoadTag = command->allocateTag();
+        command->addOperation(rocRoller::Operations::T_Load_Scalar(zeroLoadTag, zeroScalarTag));
 
         auto execute = rocRoller::Operations::T_Execute();
 
         auto condTag = command->allocateTag();
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_GreaterThan(condTag, xTag, zeroTag)));
+        execute.addXOp(rocRoller::Operations::E_GreaterThan(condTag, xLoadTag, zeroLoadTag));
 
         auto productTag = command->allocateTag();
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(productTag, xTag, alphaTag)));
+        execute.addXOp(rocRoller::Operations::E_Mul(productTag, xLoadTag, alphaLoadTag));
 
         auto reluTag = command->allocateTag();
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Conditional(reluTag, condTag, xTag, productTag)));
+        execute.addXOp(
+            rocRoller::Operations::E_Conditional(reluTag, condTag, xLoadTag, productTag));
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
+        command->addOperation(std::move(execute));
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Linear(1, reluTag)));
+        auto reluTensorTag = command->allocateTag();
+        command->addOperation(rocRoller::Operations::Tensor(reluTensorTag, 1, dataType));
+        command->addOperation(rocRoller::Operations::T_Store_Linear(reluTag, reluTensorTag));
 
         CommandKernel commandKernel(command, "LeakyRelu");
 
@@ -1578,6 +1581,7 @@ namespace KernelGraphTest
         runtimeArgs.append("alpha", d_alpha.get());
         runtimeArgs.append("zero", d_zero.get());
         runtimeArgs.append("d_b", d_b.get());
+        runtimeArgs.append("d_b_limit", nx);
         runtimeArgs.append("d_b_size", nx);
         runtimeArgs.append("d_b_stride", (size_t)1);
 
@@ -1601,13 +1605,19 @@ namespace KernelGraphTest
     {
         auto command = std::make_shared<rocRoller::Command>();
 
-        auto tag = command->allocateTag();
+        auto               tagTensorA = command->allocateTag();
+        Operations::Tensor tensor_A(tagTensorA, 1, DataType::Int32);
+        command->addOperation(std::make_shared<Operations::Operation>(std::move(tensor_A)));
 
-        Operations::T_Load_Linear load_A(DataType::Int32, 1, tag);
+        auto               tagTensorB = command->allocateTag();
+        Operations::Tensor tensor_B(tagTensorB, 1, DataType::Int32);
+        command->addOperation(std::make_shared<Operations::Operation>(std::move(tensor_B)));
+
+        auto                      tagLoadStore = command->allocateTag();
+        Operations::T_Load_Linear load_A(tagLoadStore, tagTensorA);
         command->addOperation(std::make_shared<Operations::Operation>(std::move(load_A)));
-
-        Operations::T_Store_Linear store_C(1, tag);
-        command->addOperation(std::make_shared<Operations::Operation>(std::move(store_C)));
+        Operations::T_Store_Linear store_B(tagLoadStore, tagTensorB);
+        command->addOperation(std::make_shared<Operations::Operation>(std::move(store_B)));
 
         CommandKernel commandKernel(command, "LinearCopy");
 
@@ -1627,6 +1637,7 @@ namespace KernelGraphTest
         runtimeArgs.append("d_a_size", nx);
         runtimeArgs.append("d_a_stride", (size_t)1);
         runtimeArgs.append("d_b", d_b.get());
+        runtimeArgs.append("d_b_limit", nx);
         runtimeArgs.append("d_b_size", nx);
         runtimeArgs.append("d_b_stride", (size_t)1);
 
@@ -1838,20 +1849,19 @@ namespace KernelGraphTest
 
         auto kgraph = translate(command);
 
-        auto beforePredicates
-            = {HasSubstr("SubDimension{0, CommandArgument(Load_Linear_0_size_0)}"),
-               HasSubstr("SubDimension{0, CommandArgument(Load_Linear_1_size_0)}"),
-               HasSubstr("Linear{CommandArgument(Load_Linear_0_size_0)}"),
-               HasSubstr("Linear{CommandArgument(Load_Linear_1_size_0)}")};
+        auto beforePredicates = {HasSubstr("SubDimension{0, CommandArgument(Tensor_2_size_0)}"),
+                                 HasSubstr("SubDimension{0, CommandArgument(Tensor_3_size_0)}"),
+                                 HasSubstr("Linear{CommandArgument(Tensor_2_size_0)}"),
+                                 HasSubstr("Linear{CommandArgument(Tensor_3_size_0)}")};
 
         // Note that these searches do not include the close braces ("}").  This is because the
         // argument name will have a number appended which is subject to change
         // (Load_Linear_0_size_0 might become Load_Linear_0_size_0_2).
         auto afterPredicates = {
-            HasSubstr("SubDimension{0, Load_Linear_0_size_0"),
-            HasSubstr("SubDimension{0, Load_Linear_1_size_0"),
-            HasSubstr("Linear{Load_Linear_0_size_0"),
-            HasSubstr("Linear{Load_Linear_1_size_0"),
+            HasSubstr("SubDimension{0, Tensor_2_size_0"),
+            HasSubstr("SubDimension{0, Tensor_3_size_0"),
+            HasSubstr("Linear{Tensor_2_size_0"),
+            HasSubstr("Linear{Tensor_3_size_0"),
         };
 
         {
@@ -2060,37 +2070,50 @@ namespace KernelGraphTest
     {
         auto command = std::make_shared<Command>();
 
-        auto tagA = command->allocateTag();
-        auto tagB = command->allocateTag();
-        auto tagD = command->allocateTag();
+        auto tagTensorA = command->allocateTag();
+        command->addOperation(rocRoller::Operations::Tensor(tagTensorA, 2, DataType::Float)); // A
+        auto tagLoadA = command->allocateTag();
+        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadA, tagTensorA));
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, tagA))); // A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, tagB))); // B
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(tagD, tagA, tagB)));
+        auto tagTensorB = command->allocateTag();
+        command->addOperation(rocRoller::Operations::Tensor(tagTensorB, 2, DataType::Float)); // B
+        auto tagLoadB = command->allocateTag();
+        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadB, tagTensorB));
+
+        auto tagStoreD = command->allocateTag();
+        command->addOperation(
+            rocRoller::Operations::T_Mul(tagStoreD, tagLoadA, tagLoadB)); // D = A * B
+
+        auto tagTensorD = command->allocateTag();
+        command->addOperation(rocRoller::Operations::Tensor(tagTensorD, 2, DataType::Float)); // D
+        command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
         auto kgraph0 = translate(command);
 
         std::string expected0 = R".(
         digraph {
-        "coord1"[label="User{CommandArgument(Load_Tiled_0_extent)}(1)"];
-        "coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
-        "coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
+        "coord1"[label="User{CommandArgument(Tensor_0_extent)}(1)"];
+        "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)}(2)"];
+        "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)}(3)"];
         "coord4"[label="MacroTile{NA}(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Load_Tiled_1_extent)}(8)"];
-        "coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
-        "coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
+        "coord8"[label="User{CommandArgument(Tensor_2_extent)}(8)"];
+        "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)}(9)"];
+        "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)}(10)"];
         "coord11"[label="MacroTile{NA}(11)"];
         "coord12"[label="Split(12)",shape=box];
         "coord13"[label="ConstructMacroTile(13)",shape=box];
         "coord14"[label="DataFlow(14)",shape=box];
         "coord15"[label="MacroTile{NA}(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
+        "coord17"[label="SubDimension{0, NA}(17)"];
+        "coord18"[label="SubDimension{1, NA}(18)"];
+        "coord19"[label="User{CommandArgument(Tensor_5_extent)}(19)"];
+        "coord20"[label="DestructMacroTile(20)",shape=box];
+        "coord21"[label="Join(21)",shape=box];
+        "coord22"[label="DataFlow(22)",shape=box];
         "coord1" -> "coord5"
         "coord1" -> "coord7"
         "coord2" -> "coord6"
@@ -2109,7 +2132,15 @@ namespace KernelGraphTest
         "coord12" -> "coord10"
         "coord13" -> "coord11"
         "coord14" -> "coord11"
+        "coord15" -> "coord20"
+        "coord15" -> "coord22"
         "coord16" -> "coord15"
+        "coord17" -> "coord21"
+        "coord18" -> "coord21"
+        "coord20" -> "coord17"
+        "coord20" -> "coord18"
+        "coord21" -> "coord19"
+        "coord22" -> "coord19"
         {
         rank=same
         "coord2"->"coord3"[style=invis]
@@ -2135,6 +2166,16 @@ namespace KernelGraphTest
         "coord4"->"coord11"[style=invis]
         rankdir=LR
         }
+        {
+        rank=same
+        "coord17"->"coord18"[style=invis]
+        rankdir=LR
+        }
+        {
+        rank=same
+        "coord17"->"coord18"[style=invis]
+        rankdir=LR
+        }
         subgraph clusterCF {label = "Control Graph";
         "cntrl1"[label="Kernel(1)"];
         "cntrl2"[label="LoadTiled(2)"];
@@ -2144,14 +2185,18 @@ namespace KernelGraphTest
         "cntrl6"[label="TensorContraction(6)"];
         "cntrl7"[label="Sequence(7)",shape=box];
         "cntrl8"[label="Sequence(8)",shape=box];
+        "cntrl9"[label="StoreTiled(9)"];
+        "cntrl10"[label="Sequence(10)",shape=box];
         "cntrl1" -> "cntrl3"
         "cntrl1" -> "cntrl5"
         "cntrl2" -> "cntrl7"
         "cntrl3" -> "cntrl2"
         "cntrl4" -> "cntrl8"
         "cntrl5" -> "cntrl4"
+        "cntrl6" -> "cntrl10"
         "cntrl7" -> "cntrl6"
         "cntrl8" -> "cntrl6"
+        "cntrl10" -> "cntrl9"
         }
         }
     ).";
@@ -2168,8 +2213,8 @@ namespace KernelGraphTest
 
         auto params = std::make_shared<CommandParameters>();
 
-        params->setDimensionInfo(0, macTileA);
-        params->setDimensionInfo(1, macTileB);
+        params->setDimensionInfo(tagLoadA, macTileA);
+        params->setDimensionInfo(tagLoadB, macTileB);
 
         auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
 
@@ -2177,22 +2222,28 @@ namespace KernelGraphTest
 
         std::string expected1 = R".(
         digraph {
-        "coord1"[label="User{CommandArgument(Load_Tiled_0_extent)}(1)"];
-        "coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
-        "coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
+        "coord1"[label="User{CommandArgument(Tensor_0_extent)}(1)"];
+        "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)}(2)"];
+        "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)}(3)"];
         "coord4"[label="MacroTile{64,64}(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Load_Tiled_1_extent)}(8)"];
-        "coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
-        "coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
+        "coord8"[label="User{CommandArgument(Tensor_2_extent)}(8)"];
+        "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)}(9)"];
+        "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)}(10)"];
         "coord11"[label="MacroTile{64,64}(11)"];
         "coord12"[label="Split(12)",shape=box];
         "coord13"[label="ConstructMacroTile(13)",shape=box];
         "coord14"[label="DataFlow(14)",shape=box];
         "coord15"[label="MacroTile{64,64}(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
+        "coord17"[label="SubDimension{0, NA}(17)"];
+        "coord18"[label="SubDimension{1, NA}(18)"];
+        "coord19"[label="User{CommandArgument(Tensor_5_extent)}(19)"];
+        "coord20"[label="DestructMacroTile(20)",shape=box];
+        "coord21"[label="Join(21)",shape=box];
+        "coord22"[label="DataFlow(22)",shape=box];
         "coord1" -> "coord5"
         "coord1" -> "coord7"
         "coord2" -> "coord6"
@@ -2211,7 +2262,15 @@ namespace KernelGraphTest
         "coord12" -> "coord10"
         "coord13" -> "coord11"
         "coord14" -> "coord11"
+        "coord15" -> "coord20"
+        "coord15" -> "coord22"
         "coord16" -> "coord15"
+        "coord17" -> "coord21"
+        "coord18" -> "coord21"
+        "coord20" -> "coord17"
+        "coord20" -> "coord18"
+        "coord21" -> "coord19"
+        "coord22" -> "coord19"
         {
         rank=same
         "coord2"->"coord3"[style=invis]
@@ -2237,6 +2296,16 @@ namespace KernelGraphTest
         "coord4"->"coord11"[style=invis]
         rankdir=LR
         }
+        {
+        rank=same
+        "coord17"->"coord18"[style=invis]
+        rankdir=LR
+        }
+        {
+        rank=same
+        "coord17"->"coord18"[style=invis]
+        rankdir=LR
+        }
         subgraph clusterCF {label = "Control Graph";
         "cntrl1"[label="Kernel(1)"];
         "cntrl2"[label="LoadTiled(2)"];
@@ -2246,14 +2315,18 @@ namespace KernelGraphTest
         "cntrl6"[label="TensorContraction(6)"];
         "cntrl7"[label="Sequence(7)",shape=box];
         "cntrl8"[label="Sequence(8)",shape=box];
+        "cntrl9"[label="StoreTiled(9)"];
+        "cntrl10"[label="Sequence(10)",shape=box];
         "cntrl1" -> "cntrl3"
         "cntrl1" -> "cntrl5"
         "cntrl2" -> "cntrl7"
         "cntrl3" -> "cntrl2"
         "cntrl4" -> "cntrl8"
         "cntrl5" -> "cntrl4"
+        "cntrl6" -> "cntrl10"
         "cntrl7" -> "cntrl6"
         "cntrl8" -> "cntrl6"
+        "cntrl10" -> "cntrl9"
         }
         }
     ).";

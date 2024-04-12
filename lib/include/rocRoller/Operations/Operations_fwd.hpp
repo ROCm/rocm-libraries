@@ -9,6 +9,8 @@ namespace rocRoller
 {
     namespace Operations
     {
+        struct Tensor;
+        struct Scalar;
         struct T_Load_Linear;
         struct T_Load_Scalar;
         struct T_Load_Tiled;
@@ -17,7 +19,9 @@ namespace rocRoller
         struct T_Store_Tiled;
         struct T_Execute;
         struct Nop;
-        using Operation = std::variant<T_Load_Linear,
+        using Operation = std::variant<Tensor,
+                                       Scalar,
+                                       T_Load_Linear,
                                        T_Load_Scalar,
                                        T_Load_Tiled,
                                        T_Mul,
@@ -27,11 +31,10 @@ namespace rocRoller
                                        Nop>;
 
         template <typename T>
-        concept COperation = requires
-        {
-            requires std::constructible_from<Operation, T>;
-            requires !std::same_as<Operation, T>;
-        };
+        concept COperation = std::constructible_from<Operation, T>;
+
+        template <typename T>
+        concept CConcreteOperation = (COperation<T> && !std::same_as<Operation, T>);
 
         struct Inputs;
         struct Outputs;

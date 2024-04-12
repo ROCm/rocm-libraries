@@ -4,31 +4,25 @@
 
 #pragma once
 
+#include "Operation.hpp"
+
 #include <memory>
 #include <unordered_set>
-
-#include <rocRoller/Operations/Command_fwd.hpp>
 
 namespace rocRoller
 {
     namespace Operations
     {
-        class T_Mul
+        class T_Mul : public BaseOperation
         {
         public:
             T_Mul() = delete;
             T_Mul(int dest, int a, int b);
 
-            void                    setCommand(CommandPtr);
-            int                     getTag() const;
-            void                    setTag(int tag);
             std::unordered_set<int> getInputs() const;
             std::string             toString() const;
 
-            int dest, a, b;
-
-        protected:
-            std::weak_ptr<Command> m_command;
+            int a, b;
         };
 
     }

@@ -49,7 +49,7 @@ namespace rocRoller
         allocate.call(*op);
     }
 
-    template <Operations::COperation T>
+    template <Operations::CConcreteOperation T>
     inline void Command::addOperation(T&& op)
     {
         addOperation(std::make_shared<Operations::Operation>(std::forward<T>(op)));
@@ -137,7 +137,8 @@ namespace rocRoller
             visit(rocRoller::overloaded{
                       [&](auto op) {},
                       [&](Operations::T_Load_Linear const& op) {
-                          auto sizes = op.sizes();
+                          auto tensor = getOperation<Operations::Tensor>(op.getTensorTag());
+                          auto sizes  = tensor.sizes();
                           for(size_t i = 0; i < sizes.size() && i < 3; i++)
                           {
                               result[i] = std::make_shared<Expression::Expression>(sizes[i]);
@@ -155,13 +156,19 @@ namespace rocRoller
         return result;
     }
 
-    inline std::shared_ptr<Operations::Operation> Command::findTag(int tag)
+    inline std::shared_ptr<Operations::Operation> Command::findTag(int tag) const
     {
         auto iter = m_tagMap.find(tag);
         if(iter == m_tagMap.end())
             return nullptr;
 
         return iter->second;
+    }
+
+    template <Operations::CConcreteOperation T>
+    T Command::getOperation(int tag) const
+    {
+        return std::get<T>(*findTag(tag));
     }
 
     inline int Command::getNextTag() const

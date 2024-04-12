@@ -69,12 +69,12 @@ namespace rocRoller
 
         int GraphInspector::findLoadTile(int userTag)
         {
-            return findLoadStoreTile(concatenate("Load_Tiled_", userTag, "_pointer"));
+            return findLoadStoreTile(concatenate("Tensor_", userTag, "_pointer"));
         }
 
         int GraphInspector::findStoreTile(int userTag)
         {
-            return findLoadStoreTile(concatenate("Store_Tiled_", userTag, "_pointer"));
+            return findLoadStoreTile(concatenate("Tensor_", userTag, "_pointer"));
         }
 
         void GraphInspector::inventExecutionCoordinates()

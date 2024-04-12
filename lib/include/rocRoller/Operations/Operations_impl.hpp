@@ -17,6 +17,16 @@ namespace rocRoller
             return std::visit(*this, op);
         }
 
+        inline std::unordered_set<int> Inputs::operator()(Tensor const& tensor)
+        {
+            return {};
+        }
+
+        inline std::unordered_set<int> Inputs::operator()(Scalar const& scalar)
+        {
+            return {};
+        }
+
         inline std::unordered_set<int> Inputs::operator()(T_Load_Linear const& load)
         {
             return {};
@@ -80,6 +90,16 @@ namespace rocRoller
         inline std::unordered_set<int> Outputs::call(Operation const& op)
         {
             return std::visit(*this, op);
+        }
+
+        inline std::unordered_set<int> Outputs::operator()(Tensor const& tensor)
+        {
+            return {};
+        }
+
+        inline std::unordered_set<int> Outputs::operator()(Scalar const& scalar)
+        {
+            return {};
         }
 
         inline std::unordered_set<int> Outputs::operator()(T_Load_Linear const& load)
@@ -167,6 +187,28 @@ namespace rocRoller
             m_nextTagValue = nextTagValue;
 
             return std::visit(*this, op);
+        }
+
+        inline std::unordered_set<int> AssignOutputs::operator()(Tensor& tensor)
+        {
+            if(tensor.getTag() == -1)
+            {
+                tensor.setTag(m_nextTagValue);
+                m_nextTagValue++;
+            }
+
+            return {tensor.getTag()};
+        }
+
+        inline std::unordered_set<int> AssignOutputs::operator()(Scalar& scalar)
+        {
+            if(scalar.getTag() == -1)
+            {
+                scalar.setTag(m_nextTagValue);
+                m_nextTagValue++;
+            }
+
+            return {scalar.getTag()};
         }
 
         inline std::unordered_set<int> AssignOutputs::operator()(T_Load_Linear& load)
@@ -280,19 +322,29 @@ namespace rocRoller
             return std::visit(*this, op);
         }
 
+        inline std::string ToStringVisitor::operator()(Tensor const& tensor)
+        {
+            return tensor.toString(m_runtimeArgs);
+        }
+
+        inline std::string ToStringVisitor::operator()(Scalar const& scalar)
+        {
+            return scalar.toString(m_runtimeArgs);
+        }
+
         inline std::string ToStringVisitor::operator()(T_Load_Linear const& load)
         {
-            return load.toString(m_runtimeArgs);
+            return load.toString();
         }
 
         inline std::string ToStringVisitor::operator()(T_Load_Scalar const& load)
         {
-            return load.toString(m_runtimeArgs);
+            return load.toString();
         }
 
         inline std::string ToStringVisitor::operator()(T_Load_Tiled const& load)
         {
-            return load.toString(m_runtimeArgs);
+            return load.toString();
         }
 
         inline std::string ToStringVisitor::operator()(T_Mul const& mul)
@@ -302,12 +354,12 @@ namespace rocRoller
 
         inline std::string ToStringVisitor::operator()(T_Store_Linear const& store)
         {
-            return store.toString(m_runtimeArgs);
+            return store.toString();
         }
 
         inline std::string ToStringVisitor::operator()(T_Store_Tiled const& store)
         {
-            return store.toString(m_runtimeArgs);
+            return store.toString();
         }
 
         inline std::string ToStringVisitor::operator()(T_Execute const& exec)
@@ -348,6 +400,16 @@ namespace rocRoller
         inline void SetCommand::call(Operation& op)
         {
             std::visit(*this, op);
+        }
+
+        inline void SetCommand::operator()(Tensor& tensor)
+        {
+            tensor.setCommand(command);
+        }
+
+        inline void SetCommand::operator()(Scalar& scalar)
+        {
+            scalar.setCommand(command);
         }
 
         inline void SetCommand::operator()(T_Load_Linear& load)
@@ -392,32 +454,27 @@ namespace rocRoller
             return std::visit(*this, op);
         }
 
-        inline void AllocateArguments::operator()(T_Load_Linear& load)
+        inline void AllocateArguments::operator()(Tensor& tensor)
         {
-            load.allocateArguments();
+            tensor.allocateArguments();
         }
 
-        inline void AllocateArguments::operator()(T_Load_Scalar& load)
+        inline void AllocateArguments::operator()(Scalar& scalar)
         {
-            load.allocateArguments();
+            scalar.allocateArguments();
         }
 
-        inline void AllocateArguments::operator()(T_Load_Tiled& load)
-        {
-            load.allocateArguments();
-        }
+        inline void AllocateArguments::operator()(T_Load_Linear& load) {}
+
+        inline void AllocateArguments::operator()(T_Load_Scalar& load) {}
+
+        inline void AllocateArguments::operator()(T_Load_Tiled& load) {}
 
         inline void AllocateArguments::operator()(T_Mul& mul) {}
 
-        inline void AllocateArguments::operator()(T_Store_Linear& store)
-        {
-            store.allocateArguments();
-        }
+        inline void AllocateArguments::operator()(T_Store_Linear& store) {}
 
-        inline void AllocateArguments::operator()(T_Store_Tiled& store)
-        {
-            store.allocateArguments();
-        }
+        inline void AllocateArguments::operator()(T_Store_Tiled& store) {}
 
         inline void AllocateArguments::operator()(T_Execute& exec) {}
 
@@ -430,21 +487,33 @@ namespace rocRoller
         }
 
         inline rocRoller::VariableType
+            rocRoller::Operations::VariableTypeVisitor::operator()(Tensor& tensor)
+        {
+            return {rocRoller::DataType::None};
+        }
+
+        inline rocRoller::VariableType
+            rocRoller::Operations::VariableTypeVisitor::operator()(Scalar& scalar)
+        {
+            return {rocRoller::DataType::None};
+        }
+
+        inline rocRoller::VariableType
             rocRoller::Operations::VariableTypeVisitor::operator()(T_Load_Linear& load)
         {
-            return load.dataType();
+            return {rocRoller::DataType::None};
         }
 
         inline rocRoller::VariableType
             rocRoller::Operations::VariableTypeVisitor::operator()(T_Load_Scalar& load)
         {
-            return load.dataType();
+            return {rocRoller::DataType::None};
         }
 
         inline rocRoller::VariableType
             rocRoller::Operations::VariableTypeVisitor::operator()(T_Load_Tiled& load)
         {
-            return load.dataType();
+            return {rocRoller::DataType::None};
         }
 
         inline rocRoller::VariableType
@@ -456,13 +525,13 @@ namespace rocRoller
         inline rocRoller::VariableType
             rocRoller::Operations::VariableTypeVisitor::operator()(T_Store_Linear& store)
         {
-            return store.dataType();
+            return {rocRoller::DataType::None};
         }
 
         inline rocRoller::VariableType
             rocRoller::Operations::VariableTypeVisitor::operator()(T_Store_Tiled& store)
         {
-            return store.dataType();
+            return {rocRoller::DataType::None};
         }
 
         inline rocRoller::VariableType
