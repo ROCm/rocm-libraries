@@ -160,7 +160,13 @@ endif()
 # Package
 if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
   set(BUILD_SHARED_LIBS ON) # Build as though shared library for naming
-  rocm_package_add_dependencies(DEPENDS "hip-rocclr >= 3.5.0")
+  if(BUILD_ADDRESS_SANITIZER)
+    set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
+  else()
+    set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
+  endif()
+
+  rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0")
   set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
   set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
