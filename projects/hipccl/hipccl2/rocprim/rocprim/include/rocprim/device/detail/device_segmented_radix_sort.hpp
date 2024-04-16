@@ -581,7 +581,7 @@ private:
                                          storage_type& storage,
                                          unsigned int  begin_bit,
                                          unsigned int  end_bit)
-        -> std::enable_if_t<is_floating_point<K>::value>
+        -> std::enable_if_t<!is_integral<K>::value>
     {
         (void)begin_bit;
         (void)end_bit;
@@ -597,7 +597,7 @@ private:
                                          storage_type& storage,
                                          unsigned int  begin_bit,
                                          unsigned int  end_bit)
-        -> std::enable_if_t<!is_floating_point<K>::value>
+        -> std::enable_if_t<is_integral<K>::value>
     {
         if(begin_bit == 0 && end_bit == 8 * sizeof(key_type))
         {
