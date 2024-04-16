@@ -48,9 +48,8 @@ auto invoke_merge_sort_block_merge(
     bool                                                       debug_synchronous,
     typename std::iterator_traits<KeysIterator>::value_type*   keys_buffer,
     typename std::iterator_traits<ValuesIterator>::value_type* values_buffer)
-    -> std::enable_if_t<
-        !is_floating_point<typename std::iterator_traits<KeysIterator>::value_type>::value,
-        hipError_t>
+    -> std::enable_if_t<is_integral<typename std::iterator_traits<KeysIterator>::value_type>::value,
+                        hipError_t>
 {
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
     (void)decomposer;
@@ -101,7 +100,7 @@ auto invoke_merge_sort_block_merge(
     typename std::iterator_traits<KeysIterator>::value_type*   keys_buffer,
     typename std::iterator_traits<ValuesIterator>::value_type* values_buffer)
     -> std::enable_if_t<
-        is_floating_point<typename std::iterator_traits<KeysIterator>::value_type>::value,
+        !is_integral<typename std::iterator_traits<KeysIterator>::value_type>::value,
         hipError_t>
 {
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;

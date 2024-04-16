@@ -110,10 +110,6 @@ struct inner_type<custom_float_type>
 namespace rocprim
 {
 
-template<>
-struct is_floating_point<test_utils::custom_float_type> : std::true_type
-{};
-
 namespace detail
 {
 
@@ -130,6 +126,10 @@ template<>
 struct radix_key_codec_base<test_utils::custom_float_type>
     : radix_key_codec_floating<test_utils::custom_float_type, unsigned int>
 {};
+
+static_assert(!is_floating_point<test_utils::custom_float_type>::value,
+              "custom_float_type must not be rocprim::is_floating_point, "
+              "since that is how downstream libraries use it.");
 
 } // namespace detail
 } // namespace rocprim
