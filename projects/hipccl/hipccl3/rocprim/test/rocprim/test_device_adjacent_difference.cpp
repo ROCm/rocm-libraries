@@ -598,6 +598,9 @@ TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceLargeTests,
 
 TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
 {
+    if (TestFixture::use_graphs)
+        GTEST_SKIP() << "Temporarily skipping test within hipGraphs. Will re-enable when issues with atomics inside graphs are resolved.";
+
     const int device_id = test_common_utils::obtain_device_from_ctest();
 
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);

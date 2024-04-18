@@ -53,7 +53,7 @@ Documentation for rocPRIM is available at
 * `TwiddleIn` and `TwiddleOut` have been deprecated in favor of `radix_key_codec`.
 * The internal `::rocprim::detail::radix_key_codec` has been deprecated in favor of the new public utility with the same name.
 
-## Unreleased rocPRIM-3.1.0 for ROCm 6.1.0
+## rocPRIM-3.1.0 for ROCm 6.1.0
 
 ### Additions
 
