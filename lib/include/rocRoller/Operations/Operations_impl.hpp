@@ -255,22 +255,40 @@ namespace rocRoller
             return {mul.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(T_Store_Linear& exec)
+        inline std::unordered_set<int> AssignOutputs::operator()(T_Store_Linear& store)
         {
-            return {};
+            if(store.getTag() == -1)
+            {
+                store.setTag(m_nextTagValue);
+                m_nextTagValue++;
+            }
+
+            return {store.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(T_Store_Tiled& exec)
+        inline std::unordered_set<int> AssignOutputs::operator()(T_Store_Tiled& store)
         {
-            return {};
+            if(store.getTag() == -1)
+            {
+                store.setTag(m_nextTagValue);
+                m_nextTagValue++;
+            }
+
+            return {store.getTag()};
         }
 
         inline std::unordered_set<int> AssignOutputs::operator()(T_Execute& exec)
         {
-            return {};
+            if(exec.getTag() == -1)
+            {
+                exec.setTag(m_nextTagValue);
+                m_nextTagValue++;
+            }
+
+            return {exec.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(Nop& exec)
+        inline std::unordered_set<int> AssignOutputs::operator()(Nop& nop)
         {
             return {};
         }

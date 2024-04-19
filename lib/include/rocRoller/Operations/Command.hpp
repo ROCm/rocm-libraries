@@ -28,9 +28,9 @@ namespace rocRoller
         Command(Command const& rhs);
         Command(Command&& rhs);
 
-        void addOperation(std::shared_ptr<Operations::Operation> op);
+        int addOperation(std::shared_ptr<Operations::Operation> op);
         template <Operations::CConcreteOperation T>
-        void addOperation(T&& op);
+        int addOperation(T&& op);
 
         CommandArgumentPtr allocateArgument(VariableType  variableType,
                                             DataDirection direction = DataDirection::ReadWrite);

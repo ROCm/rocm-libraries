@@ -17,7 +17,7 @@ namespace rocRoller
         {
         public:
             T_Mul() = delete;
-            T_Mul(int dest, int a, int b);
+            T_Mul(int a, int b);
 
             std::unordered_set<int> getInputs() const;
             std::string             toString() const;

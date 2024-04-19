@@ -465,7 +465,7 @@ namespace rocRoller
             int loadA  = gi.findLoadTile(0);
             int loadB  = gi.findLoadTile(2);
             int loadC  = gi.findLoadTile(4);
-            int storeD = gi.findStoreTile(14);
+            int storeD = gi.findStoreTile(15);
 
             int ldsA = findLDSNode(coords, loadA, Graph::Direction::Downstream);
             int ldsB = findLDSNode(coords, loadB, Graph::Direction::Downstream);

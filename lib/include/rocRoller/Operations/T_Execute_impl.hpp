@@ -10,15 +10,13 @@ namespace rocRoller
         // XOp methods
         // ------------------------
 
-        inline E_Unary::E_Unary(int dest, int a)
-            : dest(dest)
-            , a(a)
+        inline E_Unary::E_Unary(int a)
+            : a(a)
         {
         }
 
-        inline E_Unary::E_Unary(const std::initializer_list<unsigned>& args, const unsigned& dest)
-            : dest(dest)
-            , a(*args.begin())
+        inline E_Unary::E_Unary(const std::initializer_list<unsigned>& args)
+            : a(*args.begin())
         {
             AssertFatal(args.size() == 1, ShowValue(args.size()));
         }
@@ -52,16 +50,14 @@ namespace rocRoller
             return {a};
         }
 
-        inline E_Binary::E_Binary(int dest, int a, int b)
-            : dest(dest)
-            , a(a)
+        inline E_Binary::E_Binary(int a, int b)
+            : a(a)
             , b(b)
         {
         }
 
-        inline E_Binary::E_Binary(const std::initializer_list<unsigned>& args, unsigned& dest)
-            : dest(dest)
-            , a(*args.begin())
+        inline E_Binary::E_Binary(const std::initializer_list<unsigned>& args)
+            : a(*args.begin())
             , b(*(args.begin() + 1))
         {
             AssertFatal(args.size() == 2, ShowValue(args.size()));
@@ -96,17 +92,15 @@ namespace rocRoller
             return {a, b};
         }
 
-        inline E_Ternary::E_Ternary(int dest, int a, int b, int c)
-            : dest(dest)
-            , a(a)
+        inline E_Ternary::E_Ternary(int a, int b, int c)
+            : a(a)
             , b(b)
             , c(c)
         {
         }
 
-        inline E_Ternary::E_Ternary(const std::initializer_list<unsigned>& args, unsigned& dest)
-            : dest(dest)
-            , a(*args.begin())
+        inline E_Ternary::E_Ternary(const std::initializer_list<unsigned>& args)
+            : a(*args.begin())
             , b(*(args.begin() + 1))
             , c(*(args.begin() + 2))
         {
@@ -146,19 +140,10 @@ namespace rocRoller
         // T_Execute methods
         // ------------------------
 
-        inline T_Execute::T_Execute()
-            : m_nextTag(0)
-        {
-        }
-
         inline T_Execute::T_Execute(int starting_tag)
-            : m_nextTag(starting_tag)
+            : BaseOperation()
+            , m_nextTag(starting_tag)
         {
-        }
-
-        inline void T_Execute::setCommand(CommandPtr command)
-        {
-            m_command = command;
         }
 
         inline std::unordered_set<int> T_Execute::getInputs() const
@@ -171,14 +156,14 @@ namespace rocRoller
             return m_outputs;
         }
 
-        inline void T_Execute::addXOp(std::shared_ptr<XOp> xop)
+        inline int T_Execute::addXOp(std::shared_ptr<XOp> xop)
         {
+            int tag = m_nextTag++;
             // Determine the inputs and outputs of the xop
             auto inputs_func         = rocRoller::Operations::Inputs();
             auto assign_outputs_func = rocRoller::Operations::AssignOutputs();
-            auto outputs             = assign_outputs_func.call(*xop, m_nextTag);
-            m_nextTag++;
-            auto inputs = inputs_func.call(*xop);
+            auto outputs             = assign_outputs_func.call(*xop, tag);
+            auto inputs              = inputs_func.call(*xop);
 
             // Add the outputs of the xop to the outputs of the
             // T_Execute operation.
@@ -195,12 +180,15 @@ namespace rocRoller
             }
 
             m_xops.emplace_back(xop);
+            // update the tag assigned to T_Execute
+            setTag(m_nextTag);
+            return tag;
         }
 
         template <CXOp T>
-        inline void T_Execute::addXOp(T&& op)
+        inline int T_Execute::addXOp(T&& op)
         {
-            addXOp(std::make_shared<XOp>(std::forward<T>(op)));
+            return addXOp(std::make_shared<XOp>(std::forward<T>(op)));
         }
 
         inline int T_Execute::getNextTag() const

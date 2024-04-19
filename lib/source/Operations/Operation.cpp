@@ -4,10 +4,7 @@ namespace rocRoller
 {
     namespace Operations
     {
-        BaseOperation::BaseOperation(int dest)
-            : m_tag(dest)
-        {
-        }
+        BaseOperation::BaseOperation() {}
 
         void BaseOperation::setCommand(CommandPtr command)
         {
@@ -23,5 +20,6 @@ namespace rocRoller
         {
             m_tag = tag;
         }
+
     }
 }

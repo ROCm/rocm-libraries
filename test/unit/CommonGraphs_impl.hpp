@@ -35,50 +35,36 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto xTensorTag = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(xTensorTag, 1, dataType));
-        auto xLoadTag = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Linear(xLoadTag, xTensorTag));
+        auto xTensorTag = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
+        auto xLoadTag   = m_command->addOperation(rocRoller::Operations::T_Load_Linear(xTensorTag));
 
-        auto yTensorTag = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(yTensorTag, 1, dataType));
-        auto yLoadTag = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Linear(yLoadTag, yTensorTag));
+        auto yTensorTag = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
+        auto yLoadTag   = m_command->addOperation(rocRoller::Operations::T_Load_Linear(yTensorTag));
 
-        auto alphaScalarTag = m_command->allocateTag();
-        m_command->addOperation(
-            rocRoller::Operations::Scalar(alphaScalarTag, {dataType, PointerType::PointerGlobal}));
-        auto alphaLoadTag = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Scalar(alphaLoadTag, alphaScalarTag));
+        auto alphaScalarTag = m_command->addOperation(
+            rocRoller::Operations::Scalar({dataType, PointerType::PointerGlobal}));
+        auto alphaLoadTag
+            = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(alphaScalarTag));
 
         auto betaLoadTag = -1;
         if(m_useBeta)
         {
-            auto betaScalarTag = m_command->allocateTag();
-            m_command->addOperation(rocRoller::Operations::Scalar(betaScalarTag, dataType));
-            betaLoadTag = m_command->allocateTag();
-            m_command->addOperation(
-                rocRoller::Operations::T_Load_Scalar(betaLoadTag, betaScalarTag));
+            auto betaScalarTag = m_command->addOperation(rocRoller::Operations::Scalar(dataType));
+            betaLoadTag
+                = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(betaScalarTag));
         }
 
-        auto execute = rocRoller::Operations::T_Execute();
-
-        auto alphaXTag = m_command->allocateTag();
-        execute.addXOp(rocRoller::Operations::E_Mul(alphaXTag, xLoadTag, alphaLoadTag));
-
-        auto betaYTag = yLoadTag;
+        auto execute   = rocRoller::Operations::T_Execute(m_command->getNextTag());
+        auto alphaXTag = execute.addXOp(rocRoller::Operations::E_Mul(xLoadTag, alphaLoadTag));
+        auto betaYTag  = yLoadTag;
         if(m_useBeta)
         {
-            betaYTag = m_command->allocateTag();
-            execute.addXOp(rocRoller::Operations::E_Mul(betaYTag, yLoadTag, betaLoadTag));
+            betaYTag = execute.addXOp(rocRoller::Operations::E_Mul(yLoadTag, betaLoadTag));
         }
-
-        auto sumTag = m_command->allocateTag();
-        execute.addXOp(rocRoller::Operations::E_Add(sumTag, alphaXTag, betaYTag));
+        auto sumTag = execute.addXOp(rocRoller::Operations::E_Add(alphaXTag, betaYTag));
         m_command->addOperation(std::move(execute));
 
-        auto sumTensorTag = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(sumTensorTag, 1, dataType));
+        auto sumTensorTag = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
         m_command->addOperation(rocRoller::Operations::T_Store_Linear(sumTag, sumTensorTag));
     }
 
@@ -201,43 +187,34 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto aLoadTag = m_command->allocateTag();
-        auto bLoadTag = m_command->allocateTag();
+        auto aLoadTag = -1;
+        auto bLoadTag = -1;
 
         if(m_useScalarLoads)
         {
-            auto aScalarTag = m_command->allocateTag();
-            m_command->addOperation(rocRoller::Operations::Scalar(aScalarTag, dataType));
-            m_command->addOperation(rocRoller::Operations::T_Load_Scalar(aLoadTag, aScalarTag));
-            auto bScalarTag = m_command->allocateTag();
-            m_command->addOperation(rocRoller::Operations::Scalar(bScalarTag, dataType));
-            m_command->addOperation(rocRoller::Operations::T_Load_Scalar(bLoadTag, bScalarTag));
+            auto aScalarTag = m_command->addOperation(rocRoller::Operations::Scalar(dataType));
+            aLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(aScalarTag));
+            auto bScalarTag = m_command->addOperation(rocRoller::Operations::Scalar(dataType));
+            bLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(bScalarTag));
         }
         else
         {
-            auto aTensorTag = m_command->allocateTag();
-            m_command->addOperation(rocRoller::Operations::Tensor(aTensorTag, 1, dataType));
-            m_command->addOperation(rocRoller::Operations::T_Load_Linear(aLoadTag, aTensorTag));
-            auto bTensorTag = m_command->allocateTag();
-            m_command->addOperation(rocRoller::Operations::Tensor(bTensorTag, 1, dataType));
-            m_command->addOperation(rocRoller::Operations::T_Load_Linear(bLoadTag, bTensorTag));
+            auto aTensorTag = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
+            aLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Linear(aTensorTag));
+            auto bTensorTag = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
+            bLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Linear(bTensorTag));
         }
 
-        auto aPlusB    = m_command->allocateTag();
-        auto negAPlusB = m_command->allocateTag();
-        auto result    = m_command->allocateTag();
-
-        Operations::T_Execute execute;
-        execute.addXOp(Operations::E_Add(aPlusB, aLoadTag, bLoadTag));
-        execute.addXOp(Operations::E_Neg(negAPlusB, aPlusB));
-        execute.addXOp(Operations::E_Mul(result, aPlusB, negAPlusB));
-
+        Operations::T_Execute execute(m_command->getNextTag());
+        auto                  aPlusB    = execute.addXOp(Operations::E_Add(aLoadTag, bLoadTag));
+        auto                  negAPlusB = execute.addXOp(Operations::E_Neg(aPlusB));
+        auto                  result    = execute.addXOp(Operations::E_Mul(aPlusB, negAPlusB));
         m_command->addOperation(std::move(execute));
 
         if(!m_useScalarLoads)
         {
-            auto resultTensorTag = m_command->allocateTag();
-            m_command->addOperation(rocRoller::Operations::Tensor(resultTensorTag, 1, dataType));
+            auto resultTensorTag
+                = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
             m_command->addOperation(Operations::T_Store_Linear(result, resultTensorTag));
         }
     }
@@ -271,22 +248,16 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto tagTensorA = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(tagTensorA, 2, dataType)); // A
-        auto tagLoadA = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadA, tagTensorA));
+        auto tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // A
+        auto tagLoadA   = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-        auto tagTensorB = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(tagTensorB, 2, dataType)); // B
-        auto tagLoadB = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadB, tagTensorB));
+        auto tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // B
+        auto tagLoadB   = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
-        auto tagStoreD = m_command->allocateTag();
-        m_command->addOperation(
-            rocRoller::Operations::T_Mul(tagStoreD, tagLoadA, tagLoadB)); // D = A * B
+        auto tagStoreD = m_command->addOperation(
+            rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // D = A * B
 
-        auto tagTensorD = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(tagTensorD, 2, dataType)); // D
+        auto tagTensorD = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // D
         m_command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
     }
 
@@ -319,49 +290,37 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto tagTensorA = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(tagTensorA, 2, dataType)); // A
-        m_tagA = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagA, tagTensorA));
+        auto tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // A
+        m_tagA          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-        auto tagTensorB = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(tagTensorB, 2, dataType)); // B
-        m_tagB = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagB, tagTensorB));
+        auto tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // B
+        m_tagB          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
-        auto tagTensorC = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(tagTensorC, 2, dataType)); // C
-        m_tagC = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagC, tagTensorC));
+        auto tagTensorC = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // C
+        m_tagC          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
-        auto tagScalarAlpha = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Scalar(tagScalarAlpha, dataType)); // alpha
-        auto tagLoadAlpha = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Scalar(tagLoadAlpha, tagScalarAlpha));
+        auto tagScalarAlpha
+            = m_command->addOperation(rocRoller::Operations::Scalar(dataType)); // alpha
+        auto tagLoadAlpha
+            = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarAlpha));
 
-        auto tagScalarBeta = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Scalar(tagScalarBeta, dataType)); // beta
-        auto tagLoadBeta = m_command->allocateTag();
-        m_command->addOperation(
-            rocRoller::Operations::T_Load_Scalar(tagLoadBeta, tagScalarBeta)); // beta
+        auto tagScalarBeta
+            = m_command->addOperation(rocRoller::Operations::Scalar(dataType)); // beta
+        auto tagLoadBeta
+            = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarBeta)); // beta
 
-        auto tagAB = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Mul(tagAB, m_tagA, m_tagB)); // A * B
+        auto tagAB = m_command->addOperation(rocRoller::Operations::T_Mul(m_tagA, m_tagB)); // A * B
 
-        rocRoller::Operations::T_Execute execute;
-        auto                             tagAlphaAB = m_command->allocateTag();
-        execute.addXOp(
-            rocRoller::Operations::E_Mul(tagAlphaAB, tagLoadAlpha, tagAB)); // alpha * (A * B)
-        auto tagBetaC = m_command->allocateTag();
-        execute.addXOp(rocRoller::Operations::E_Mul(tagBetaC, tagLoadBeta, m_tagC)); // beta * C
-        m_tagD = m_command->allocateTag();
-        execute.addXOp(rocRoller::Operations::E_Add(m_tagD, tagAlphaAB, tagBetaC));
+        rocRoller::Operations::T_Execute execute(m_command->getNextTag());
+        auto                             tagAlphaAB
+            = execute.addXOp(rocRoller::Operations::E_Mul(tagLoadAlpha, tagAB)); // alpha * (A * B)
+        auto tagBetaC
+            = execute.addXOp(rocRoller::Operations::E_Mul(tagLoadBeta, m_tagC)); // beta * C
+        m_tagD = execute.addXOp(rocRoller::Operations::E_Add(tagAlphaAB, tagBetaC));
         // alpha * (A * B) + beta * C
-
         m_command->addOperation(std::move(execute));
 
-        auto tagTensorD = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(tagTensorD, 2, dataType)); // D
+        auto tagTensorD = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // D
         m_command->addOperation(rocRoller::Operations::T_Store_Tiled(m_tagD, tagTensorD)); // D
     }
 
@@ -454,28 +413,19 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto tagTensorA = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(tagTensorA, 2, dataType)); // A
-        m_tagA = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagA, tagTensorA));
+        auto tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // A
+        m_tagA          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-        auto tagTensorB = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(tagTensorB, 2, dataType)); // B
-        m_tagB = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tagB, tagTensorB));
+        auto tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // B
+        m_tagB          = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
-        auto execute = rocRoller::Operations::T_Execute();
-        auto tag2A   = m_command->allocateTag();
-        execute.addXOp(rocRoller::Operations::E_Add(tag2A, m_tagA, m_tagA)); // A + A
-        auto tag2B = m_command->allocateTag();
-        execute.addXOp(rocRoller::Operations::E_Add(tag2B, m_tagB, m_tagB)); // B + B
-        m_tagD = m_command->allocateTag();
-        execute.addXOp(rocRoller::Operations::E_Add(m_tagD, tag2A, tag2B)); // C = 2A + 2B
-
+        auto execute = rocRoller::Operations::T_Execute(m_command->getNextTag());
+        auto tag2A   = execute.addXOp(rocRoller::Operations::E_Add(m_tagA, m_tagA)); // A + A
+        auto tag2B   = execute.addXOp(rocRoller::Operations::E_Add(m_tagB, m_tagB)); // B + B
+        m_tagD       = execute.addXOp(rocRoller::Operations::E_Add(tag2A, tag2B)); // C = 2A + 2B
         m_command->addOperation(std::move(execute));
 
-        auto tagTensorC = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::Tensor(tagTensorC, 2, dataType));
+        auto tagTensorC = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType));
         m_command->addOperation(rocRoller::Operations::T_Store_Tiled(m_tagD, tagTensorC));
     }
 
@@ -596,24 +546,23 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto tagInputTensor  = m_command->allocateTag();
-        auto tagOutputTensor = m_command->allocateTag();
+        auto tagInputTensor  = -1;
+        auto tagOutputTensor = -1;
 
         if(!m_literalStrides.empty())
         {
-            m_command->addOperation(
-                rocRoller::Operations::Tensor(tagInputTensor, 2, dataType, m_literalStrides));
-            m_command->addOperation(
-                rocRoller::Operations::Tensor(tagOutputTensor, 2, dataType, m_literalStrides));
+            tagInputTensor = m_command->addOperation(
+                rocRoller::Operations::Tensor(2, dataType, m_literalStrides));
+            tagOutputTensor = m_command->addOperation(
+                rocRoller::Operations::Tensor(2, dataType, m_literalStrides));
         }
         else
         {
-            m_command->addOperation(rocRoller::Operations::Tensor(tagInputTensor, 2, dataType));
-            m_command->addOperation(rocRoller::Operations::Tensor(tagOutputTensor, 2, dataType));
+            tagInputTensor  = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType));
+            tagOutputTensor = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType));
         }
 
-        m_tag = m_command->allocateTag();
-        m_command->addOperation(rocRoller::Operations::T_Load_Tiled(m_tag, tagInputTensor));
+        m_tag = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagInputTensor));
         m_command->addOperation(rocRoller::Operations::T_Store_Tiled(m_tag, tagOutputTensor));
     }
 

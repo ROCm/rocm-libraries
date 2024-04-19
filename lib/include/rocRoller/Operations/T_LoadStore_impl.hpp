@@ -6,8 +6,8 @@ namespace rocRoller
 {
     namespace Operations
     {
-        inline T_Load_Linear::T_Load_Linear(int dest, int tensor)
-            : BaseOperation(dest)
+        inline T_Load_Linear::T_Load_Linear(int tensor)
+            : BaseOperation()
             , m_tensorTag(tensor)
         {
         }
@@ -31,8 +31,8 @@ namespace rocRoller
             return stream << val.toString();
         }
 
-        inline T_Load_Scalar::T_Load_Scalar(int dest, int scalar)
-            : BaseOperation(dest)
+        inline T_Load_Scalar::T_Load_Scalar(int scalar)
+            : BaseOperation()
             , m_scalarTag(scalar)
         {
         }
@@ -56,8 +56,8 @@ namespace rocRoller
             return stream << val.toString();
         }
 
-        inline T_Load_Tiled::T_Load_Tiled(int dest, int tensor)
-            : BaseOperation(dest)
+        inline T_Load_Tiled::T_Load_Tiled(int tensor)
+            : BaseOperation()
             , m_tensorTag(tensor)
         {
         }
@@ -81,10 +81,16 @@ namespace rocRoller
             return stream << val.toString();
         }
 
-        inline T_Store_Linear::T_Store_Linear(int dest, int tensor)
-            : BaseOperation(dest)
+        inline T_Store_Linear::T_Store_Linear(int source, int tensor)
+            : BaseOperation()
+            , m_srcTag(source)
             , m_tensorTag(tensor)
         {
+        }
+
+        inline int T_Store_Linear::getSrcTag() const
+        {
+            return m_srcTag;
         }
 
         inline int T_Store_Linear::getTensorTag() const
@@ -96,7 +102,8 @@ namespace rocRoller
         {
             std::ostringstream msg;
 
-            msg << "T_STORE_LINEAR " << m_tag << " Tensor " << m_tensorTag;
+            msg << "T_STORE_LINEAR " << m_tag << " Source " << m_srcTag << " Tensor "
+                << m_tensorTag;
 
             return msg.str();
         }
@@ -106,10 +113,16 @@ namespace rocRoller
             return stream << val.toString();
         }
 
-        inline T_Store_Tiled::T_Store_Tiled(int dest, int tensor)
-            : BaseOperation(dest)
+        inline T_Store_Tiled::T_Store_Tiled(int source, int tensor)
+            : BaseOperation()
+            , m_srcTag(source)
             , m_tensorTag(tensor)
         {
+        }
+
+        inline int T_Store_Tiled::getSrcTag() const
+        {
+            return m_srcTag;
         }
 
         inline int T_Store_Tiled::getTensorTag() const
@@ -121,7 +134,7 @@ namespace rocRoller
         {
             std::ostringstream msg;
 
-            msg << "T_STORE_TILED " << m_tag << " Tensor " << m_tensorTag;
+            msg << "T_STORE_TILED " << m_tag << " Source " << m_srcTag << " Tensor " << m_tensorTag;
 
             return msg.str();
         }

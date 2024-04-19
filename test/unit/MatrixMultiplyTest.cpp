@@ -81,23 +81,17 @@ namespace MatrixMultiplyTest
         auto command  = std::make_shared<Command>();
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto tagTensorA = command->allocateTag();
-        command->addOperation(
-            rocRoller::Operations::Tensor(tagTensorA, 2, dataType, {(size_t)1})); // A
-        auto tagLoadA = command->allocateTag();
-        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadA, tagTensorA));
+        auto tagTensorA
+            = command->addOperation(rocRoller::Operations::Tensor(2, dataType, {(size_t)1})); // A
+        auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-        auto tagTensorB = command->allocateTag();
-        command->addOperation(rocRoller::Operations::Tensor(tagTensorB, 2, dataType)); // B
-        auto tagLoadB = command->allocateTag();
-        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadB, tagTensorB));
+        auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // B
+        auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
-        auto tagStoreD = command->allocateTag();
-        command->addOperation(
-            rocRoller::Operations::T_Mul(tagStoreD, tagLoadA, tagLoadB)); // D = A * B
+        auto tagStoreD
+            = command->addOperation(rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // D = A * B
 
-        auto tagTensorD = command->allocateTag();
-        command->addOperation(rocRoller::Operations::Tensor(tagTensorD, 2, dataType)); // D
+        auto tagTensorD = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // D
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
         KernelArguments runtimeArgs;
@@ -260,23 +254,17 @@ namespace MatrixMultiplyTest
         auto command  = std::make_shared<Command>();
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto tagTensorA = command->allocateTag();
-        command->addOperation(
-            rocRoller::Operations::Tensor(tagTensorA, 2, dataType, {(size_t)1})); // A
-        auto tagLoadA = command->allocateTag();
-        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadA, tagTensorA));
+        auto tagTensorA
+            = command->addOperation(rocRoller::Operations::Tensor(2, dataType, {(size_t)1})); // A
+        auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-        auto tagTensorB = command->allocateTag();
-        command->addOperation(rocRoller::Operations::Tensor(tagTensorB, 2, dataType)); // B
-        auto tagLoadB = command->allocateTag();
-        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadB, tagTensorB));
+        auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // B
+        auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
-        auto tagStoreD = command->allocateTag();
-        command->addOperation(
-            rocRoller::Operations::T_Mul(tagStoreD, tagLoadA, tagLoadB)); // D = A * B
+        auto tagStoreD
+            = command->addOperation(rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // D = A * B
 
-        auto tagTensorD = command->allocateTag();
-        command->addOperation(rocRoller::Operations::Tensor(tagTensorD, 2, dataType)); // D
+        auto tagTensorD = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // D
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
         KernelArguments runtimeArgs;
@@ -393,31 +381,24 @@ namespace MatrixMultiplyTest
         auto command  = std::make_shared<Command>();
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto tagTensorA = command->allocateTag();
-        command->addOperation(rocRoller::Operations::Tensor(tagTensorA, 2, dataType)); // A
-        auto tagLoadA = command->allocateTag();
-        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadA, tagTensorA));
+        auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // A
+        auto tagLoadA   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-        auto tagTensorB = command->allocateTag();
-        command->addOperation(rocRoller::Operations::Tensor(tagTensorB, 2, dataType)); // B
-        auto tagLoadB = command->allocateTag();
-        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadB, tagTensorB));
+        auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // B
+        auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
-        auto tagTensorC = command->allocateTag();
-        command->addOperation(rocRoller::Operations::Tensor(tagTensorC, 2, dataType)); // C
-        auto tagLoadC = command->allocateTag();
-        command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadC, tagTensorC));
+        auto tagTensorC = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // C
+        auto tagLoadC   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
-        auto tagAB = command->allocateTag();
-        command->addOperation(rocRoller::Operations::T_Mul(tagAB, tagLoadA, tagLoadB)); // A * B
+        auto tagAB
+            = command->addOperation(rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // A * B
 
-        auto execute   = rocRoller::Operations::T_Execute();
-        auto tagStoreD = command->allocateTag();
-        execute.addXOp(rocRoller::Operations::E_Add(tagStoreD, tagAB, tagLoadC)); // D = A * B + C
+        auto execute = rocRoller::Operations::T_Execute(command->getNextTag());
+        auto tagStoreD
+            = execute.addXOp(rocRoller::Operations::E_Add(tagAB, tagLoadC)); // D = A * B + C
         command->addOperation(std::move(execute));
 
-        auto tagTensorD = command->allocateTag();
-        command->addOperation(rocRoller::Operations::Tensor(tagTensorD, 2, dataType)); // D
+        auto tagTensorD = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // D
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
         KernelArguments runtimeArgs;

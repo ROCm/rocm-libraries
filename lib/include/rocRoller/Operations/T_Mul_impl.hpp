@@ -6,8 +6,8 @@ namespace rocRoller
 {
     namespace Operations
     {
-        inline T_Mul::T_Mul(int dest, int a, int b)
-            : BaseOperation(dest)
+        inline T_Mul::T_Mul(int a, int b)
+            : BaseOperation()
             , a(a)
             , b(b)
         {

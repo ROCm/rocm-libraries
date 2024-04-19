@@ -272,9 +272,9 @@ namespace rocRoller
             void operator()(Operations::T_Store_Linear const& tstore)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Store_Linear");
-                AssertFatal(m_op.count(tstore.getTag()) > 0,
+                AssertFatal(m_op.count(tstore.getSrcTag()) > 0,
                             "Unknown command tag",
-                            ShowValue(tstore.getTag()));
+                            ShowValue(tstore.getSrcTag()));
 
                 auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getTensorTag());
 
@@ -287,9 +287,9 @@ namespace rocRoller
                     dims.push_back(dim);
                 }
 
-                auto linear = m_dim.at(tstore.getTag());
+                auto linear = m_dim.at(tstore.getSrcTag());
                 auto user   = m_graph.coordinates.addElement(
-                    User(tstore.getTag(),
+                    User(tstore.getSrcTag(),
                          tensor.data()->name(),
                          std::make_shared<Expression::Expression>(tensor.limit())));
 
@@ -298,7 +298,7 @@ namespace rocRoller
                 m_graph.coordinates.addElement(DataFlow(), {linear}, {user});
 
                 auto store = m_graph.control.addElement(StoreLinear());
-                auto last  = m_op.at(tstore.getTag());
+                auto last  = m_op.at(tstore.getSrcTag());
                 m_graph.control.addElement(Sequence(), {last}, {store});
 
                 m_graph.mapper.connect<Linear>(store, linear);
@@ -317,9 +317,9 @@ namespace rocRoller
             void operator()(Operations::T_Store_Tiled const& tstore)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Store_Tiled");
-                AssertFatal(m_op.count(tstore.getTag()) > 0,
+                AssertFatal(m_op.count(tstore.getSrcTag()) > 0,
                             "Unknown command tag",
-                            ShowValue(tstore.getTag()));
+                            ShowValue(tstore.getSrcTag()));
 
                 auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getTensorTag());
 
@@ -342,9 +342,9 @@ namespace rocRoller
                     dims.push_back(dim);
                 }
 
-                auto tile = m_dim.at(tstore.getTag());
+                auto tile = m_dim.at(tstore.getSrcTag());
                 auto user = m_graph.coordinates.addElement(
-                    User(tstore.getTag(),
+                    User(tstore.getSrcTag(),
                          tensor.data()->name(),
                          std::make_shared<Expression::Expression>(tensor.limit())));
 
@@ -353,7 +353,7 @@ namespace rocRoller
                 m_graph.coordinates.addElement(DataFlow(), {tile}, {user});
 
                 auto store = m_graph.control.addElement(StoreTiled(tensor.dataType()));
-                auto last  = m_op.at(tstore.getTag());
+                auto last  = m_op.at(tstore.getSrcTag());
                 m_graph.control.addElement(Sequence(), {last}, {store});
 
                 m_graph.mapper.connect<MacroTile>(store, tile);

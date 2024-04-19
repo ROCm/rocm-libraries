@@ -10,7 +10,7 @@ namespace rocRoller
         {
         public:
             T_Load_Linear() = delete;
-            T_Load_Linear(int dest, int tensor);
+            T_Load_Linear(int tensor);
 
             int         getTensorTag() const;
             std::string toString() const;
@@ -25,7 +25,7 @@ namespace rocRoller
         {
         public:
             T_Load_Scalar() = delete;
-            T_Load_Scalar(int dest, int scalar);
+            T_Load_Scalar(int scalar);
 
             int         getScalarTag() const;
             std::string toString() const;
@@ -40,7 +40,7 @@ namespace rocRoller
         {
         public:
             T_Load_Tiled() = delete;
-            T_Load_Tiled(int dest, int tensor);
+            T_Load_Tiled(int tensor);
 
             int         getTensorTag() const;
             std::string toString() const;
@@ -55,12 +55,14 @@ namespace rocRoller
         {
         public:
             T_Store_Linear() = delete;
-            T_Store_Linear(int dest, int tensor);
+            T_Store_Linear(int source, int tensor);
 
+            int         getSrcTag() const;
             int         getTensorTag() const;
             std::string toString() const;
 
         private:
+            int m_srcTag;
             int m_tensorTag;
         };
 
@@ -70,12 +72,14 @@ namespace rocRoller
         {
         public:
             T_Store_Tiled() = delete;
-            T_Store_Tiled(int dest, int tensor);
+            T_Store_Tiled(int source, int tensor);
 
+            int         getSrcTag() const;
             int         getTensorTag() const;
             std::string toString() const;
 
         private:
+            int m_srcTag;
             int m_tensorTag;
         };
 

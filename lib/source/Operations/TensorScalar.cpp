@@ -50,18 +50,17 @@ namespace rocRoller
             return msg.str();
         }
 
-        Tensor::Tensor(int dest, int numDims, VariableType variableType)
-            : BaseOperation(dest)
+        Tensor::Tensor(int numDims, VariableType variableType)
+            : BaseOperation()
             , m_variableType(variableType)
             , m_numDims(numDims)
         {
         }
 
-        Tensor::Tensor(int                        dest,
-                       int                        numDims,
+        Tensor::Tensor(int                        numDims,
                        VariableType               variableType,
                        std::vector<size_t> const& literalStrides)
-            : Tensor(dest, numDims, variableType)
+            : Tensor(numDims, variableType)
         {
             AssertFatal(literalStrides.size() <= numDims,
                         "Cannot specify more literal strides than dimensions.");
@@ -116,8 +115,8 @@ namespace rocRoller
             return msg.str();
         }
 
-        Scalar::Scalar(int dest, VariableType variableType)
-            : BaseOperation(dest)
+        Scalar::Scalar(VariableType variableType)
+            : BaseOperation()
             , m_variableType(variableType)
         {
         }

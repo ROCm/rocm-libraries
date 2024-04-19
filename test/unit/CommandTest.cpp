@@ -15,25 +15,25 @@ TEST(CommandTest, Basic)
 
     EXPECT_EQ(0, command->operations().size());
 
-    auto tagTensor = command->allocateTag();
-    auto tagLoad   = command->allocateTag();
+    auto tagTensor = command->addOperation(Operations::Tensor(1, DataType::Int32));
+
     auto load_linear
-        = std::make_shared<Operations::Operation>(Operations::T_Load_Linear(tagLoad, tagTensor));
+        = std::make_shared<Operations::Operation>(Operations::T_Load_Linear(tagTensor));
+    auto tagLoad = command->addOperation(load_linear);
 
-    auto                       tagStore = command->allocateTag();
-    Operations::T_Store_Linear tsl(tagStore, tagTensor);
-    EXPECT_EQ(2, tsl.getTag());
-
+    Operations::T_Store_Linear tsl(tagLoad, tagTensor);
+    // tag value is assigned to an operation when it's added to the Command Graph
+    EXPECT_EQ(-1, tsl.getTag());
     auto store_linear = std::make_shared<Operations::Operation>(std::move(tsl));
-    auto execute      = std::make_shared<Operations::Operation>(Operations::T_Execute());
+    auto execute
+        = std::make_shared<Operations::Operation>(Operations::T_Execute(command->getNextTag()));
 
-    command->addOperation(load_linear);
     command->addOperation(store_linear);
     command->addOperation(execute);
 
     EXPECT_EQ(load_linear, command->findTag(1));
 
-    EXPECT_EQ(3, command->operations().size());
+    EXPECT_EQ(4, command->operations().size());
 }
 
 TEST(CommandTest, ToString)
@@ -42,9 +42,9 @@ TEST(CommandTest, ToString)
 
     EXPECT_EQ(0, command->operations().size());
 
+    command->addOperation(std::make_shared<Operations::Operation>(Operations::T_Load_Linear(-1)));
     command->addOperation(
-        std::make_shared<Operations::Operation>(Operations::T_Load_Linear(-1, -1)));
-    command->addOperation(std::make_shared<Operations::Operation>(Operations::T_Execute()));
+        std::make_shared<Operations::Operation>(Operations::T_Execute(command->getNextTag())));
 
     EXPECT_EQ(2, command->operations().size());
 
@@ -61,23 +61,17 @@ TEST(CommandTest, VectorAdd)
 {
     auto command = std::make_shared<rocRoller::Command>();
 
-    auto tagTensorA = command->allocateTag();
-    command->addOperation(Operations::Tensor(tagTensorA, 1, DataType::Float));
-    auto tagLoadA = command->allocateTag();
-    command->addOperation(Operations::T_Load_Linear(tagLoadA, tagTensorA));
+    auto tagTensorA = command->addOperation(Operations::Tensor(1, DataType::Float));
+    auto tagLoadA   = command->addOperation(Operations::T_Load_Linear(tagTensorA));
 
-    auto tagTensorB = command->allocateTag();
-    command->addOperation(Operations::Tensor(tagTensorB, 1, DataType::Float));
-    auto tagLoadB = command->allocateTag();
-    command->addOperation(Operations::T_Load_Linear(tagLoadB, tagTensorB));
+    auto tagTensorB = command->addOperation(Operations::Tensor(1, DataType::Float));
+    auto tagLoadB   = command->addOperation(Operations::T_Load_Linear(tagTensorB));
 
-    Operations::T_Execute execute;
-    auto                  tagResult = command->allocateTag();
-    execute.addXOp(Operations::E_Add(tagResult, tagLoadA, tagLoadB));
+    Operations::T_Execute execute(command->getNextTag());
+    auto                  tagResult = execute.addXOp(Operations::E_Add(tagLoadA, tagLoadB));
     command->addOperation(std::move(execute));
 
-    auto tagTensorResult = command->allocateTag();
-    command->addOperation(Operations::Tensor(tagTensorResult, 1, DataType::Float));
+    auto tagTensorResult = command->addOperation(Operations::Tensor(1, DataType::Float));
     command->addOperation(Operations::T_Store_Linear(tagResult, tagTensorResult));
 
     std::string result = R"(
@@ -87,8 +81,8 @@ TEST(CommandTest, VectorAdd)
         T_LOAD_LINEAR 3 Tensor 2
         T_EXECUTE 1 3
         E_Add 4, 1, 3
-        Tensor.Float.d1 5, (base=&64, lim=&72, sizes={&80 }, strides={&88 })
-        T_STORE_LINEAR 4 Tensor 5)";
+        Tensor.Float.d1 6, (base=&64, lim=&72, sizes={&80 }, strides={&88 })
+        T_STORE_LINEAR 7 Source 4 Tensor 6)";
     EXPECT_EQ(NormalizedSource(command->toString()), NormalizedSource(result));
 
     {
@@ -101,10 +95,10 @@ TEST(CommandTest, VectorAdd)
             Tensor_2_extent: Value: Int64(offset: 40, size: 8, read_only),
             Tensor_2_size_0: Value: Int64(offset: 48, size: 8, read_only),
             Tensor_2_stride_0: Value: Int64(offset: 56, size: 8, read_only),
-            Tensor_5_pointer: PointerGlobal: Float(offset: 64, size: 8, read_write),
-            Tensor_5_extent: Value: Int64(offset: 72, size: 8, read_only),
-            Tensor_5_size_0: Value: Int64(offset: 80, size: 8, read_only),
-            Tensor_5_stride_0: Value: Int64(offset: 88, size: 8, read_only)
+            Tensor_6_pointer: PointerGlobal: Float(offset: 64, size: 8, read_write),
+            Tensor_6_extent: Value: Int64(offset: 72, size: 8, read_only),
+            Tensor_6_size_0: Value: Int64(offset: 80, size: 8, read_only),
+            Tensor_6_stride_0: Value: Int64(offset: 88, size: 8, read_only)
         ])";
         std::ostringstream msg;
         msg << command->getArguments();
@@ -116,7 +110,8 @@ TEST(CommandTest, DuplicateOp)
 {
     auto command = std::make_shared<rocRoller::Command>();
 
-    auto execute = std::make_shared<Operations::Operation>(Operations::T_Execute());
+    auto execute
+        = std::make_shared<Operations::Operation>(Operations::T_Execute(command->getNextTag()));
 
     command->addOperation(execute);
 #ifdef NDEBUG
@@ -128,17 +123,19 @@ TEST(CommandTest, DuplicateOp)
 
 TEST(CommandTest, XopInputOutputs)
 {
-    Operations::T_Execute execute;
-
-    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Sub(2, 0, 1)));
-    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Mul(3, 2, 1)));
+    auto command = std::make_shared<rocRoller::Command>();
+    command->allocateTag();
+    command->allocateTag();
+    Operations::T_Execute execute(command->getNextTag());
+    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Sub(0, 1)));
+    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Mul(2, 1)));
 
     EXPECT_EQ(execute.getInputs(), std::unordered_set<int>({0, 1}));
     EXPECT_EQ(execute.getOutputs(), std::unordered_set<int>({2, 3}));
 
-    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Abs(4, 3)));
-    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Neg(5, 6)));
+    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Abs(3)));
+    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Neg(4)));
 
-    EXPECT_EQ(execute.getInputs(), std::unordered_set<int>({0, 1, 6}));
+    EXPECT_EQ(execute.getInputs(), std::unordered_set<int>({0, 1}));
     EXPECT_EQ(execute.getOutputs(), std::unordered_set<int>({2, 3, 4, 5}));
 }

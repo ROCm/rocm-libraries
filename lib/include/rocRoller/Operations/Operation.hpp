@@ -11,8 +11,7 @@ namespace rocRoller
         class BaseOperation
         {
         public:
-            BaseOperation() = delete;
-            explicit BaseOperation(int dest);
+            BaseOperation();
 
             void setCommand(CommandPtr);
             int  getTag() const;

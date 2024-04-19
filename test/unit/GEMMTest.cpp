@@ -125,66 +125,54 @@ namespace GEMMDriverTest
                                                   ? std::vector<size_t>({(size_t)0, (size_t)1})
                                                   : std::vector<size_t>({});
 
-            auto tagTensorA = command->allocateTag();
-            command->addOperation(rocRoller::Operations::Tensor(
-                tagTensorA, 2, dataType, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
-            auto tagLoadA = command->allocateTag();
-            command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadA, tagTensorA));
+            auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
+                2, dataType, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
+            auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-            auto tagTensorB = command->allocateTag();
-            command->addOperation(rocRoller::Operations::Tensor(
-                tagTensorB, 2, dataType, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
-            auto tagLoadB = command->allocateTag();
-            command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadB, tagTensorB));
+            auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
+                2, dataType, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
+            auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
-            auto tagTensorC = command->allocateTag();
-            command->addOperation(
-                rocRoller::Operations::Tensor(tagTensorC, 2, dataType, oneStridesN)); // C
-            auto tagLoadC = command->allocateTag();
-            command->addOperation(rocRoller::Operations::T_Load_Tiled(tagLoadC, tagTensorC));
+            auto tagTensorC = command->addOperation(
+                rocRoller::Operations::Tensor(2, dataType, oneStridesN)); // C
+            auto tagLoadC = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
-            auto tagScalarAlpha = command->allocateTag();
-            command->addOperation(
-                rocRoller::Operations::Scalar(tagScalarAlpha, DataType::Float)); // alpha
-            auto tagLoadAlpha = command->allocateTag();
-            command->addOperation(
-                rocRoller::Operations::T_Load_Scalar(tagLoadAlpha, tagScalarAlpha));
+            auto tagScalarAlpha
+                = command->addOperation(rocRoller::Operations::Scalar(DataType::Float)); // alpha
+            auto tagLoadAlpha
+                = command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarAlpha));
 
-            auto tagScalarBeta = command->allocateTag();
-            command->addOperation(
-                rocRoller::Operations::Scalar(tagScalarBeta, DataType::Float)); // beta
-            auto tagLoadBeta = command->allocateTag();
-            command->addOperation(rocRoller::Operations::T_Load_Scalar(tagLoadBeta, tagScalarBeta));
+            auto tagScalarBeta
+                = command->addOperation(rocRoller::Operations::Scalar(DataType::Float)); // beta
+            auto tagLoadBeta
+                = command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarBeta));
 
-            auto tagAB = command->allocateTag();
-            command->addOperation(rocRoller::Operations::T_Mul(tagAB, tagLoadA, tagLoadB)); // A * B
+            auto tagAB
+                = command->addOperation(rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // A * B
 
-            auto                             tagBetaC = command->allocateTag();
-            rocRoller::Operations::T_Execute execute;
-            execute.addXOp(
-                rocRoller::Operations::E_Mul(tagBetaC, tagLoadBeta, tagLoadC)); // beta * C
+            rocRoller::Operations::T_Execute execute(command->getNextTag());
+            auto                             tagBetaC
+                = execute.addXOp(rocRoller::Operations::E_Mul(tagLoadBeta, tagLoadC)); // beta * C
 
-            auto tagAlphaAB = command->allocateTag();
-            execute.addXOp(
-                rocRoller::Operations::E_Mul(tagAlphaAB, tagLoadAlpha, tagAB)); // alpha * (A * B)
+            auto tagAlphaAB = execute.addXOp(
+                rocRoller::Operations::E_Mul(tagLoadAlpha, tagAB)); // alpha * (A * B)
 
-            auto tagStoreD = command->allocateTag();
+            auto tagStoreD = -1;
             if(gemm.betaInFma)
             {
-                execute.addXOp(rocRoller::Operations::E_Add(
-                    tagStoreD, tagBetaC, tagAlphaAB)); // beta * C + alpha * (A * B)
+                tagStoreD = execute.addXOp(rocRoller::Operations::E_Add(
+                    tagBetaC, tagAlphaAB)); // beta * C + alpha * (A * B)
             }
             else
             {
-                execute.addXOp(rocRoller::Operations::E_Add(
-                    tagStoreD, tagAlphaAB, tagBetaC)); // alpha * (A * B) + beta * C
+                tagStoreD = execute.addXOp(rocRoller::Operations::E_Add(
+                    tagAlphaAB, tagBetaC)); // alpha * (A * B) + beta * C
             }
 
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
-            auto tagTensorD = command->allocateTag();
-            command->addOperation(
-                rocRoller::Operations::Tensor(tagTensorD, 2, dataType, oneStridesN)); // D
+            auto tagTensorD = command->addOperation(
+                rocRoller::Operations::Tensor(2, dataType, oneStridesN)); // D
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
             KernelArguments runtimeArgs;

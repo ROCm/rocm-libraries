@@ -12,7 +12,7 @@ namespace rocRoller
         {
         public:
             Scalar() = delete;
-            Scalar(int dest, VariableType variableType);
+            Scalar(VariableType variableType);
 
             std::string toString() const;
             std::string toString(const unsigned char*) const;
@@ -41,9 +41,8 @@ namespace rocRoller
         {
         public:
             Tensor() = delete;
-            Tensor(int dest, int numDims, VariableType variableType);
-            Tensor(int                        dest,
-                   int                        numDims,
+            Tensor(int numDims, VariableType variableType);
+            Tensor(int                        numDims,
                    VariableType               variableType,
                    std::vector<size_t> const& literalStrides);
 

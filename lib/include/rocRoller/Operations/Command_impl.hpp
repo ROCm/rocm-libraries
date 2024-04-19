@@ -21,10 +21,12 @@ namespace rocRoller
     inline Command::Command(Command const& rhs) = default;
     inline Command::Command(Command&& rhs)      = default;
 
-    inline void Command::addOperation(std::shared_ptr<Operations::Operation> op)
+    inline int Command::addOperation(std::shared_ptr<Operations::Operation> op)
     {
+        int rv = -1;
+
         if(op == nullptr)
-            return;
+            return rv;
 
         AssertFatal(std::find(m_operations.begin(), m_operations.end(), op) == m_operations.end());
 
@@ -34,6 +36,7 @@ namespace rocRoller
         for(auto const& tag : outputs)
         {
             AssertFatal(m_tagMap.find(tag) == m_tagMap.end());
+            rv = tag;
 
             m_tagMap[tag] = op;
 
@@ -47,12 +50,13 @@ namespace rocRoller
 
         Operations::AllocateArguments allocate;
         allocate.call(*op);
+        return rv;
     }
 
     template <Operations::CConcreteOperation T>
-    inline void Command::addOperation(T&& op)
+    inline int Command::addOperation(T&& op)
     {
-        addOperation(std::make_shared<Operations::Operation>(std::forward<T>(op)));
+        return addOperation(std::make_shared<Operations::Operation>(std::forward<T>(op)));
     }
 
     // Allocate a single command argument by incrementing the most recent offset.
