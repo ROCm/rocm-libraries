@@ -57,6 +57,34 @@ namespace rocRoller
 
     namespace Scheduling
     {
+        constexpr Weights GFX942_WEIGHTS = {.nops               = 76.1378190902018,
+                                           .vmcnt              = 54.07458257683615,
+                                           .lgkmcnt            = 363.52374933980695,
+                                           .vmQueueLen         = 15,
+                                           .vectorQueueSat     = 117.98948831627662,
+                                           .ldsQueueSat        = 39.7629521810087,
+                                           .lgkmQueueLen       = 32,
+                                           .stallCycles        = 1000.0,
+                                           .notMFMA            = 112.78496698641563,
+                                           .isMFMA             = 28.46319426559006,
+                                           .isSMEM             = 29.301367351797182,
+                                           .isSControl         = 151.81903815971856,
+                                           .isSALU             = 203.00378213068987,
+                                           .isVMEMRead         = 486.00787195537976,
+                                           .isVMEMWrite        = 70.07923988747702,
+                                           .isLDSRead          = 263.30280566995185,
+                                           .isLDSWrite         = 426.40696175714083,
+                                           .isVALU             = 183.0389398278438,
+                                           .isACCVGPRWrite     = 4119.490080082772,
+                                           .isACCVGPRRead      = 46.24688276910242,
+                                           .newSGPRs           = 389.73028954654313,
+                                           .newVGPRs           = 131.08534084933558,
+                                           .highWaterMarkSGPRs = 109.97284244894918,
+                                           .highWaterMarkVGPRs = 695.2455908721744,
+                                           .fractionOfSGPRs    = 319.9516627135275,
+                                           .fractionOfVGPRs    = 259.29682991279344,
+                                           .outOfRegisters     = 1000000000.0,
+                                           .zeroFreeBarriers   = true};
         constexpr Weights GFX90A_WEIGHTS = {.nops               = 102.16064235921411,
                                            .vmcnt              = 175.18015151123478,
                                            .lgkmcnt            = 57.42789675890664,
@@ -113,7 +141,6 @@ namespace rocRoller
                                            .fractionOfVGPRs    = 308.3901444061333,
                                            .outOfRegisters     = 1000000000.0,
                                            .zeroFreeBarriers   = true};
-        constexpr Weights GFX942_WEIGHTS = GFX90A_WEIGHTS;
 
         RegisterComponent(LinearWeightedCost);
         static_assert(Component::Component<LinearWeightedCost>);
