@@ -122,7 +122,7 @@ namespace rocRoller
         {
         case DataType::Half:
             AssertFatal(arg->valueCount() == 2, "Conversion to Halfx2 requires two elements");
-            co_yield m_context->copier()->pack(dest, arg->element({0}), arg->element({1}));
+            co_yield m_context->copier()->packHalf(dest, arg->element({0}), arg->element({1}));
             break;
         default:
             Throw<FatalError>("Unsupported datatype for convert to halfx2: ", ShowValue(dataType));

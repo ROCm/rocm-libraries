@@ -61,6 +61,8 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::HasMFMA,
              {"v_mfma_f32_32x32x1f32 a[0:31], v32, v33, a[0:31]", ""}},
+            {rocRoller::GPUCapability::HasMFMA_fp8,
+             {"v_mfma_f32_16x16x32_fp8_fp8 v[0:3], v[32:33], v[36:37], v[0:3]", ""}},
             {rocRoller::GPUCapability::HasMFMA_f64,
              {"v_mfma_f64_16x16x4f64 v[0:7], v[32:33], v[36:37], v[0:7]", ""}},
             {rocRoller::GPUCapability::HasMFMA_bf16_1k,

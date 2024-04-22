@@ -516,6 +516,25 @@ namespace rocRoller
         return Get(iter->second);
     }
 
+    VariableType DataTypeInfo::unsegmentedVariableType() const
+    {
+        registerAllTypeInfoOnce();
+
+        // Finds the reverse mapping
+        for(auto const& [key, value] : data)
+        {
+            if(variableType == value.segmentVariableType)
+            {
+                // This check exists because some variables are its own segmentVariableType
+                if(key != value.segmentVariableType)
+                {
+                    return key;
+                }
+            }
+        }
+        Throw<FatalError>("Segmented variable type not found for ", ShowValue(variableType));
+    }
+
     std::ostream& operator<<(std::ostream& stream, const DataType& t)
     {
         return stream << toString(t);

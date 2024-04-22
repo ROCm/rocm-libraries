@@ -47,6 +47,7 @@ namespace rocRoller
             {"HasCodeObjectV5", Value::HasCodeObjectV5},
 
             {"HasMFMA", Value::HasMFMA},
+            {"HasMFMA_fp8", Value::HasMFMA_fp8},
             {"HasMFMA_f64", Value::HasMFMA_f64},
             {"HasMFMA_bf16_1k", Value::HasMFMA_bf16_1k},
 

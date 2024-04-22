@@ -224,6 +224,16 @@ TEST(GPUArchitectureTest, Validate94xInstructions)
         true);
 }
 
+TEST(GPUArchitectureTest, MFMA)
+{
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx942:sramecc+",
+                                                                   GPUCapability::HasMFMA_fp8),
+              true);
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx90a", GPUCapability::HasMFMA_fp8),
+        false);
+}
+
 TEST(GPUArchitectureTest, CheckDefFile)
 {
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetDevice("gfx90a").HasCapability(

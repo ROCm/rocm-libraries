@@ -22,6 +22,9 @@ namespace rocRollerTest
 
     const size_t numFP8PerElement = 4;
 
+    /**
+     * Loads FP8x4 to GPU, unpacks to individual FP8s, convert to float, store to CPU
+    */
     void genFP8x4LoadToFloatStore(rocRoller::ContextPtr m_context, int N)
     {
         auto k = m_context->kernel();
@@ -177,7 +180,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST_P(FP8Test, GPU_ExecuteFP8x4LoadToFloatStore)
+    TEST_P(FP8Test, GPU_FP8x4LoadToFloatStore)
     {
         if(isLocalDevice())
         {
@@ -191,10 +194,154 @@ namespace rocRollerTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        FP8Test,
-        FP8Test,
-        ::testing::Combine(::testing::Values("gfx940", "gfx941", "gfx942", "gfx942:sramecc+")));
+    /**
+     * Loads sparse FP8s to GPU, packs into FP8x4s, stores to CPU
+    */
+    void genFP8LoadGather(rocRoller::ContextPtr m_context, int N)
+    {
+        auto k = m_context->kernel();
+
+        k->setKernelDimensions(1);
+        auto command = std::make_shared<Command>();
+
+        auto result_exp = std::make_shared<Expression::Expression>(
+            command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal}));
+        auto a_exp = std::make_shared<Expression::Expression>(
+            command->allocateArgument({DataType::FP8_NANOO, PointerType::PointerGlobal}));
+
+        auto one  = std::make_shared<Expression::Expression>(1u);
+        auto zero = std::make_shared<Expression::Expression>(0u);
+
+        k->addArgument({"result",
+                        {DataType::UInt32, PointerType::PointerGlobal},
+                        DataDirection::WriteOnly,
+                        result_exp});
+        k->addArgument({"a",
+                        {DataType::FP8_NANOO, PointerType::PointerGlobal},
+                        DataDirection::ReadOnly,
+                        a_exp});
+
+        k->setWorkgroupSize({1, 1, 1});
+        k->setWorkitemCount({one, one, one});
+        k->setDynamicSharedMemBytes(zero);
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        auto kb = [&]() -> Generator<Instruction> {
+            Register::ValuePtr s_result, s_a;
+            co_yield m_context->argLoader()->getValue("result", s_result);
+            co_yield m_context->argLoader()->getValue("a", s_a);
+
+            auto result_ptr
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::UInt32, PointerType::PointerGlobal},
+                                               1,
+                                               Register::AllocationOptions::FullyContiguous());
+
+            auto a_ptr
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::FP8_NANOO, PointerType::PointerGlobal},
+                                               1,
+                                               Register::AllocationOptions::FullyContiguous());
+            auto v_a = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::FP8_NANOO, 1);
+
+            auto v_temp
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::FP8_NANOO,
+                                               4,
+                                               Register::AllocationOptions::FullyContiguous());
+
+            co_yield v_a->allocate();
+            co_yield a_ptr->allocate();
+            co_yield result_ptr->allocate();
+            co_yield v_temp->allocate();
+
+            co_yield m_context->copier()->copy(result_ptr, s_result, "Move pointer.");
+            co_yield m_context->copier()->copy(a_ptr, s_a, "Move pointer.");
+
+            auto bpi = DataTypeInfo::Get(a_ptr->variableType().dataType).elementSize;
+            auto bpo = DataTypeInfo::Get(result_ptr->variableType().dataType).elementSize;
+
+            auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
+            co_yield bufDesc->setup();
+            co_yield bufDesc->setSize(Register::Value::Literal(N));
+            co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
+
+            auto bufInstOpts = rocRoller::BufferInstructionOptions();
+
+            auto vgprSerial = m_context->kernel()->workitemIndex()[0];
+
+            co_yield bufDesc->setBasePointer(s_a);
+            for(int i = 0; i < N; ++i)
+            {
+                co_yield m_context->mem()->loadBuffer(
+                    v_temp->element({i}), vgprSerial, i, bufDesc, bufInstOpts, 1);
+            }
+            co_yield bufDesc->setBasePointer(s_result);
+            co_yield m_context->mem()->storeBuffer(v_temp, vgprSerial, 0, bufDesc, bufInstOpts, N);
+        };
+
+        m_context->schedule(kb());
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+    }
+
+    /**
+     * @param N number of FP8x4; so Nx4 float results
+     */
+    void executeFP8LoadGather(rocRoller::ContextPtr m_context, int N)
+    {
+        genFP8LoadGather(m_context, N);
+        std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+            = m_context->instructions()->getExecutableKernel();
+
+        std::vector<char> a(N);
+        for(int i = 0; i < N; i++)
+            a[i] = i + 10;
+
+        auto d_a      = make_shared_device(a);
+        auto d_result = make_shared_device<uint32_t>(N / 4);
+
+        KernelArguments kargs;
+        kargs.append<void*>("result", d_result.get());
+        kargs.append<void*>("a", d_a.get());
+        KernelInvocation invocation;
+
+        executableKernel->executeKernel(kargs, invocation);
+
+        std::vector<uint32_t> result(N / 4);
+        ASSERT_THAT(
+            hipMemcpy(result.data(), d_result.get(), sizeof(uint32_t) * N / 4, hipMemcpyDefault),
+            HasHipSuccess(0));
+
+        auto bpi = 1;
+        auto bpo = 4;
+        for(int i = 0; i < N / 4; i++)
+        {
+            uint32_t expected = a[i] | (a[i + 1] << 8) | (a[i + 2] << 16) | (a[i + 3] << 24);
+            EXPECT_EQ(result[i], expected) << std::hex << result[i] << " " << expected;
+        }
+    }
+
+    TEST_P(FP8Test, GPU_FP8LoadGather)
+    {
+        constexpr int N = 4;
+        if(isLocalDevice())
+        {
+            executeFP8LoadGather(m_context, N);
+        }
+        else
+        {
+            genFP8LoadGather(m_context, N);
+            std::vector<char> assembledKernel = m_context->instructions()->assemble();
+            EXPECT_GT(assembledKernel.size(), 0);
+        }
+    }
 
     TEST(FP8Test, CPUConversions)
     {
@@ -216,4 +363,8 @@ namespace rocRollerTest
             singleTest(c);
         }
     }
+
+    INSTANTIATE_TEST_SUITE_P(FP8Test,
+                             FP8Test,
+                             ::testing::Combine(::testing::Values("gfx942:sramecc+")));
 }

@@ -11,6 +11,7 @@
 #include "../Context.hpp"
 #include "../InstructionValues/Register.hpp"
 #include "../Utilities/Error.hpp"
+#include "Arithmetic/ArithmeticGenerator.hpp"
 #include "Arithmetic/Utility.hpp"
 
 namespace rocRoller
@@ -317,19 +318,55 @@ namespace rocRoller
         co_yield copy(dest, src);
     }
 
-    inline Generator<Instruction> CopyGenerator::pack(Register::ValuePtr dest,
-                                                      Register::ValuePtr loVal,
-                                                      Register::ValuePtr hiVal,
-                                                      std::string        comment) const
+    inline Generator<Instruction> CopyGenerator::pack(Register::ValuePtr              dest,
+                                                      std::vector<Register::ValuePtr> values,
+                                                      std::string                     comment) const
     {
-        AssertFatal((dest && dest->regType() == Register::Type::Vector
-                     && dest->variableType().dataType == DataType::Halfx2)
-                        && (loVal && loVal->regType() == Register::Type::Vector
-                            && loVal->variableType().dataType == DataType::Half)
-                        && (hiVal && hiVal->regType() == Register::Type::Vector
-                            && hiVal->variableType().dataType == DataType::Half),
-                    "pack arguments must be vector registers of type Half");
+        if(values.size() == 2
+           && (dest && dest->regType() == Register::Type::Vector
+               && dest->variableType().dataType == DataType::Halfx2)
+           && (values[0] && values[0]->regType() == Register::Type::Vector
+               && values[0]->variableType().dataType == DataType::Half)
+           && (values[1] && values[1]->regType() == Register::Type::Vector
+               && values[1]->variableType().dataType == DataType::Half))
+        {
+            co_yield packHalf(dest, values[0], values[1]);
+        }
+        else
+        {
+            AssertFatal(!values.empty());
+            AssertFatal(std::all_of(values.begin(),
+                                    values.end(),
+                                    [&](auto v) {
+                                        return v->variableType().getElementSize()
+                                               == values[0]->variableType().getElementSize();
+                                    }),
+                        "Requires homogenous element sizes");
+            AssertFatal(dest
+                            && dest->variableType().getElementSize()
+                                   == values.size() * values[0]->variableType().getElementSize(),
+                        "Values do not perfectly fit");
+            const auto shift_amount = values[0]->variableType().getElementSize();
+            if(!dest->canUseAsOperand())
+            {
+                co_yield dest->allocate();
+            }
+            co_yield generate(dest, Expression::literal(0), m_context.lock());
+            for(int i = values.size() - 1; i > 0; --i)
+            {
+                co_yield generateOp<Expression::BitwiseOr>(dest, dest, values[i]);
+                co_yield generateOp<Expression::ShiftL>(
+                    dest, dest, Register::Value::Literal(shift_amount * 8));
+            }
+            co_yield generateOp<Expression::BitwiseOr>(dest, dest, values[0]);
+        }
+    }
 
+    inline Generator<Instruction> CopyGenerator::packHalf(Register::ValuePtr dest,
+                                                          Register::ValuePtr loVal,
+                                                          Register::ValuePtr hiVal,
+                                                          std::string        comment) const
+    {
         co_yield_(Instruction("v_pack_B32_F16", {dest}, {loVal, hiVal}, {}, ""));
     }
 }

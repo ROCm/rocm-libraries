@@ -1242,4 +1242,154 @@ namespace MemoryInstructionsTest
         }
     }
 
+    class MemoryInstructions942Test : public GPUContextFixture
+    {
+    public:
+        void genByteLoadStore()
+        {
+            unsigned int N = 1;
+
+            auto k       = m_context->kernel();
+            auto command = std::make_shared<Command>();
+
+            auto result_exp = std::make_shared<Expression::Expression>(
+                command->allocateArgument({DataType::FP8x4_NANOO, PointerType::PointerGlobal}));
+
+            auto workItemCountExpr = std::make_shared<Expression::Expression>(N);
+            auto one               = std::make_shared<Expression::Expression>(1u);
+            auto zero              = std::make_shared<Expression::Expression>(0u);
+
+            k->setKernelName("PackForStore");
+            k->setKernelDimensions(1);
+
+            k->addArgument({"result",
+                            {DataType::Int32, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly});
+            k->addArgument(
+                {"a", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::ReadOnly});
+
+            k->setWorkgroupSize({N, 1, 1});
+            k->setWorkitemCount({workItemCountExpr, one, one});
+            k->setDynamicSharedMemBytes(zero);
+
+            k->setKernelDimensions(1);
+
+            m_context->schedule(k->preamble());
+            m_context->schedule(k->prolog());
+
+            auto kb = [&]() -> Generator<Instruction> {
+                Register::ValuePtr s_result, s_a;
+                co_yield m_context->argLoader()->getValue("result", s_result);
+                co_yield m_context->argLoader()->getValue("a", s_a);
+
+                auto vgprSerial = m_context->kernel()->workitemIndex()[0];
+
+                int  size = (N % 4 == 0) ? N / 4 : N / 4 + 1;
+                auto v_a
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   DataType::FP8x4_NANOO,
+                                                   size,
+                                                   Register::AllocationOptions::FullyContiguous());
+
+                co_yield v_a->allocate();
+
+                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
+                co_yield bufDesc->setup();
+                co_yield bufDesc->setBasePointer(s_a);
+                co_yield bufDesc->setSize(Register::Value::Literal(N));
+                co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
+
+                auto bufInstOpts = rocRoller::BufferInstructionOptions();
+
+                co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
+                co_yield bufDesc->setBasePointer(s_result);
+                co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
+
+                co_yield m_context->mem()->loadBuffer(
+                    v_a, vgprSerial, 0, bufDesc, bufInstOpts, N, true);
+                co_yield bufDesc->setBasePointer(s_result);
+                co_yield m_context->mem()->storeBuffer(
+                    v_a, vgprSerial, 0, bufDesc, bufInstOpts, N, true);
+
+                co_yield m_context->mem()->loadLocal(v_a, vgprSerial, 0, N);
+                co_yield bufDesc->setBasePointer(s_result);
+                co_yield m_context->mem()->storeLocal(v_a, vgprSerial, 0, N);
+
+                co_yield m_context->mem()->loadLocal(v_a, vgprSerial, 0, N, "", true);
+                co_yield bufDesc->setBasePointer(s_result);
+                co_yield m_context->mem()->storeLocal(v_a, vgprSerial, 0, N, "", true);
+            };
+
+            m_context->schedule(kb());
+            m_context->schedule(k->postamble());
+            m_context->schedule(k->amdgpu_metadata());
+
+            EXPECT_NE(NormalizedSource(output()).find("buffer_load_ubyte"), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("buffer_store_byte"), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("buffer_load_ubyte_d16_hi"),
+                      std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("buffer_store_byte_d16_hi"),
+                      std::string::npos);
+
+            EXPECT_NE(NormalizedSource(output()).find("ds_read_u8_d16"), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("ds_write_b8"), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("ds_read_u8_d16_hi"), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("ds_write_b8_d16_hi"), std::string::npos);
+
+            std::vector<char> assembledKernel = m_context->instructions()->assemble();
+            EXPECT_GT(assembledKernel.size(), 0);
+        }
+
+        void executeByteLoadStore()
+        {
+            int N          = 1;
+            int bufferSize = N + 20;
+
+            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+                = m_context->instructions()->getExecutableKernel();
+
+            std::vector<char> a(bufferSize);
+            for(int i = 0; i < N; i++)
+                a[i] = i + 10;
+            for(int i = N; i < bufferSize; i++)
+                a[i] = -i;
+
+            std::vector<char> initialResult(bufferSize);
+            for(int i = 0; i < bufferSize; i++)
+                initialResult[i] = 2 * i;
+
+            auto d_a      = make_shared_device(a);
+            auto d_result = make_shared_device<char>(initialResult);
+
+            KernelArguments kargs;
+            kargs.append<void*>("result", d_result.get());
+            kargs.append<void*>("a", d_a.get());
+            KernelInvocation invocation;
+
+            executableKernel->executeKernel(kargs, invocation);
+
+            std::vector<char> result(bufferSize);
+            ASSERT_THAT(
+                hipMemcpy(
+                    result.data(), d_result.get(), sizeof(char) * bufferSize, hipMemcpyDefault),
+                HasHipSuccess(0));
+
+            for(int i = 0; i < N; i++)
+                EXPECT_EQ(result[i], a[i]);
+            for(int i = N; i < result.size(); i++)
+                EXPECT_EQ(result[i], 2 * i);
+        }
+    };
+
+    TEST_P(MemoryInstructions942Test, ByteLoadStore)
+    {
+        genByteLoadStore();
+        if(isLocalDevice())
+            executeByteLoadStore();
+    }
+
+    INSTANTIATE_TEST_SUITE_P(MemoryInstructions942Test,
+                             MemoryInstructions942Test,
+                             ::testing::Combine(::testing::Values("gfx942:sramecc+")));
 }

@@ -304,7 +304,7 @@ namespace rocRoller
         Generator<Instruction> barrier();
 
     private:
-        const int m_wordSize = 4;
+        const int m_wordSize = 4; // in bytes
 
         std::weak_ptr<Context> m_context;
 

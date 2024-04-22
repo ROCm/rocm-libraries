@@ -427,7 +427,7 @@ namespace rocRoller
         AssertFatal(numBytes > 0 && (numBytes < m_wordSize || numBytes % m_wordSize == 0),
                     "Invalid number of bytes");
 
-        AssertFatal(!high || (high && numBytes == 2),
+        AssertFatal(!high || (high && numBytes <= 2),
                     "Operation doesn't support hi argument for sizes of "
                         + std::to_string(numBytes));
 
@@ -562,9 +562,11 @@ namespace rocRoller
         // TODO : add support for buffer loads where numBytes == 3 || numBytes % m_wordSize != 0
         AssertFatal(numBytes > 0
                         && ((numBytes < m_wordSize && numBytes != 3) || numBytes % m_wordSize == 0),
-                    "Invalid number of bytes");
+                    "Invalid number of bytes",
+                    ShowValue(numBytes),
+                    ShowValue(m_wordSize));
 
-        AssertFatal(!high || (high && numBytes == 2),
+        AssertFatal(!high || (high && numBytes <= 2),
                     "Operation doesn't support hi argument for sizes of "
                         + std::to_string(numBytes));
 
@@ -610,7 +612,14 @@ namespace rocRoller
             std::string opEnd = "";
             if(numBytes == 1)
             {
-                opEnd += "ubyte";
+                if(high)
+                {
+                    AssertFatal(m_context.lock()->targetArchitecture().HasCapability(
+                        GPUCapability::HasMFMA_fp8));
+                    opEnd += "ubyte_d16_hi";
+                }
+                else
+                    opEnd += "ubyte";
             }
             else if(numBytes == 2)
             {
@@ -725,6 +734,12 @@ namespace rocRoller
             if(numBytes == 1)
             {
                 opEnd += "byte";
+                if(high)
+                {
+                    AssertFatal(m_context.lock()->targetArchitecture().HasCapability(
+                        GPUCapability::HasMFMA_fp8));
+                    opEnd += "_d16_hi";
+                }
             }
             else if(numBytes == 2)
             {

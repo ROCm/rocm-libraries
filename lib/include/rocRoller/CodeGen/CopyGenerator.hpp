@@ -68,10 +68,22 @@ namespace rocRoller
          * @param comment Comment that will be generated along with the instructions. (Default = "")
          * @return Generator<Instruction>
          */
-        Generator<Instruction> pack(Register::ValuePtr dest,
-                                    Register::ValuePtr loVal,
-                                    Register::ValuePtr hiVal,
-                                    std::string        comment = "") const;
+        Generator<Instruction> packHalf(Register::ValuePtr dest,
+                                        Register::ValuePtr loVal,
+                                        Register::ValuePtr hiVal,
+                                        std::string        comment = "") const;
+
+        /**
+         * @brief Pack multiple values into a single 32bit register
+         *
+         * @param dest The register that will hold the value
+         * @param values A vector containing the registers that will be stored. The lowerer indexed elements will be stored in the LSBs.
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
+         * @return Generator<Instruction>
+         */
+        Generator<Instruction> pack(Register::ValuePtr              dest,
+                                    std::vector<Register::ValuePtr> values,
+                                    std::string                     comment = "") const;
 
     private:
         std::weak_ptr<Context> m_context;

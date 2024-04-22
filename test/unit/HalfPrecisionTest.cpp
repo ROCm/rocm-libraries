@@ -608,10 +608,10 @@ namespace rocRollerTest
         auto buff_opts = BufferInstructionOptions();
 
         // copy
-        EXPECT_THROW(m_context->schedule(m_context->copier()->pack(vf32, vh16_1, vh16_2)),
+        EXPECT_THROW(m_context->schedule(m_context->copier()->packHalf(vf32, vh16_1, vh16_2)),
                      FatalError);
 
-        EXPECT_THROW(m_context->schedule(m_context->copier()->pack(vh16x2, vf32, vf32)),
+        EXPECT_THROW(m_context->schedule(m_context->copier()->packHalf(vh16x2, vf32, vf32)),
                      FatalError);
 
         // memory instructions

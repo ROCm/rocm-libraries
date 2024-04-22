@@ -58,7 +58,7 @@ namespace rocRoller
         auto val = Register::Value::Placeholder(
             m_context.lock(), Register::Type::Vector, DataType::Halfx2, 1);
 
-        co_yield m_context.lock()->copier()->pack(val, data1, data2);
+        co_yield m_context.lock()->copier()->packHalf(val, data1, data2);
 
         co_yield store(kind, addr, val, offset, 4, comment);
     }
@@ -76,17 +76,22 @@ namespace rocRoller
                                                             Register::ValuePtr  toPack) const
     {
         auto valuesPerWord = m_wordSize / toPack->variableType().getElementSize();
-        AssertFatal(valuesPerWord == 2);
+        auto unsegmented   = DataTypeInfo::Get(toPack->variableType()).unsegmentedVariableType();
+        // AssertFatal(unsegmented == DataType::Halfx2, "Other datatypes not tested");
+
         result = Register::Value::Placeholder(toPack->context(),
                                               toPack->regType(),
-                                              DataType::Halfx2,
+                                              unsegmented,
                                               toPack->valueCount() / valuesPerWord,
                                               Register::AllocationOptions::FullyContiguous());
         for(int i = 0; i < result->registerCount(); i++)
         {
-            co_yield m_context.lock()->copier()->pack(result->element({i}),
-                                                      toPack->element({i * valuesPerWord}),
-                                                      toPack->element({i * valuesPerWord + 1}));
+            std::vector<Register::ValuePtr> values;
+            for(int j = 0; j < valuesPerWord; j++)
+            {
+                values.push_back(toPack->element({i * valuesPerWord + j}));
+            }
+            co_yield m_context.lock()->copier()->pack(result->element({i}), values);
         }
     }
 }
