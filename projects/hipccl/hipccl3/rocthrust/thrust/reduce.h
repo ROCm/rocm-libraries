@@ -351,6 +351,8 @@ template<typename InputIterator,
  *  This version of \p reduce_by_key uses the function object \c equal_to
  *  to test for equality and \c plus to reduce values with equal keys.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
  *  \param exec The execution policy to use for parallelization.
@@ -421,6 +423,8 @@ __host__ __device__
  *  This version of \p reduce_by_key uses the function object \c equal_to
  *  to test for equality and \c plus to reduce values with equal keys.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  \param keys_first The beginning of the input key range.
  *  \param keys_last  The end of the input key range.
  *  \param values_first The beginning of the input value range.
@@ -481,6 +485,8 @@ template<typename InputIterator1,
  *
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c plus to reduce values with equal keys.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -557,6 +563,8 @@ __host__ __device__
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c plus to reduce values with equal keys.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  \param keys_first The beginning of the input key range.
  *  \param keys_last  The end of the input key range.
  *  \param values_first The beginning of the input value range.
@@ -625,6 +633,8 @@ template<typename InputIterator1,
  *
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c binary_op to reduce values with equal keys.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -709,6 +719,8 @@ __host__ __device__
  *
  *  This version of \p reduce_by_key uses the function object \c binary_pred
  *  to test for equality and \c binary_op to reduce values with equal keys.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  \param keys_first The beginning of the input key range.
  *  \param keys_last  The end of the input key range.

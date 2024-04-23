@@ -12,6 +12,7 @@ subtrees:
 - caption: API reference
   entries:
   - file: data-type-support
+  - file: bitwise-repro
   - file: cpp_api
 
 - caption: About

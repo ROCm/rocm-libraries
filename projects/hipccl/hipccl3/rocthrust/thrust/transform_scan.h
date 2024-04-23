@@ -51,6 +51,8 @@ THRUST_NAMESPACE_BEGIN
  *  assigned to <tt>\*(result + 1)</tt>, and so on.  The transform scan
  *  operation is permitted to be in-place.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
  *  \param exec The execution policy to use for parallelization.
@@ -121,6 +123,8 @@ __host__ __device__
  *  assigned to <tt>\*(result + 1)</tt>, and so on.  The transform scan
  *  operation is permitted to be in-place.
  *
+ *  Results from this function may vary from run to run depending on the inputs provided.
+ *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
  *  \param result The beginning of the output sequence.
@@ -180,6 +184,8 @@ template<typename InputIterator,
  *  and the result of <tt>binary_op(init, unary_op(\*first))</tt> is assigned
  *  to <tt>\*(result + 1)</tt>, and so on.  The transform scan operation is 
  *  permitted to be in-place.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -254,6 +260,8 @@ __host__ __device__
  *  and the result of <tt>binary_op(init, unary_op(\*first))</tt> is assigned
  *  to <tt>\*(result + 1)</tt>, and so on.  The transform scan operation is 
  *  permitted to be in-place.
+ *
+ *  Results from this function may vary from run to run depending on the inputs provided.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
