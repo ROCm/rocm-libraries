@@ -24,6 +24,7 @@ The documentation is structured as follows:
   .. grid-item-card:: API reference
 
     * :ref:`data-type-support`
+    * :ref:`bitwise-repro`
     * :ref:`api-reference`
     * :ref:`genindex`
 
