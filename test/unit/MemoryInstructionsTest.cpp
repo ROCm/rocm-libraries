@@ -1325,17 +1325,17 @@ namespace MemoryInstructionsTest
             m_context->schedule(k->postamble());
             m_context->schedule(k->amdgpu_metadata());
 
-            EXPECT_NE(NormalizedSource(output()).find("buffer_load_ubyte"), std::string::npos);
-            EXPECT_NE(NormalizedSource(output()).find("buffer_store_byte"), std::string::npos);
-            EXPECT_NE(NormalizedSource(output()).find("buffer_load_ubyte_d16_hi"),
+            EXPECT_NE(NormalizedSource(output()).find("buffer_load_ubyte "), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("buffer_store_byte "), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("buffer_load_ubyte_d16_hi "),
                       std::string::npos);
-            EXPECT_NE(NormalizedSource(output()).find("buffer_store_byte_d16_hi"),
+            EXPECT_NE(NormalizedSource(output()).find("buffer_store_byte_d16_hi "),
                       std::string::npos);
 
-            EXPECT_NE(NormalizedSource(output()).find("ds_read_u8_d16"), std::string::npos);
-            EXPECT_NE(NormalizedSource(output()).find("ds_write_b8"), std::string::npos);
-            EXPECT_NE(NormalizedSource(output()).find("ds_read_u8_d16_hi"), std::string::npos);
-            EXPECT_NE(NormalizedSource(output()).find("ds_write_b8_d16_hi"), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("ds_read_u8 "), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("ds_write_b8 "), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("ds_read_u8_d16_hi "), std::string::npos);
+            EXPECT_NE(NormalizedSource(output()).find("ds_write_b8_d16_hi "), std::string::npos);
 
             std::vector<char> assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
