@@ -27,6 +27,11 @@ namespace rocRoller
             return {};
         }
 
+        inline std::unordered_set<int> Inputs::operator()(BlockScale const& blockScale)
+        {
+            return blockScale.getInputs();
+        }
+
         inline std::unordered_set<int> Inputs::operator()(T_Load_Linear const& load)
         {
             return {};
@@ -100,6 +105,11 @@ namespace rocRoller
         inline std::unordered_set<int> Outputs::operator()(Scalar const& scalar)
         {
             return {};
+        }
+
+        inline std::unordered_set<int> Outputs::operator()(BlockScale const& blockScale)
+        {
+            return {blockScale.getTag()};
         }
 
         inline std::unordered_set<int> Outputs::operator()(T_Load_Linear const& load)
@@ -209,6 +219,17 @@ namespace rocRoller
             }
 
             return {scalar.getTag()};
+        }
+
+        inline std::unordered_set<int> AssignOutputs::operator()(BlockScale& blockScale)
+        {
+            if(blockScale.getTag() == -1)
+            {
+                blockScale.setTag(m_nextTagValue);
+                m_nextTagValue++;
+            }
+
+            return {blockScale.getTag()};
         }
 
         inline std::unordered_set<int> AssignOutputs::operator()(T_Load_Linear& load)
@@ -350,6 +371,11 @@ namespace rocRoller
             return scalar.toString(m_runtimeArgs);
         }
 
+        inline std::string ToStringVisitor::operator()(BlockScale const& blockScale)
+        {
+            return blockScale.toString();
+        }
+
         inline std::string ToStringVisitor::operator()(T_Load_Linear const& load)
         {
             return load.toString();
@@ -430,6 +456,11 @@ namespace rocRoller
             scalar.setCommand(command);
         }
 
+        inline void SetCommand::operator()(BlockScale& blockScale)
+        {
+            blockScale.setCommand(command);
+        }
+
         inline void SetCommand::operator()(T_Load_Linear& load)
         {
             load.setCommand(command);
@@ -482,6 +513,8 @@ namespace rocRoller
             scalar.allocateArguments();
         }
 
+        inline void AllocateArguments::operator()(BlockScale& blockScale) {}
+
         inline void AllocateArguments::operator()(T_Load_Linear& load) {}
 
         inline void AllocateArguments::operator()(T_Load_Scalar& load) {}
@@ -512,6 +545,12 @@ namespace rocRoller
 
         inline rocRoller::VariableType
             rocRoller::Operations::VariableTypeVisitor::operator()(Scalar& scalar)
+        {
+            return {rocRoller::DataType::None};
+        }
+
+        inline rocRoller::VariableType
+            rocRoller::Operations::VariableTypeVisitor::operator()(BlockScale&)
         {
             return {rocRoller::DataType::None};
         }

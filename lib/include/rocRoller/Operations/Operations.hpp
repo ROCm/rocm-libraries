@@ -8,6 +8,7 @@
 #include <variant>
 
 #include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/T_Execute_fwd.hpp>
 #include <rocRoller/Operations/T_LoadStore.hpp>
@@ -33,6 +34,7 @@ namespace rocRoller
 
             std::unordered_set<int> operator()(Tensor const&);
             std::unordered_set<int> operator()(Scalar const&);
+            std::unordered_set<int> operator()(BlockScale const&);
             std::unordered_set<int> operator()(T_Load_Linear const&);
             std::unordered_set<int> operator()(T_Load_Scalar const&);
             std::unordered_set<int> operator()(T_Load_Tiled const&);
@@ -54,6 +56,7 @@ namespace rocRoller
 
             std::unordered_set<int> operator()(Tensor const&);
             std::unordered_set<int> operator()(Scalar const&);
+            std::unordered_set<int> operator()(BlockScale const&);
             std::unordered_set<int> operator()(T_Load_Linear const&);
             std::unordered_set<int> operator()(T_Load_Scalar const&);
             std::unordered_set<int> operator()(T_Load_Tiled const&);
@@ -83,6 +86,7 @@ namespace rocRoller
 
             std::unordered_set<int> operator()(Tensor&);
             std::unordered_set<int> operator()(Scalar&);
+            std::unordered_set<int> operator()(BlockScale&);
             std::unordered_set<int> operator()(T_Load_Linear&);
             std::unordered_set<int> operator()(T_Load_Scalar&);
             std::unordered_set<int> operator()(T_Load_Tiled&);
@@ -107,6 +111,7 @@ namespace rocRoller
 
             std::string operator()(Tensor const&);
             std::string operator()(Scalar const&);
+            std::string operator()(BlockScale const&);
             std::string operator()(T_Load_Linear const&);
             std::string operator()(T_Load_Scalar const&);
             std::string operator()(T_Load_Tiled const&);
@@ -133,6 +138,7 @@ namespace rocRoller
 
             void operator()(Tensor&);
             void operator()(Scalar&);
+            void operator()(BlockScale&);
             void operator()(T_Load_Linear&);
             void operator()(T_Load_Scalar&);
             void operator()(T_Load_Tiled&);
@@ -151,6 +157,7 @@ namespace rocRoller
 
             void operator()(Tensor&);
             void operator()(Scalar&);
+            void operator()(BlockScale&);
             void operator()(T_Load_Linear&);
             void operator()(T_Load_Scalar&);
             void operator()(T_Load_Tiled&);
@@ -167,6 +174,7 @@ namespace rocRoller
 
             rocRoller::VariableType operator()(Tensor&);
             rocRoller::VariableType operator()(Scalar&);
+            rocRoller::VariableType operator()(BlockScale&);
             rocRoller::VariableType operator()(T_Load_Linear&);
             rocRoller::VariableType operator()(T_Load_Scalar&);
             rocRoller::VariableType operator()(T_Load_Tiled&);

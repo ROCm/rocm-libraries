@@ -139,3 +139,36 @@ TEST(CommandTest, XopInputOutputs)
     EXPECT_EQ(execute.getInputs(), std::unordered_set<int>({0, 1}));
     EXPECT_EQ(execute.getOutputs(), std::unordered_set<int>({2, 3, 4, 5}));
 }
+
+TEST(CommandTest, BlockScaleInline)
+{
+    auto command = std::make_shared<rocRoller::Command>();
+
+    auto dataTensor = command->addOperation(Operations::Tensor(1, DataType::Int32));
+
+    auto block_scale = Operations::BlockScale(dataTensor, 3);
+    auto block_scale_tag
+        = command->addOperation(std::make_shared<Operations::Operation>(block_scale));
+
+    EXPECT_EQ(block_scale.pointerMode(), Operations::BlockScale::PointerMode::Inline);
+    EXPECT_EQ(block_scale.strides(), std::vector<size_t>({32, 1, 1}));
+    EXPECT_EQ(command->getOperation<Operations::BlockScale>(block_scale_tag).getInputs(),
+              std::unordered_set<int>({dataTensor}));
+}
+
+TEST(CommandTest, BlockScaleSeparate)
+{
+    auto command = std::make_shared<rocRoller::Command>();
+
+    auto dataTensor  = command->addOperation(Operations::Tensor(1, DataType::Int32));
+    auto scaleTensor = command->addOperation(Operations::Tensor(1, DataType::Int32));
+
+    auto block_scale = Operations::BlockScale(dataTensor, 3, scaleTensor, {4, 32});
+    auto block_scale_tag
+        = command->addOperation(std::make_shared<Operations::Operation>(block_scale));
+
+    EXPECT_EQ(block_scale.pointerMode(), Operations::BlockScale::PointerMode::Separate);
+    EXPECT_EQ(block_scale.strides(), std::vector<size_t>({4, 32, 1}));
+    EXPECT_EQ(command->getOperation<Operations::BlockScale>(block_scale_tag).getInputs(),
+              std::unordered_set<int>({dataTensor, scaleTensor}));
+}
