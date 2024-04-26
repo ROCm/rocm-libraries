@@ -93,3 +93,29 @@ def rev_list(repo: Path, old_commit: str, new_commit: str) -> List[str]:
         check=True,
     )
     return p.stdout.strip().split("\n")
+
+
+def ls_tree(repo: Path = None):
+    """
+    Returns a list of all files committed into Git in this repo.
+    """
+
+    if repo is None:
+        repo = Path.cwd()
+
+    p = subprocess.run(
+        [
+            "git",
+            "ls-tree",
+            "--full-tree",
+            "--full-name",
+            "-r",
+            "--name-only",
+            "HEAD"
+        ],
+        cwd=str(repo),
+        stdout=subprocess.PIPE,
+        check=True,
+    )
+
+    return p.stdout.decode().strip().split("\n")

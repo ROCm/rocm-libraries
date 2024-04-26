@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright 2023 Advanced Micro Devices, Inc.
+# Copyright 2023-2024 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,10 +27,9 @@
 
 import os
 import sys
-import re
 
 sys.path.insert(0, os.path.abspath("."))
-import sphinx_rtd_theme
+import sphinx_rtd_theme  # noqa: F401,E402
 
 
 # -- General configuration ------------------------------------------------

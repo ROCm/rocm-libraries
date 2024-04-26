@@ -31,7 +31,7 @@ def script(args: argparse.Namespace, print: callable, shell: callable) -> int:
     print(
         "\n\nKernels availible: \n"
         + shell(
-            "ls kernels/* | grep -E '\.s$|\.yaml$' | tee ./kernels/kernels.txt"
+            "ls kernels/* | grep -E '\\.s$|\\.yaml$' | tee ./kernels/kernels.txt"
         ).stdout,
         1,
     )

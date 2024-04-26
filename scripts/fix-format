@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+
+import argparse
+import pathlib
+import sys
+import subprocess
+
+try:
+    from tqdm.auto import tqdm
+
+    def write(*args, **kwargs):
+        tqdm.write(*args, **kwargs)
+
+except ImportError:
+    tqdm = None
+
+    def write(*args, **kwargs):
+        print(*args, **kwargs)
+
+repo_dir = pathlib.Path(__file__).resolve().parent.parent
+sys.path.append(str(repo_dir / "scripts" / "lib"))
+
+from rrperf import git  # noqa: E402
+
+
+def run_clang_format(path: pathlib.Path):
+    cli1 = f"clang-format '{path}' | diff {path} -"
+    p = subprocess.run(
+        cli1,
+        shell=True,
+        stdout=subprocess.PIPE,
+    )
+
+    output = p.stdout.decode()
+
+    if p.returncode == 0:
+        assert output.strip() == ''
+        return
+
+    output += "\n\n"
+
+    p2 = subprocess.run(
+        ["patch", str(path)],
+        check=True,
+        input=output,
+        encoding='UTF-8',
+        stdout=subprocess.PIPE,
+    )
+    write(p2.stdout)
+
+
+def fix_file(path: pathlib.Path):
+    if path.suffix in {'.h', '.hpp', '.cpp', '.h.in', '.hpp.in', '.cpp.in'}:
+        run_clang_format(path)
+
+
+def fix_cpp(dir: pathlib.Path):
+    paths = git.ls_tree(dir)
+    write(f"Fixing {len(paths)} C++ files:")
+    paths = list(map(pathlib.Path, paths))
+
+    if tqdm is not None:
+        paths = tqdm(paths, unit=" files")
+
+    for path in paths:
+        fix_file(path)
+    write("Done.")
+
+
+def check_python(dir: pathlib.Path):
+    command = ["flake8"]
+    write(" ".join(command))
+
+    subprocess.run(
+        command,
+        cwd=dir,
+        check=False
+    )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Fix C++ formatting and check Python formatting.")
+
+    parser.add_argument("--skip-cpp", dest="cpp", default=True, action="store_false", help="Don't format C++ files.")
+    parser.add_argument("--skip-python", dest="python", default=True, action="store_false", help="Don't check Python files.")
+    parser.add_argument("dir", type=pathlib.Path, default=pathlib.Path.cwd(), nargs="?")
+
+    args = parser.parse_args()
+
+    if args.cpp:
+        fix_cpp(args.dir)
+
+    if args.python:
+        check_python(args.dir)

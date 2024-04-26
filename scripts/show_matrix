@@ -11,7 +11,7 @@ import sys
 repo_dir = pathlib.Path(__file__).resolve().parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))
 
-import matrix_utils
+import matrix_utils  # noqa: E402
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)

@@ -9,13 +9,13 @@ import sys
 import csv
 import yaml
 import glob
-from dataclasses import dataclass, field, fields, asdict
+from dataclasses import asdict
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))
 
-import rrperf.git as git
-import rrperf.problems as problems
+import rrperf.git as git            # noqa: E402
+import rrperf.problems as problems  # noqa: E402
 
 
 class keyvalue(argparse.Action):
