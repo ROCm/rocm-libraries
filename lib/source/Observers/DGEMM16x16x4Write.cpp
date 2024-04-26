@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/DGEMM16x16x4Write.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -28,7 +27,7 @@ namespace rocRoller
 
         int DGEMM16x16x4Write::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isMFMA(inst.getOpCode()))
+            if(GPUInstructionInfo::isMFMA(inst.getOpCode()))
             {
                 std::optional<int> value;
 
@@ -60,7 +59,7 @@ namespace rocRoller
                     }
                     if(overlap)
                     {
-                        if(mismatched && InstructionRef::isDGEMM(inst.getOpCode()))
+                        if(mismatched && GPUInstructionInfo::isDGEMM(inst.getOpCode()))
                         {
                             return requiredNops;
                         }
@@ -85,13 +84,13 @@ namespace rocRoller
                     return *value - (m_maxNops - 11);
                 }
             }
-            else if(InstructionRef::isVMEM(inst.getOpCode())
-                    || InstructionRef::isLDS(inst.getOpCode())
-                    || InstructionRef::isFlat(inst.getOpCode()))
+            else if(GPUInstructionInfo::isVMEM(inst.getOpCode())
+                    || GPUInstructionInfo::isLDS(inst.getOpCode())
+                    || GPUInstructionInfo::isFlat(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0);
             }
-            else if(InstructionRef::isVALU(inst.getOpCode()))
+            else if(GPUInstructionInfo::isVALU(inst.getOpCode()))
             {
                 std::optional<int> value;
 

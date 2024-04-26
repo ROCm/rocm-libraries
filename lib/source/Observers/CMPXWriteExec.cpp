@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/CMPXWriteExec.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -25,7 +24,7 @@ namespace rocRoller
 
         bool CMPXWriteExec::trigger(Instruction const& inst) const
         {
-            return InstructionRef::isVCMPX(inst.getOpCode());
+            return GPUInstructionInfo::isVCMPX(inst.getOpCode());
         };
 
         bool CMPXWriteExec::writeTrigger() const
@@ -35,8 +34,8 @@ namespace rocRoller
 
         int CMPXWriteExec::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isMFMA(inst.getOpCode())
-               || (m_checkACCVGPR && InstructionRef::isACCVGPRWrite(inst.getOpCode())))
+            if(GPUInstructionInfo::isMFMA(inst.getOpCode())
+               || (m_checkACCVGPR && GPUInstructionInfo::isACCVGPRWrite(inst.getOpCode())))
             {
                 return checkRegister(m_context.lock()->getExec()).value_or(0);
             }

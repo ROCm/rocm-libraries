@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLReadSrcC908.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -28,7 +27,7 @@ namespace rocRoller
 
         bool XDLReadSrcC908::trigger(Instruction const& inst) const
         {
-            return InstructionRef::isMFMA(inst.getOpCode());
+            return GPUInstructionInfo::isMFMA(inst.getOpCode());
         };
 
         bool XDLReadSrcC908::writeTrigger() const
@@ -38,7 +37,7 @@ namespace rocRoller
 
         int XDLReadSrcC908::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isACCVGPRWrite(inst.getOpCode()))
+            if(GPUInstructionInfo::isACCVGPRWrite(inst.getOpCode()))
             {
                 // WAR
                 return checkDsts(inst).value_or(0);

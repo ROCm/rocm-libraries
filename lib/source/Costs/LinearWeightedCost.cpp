@@ -1,9 +1,10 @@
 
 #include <rocRoller/Scheduling/Costs/LinearWeightedCost.hpp>
 
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
+
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 
 namespace rocRoller
 {
@@ -273,18 +274,20 @@ namespace rocRoller
                    + m_weights.fractionOfVGPRs * fractionOfVGPRs //
                    + m_weights.outOfRegisters * outOfRegisters //
 
-                   + m_weights.isSMEM * InstructionRef::isSMEM(inst) //
-                   + m_weights.isSControl * InstructionRef::isSControl(inst) //
-                   + m_weights.isSALU * InstructionRef::isSALU(inst) //
+                   + m_weights.isSMEM * GPUInstructionInfo::isSMEM(inst.getOpCode()) //
+                   + m_weights.isSControl * GPUInstructionInfo::isSControl(inst.getOpCode()) //
+                   + m_weights.isSALU * GPUInstructionInfo::isSALU(inst.getOpCode()) //
 
-                   + m_weights.isVMEMRead * InstructionRef::isVMEMRead(inst) //
-                   + m_weights.isVMEMWrite * InstructionRef::isVMEMWrite(inst) //
-                   + m_weights.isLDSRead * InstructionRef::isLDSRead(inst) //
-                   + m_weights.isLDSWrite * InstructionRef::isLDSWrite(inst) //
-                   + m_weights.isVALU * InstructionRef::isVALU(inst) //
+                   + m_weights.isVMEMRead * GPUInstructionInfo::isVMEMRead(inst.getOpCode()) //
+                   + m_weights.isVMEMWrite * GPUInstructionInfo::isVMEMWrite(inst.getOpCode()) //
+                   + m_weights.isLDSRead * GPUInstructionInfo::isLDSRead(inst.getOpCode()) //
+                   + m_weights.isLDSWrite * GPUInstructionInfo::isLDSWrite(inst.getOpCode()) //
+                   + m_weights.isVALU * GPUInstructionInfo::isVALU(inst.getOpCode()) //
 
-                   + m_weights.isACCVGPRWrite * InstructionRef::isACCVGPRWrite(inst) //
-                   + m_weights.isACCVGPRRead * InstructionRef::isACCVGPRRead(inst) //
+                   + m_weights.isACCVGPRWrite
+                         * GPUInstructionInfo::isACCVGPRWrite(inst.getOpCode()) //
+                   + m_weights.isACCVGPRRead
+                         * GPUInstructionInfo::isACCVGPRRead(inst.getOpCode()) //
                 ;
         }
     }

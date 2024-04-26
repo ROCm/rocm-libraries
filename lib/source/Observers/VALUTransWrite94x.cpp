@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -13,7 +12,7 @@ namespace rocRoller
 
         bool VALUTransWrite94x::trigger(Instruction const& inst) const
         {
-            return InstructionRef::isVALUTrans(inst.getOpCode());
+            return GPUInstructionInfo::isVALUTrans(inst.getOpCode());
         };
 
         bool VALUTransWrite94x::writeTrigger() const
@@ -23,8 +22,8 @@ namespace rocRoller
 
         int VALUTransWrite94x::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isVALU(inst.getOpCode())
-               && !InstructionRef::isVALUTrans(inst.getOpCode()))
+            if(GPUInstructionInfo::isVALU(inst.getOpCode())
+               && !GPUInstructionInfo::isVALUTrans(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0);
             }

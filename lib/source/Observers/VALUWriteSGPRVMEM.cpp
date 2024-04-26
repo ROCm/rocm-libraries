@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVMEM.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -13,9 +12,9 @@ namespace rocRoller
 
         bool VALUWriteSGPRVMEM::trigger(Instruction const& inst) const
         {
-            return InstructionRef::isVALU(inst.getOpCode())
-                   && !InstructionRef::isMFMA(inst.getOpCode())
-                   && !InstructionRef::isDLOP(inst.getOpCode());
+            return GPUInstructionInfo::isVALU(inst.getOpCode())
+                   && !GPUInstructionInfo::isMFMA(inst.getOpCode())
+                   && !GPUInstructionInfo::isDLOP(inst.getOpCode());
         };
 
         bool VALUWriteSGPRVMEM::writeTrigger() const
@@ -25,7 +24,7 @@ namespace rocRoller
 
         int VALUWriteSGPRVMEM::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isVMEM(inst.getOpCode()))
+            if(GPUInstructionInfo::isVMEM(inst.getOpCode()))
             {
                 for(auto const& src : inst.getSrcs())
                 {

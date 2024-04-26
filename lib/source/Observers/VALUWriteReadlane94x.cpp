@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteReadlane94x.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -13,9 +12,9 @@ namespace rocRoller
 
         bool VALUWriteReadlane94x::trigger(Instruction const& inst) const
         {
-            return InstructionRef::isVALU(inst.getOpCode())
-                   && !InstructionRef::isMFMA(inst.getOpCode())
-                   && !InstructionRef::isDLOP(inst.getOpCode());
+            return GPUInstructionInfo::isVALU(inst.getOpCode())
+                   && !GPUInstructionInfo::isMFMA(inst.getOpCode())
+                   && !GPUInstructionInfo::isDLOP(inst.getOpCode());
         };
 
         bool VALUWriteReadlane94x::writeTrigger() const

@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/DLWrite.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -35,7 +34,7 @@ namespace rocRoller
 
         bool DLWrite::trigger(Instruction const& inst) const
         {
-            return InstructionRef::isDLOP(inst.getOpCode());
+            return GPUInstructionInfo::isDLOP(inst.getOpCode());
         };
 
         bool DLWrite::writeTrigger() const
@@ -45,7 +44,7 @@ namespace rocRoller
 
         int DLWrite::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isDLOP(inst.getOpCode()))
+            if(GPUInstructionInfo::isDLOP(inst.getOpCode()))
             {
                 std::optional<int> value;
 

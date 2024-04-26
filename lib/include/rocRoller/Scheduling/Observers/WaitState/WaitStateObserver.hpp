@@ -3,7 +3,6 @@
 #include <concepts>
 #include <optional>
 
-#include <rocRoller/CodeGen/InstructionRef_fwd.hpp>
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduling.hpp>
 #include <rocRoller/Scheduling/WaitStateHazardCounter.hpp>

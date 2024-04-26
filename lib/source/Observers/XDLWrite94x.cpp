@@ -1,6 +1,6 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite94x.hpp>
 
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 namespace rocRoller
 {
     namespace Scheduling
@@ -15,7 +15,7 @@ namespace rocRoller
             bool excluded
                 = std::find(m_excludedOpCodes.begin(), m_excludedOpCodes.end(), inst.getOpCode())
                   != m_excludedOpCodes.end();
-            return InstructionRef::isMFMA(inst.getOpCode()) && !excluded;
+            return GPUInstructionInfo::isMFMA(inst.getOpCode()) && !excluded;
         };
 
         bool XDLWrite94x::writeTrigger() const
@@ -27,12 +27,12 @@ namespace rocRoller
         {
             int decrement = 0;
 
-            if(InstructionRef::isSGEMM(inst.getOpCode()))
+            if(GPUInstructionInfo::isSGEMM(inst.getOpCode()))
             {
                 decrement = 1;
             }
 
-            if(InstructionRef::isMFMA(inst.getOpCode()))
+            if(GPUInstructionInfo::isMFMA(inst.getOpCode()))
             {
                 std::optional<int> value;
 
@@ -54,11 +54,11 @@ namespace rocRoller
                                 if(hazard.regWasWritten())
                                 {
                                     decrement = 2;
-                                    if(InstructionRef::isDGEMM(inst.getOpCode()))
+                                    if(GPUInstructionInfo::isDGEMM(inst.getOpCode()))
                                     {
                                         decrement = 2;
                                     }
-                                    else if(InstructionRef::isSGEMM(inst.getOpCode()))
+                                    else if(GPUInstructionInfo::isSGEMM(inst.getOpCode()))
                                     {
                                         decrement = 3;
                                     }
@@ -92,13 +92,13 @@ namespace rocRoller
                     return *value - decrement;
                 }
             }
-            else if(InstructionRef::isVMEM(inst.getOpCode())
-                    || InstructionRef::isLDS(inst.getOpCode())
-                    || InstructionRef::isFlat(inst.getOpCode()))
+            else if(GPUInstructionInfo::isVMEM(inst.getOpCode())
+                    || GPUInstructionInfo::isLDS(inst.getOpCode())
+                    || GPUInstructionInfo::isFlat(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0) - decrement;
             }
-            else if(InstructionRef::isVALU(inst.getOpCode()))
+            else if(GPUInstructionInfo::isVALU(inst.getOpCode()))
             {
                 std::optional<int> value;
 

@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 
 #include <rocRoller/CodeGen/Instruction.hpp>
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
@@ -245,7 +244,7 @@ TEST_F(InstructionTest, Classifications)
     src->allocateNow();
 
     auto inst = Instruction("s_cmov_b32", {dst}, {src}, {}, "Not VALU");
-    EXPECT_FALSE(InstructionRef::isVALU(inst.getOpCode()));
+    EXPECT_FALSE(GPUInstructionInfo::isVALU(inst.getOpCode()));
 }
 
 TEST_F(InstructionTest, Special)

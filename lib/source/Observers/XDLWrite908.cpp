@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite908.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -13,7 +12,7 @@ namespace rocRoller
 
         bool XDLWrite908::trigger(Instruction const& inst) const
         {
-            return InstructionRef::isMFMA(inst.getOpCode());
+            return GPUInstructionInfo::isMFMA(inst.getOpCode());
         };
 
         bool XDLWrite908::writeTrigger() const
@@ -23,7 +22,7 @@ namespace rocRoller
 
         int XDLWrite908::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isMFMA(inst.getOpCode()))
+            if(GPUInstructionInfo::isMFMA(inst.getOpCode()))
             {
                 std::optional<int> value;
 
@@ -93,12 +92,12 @@ namespace rocRoller
                     }
                 }
             }
-            else if(InstructionRef::isACCVGPRRead(inst.getOpCode()))
+            else if(GPUInstructionInfo::isACCVGPRRead(inst.getOpCode()))
             {
                 // ACCVGPR RAW
                 return checkSrcs(inst).value_or(0);
             }
-            else if(InstructionRef::isACCVGPRWrite(inst.getOpCode()))
+            else if(GPUInstructionInfo::isACCVGPRWrite(inst.getOpCode()))
             {
                 // ACCVGPR WAW
                 return checkDsts(inst).value_or(0) - 3;

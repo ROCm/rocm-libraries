@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VCMPXWrite94x.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -25,7 +24,7 @@ namespace rocRoller
 
         bool VCMPXWrite94x::trigger(Instruction const& inst) const
         {
-            return InstructionRef::isVCMPX(inst.getOpCode());
+            return GPUInstructionInfo::isVCMPX(inst.getOpCode());
         };
 
         bool VCMPXWrite94x::writeTrigger() const
@@ -35,14 +34,14 @@ namespace rocRoller
 
         int VCMPXWrite94x::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isVReadlane(inst.getOpCode())
-               || InstructionRef::isVWritelane(inst.getOpCode()))
+            if(GPUInstructionInfo::isVReadlane(inst.getOpCode())
+               || GPUInstructionInfo::isVWritelane(inst.getOpCode()))
             {
                 return checkRegister(m_context.lock()->getExec()).value_or(0) - 2;
             }
 
             // Check if VALU reads EXEC as constant
-            if(InstructionRef::isVALU(inst.getOpCode()))
+            if(GPUInstructionInfo::isVALU(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0);
             }

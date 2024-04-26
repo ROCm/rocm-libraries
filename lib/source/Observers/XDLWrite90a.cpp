@@ -1,6 +1,6 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite90a.hpp>
 
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 namespace rocRoller
 {
     namespace Scheduling
@@ -15,7 +15,7 @@ namespace rocRoller
             bool excluded
                 = std::find(m_excludedOpCodes.begin(), m_excludedOpCodes.end(), inst.getOpCode())
                   != m_excludedOpCodes.end();
-            return InstructionRef::isMFMA(inst.getOpCode()) && !excluded;
+            return GPUInstructionInfo::isMFMA(inst.getOpCode()) && !excluded;
         };
 
         bool XDLWrite90a::writeTrigger() const
@@ -25,7 +25,7 @@ namespace rocRoller
 
         int XDLWrite90a::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isMFMA(inst.getOpCode()))
+            if(GPUInstructionInfo::isMFMA(inst.getOpCode()))
             {
                 std::optional<int> value;
 
@@ -47,7 +47,7 @@ namespace rocRoller
                                 if(hazard.regWasWritten())
                                 {
                                     int decrement
-                                        = InstructionRef::isDGEMM(inst.getOpCode()) ? 2 : 3;
+                                        = GPUInstructionInfo::isDGEMM(inst.getOpCode()) ? 2 : 3;
                                     overlap      = true;
                                     requiredNops = hazard.getRequiredNops() - decrement;
                                 }
@@ -78,13 +78,13 @@ namespace rocRoller
                     return *value;
                 }
             }
-            else if(InstructionRef::isVMEM(inst.getOpCode())
-                    || InstructionRef::isLDS(inst.getOpCode())
-                    || InstructionRef::isFlat(inst.getOpCode()))
+            else if(GPUInstructionInfo::isVMEM(inst.getOpCode())
+                    || GPUInstructionInfo::isLDS(inst.getOpCode())
+                    || GPUInstructionInfo::isFlat(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0);
             }
-            else if(InstructionRef::isVALU(inst.getOpCode()))
+            else if(GPUInstructionInfo::isVALU(inst.getOpCode()))
             {
                 std::optional<int> value;
 

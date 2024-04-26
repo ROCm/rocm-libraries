@@ -234,6 +234,7 @@ set(rocroller_src
  lib/source/Expression_serialization.cpp
  lib/source/GPUArchitecture.cpp
  lib/source/GPUArchitectureLibrary.cpp
+ lib/source/GPUInstructionInfo.cpp
  lib/source/KernelArguments.cpp
  lib/source/KernelOptions.cpp
  lib/source/LDSAllocator.cpp
@@ -499,7 +500,6 @@ set(
   test/unit/FP8Test.cpp
   test/unit/HazardObserverTest.cpp
   test/unit/HypergraphTest.cpp
-  test/unit/InstructionRefTest.cpp
   test/unit/InstructionTest.cpp
   test/unit/KernelArgumentsTest.cpp
   test/unit/KernelGraphTest.cpp

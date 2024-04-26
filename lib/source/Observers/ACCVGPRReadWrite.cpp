@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/ACCVGPRReadWrite.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -13,7 +12,7 @@ namespace rocRoller
 
         bool ACCVGPRReadWrite::trigger(Instruction const& inst) const
         {
-            return InstructionRef::isACCVGPRRead(inst.getOpCode());
+            return GPUInstructionInfo::isACCVGPRRead(inst.getOpCode());
         };
 
         bool ACCVGPRReadWrite::writeTrigger() const
@@ -23,7 +22,7 @@ namespace rocRoller
 
         int ACCVGPRReadWrite::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isMFMA(inst.getOpCode()))
+            if(GPUInstructionInfo::isMFMA(inst.getOpCode()))
             {
                 auto const& srcs = inst.getSrcs();
 
@@ -43,11 +42,11 @@ namespace rocRoller
                     return *value;
                 }
             }
-            else if(InstructionRef::isACCVGPRWrite(inst.getOpCode()))
+            else if(GPUInstructionInfo::isACCVGPRWrite(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0);
             }
-            else if(InstructionRef::isVMEM(inst.getOpCode()))
+            else if(GPUInstructionInfo::isVMEM(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0);
             }

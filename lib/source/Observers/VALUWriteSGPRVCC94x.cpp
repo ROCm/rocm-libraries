@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVCC94x.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -13,15 +12,15 @@ namespace rocRoller
 
         bool VALUWriteSGPRVCC94x::trigger(Instruction const& inst) const
         {
-            return InstructionRef::isVCMP(inst.getOpCode())
-                   || InstructionRef::isVReadlane(inst.getOpCode())
-                   || InstructionRef::isVDivScale(inst.getOpCode())
-                   || (InstructionRef::isVAddInst(inst.getOpCode())
-                       && (InstructionRef::isIntInst(inst.getOpCode())
-                           || InstructionRef::isUIntInst(inst.getOpCode())))
-                   || (InstructionRef::isVSubInst(inst.getOpCode())
-                       && (InstructionRef::isIntInst(inst.getOpCode())
-                           || InstructionRef::isUIntInst(inst.getOpCode())));
+            return GPUInstructionInfo::isVCMP(inst.getOpCode())
+                   || GPUInstructionInfo::isVReadlane(inst.getOpCode())
+                   || GPUInstructionInfo::isVDivScale(inst.getOpCode())
+                   || (GPUInstructionInfo::isVAddInst(inst.getOpCode())
+                       && (GPUInstructionInfo::isIntInst(inst.getOpCode())
+                           || GPUInstructionInfo::isUIntInst(inst.getOpCode())))
+                   || (GPUInstructionInfo::isVSubInst(inst.getOpCode())
+                       && (GPUInstructionInfo::isIntInst(inst.getOpCode())
+                           || GPUInstructionInfo::isUIntInst(inst.getOpCode())));
         };
 
         bool VALUWriteSGPRVCC94x::writeTrigger() const
@@ -31,8 +30,8 @@ namespace rocRoller
 
         int VALUWriteSGPRVCC94x::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isVReadlane(inst.getOpCode())
-               || InstructionRef::isVWritelane(inst.getOpCode()))
+            if(GPUInstructionInfo::isVReadlane(inst.getOpCode())
+               || GPUInstructionInfo::isVWritelane(inst.getOpCode()))
             {
                 AssertFatal(inst.getSrcs().size() >= 2, "Unexpected instruction", inst.getOpCode());
                 auto const& laneSelect = inst.getSrcs()[1];

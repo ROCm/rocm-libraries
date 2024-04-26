@@ -1,6 +1,5 @@
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/OPSEL94x.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
 
 namespace rocRoller
 {
@@ -13,9 +12,9 @@ namespace rocRoller
 
         bool OPSEL94x::trigger(Instruction const& inst) const
         {
-            if(InstructionRef::isVALU(inst.getOpCode()))
+            if(GPUInstructionInfo::isVALU(inst.getOpCode()))
             {
-                if(InstructionRef::isSDWA(inst.getOpCode()))
+                if(GPUInstructionInfo::isSDWA(inst.getOpCode()))
                 {
                     return true;
                 }
@@ -35,7 +34,7 @@ namespace rocRoller
 
         int OPSEL94x::getNops(Instruction const& inst) const
         {
-            if(InstructionRef::isVALU(inst.getOpCode()))
+            if(GPUInstructionInfo::isVALU(inst.getOpCode()))
             {
                 return checkSrcs(inst).value_or(0);
             }
