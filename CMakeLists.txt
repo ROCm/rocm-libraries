@@ -347,6 +347,7 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/Simplify.cpp
  lib/source/KernelGraph/Transformations/UnrollLoops.cpp
  lib/source/KernelGraph/Transformations/UpdateParameters.cpp
+ lib/source/KernelGraph/Transformations/ConstantPropagation.cpp
 
  lib/source/Observers/ACCVGPRReadWrite.cpp
  lib/source/Observers/ACCVGPRWriteWrite.cpp
@@ -502,6 +503,7 @@ set(
   test/unit/InstructionTest.cpp
   test/unit/KernelArgumentsTest.cpp
   test/unit/KernelGraphTest.cpp
+  test/unit/KernelGraphTest/ConstantPropagation.cpp
   test/unit/KernelGraphTest/KernelGraphUtils.cpp
   test/unit/KernelGraphTest/Simplify.cpp
   test/unit/KernelGraphTest/UpdateParameters.cpp

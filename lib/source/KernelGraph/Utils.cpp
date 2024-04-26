@@ -82,6 +82,14 @@ namespace rocRoller
             return {forLoop, range};
         }
 
+        int getDEST(KernelGraph const& kgraph, int assign)
+        {
+            auto dst = only(kgraph.mapper.getConnections(assign));
+            if(!dst)
+                return -1;
+            return dst->coordinate;
+        }
+
         std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>
             getForLoopIncrement(KernelGraph const& graph, int forLoop)
         {

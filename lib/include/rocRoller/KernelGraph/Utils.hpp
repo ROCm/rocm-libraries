@@ -16,6 +16,20 @@ namespace rocRoller
         namespace CF = rocRoller::KernelGraph::ControlGraph;
 
         /**
+        * @brief Return DataFlowTag of LHS of binary expression in Assign node.
+        */
+        template <Expression::CBinary T>
+        std::tuple<int, Expression::ExpressionPtr> getBinaryLHS(KernelGraph const& kgraph,
+                                                                int                assign);
+
+        /**
+        * @brief Return DataFlowTag of RHS of binary expression in Assign node.
+        */
+        template <Expression::CBinary T>
+        std::tuple<int, Expression::ExpressionPtr> getBinaryRHS(KernelGraph const& kgraph,
+                                                                int                assign);
+
+        /**
          * @brief Create a range-based for loop.
          */
         std::pair<int, int> rangeFor(KernelGraph&              graph,
@@ -75,6 +89,11 @@ namespace rocRoller
             findStorageNeighbour(int tag, KernelGraph const& kgraph);
 
         /**
+        * @brief Return DataFlowTag of DEST of Assign node.
+        */
+        int getDEST(KernelGraph const& kgraph, int assign);
+
+        /**
          * @brief Return target coordinate for load/store operation.
          *
          * For loads, the target is the source (User or LDS) of the
@@ -110,6 +129,12 @@ namespace rocRoller
          */
         template <typename T>
         std::optional<int> findContainingOperation(int candidate, KernelGraph const& kgraph);
+
+        /**
+     * @brief Reconnect incoming/outgoing edges from op to newop.
+     */
+        template <Graph::Direction direction>
+        void reconnect(KernelGraph& graph, int newop, int op);
 
         /**
          * @brief Find the operation of type T that contains the

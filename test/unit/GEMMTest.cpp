@@ -268,6 +268,9 @@ namespace GEMMDriverTest
             params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
             params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
 
+            // TODO: replace it with conditional node in the control graph
+            params->setBetaValue(gemm.beta);
+
             auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                 {gemm.macM, gemm.macK},
                 LayoutType::MATRIX_A,
@@ -432,6 +435,52 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
         basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBetaIsZero)
+    {
+        GEMMProblem gemm;
+        gemm.beta = 0;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
+    {
+        if(m_context->targetArchitecture().target().getVersionString() == "gfx908")
+        {
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMBeta0StreamK test";
+        }
+
+        GEMMProblem gemm;
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        gemm.numCUs = deviceProperties.multiProcessorCount;
+
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * gemm.numCUs / 2 + gemm.macN * 2;
+
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numCUs);
+
+        gemm.streamK = true;
+        gemm.k       = gemm.macK * 8;
+
+        // TODO: Does not work with unrolling K
+        //gemm.unrollK          = 2;
+        //gemm.prefetch         = true;
+        //gemm.prefetchInFlight = 2;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = true;
+
+        gemm.beta = 0;
+
+        for(auto twoTile : {true, false})
+        {
+            gemm.streamKTwoTile = twoTile;
+            basicGEMM<float>(m_context, gemm, 1.e-6);
+        }
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMStreamK)

@@ -5,6 +5,36 @@
 
 namespace rocRoller::KernelGraph
 {
+    /**
+     * @brief Return DataFlowTag of LHS of binary expression in Assign node.
+     */
+    template <Expression::CBinary T>
+    std::tuple<int, Expression::ExpressionPtr> getBinaryLHS(KernelGraph const& kgraph, int assign)
+    {
+        auto op = kgraph.control.get<Assign>(assign);
+
+        auto expr = std::get<T>(*op->expression);
+        if(!std::holds_alternative<Expression::DataFlowTag>(*expr.lhs))
+            return {-1, nullptr};
+        auto tag = std::get<Expression::DataFlowTag>(*expr.lhs).tag;
+        return {tag, expr.lhs};
+    }
+
+    /**
+     * @brief Return DataFlowTag of RHS of binary expression in Assign node.
+     */
+    template <Expression::CBinary T>
+    std::tuple<int, Expression::ExpressionPtr> getBinaryRHS(KernelGraph const& kgraph, int assign)
+    {
+        auto op = kgraph.control.get<Assign>(assign);
+
+        auto expr = std::get<T>(*op->expression);
+        if(!std::holds_alternative<Expression::DataFlowTag>(*expr.rhs))
+            return {-1, nullptr};
+        auto tag = std::get<Expression::DataFlowTag>(*expr.rhs).tag;
+        return {tag, expr.rhs};
+    }
+
     template <std::ranges::forward_range Range>
     void purgeNodes(KernelGraph& kgraph, Range nodes)
     {
@@ -65,6 +95,29 @@ namespace rocRoller::KernelGraph
                 return parent;
         }
         return {};
+    }
+
+    template <Graph::Direction direction>
+    void reconnect(KernelGraph& graph, int newop, int op)
+    {
+        auto neighbours = graph.control.getNeighbours<direction>(op).template to<std::vector>();
+        for(auto const& tag : neighbours)
+        {
+            auto edge = graph.control.getElement(tag);
+            int  node = *graph.control.getNeighbours<direction>(tag).begin();
+            graph.control.deleteElement(tag);
+            if(newop != -1)
+            {
+                if constexpr(direction == Graph::Direction::Upstream)
+                {
+                    graph.control.addElement(edge, {node}, {newop});
+                }
+                else
+                {
+                    graph.control.addElement(edge, {newop}, {node});
+                }
+            }
+        }
     }
 
     template <typename T>

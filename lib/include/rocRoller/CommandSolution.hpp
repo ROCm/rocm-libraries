@@ -35,6 +35,14 @@ namespace rocRoller
         int  getManualKernelDimension() const;
 
         /**
+         * Manually pass the value of beta.
+         *
+         * TODO: replace it with the conditional node in the control graph.
+         */
+        void  setBetaValue(float beta);
+        float getBetaValue() const;
+
+        /**
          * Manually overrite workgroup sizes.
          *
          * TODO remove this.
@@ -82,6 +90,8 @@ namespace rocRoller
         std::optional<std::array<unsigned int, 3>>              m_workgroupSize;
         std::optional<std::array<Expression::ExpressionPtr, 3>> m_workitemCount;
         std::optional<std::pair<uint, uint>>                    m_wavefrontCounts;
+        // TODO: replace it with the conditional node in the control graph
+        float m_beta;
 
         int m_kernelDimension = 0;
 
