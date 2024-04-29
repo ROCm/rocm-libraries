@@ -3,6 +3,7 @@
 #include "../DataTypes/DataTypes.hpp"
 #include "CommandArgument.hpp"
 #include "Operation.hpp"
+#include "TensorScalar_fwd.hpp"
 
 namespace rocRoller
 {
@@ -19,14 +20,8 @@ namespace rocRoller
 
             void allocateArguments();
 
-            CommandArgumentPtr data() const
-            {
-                return m_pointer;
-            }
-            VariableType variableType() const
-            {
-                return m_variableType;
-            }
+            CommandArgumentPtr data() const;
+            VariableType       variableType() const;
 
         private:
             std::string getArgumentString(const unsigned char*) const;
@@ -51,34 +46,16 @@ namespace rocRoller
 
             void allocateArguments();
 
-            std::vector<size_t> literalStrides() const
-            {
-                return m_literalStrides;
-            }
-            std::vector<CommandArgumentPtr> strides() const
-            {
-                return m_strides;
-            }
-            std::vector<CommandArgumentPtr> sizes() const
-            {
-                return m_sizes;
-            }
-            CommandArgumentPtr limit() const
-            {
-                return m_extent;
-            }
-            VariableType variableType() const
-            {
-                return m_variableType;
-            }
-            DataType dataType() const
-            {
-                return m_variableType.dataType;
-            }
-            CommandArgumentPtr data() const
-            {
-                return m_pointer;
-            }
+            std::vector<size_t> const& literalStrides() const;
+
+            std::vector<CommandArgumentPtr> const& strides() const;
+            std::vector<CommandArgumentPtr> const& sizes() const;
+
+            CommandArgumentPtr limit() const;
+            CommandArgumentPtr data() const;
+
+            VariableType variableType() const;
+            DataType     dataType() const;
 
         private:
             std::string getArgumentString(const unsigned char*) const;
@@ -98,3 +75,5 @@ namespace rocRoller
         std::ostream& operator<<(std::ostream& stream, Tensor const& val);
     }
 }
+
+#include "TensorScalar_impl.hpp"

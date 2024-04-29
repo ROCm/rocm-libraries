@@ -462,28 +462,28 @@ namespace rocRoller
 
             auto coords = gi.coords();
 
-            int loadA  = gi.findLoadTile(0);
-            int loadB  = gi.findLoadTile(2);
-            int loadC  = gi.findLoadTile(4);
-            int storeD = gi.findStoreTile(15);
+            int tensorA = gi.findTensor(0);
+            int tensorB = gi.findTensor(2);
+            int tensorC = gi.findTensor(4);
+            int tensorD = gi.findTensor(15);
 
-            int ldsA = findLDSNode(coords, loadA, Graph::Direction::Downstream);
-            int ldsB = findLDSNode(coords, loadB, Graph::Direction::Downstream);
+            int ldsA = findLDSNode(coords, tensorA, Graph::Direction::Downstream);
+            int ldsB = findLDSNode(coords, tensorB, Graph::Direction::Downstream);
 
-            writeMacrotileByWorkitem(vfile, gi, loadA, "Tensor_0", "A");
-            writeMacrotileByWorkitem(vfile, gi, loadB, "Tensor_2", "B");
+            writeMacrotileByWorkitem(vfile, gi, tensorA, "Tensor_0", "A");
+            writeMacrotileByWorkitem(vfile, gi, tensorB, "Tensor_2", "B");
 
             writeLDSByWorkitem(vfile, gi, ldsA, "A");
             writeLDSByWorkitem(vfile, gi, ldsB, "B");
 
-            writeKIterByWorkitem(vfile, gi, loadA, 0, "Tensor_0", "A");
-            writeKIterByWorkitem(vfile, gi, loadB, 1, "Tensor_2", "B");
+            writeKIterByWorkitem(vfile, gi, tensorA, 0, "Tensor_0", "A");
+            writeKIterByWorkitem(vfile, gi, tensorB, 1, "Tensor_2", "B");
 
-            writeMatByKIter(vfile, gi, loadA, 0, "Tensor_0", "A");
-            writeMatByKIter(vfile, gi, loadB, 1, "Tensor_2", "B");
+            writeMatByKIter(vfile, gi, tensorA, 0, "Tensor_0", "A");
+            writeMatByKIter(vfile, gi, tensorB, 1, "Tensor_2", "B");
 
-            auto cElemNodes = findElementNumberNodes(coords, loadC, Graph::Direction::Downstream);
-            auto dElemNodes = findElementNumberNodes(coords, storeD, Graph::Direction::Upstream);
+            auto cElemNodes = findElementNumberNodes(coords, tensorC, Graph::Direction::Downstream);
+            auto dElemNodes = findElementNumberNodes(coords, tensorD, Graph::Direction::Upstream);
 
             vfile << "C Element Numbers:";
             for(auto const& tup : cElemNodes)

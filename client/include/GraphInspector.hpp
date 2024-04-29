@@ -52,16 +52,10 @@ namespace rocRoller
             void setCoordinate(Range const& indices, CommandArgumentValue val);
 
             /**
-             * Returns the node ID for the LoadTiled operation with the given user tag.  For example,
+             * Returns the node ID for the tensor with the given user tag.  For example,
              * sending in 1 should return the User dimension associated with the B matrix.
              */
-            int findLoadTile(int userTag);
-
-            /**
-             * Returns the node ID for the StoreTiled operation with the given user tag.  For example,
-             * sending in 0 should return the User dimension associated with the D matrix.
-             */
-            int findStoreTile(int userTag);
+            int findTensor(int userTag);
 
             /**
              * Sets arbitrary, reasonable values for many of the common dimensions needed to get
