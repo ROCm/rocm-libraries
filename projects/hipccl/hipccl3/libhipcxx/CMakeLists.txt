@@ -71,7 +71,11 @@ option(LIBCUDACXX_ENABLE_CUDA "Enable the CUDA language support." OFF)
 option(LIBCUDACXX_ENABLE_HIP "Enable the HIP language support." ON)
 
 if (LIBCUDACXX_ENABLE_CUDA AND LIBCUDACXX_ENABLE_HIP)
-  message( FATAL_ERROR "HIP and CUDA compilers cannot be used at the same time, CMake will exit." )    
+  message(FATAL_ERROR "HIP and CUDA compilers cannot be used at the same time, CMake will exit." )    
+endif()
+
+if (LIBCUDACXX_ENABLE_CUDA)
+  message(FATAL_ERROR "CUDA backend support is currently not supported. CMake will exit.")
 endif()
 
 if (LIBCUDACXX_ENABLE_CUDA)
@@ -80,7 +84,7 @@ elseif (LIBCUDACXX_ENABLE_HIP)
   find_package(hip REQUIRED)
 endif ()
 
-option(LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS "Enable libcu++ tests." ON)
+option(LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS "Enable libhip++ tests." ON)
 if (LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS)
   enable_testing()
 
