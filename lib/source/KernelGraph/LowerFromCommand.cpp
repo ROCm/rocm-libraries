@@ -395,12 +395,16 @@ namespace rocRoller
 
                     for(auto const& sinput : sinputs)
                     {
-                        AssertFatal(m_op.count(sinput) > 0,
-                                    "Unable to find XOp inputs in kernel control graph.");
-                        AssertFatal(m_dim.count(sinput) > 0,
-                                    "Unable to find XOp inputs in kernel coordinate graph.");
-                        control_inputs.push_back(m_op.at(sinput));
-                        coordinate_inputs.push_back(m_dim.at(sinput));
+                        AssertFatal(m_op.count(sinput) > 0 || m_expr.count(sinput) > 0,
+                                    "XOp input needs to be a literal or have a node in kernel "
+                                    "control graph.");
+                        AssertFatal(m_dim.count(sinput) > 0 || m_expr.count(sinput) > 0,
+                                    "XOp input needs to be a literal or have a dimension in kernel "
+                                    "coordinate graph.");
+                        if(m_op.count(sinput) > 0)
+                            control_inputs.push_back(m_op.at(sinput));
+                        if(m_dim.count(sinput) > 0)
+                            coordinate_inputs.push_back(m_dim.at(sinput));
                     }
 
                     int  cTag = std::visit([](auto const& a) -> int { return a.getTag(); }, *xop);
@@ -420,18 +424,21 @@ namespace rocRoller
                     m_graph.coordinates.addElement(
                         DataFlow(), coordinate_inputs, coordinate_outputs);
 
-                    // Translate coodinate input tags to DataFlowTag expressions.  Each DataFlowTag
-                    // referes to the corresponding coordinate input tag, and uses DataType::None to
+                    // Translate coordinate input tags to DataFlowTag expressions.  Each DataFlowTag
+                    // refers to the corresponding coordinate input tag, and uses DataType::None to
                     // represent a "deferred" type.
-                    std::vector<Expression::ExpressionPtr> dflow(coordinate_inputs.size());
-                    std::transform(coordinate_inputs.cbegin(),
-                                   coordinate_inputs.cend(),
-                                   dflow.begin(),
-                                   [](int tag) {
-                                       return std::make_shared<Expression::Expression>(
-                                           Expression::DataFlowTag{
-                                               tag, Register::Type::Vector, DataType::None});
-                                   });
+                    std::vector<Expression::ExpressionPtr> dflow(sinputs.size());
+                    std::transform(
+                        sinputs.cbegin(), sinputs.cend(), dflow.begin(), [=](int sinput) {
+                            if(m_dim.count(sinput) > 0)
+                            {
+                                return std::make_shared<Expression::Expression>(
+                                    Expression::DataFlowTag{
+                                        m_dim.at(sinput), Register::Type::Vector, DataType::None});
+                            }
+                            else
+                                return m_expr.at(sinput);
+                        });
 
                     // Translate XOp to an Expression
                     auto expr = std::visit(
@@ -542,6 +549,14 @@ namespace rocRoller
 #endif
             }
 
+            void operator()(Operations::Literal const& literal)
+            {
+                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::Literal");
+
+                auto expr = Expression::literal(literal.value());
+                m_expr.insert_or_assign(literal.getTag(), expr);
+            }
+
             void operator()(Operations::Nop const& x) {}
 
             KernelGraph call(CommandPtr command)
@@ -562,6 +577,9 @@ namespace rocRoller
 
             // command tag -> operation tag
             std::map<int, int> m_op;
+
+            // literal command tag -> Expression
+            std::map<int, Expression::ExpressionPtr> m_expr;
 
             // command tag -> dimension/coordinate tag
             std::map<int, int> m_dim;

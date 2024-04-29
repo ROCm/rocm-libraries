@@ -154,10 +154,8 @@ namespace GEMMDriverTest
             auto tagLoadReluAlpha
                 = command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarReluAlpha));
 
-            auto tagScalarZero
-                = command->addOperation(rocRoller::Operations::Scalar(DataType::Float)); // beta
-            auto tagLoadZero
-                = command->addOperation(rocRoller::Operations::T_Load_Scalar(tagScalarZero));
+            auto tagLiteralZero
+                = command->addOperation(rocRoller::Operations::Literal(0.0f)); // zero
 
             auto tagAB
                 = command->addOperation(rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // A * B
@@ -178,8 +176,8 @@ namespace GEMMDriverTest
                 tagD = execute.addXOp(rocRoller::Operations::E_Add(
                     tagAlphaAB, tagBetaC)); // alpha * (A * B) + beta * C
             }
-            auto tagDGtZero
-                = execute.addXOp(rocRoller::Operations::E_GreaterThan(tagD, tagLoadZero)); // D > 0
+            auto tagDGtZero = execute.addXOp(
+                rocRoller::Operations::E_GreaterThan(tagD, tagLiteralZero)); // D > 0
             auto tagDReluAlpha = execute.addXOp(
                 rocRoller::Operations::E_Mul(tagD, tagLoadReluAlpha)); // D * reluAlpha
             auto tagRelu = execute.addXOp(rocRoller::Operations::E_Conditional(
@@ -234,8 +232,6 @@ namespace GEMMDriverTest
             runtimeArgs.append("beta", beta);
 
             runtimeArgs.append("reluAlpha", static_cast<T>(reluAlpha));
-
-            runtimeArgs.append("zero", static_cast<T>(0.0));
 
             runtimeArgs.append("D", deviceD.get());
             runtimeArgs.append("d_d_limit", (size_t)M * N);

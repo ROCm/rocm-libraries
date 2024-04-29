@@ -11,6 +11,7 @@ namespace rocRoller
     {
         struct Tensor;
         struct Scalar;
+        struct Literal;
         struct BlockScale;
         struct T_Load_Linear;
         struct T_Load_Scalar;
@@ -22,6 +23,7 @@ namespace rocRoller
         struct Nop;
         using Operation = std::variant<Tensor,
                                        Scalar,
+                                       Literal,
                                        BlockScale,
                                        T_Load_Linear,
                                        T_Load_Scalar,

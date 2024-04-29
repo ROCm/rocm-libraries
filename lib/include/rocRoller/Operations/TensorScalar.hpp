@@ -9,6 +9,21 @@ namespace rocRoller
 {
     namespace Operations
     {
+        class Literal : public BaseOperation
+        {
+        public:
+            Literal() = delete;
+            Literal(CommandArgumentValue value);
+
+            std::string          toString() const;
+            CommandArgumentValue value() const;
+
+        private:
+            CommandArgumentValue m_value;
+        };
+
+        std::ostream& operator<<(std::ostream& stream, Literal const& val);
+
         class Scalar : public BaseOperation
         {
         public:

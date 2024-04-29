@@ -17,6 +17,7 @@ except ImportError:
     def write(*args, **kwargs):
         print(*args, **kwargs)
 
+
 repo_dir = pathlib.Path(__file__).resolve().parent.parent
 sys.path.append(str(repo_dir / "scripts" / "lib"))
 
@@ -34,7 +35,7 @@ def run_clang_format(path: pathlib.Path):
     output = p.stdout.decode()
 
     if p.returncode == 0:
-        assert output.strip() == ''
+        assert output.strip() == ""
         return
 
     output += "\n\n"
@@ -43,14 +44,14 @@ def run_clang_format(path: pathlib.Path):
         ["patch", str(path)],
         check=True,
         input=output,
-        encoding='UTF-8',
+        encoding="UTF-8",
         stdout=subprocess.PIPE,
     )
     write(p2.stdout)
 
 
 def fix_file(path: pathlib.Path):
-    if path.suffix in {'.h', '.hpp', '.cpp', '.h.in', '.hpp.in', '.cpp.in'}:
+    if path.suffix in {".h", ".hpp", ".cpp", ".h.in", ".hpp.in", ".cpp.in"}:
         run_clang_format(path)
 
 
@@ -71,18 +72,28 @@ def check_python(dir: pathlib.Path):
     command = ["flake8"]
     write(" ".join(command))
 
-    subprocess.run(
-        command,
-        cwd=dir,
-        check=False
-    )
+    subprocess.run(command, cwd=dir, check=False)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Fix C++ formatting and check Python formatting.")
+    parser = argparse.ArgumentParser(
+        description="Fix C++ formatting and check Python formatting."
+    )
 
-    parser.add_argument("--skip-cpp", dest="cpp", default=True, action="store_false", help="Don't format C++ files.")
-    parser.add_argument("--skip-python", dest="python", default=True, action="store_false", help="Don't check Python files.")
+    parser.add_argument(
+        "--skip-cpp",
+        dest="cpp",
+        default=True,
+        action="store_false",
+        help="Don't format C++ files.",
+    )
+    parser.add_argument(
+        "--skip-python",
+        dest="python",
+        default=True,
+        action="store_false",
+        help="Don't check Python files.",
+    )
     parser.add_argument("dir", type=pathlib.Path, default=pathlib.Path.cwd(), nargs="?")
 
     args = parser.parse_args()

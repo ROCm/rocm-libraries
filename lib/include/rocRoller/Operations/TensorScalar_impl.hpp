@@ -6,6 +6,10 @@ namespace rocRoller
 {
     namespace Operations
     {
+        inline CommandArgumentValue Literal::value() const
+        {
+            return m_value;
+        }
 
         inline CommandArgumentPtr Scalar::data() const
         {

@@ -104,15 +104,7 @@ def ls_tree(repo: Path = None):
         repo = Path.cwd()
 
     p = subprocess.run(
-        [
-            "git",
-            "ls-tree",
-            "--full-tree",
-            "--full-name",
-            "-r",
-            "--name-only",
-            "HEAD"
-        ],
+        ["git", "ls-tree", "--full-tree", "--full-name", "-r", "--name-only", "HEAD"],
         cwd=str(repo),
         stdout=subprocess.PIPE,
         check=True,

@@ -1524,14 +1524,11 @@ namespace KernelGraphTest
         auto alphaLoadTag
             = command->addOperation(rocRoller::Operations::T_Load_Scalar(alphaScalarTag));
 
-        // TODO: allow for literal constants
-        auto zeroScalarTag = command->addOperation(
-            rocRoller::Operations::Scalar({dataType, PointerType::PointerGlobal}));
-        auto zeroLoadTag
-            = command->addOperation(rocRoller::Operations::T_Load_Scalar(zeroScalarTag));
+        auto zeroLiteralTag = command->addOperation(rocRoller::Operations::Literal(0.0f));
 
         auto execute = rocRoller::Operations::T_Execute(command->getNextTag());
-        auto condTag = execute.addXOp(rocRoller::Operations::E_GreaterThan(xLoadTag, zeroLoadTag));
+        auto condTag
+            = execute.addXOp(rocRoller::Operations::E_GreaterThan(xLoadTag, zeroLiteralTag));
         auto productTag = execute.addXOp(rocRoller::Operations::E_Mul(xLoadTag, alphaLoadTag));
         auto reluTag
             = execute.addXOp(rocRoller::Operations::E_Conditional(condTag, xLoadTag, productTag));
@@ -1544,7 +1541,6 @@ namespace KernelGraphTest
 
         size_t nx    = 64;
         float  alpha = 0.9;
-        float  zero  = 0;
 
         RandomGenerator random(135679u);
         auto            a = random.vector<float>(nx, -5, 5);
@@ -1552,13 +1548,10 @@ namespace KernelGraphTest
         auto d_a     = make_shared_device(a);
         auto d_b     = make_shared_device<float>(nx);
         auto d_alpha = make_shared_device<float>();
-        auto d_zero  = make_shared_device<float>();
 
         std::vector<float> r(nx), x(nx);
 
         ASSERT_THAT(hipMemcpy(d_alpha.get(), &alpha, 1 * sizeof(float), hipMemcpyDefault),
-                    HasHipSuccess(0));
-        ASSERT_THAT(hipMemcpy(d_zero.get(), &zero, 1 * sizeof(float), hipMemcpyDefault),
                     HasHipSuccess(0));
 
         KernelArguments runtimeArgs;
@@ -1567,7 +1560,6 @@ namespace KernelGraphTest
         runtimeArgs.append("d_a_size", nx);
         runtimeArgs.append("d_a_stride", (size_t)1);
         runtimeArgs.append("alpha", d_alpha.get());
-        runtimeArgs.append("zero", d_zero.get());
         runtimeArgs.append("d_b", d_b.get());
         runtimeArgs.append("d_b_limit", nx);
         runtimeArgs.append("d_b_size", nx);

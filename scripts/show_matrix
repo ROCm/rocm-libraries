@@ -23,17 +23,21 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if len(args.output) == 0:
+
         def makeOutput(inFile):
             (base, _) = os.path.splitext(inFile)
             return base + ".png"
+
         args.output = list(map(makeOutput, args.input))
 
     if len(args.output) != len(args.input):
-        print("If specified, number of output arguments must equal "
-              "number of input arguments")
+        print(
+            "If specified, number of output arguments must equal "
+            "number of input arguments"
+        )
         exit(-1)
 
-    for (inFile, outFile) in zip(args.input, args.output):
+    for inFile, outFile in zip(args.input, args.output):
 
         if args.verbose > 0:
             print(args)

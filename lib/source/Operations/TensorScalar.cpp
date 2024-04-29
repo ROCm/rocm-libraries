@@ -143,5 +143,21 @@ namespace rocRoller
         {
             return stream << val.toString();
         }
+
+        Literal::Literal(CommandArgumentValue value)
+            : BaseOperation()
+            , m_value(value)
+        {
+        }
+
+        std::string Literal::toString() const
+        {
+            return "Literal";
+        }
+
+        std::ostream& operator<<(std::ostream& stream, Literal const& val)
+        {
+            return stream << val.toString();
+        }
     }
 }

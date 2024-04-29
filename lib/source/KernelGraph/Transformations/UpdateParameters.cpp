@@ -62,6 +62,11 @@ namespace rocRoller
                 return {};
             }
 
+            Size operator()(CommandArgumentValue const& expr)
+            {
+                return {1};
+            }
+
             Size operator()(auto const& expr)
             {
                 Throw<FatalError>("SizeVisitor not implemented yet.");
@@ -105,9 +110,9 @@ namespace rocRoller
                     return lhs;
                 if(lhs == MemoryType::WAVE || rhs == MemoryType::WAVE)
                     return MemoryType::WAVE;
-                if(lhs == MemoryType::VGPR || lhs == MemoryType::AGPR)
+                if(lhs == MemoryType::VGPR || lhs == MemoryType::AGPR || lhs == MemoryType::Literal)
                     return rhs;
-                if(rhs == MemoryType::VGPR || rhs == MemoryType::AGPR)
+                if(rhs == MemoryType::VGPR || rhs == MemoryType::AGPR || rhs == MemoryType::Literal)
                     return lhs;
                 Throw<FatalError>(
                     "Unhandled MemoryType combination: ", ShowValue(lhs), ShowValue(rhs));
@@ -127,6 +132,11 @@ namespace rocRoller
                                       [](VGPR const&) -> MemoryType { return MemoryType::VGPR; },
                                       [](auto const&) -> MemoryType { return MemoryType::None; }},
                                   dim);
+            }
+
+            MemoryType operator()(CommandArgumentValue const& expr)
+            {
+                return MemoryType::Literal;
             }
 
             MemoryType operator()(auto const& expr)
@@ -182,6 +192,11 @@ namespace rocRoller
                                       [](MacroTile const& x) -> LayoutType { return x.layoutType; },
                                       [](auto const&) -> LayoutType { return LayoutType::None; }},
                                   dim);
+            }
+
+            LayoutType operator()(CommandArgumentValue const& expr)
+            {
+                return LayoutType::None;
             }
 
             LayoutType operator()(auto const& expr)

@@ -134,6 +134,7 @@ namespace rocRoller
         WAVE,
         WAVE_LDS,
         JAMMED_WAVE_LDS,
+        Literal,
 
         Count,
         None = Count
