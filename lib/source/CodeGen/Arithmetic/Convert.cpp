@@ -6,6 +6,7 @@
 namespace rocRoller
 {
     // Register supported components
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::Double);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Float);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Half);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Halfx2);
@@ -24,6 +25,7 @@ namespace rocRoller
             getContextFromValues(dst, arg), dst->regType(), dst->variableType().dataType);     \
     }
 
+    DefineSpecializedGetGeneratorConvert(Double);
     DefineSpecializedGetGeneratorConvert(Float);
     DefineSpecializedGetGeneratorConvert(Half);
     DefineSpecializedGetGeneratorConvert(Halfx2);
@@ -231,6 +233,13 @@ namespace rocRoller
         default:
             Throw<FatalError>("Unsupported datatype for convert to UInt64: ", ShowValue(dataType));
         }
+    }
+
+    template <>
+    Generator<Instruction> ConvertGenerator<DataType::Double>::generate(Register::ValuePtr dest,
+                                                                        Register::ValuePtr arg)
+    {
+        Throw<FatalError>("Convert to Double not supported");
     }
 
 }

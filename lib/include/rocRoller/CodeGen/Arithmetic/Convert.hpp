@@ -12,6 +12,7 @@ namespace rocRoller
         GetGenerator<Expression::Convert<DataType::dtype>>(Register::ValuePtr dst,  \
                                                            Register::ValuePtr arg)
 
+    SpecializeGetGeneratorConvert(Double);
     SpecializeGetGeneratorConvert(Float);
     SpecializeGetGeneratorConvert(Half);
     SpecializeGetGeneratorConvert(Halfx2);
