@@ -1,7 +1,7 @@
-#include <hip/hip_runtime.h>
 //===----------------------------------------------------------------------===//
 //
-// Part of libcu++, the C++ Standard Library for your entire system,
+// Part of libhip++ (derived from libcu++),
+// the C++ Standard Library for your entire system,
 // under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -24,6 +24,8 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
+
+#include <hip/hip_runtime.h>
 
 // We use <stdio.h> instead of <iostream> to avoid relying on the host system's
 // C++ standard library.
@@ -63,7 +65,7 @@ void list_devices()
             printf("Unused, ");
 
         printf("CDNA %s\n", device_prop.gcnArchName);
-        printf("SM%d%d, %zu [bytes]\n",
+        printf("CU%d%d, %zu [bytes]\n",
             device_prop.major, device_prop.minor,
             device_prop.totalGlobalMem);
     }
