@@ -32,3 +32,9 @@ find_package(libhipcxx)
 add_executable(hash_map concurrent_hash_table.hip)
 target_compile_features(hash_map PRIVATE cxx_std_14)
 target_link_libraries(hash_map PRIVATE libhipcxx::libhipcxx)
+
+#This example requires C++20
+#add_executable(chrono_sysclock_workaround chrono_sysclock_workaround.hip)
+#target_compile_features(chrono_sysclock_workaround PRIVATE cxx_std_20)
+#target_compile_options(chrono_sysclock_workaround PRIVATE -D_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP)
+#target_link_libraries(chrono_sysclock_workaround PRIVATE libhipcxx::libhipcxx)
