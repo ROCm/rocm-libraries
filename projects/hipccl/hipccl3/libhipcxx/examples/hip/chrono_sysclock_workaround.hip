@@ -22,7 +22,7 @@
 
 #include "hip/hip_runtime.h"
 #include <unistd.h>
-#include <hip/std/chrono>
+#include <cuda/std/chrono>
 
 LIBCUDACXX_HIP_DEFINE_SYSCLOCK_VARS
 

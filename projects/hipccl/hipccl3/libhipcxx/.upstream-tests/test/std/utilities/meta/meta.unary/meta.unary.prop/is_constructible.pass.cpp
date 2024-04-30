@@ -107,7 +107,7 @@ template <class T, class A0>
 __host__ __device__ void test_is_constructible()
 {
   static_assert((cuda::std::is_constructible<T, A0>::value), "");
-#if !defined(TEST_COMPILER_MSVC) && !defined(TEST_COMPILER_HIPCC)
+#ifndef TEST_COMPILER_MSVC
   // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
   static_assert((cuda::std::__libcpp_is_constructible<T, A0>::type::value), "");
