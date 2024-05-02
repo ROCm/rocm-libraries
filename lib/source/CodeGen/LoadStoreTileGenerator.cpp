@@ -590,14 +590,20 @@ namespace rocRoller
                     = only(m_graph->coordinates.getInputNodeIndices(macTileTag, CT::isEdge<View>))
                           .value_or(macTileTag);
 
+                auto unsegmentedVariableType
+                    = DataTypeInfo::Get(dataType).unsegmentedVariableType();
+                auto segmentedElementsPerRegister
+                    = unsegmentedVariableType.has_value() ? 4 / info.elementSize : 0;
+
                 Register::ValuePtr tmpl;
-                if(dataType == DataType::Half && n > 1 && colStrideIsOne)
+                if(unsegmentedVariableType && (n % segmentedElementsPerRegister == 0)
+                   && colStrideIsOne)
                 {
                     tmpl = Register::Value::Placeholder(
                         m_context,
                         Register::Type::Vector,
-                        DataType::Halfx2,
-                        m * n / 2,
+                        unsegmentedVariableType.value(),
+                        m * n / segmentedElementsPerRegister,
                         Register::AllocationOptions::FullyContiguous());
                 }
                 else

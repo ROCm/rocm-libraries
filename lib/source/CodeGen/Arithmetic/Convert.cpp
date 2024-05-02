@@ -10,6 +10,7 @@ namespace rocRoller
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Float);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Half);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Halfx2);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP8x4_NANOO);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int32);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int64);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::UInt32);
@@ -29,6 +30,7 @@ namespace rocRoller
     DefineSpecializedGetGeneratorConvert(Float);
     DefineSpecializedGetGeneratorConvert(Half);
     DefineSpecializedGetGeneratorConvert(Halfx2);
+    DefineSpecializedGetGeneratorConvert(FP8x4_NANOO);
     DefineSpecializedGetGeneratorConvert(Int32);
     DefineSpecializedGetGeneratorConvert(Int64);
     DefineSpecializedGetGeneratorConvert(UInt32);
@@ -48,6 +50,7 @@ namespace rocRoller
             ConvertCase(Float);
             ConvertCase(Half);
             ConvertCase(Halfx2);
+            ConvertCase(FP8_NANOO);
             ConvertCase(Int32);
             ConvertCase(Int64);
             ConvertCase(UInt32);
@@ -128,6 +131,33 @@ namespace rocRoller
             break;
         default:
             Throw<FatalError>("Unsupported datatype for convert to halfx2: ", ShowValue(dataType));
+        }
+    }
+
+    template <>
+    Generator<Instruction>
+        ConvertGenerator<DataType::FP8x4_NANOO>::generate(Register::ValuePtr dest,
+                                                          Register::ValuePtr arg)
+    {
+        AssertFatal(arg != nullptr);
+
+        auto dataType = getArithDataType(arg);
+
+        switch(dataType)
+        {
+        case DataType::FP8_NANOO:
+        {
+            AssertFatal(arg->valueCount() == 4,
+                        "Conversion to FP8x4_NANOO requires four elements",
+                        ShowValue(arg->valueCount()));
+            std::vector<Register::ValuePtr> values{
+                arg->element({0}), arg->element({1}), arg->element({2}), arg->element({3})};
+            co_yield m_context->copier()->pack(dest, values, "Pack into FP8x4");
+        }
+        break;
+        default:
+            Throw<FatalError>("Unsupported datatype for convert to FP8x4_NANOO: ",
+                              ShowValue(dataType));
         }
     }
 

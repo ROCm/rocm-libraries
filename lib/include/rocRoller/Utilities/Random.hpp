@@ -40,8 +40,8 @@ namespace rocRoller
          * Generate a random vector of length `nx`, with values
          * between `min` and `max`.
          */
-        template <typename T>
-        std::vector<T> vector(uint nx, T min, T max);
+        template <typename T, typename R>
+        std::vector<T> vector(uint nx, R min, R max);
 
         template <std::integral T>
         T next(T min, T max);

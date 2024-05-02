@@ -631,8 +631,15 @@ namespace rocRoller
                         Register::ValuePtr arg;
                         if(argInfo.packing < destInfo.packing)
                         {
-                            arg = results[0]->element(
-                                {i * packingRatio, i * packingRatio + packingRatio - 1});
+                            if(packingRatio == 2)
+                                arg = results[0]->element({i * packingRatio, i * packingRatio + 1});
+                            else if(packingRatio == 4)
+                                arg = results[0]->element({i * packingRatio,
+                                                           i * packingRatio + 1,
+                                                           i * packingRatio + 2,
+                                                           i * packingRatio + 3});
+                            else
+                                Throw<FatalError>("Packing ratio not supported yet.");
                         }
                         else if(argInfo.packing > destInfo.packing)
                         {

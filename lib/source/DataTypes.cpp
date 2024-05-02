@@ -518,7 +518,7 @@ namespace rocRoller
         return Get(iter->second);
     }
 
-    VariableType DataTypeInfo::unsegmentedVariableType() const
+    std::optional<VariableType> DataTypeInfo::unsegmentedVariableType() const
     {
         registerAllTypeInfoOnce();
 
@@ -534,7 +534,7 @@ namespace rocRoller
                 }
             }
         }
-        Throw<FatalError>("Segmented variable type not found for ", ShowValue(variableType));
+        return {};
     }
 
     std::ostream& operator<<(std::ostream& stream, const DataType& t)

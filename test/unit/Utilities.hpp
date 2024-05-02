@@ -18,7 +18,7 @@
 #include <rocRoller/Utilities/Settings.hpp>
 
 template <typename T>
-std::shared_ptr<T> make_shared_device(std::size_t n = 1, T init = 0.0)
+std::shared_ptr<T> make_shared_device(std::size_t n = 1, T init = {})
 {
     std::size_t size   = n * sizeof(T);
     T*          ptr    = nullptr;
@@ -157,6 +157,18 @@ namespace rocRoller
                float                      beta,
                bool                       transA = false,
                bool                       transB = true);
+
+    void CPUMM(std::vector<float>&           D,
+               const std::vector<float>&     C,
+               const std::vector<FP8_NANOO>& A,
+               const std::vector<FP8_NANOO>& B,
+               int                           M,
+               int                           N,
+               int                           K,
+               float                         alpha,
+               float                         beta,
+               bool                          transA = false,
+               bool                          transB = true);
 }
 
 /*

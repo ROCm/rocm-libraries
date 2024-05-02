@@ -11,6 +11,9 @@ namespace rocRoller
     {
         RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::Float);
         RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::Halfx2);
+        RegisterComponentTemplateSpec(MatrixMultiplyGenerator,
+                                      DataType::Float,
+                                      DataType::FP8x4_NANOO);
 
         const std::string MatrixMultiply::Basename = "MatrixMultiply";
 
@@ -21,6 +24,8 @@ namespace rocRoller
                 return "f32";
             else if constexpr(DATATYPE == DataType::Halfx2)
                 return "f16";
+            else if constexpr(DATATYPE == DataType::FP8x4_NANOO)
+                return "_fp8_fp8";
             else
                 return "unknown";
         }

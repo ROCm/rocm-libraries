@@ -137,7 +137,11 @@ namespace rocRoller
 
             for(auto& [storage, multiplies] : m_multiplyArgs)
             {
-                if(m_storageDataType[storage] != DataType::Half)
+                auto unsegmented
+                    = DataTypeInfo::Get(m_storageDataType[storage]).unsegmentedVariableType();
+                if(!unsegmented)
+                    continue;
+                if(m_storageDataType[storage] == unsegmented->dataType)
                     continue;
 
                 auto sharedParents = findSharedParents(graph, storage);
@@ -169,8 +173,11 @@ namespace rocRoller
                     = graph.coordinates.addElement(graph.coordinates.getElement(location.storage));
                 auto dataFlow    = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
                     location.storage, Register::Type::Vector, DataType::None});
-                auto convertNode = graph.control.addElement(Assign{
-                    Register::Type::Vector, Expression::convert<DataType::Halfx2>(dataFlow)});
+                auto unsegmented = DataTypeInfo::Get(m_storageDataType[location.storage])
+                                       .unsegmentedVariableType()
+                                       ->dataType;
+                auto convertNode = graph.control.addElement(
+                    Assign{Register::Type::Vector, Expression::convert(unsegmented, dataFlow)});
                 graph.mapper.connect(convertNode, newStorage, NaryArgument::DEST);
 
                 // Create Edge from shared node to convert node

@@ -77,11 +77,14 @@ namespace rocRoller
     {
         auto valuesPerWord = m_wordSize / toPack->variableType().getElementSize();
         auto unsegmented   = DataTypeInfo::Get(toPack->variableType()).unsegmentedVariableType();
-        // AssertFatal(unsegmented == DataType::Halfx2, "Other datatypes not tested");
+        if(!unsegmented)
+        {
+            Throw<FatalError>("Segmented variable type not found for ", ShowValue(variableType));
+        }
 
         result = Register::Value::Placeholder(toPack->context(),
                                               toPack->regType(),
-                                              unsegmented,
+                                              *unsegmented,
                                               toPack->valueCount() / valuesPerWord,
                                               Register::AllocationOptions::FullyContiguous());
         for(int i = 0; i < result->registerCount(); i++)

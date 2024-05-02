@@ -323,10 +323,13 @@ namespace rocRoller
         static DataTypeInfo const& Get(std::string const& str);
 
         /**
-         * Returns the segmented variable type
-         * e.g. If this->variableType == Half, then returns Halfx2
-        */
-        VariableType unsegmentedVariableType() const;
+         * @brief Returns the not-segmented variable type.
+         *
+         * For example:
+         * 1. If variableType == Half, this returns Halfx2.
+         * 2. If variableType == Float, this returns {}.
+         */
+        std::optional<VariableType> unsegmentedVariableType() const;
 
         VariableType variableType;
         VariableType segmentVariableType;

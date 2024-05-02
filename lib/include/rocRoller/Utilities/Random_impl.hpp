@@ -4,8 +4,8 @@
 
 namespace rocRoller
 {
-    template <typename T>
-    std::vector<T> RandomGenerator::vector(uint nx, T min, T max)
+    template <typename T, typename R>
+    std::vector<T> RandomGenerator::vector(uint nx, R min, R max)
     {
         std::vector<T>                   x(nx);
         std::uniform_real_distribution<> udist(min, max);

@@ -733,7 +733,7 @@ namespace rocRoller
 
                 uint numElements = waveA.sizes[0] * waveB.sizes[1];
                 uint wfs         = m_context->kernel()->wavefront_size();
-                uint num_agpr    = numElements / wfs;
+                uint numAGPR     = numElements / wfs;
 
                 auto [DTag, _D] = m_graph->getDimension<MacroTile>(
                     tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
@@ -742,10 +742,9 @@ namespace rocRoller
                     DTag,
                     Register::Type::Accumulator,
                     DataType::Float,
-                    num_agpr,
-                    Register::AllocationOptions{.contiguousChunkWidth = 16});
-
-                AssertFatal(D->allocation()->options().contiguousChunkWidth >= 16, "Should be 16");
+                    numAGPR,
+                    Register::AllocationOptions{.contiguousChunkWidth
+                                                = Register::FULLY_CONTIGUOUS});
 
                 waveA.vgpr = m_context->registerTagManager()->getRegister(macATag);
                 waveB.vgpr = m_context->registerTagManager()->getRegister(macBTag);

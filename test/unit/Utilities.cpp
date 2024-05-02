@@ -105,4 +105,61 @@ namespace rocRoller
             D[i] = __float2half(floatD[i]);
         }
     }
+
+    void CPUMM(std::vector<float>&           D,
+               const std::vector<float>&     C,
+               const std::vector<FP8_NANOO>& A,
+               const std::vector<FP8_NANOO>& B,
+               int                           M,
+               int                           N,
+               int                           K,
+               float                         alpha,
+               float                         beta,
+               bool                          transA,
+               bool                          transB)
+    {
+        std::vector<float> floatA(A.size());
+        std::vector<float> floatB(B.size());
+        std::vector<float> floatD(C.size());
+
+#pragma omp parallel for
+        for(std::size_t i = 0; i != A.size(); ++i)
+        {
+            floatA[i] = float(A[i]);
+        }
+
+#pragma omp parallel for
+        for(std::size_t i = 0; i != B.size(); ++i)
+        {
+            floatB[i] = float(B[i]);
+        }
+
+#pragma omp parallel for
+        for(std::size_t i = 0; i != C.size(); ++i)
+        {
+            floatD[i] = C[i];
+        }
+
+        cblas_sgemm(CblasColMajor,
+                    transA ? CblasTrans : CblasNoTrans,
+                    transB ? CblasTrans : CblasNoTrans,
+                    M,
+                    N,
+                    K,
+                    alpha,
+                    floatA.data(),
+                    transA ? K : M,
+                    floatB.data(),
+                    transB ? N : K,
+                    beta,
+                    floatD.data(),
+                    M);
+
+#pragma omp parallel for
+        for(std::size_t i = 0; i != floatD.size(); ++i)
+        {
+            D[i] = floatD[i];
+        }
+    }
+
 }
