@@ -29,8 +29,7 @@
 
 // UNSUPPORTED: hipcc
 // We made the test unsupported because hip builtin atomics 
-// fail with underaligned types:
-// https://ontrack-internal.amd.com/browse/SWDEV-393058 
+// fail with underaligned types (SWDEV-393058) 
 // As a workaround, you need to use alignas(8) 
 // to align the user-defined types manually. 
 

@@ -70,7 +70,7 @@ _CCCL_PUSH_MACROS
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
-//TODO(HIP): WAR for missing typedefs, see https://ontrack-internal.amd.com/browse/SWDEV-421819
+//TODO(HIP): WAR for missing typedefs, see SWDEV-421819
 #ifdef __HIPCC_RTC__
 typedef long ptrdiff_t;
 #else
