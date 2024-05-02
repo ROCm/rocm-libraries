@@ -267,6 +267,9 @@ namespace rocRoller
                     params->setWaveTilesPerWavefront(wavetile_per_wavefront_m,
                                                      wavetile_per_wavefront_n);
 
+                    // TODO: replace it with conditional node in the control graph
+                    params->setBetaValue(m_solutionParams.problemParams.beta);
+
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {m_solutionParams.macM, m_solutionParams.macK},
                         LayoutType::MATRIX_A,
