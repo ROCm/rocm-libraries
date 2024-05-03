@@ -308,5 +308,8 @@ int main(int argc, const char* argv[])
         Serialization::writeYAML(file, result);
     }
 
+    if(!result.benchmarkResults.correct)
+        return 1;
+
     return 0;
 }
