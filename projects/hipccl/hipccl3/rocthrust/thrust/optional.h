@@ -2746,14 +2746,11 @@ public:
   ///
   /// \group emplace
   __thrust_exec_check_disable__
-  template <class... Args>
+  template <class U>
   __host__ __device__
-  T &emplace(Args &&... args) noexcept {
-    static_assert(std::is_constructible<T, Args &&...>::value,
-                  "T must be constructible with Args");
-
-    *this = nullopt;
-    this->construct(std::forward<Args>(args)...);
+  T &emplace(U& u) noexcept {
+    m_value = addressof(u);
+    return *m_value;
   }
 
   /// Swaps this optional with the other.
