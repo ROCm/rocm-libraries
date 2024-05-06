@@ -20,6 +20,7 @@ The rocPRIM documentation is structured as follows:
 
     * :ref:`rocprim-intro`
     * :ref:`glossary`
+    * :ref:`developer`
 
   .. grid-item-card:: API reference
 
