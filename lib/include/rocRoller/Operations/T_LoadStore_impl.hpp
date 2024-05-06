@@ -6,13 +6,13 @@ namespace rocRoller
 {
     namespace Operations
     {
-        inline T_Load_Linear::T_Load_Linear(int tensor)
+        inline T_Load_Linear::T_Load_Linear(OperationTag tensor)
             : BaseOperation()
             , m_tensorTag(tensor)
         {
         }
 
-        inline int T_Load_Linear::getTensorTag() const
+        inline OperationTag T_Load_Linear::getTensorTag() const
         {
             return m_tensorTag;
         }
@@ -31,13 +31,13 @@ namespace rocRoller
             return stream << val.toString();
         }
 
-        inline T_Load_Scalar::T_Load_Scalar(int scalar)
+        inline T_Load_Scalar::T_Load_Scalar(OperationTag scalar)
             : BaseOperation()
             , m_scalarTag(scalar)
         {
         }
 
-        inline int T_Load_Scalar::getScalarTag() const
+        inline OperationTag T_Load_Scalar::getScalarTag() const
         {
             return m_scalarTag;
         }
@@ -56,13 +56,13 @@ namespace rocRoller
             return stream << val.toString();
         }
 
-        inline T_Load_Tiled::T_Load_Tiled(int tensor)
+        inline T_Load_Tiled::T_Load_Tiled(OperationTag tensor)
             : BaseOperation()
             , m_tensorTag(tensor)
         {
         }
 
-        inline int T_Load_Tiled::getTensorTag() const
+        inline OperationTag T_Load_Tiled::getTensorTag() const
         {
             return m_tensorTag;
         }
@@ -81,19 +81,19 @@ namespace rocRoller
             return stream << val.toString();
         }
 
-        inline T_Store_Linear::T_Store_Linear(int source, int tensor)
+        inline T_Store_Linear::T_Store_Linear(OperationTag source, OperationTag tensor)
             : BaseOperation()
             , m_srcTag(source)
             , m_tensorTag(tensor)
         {
         }
 
-        inline int T_Store_Linear::getSrcTag() const
+        inline OperationTag T_Store_Linear::getSrcTag() const
         {
             return m_srcTag;
         }
 
-        inline int T_Store_Linear::getTensorTag() const
+        inline OperationTag T_Store_Linear::getTensorTag() const
         {
             return m_tensorTag;
         }
@@ -113,19 +113,19 @@ namespace rocRoller
             return stream << val.toString();
         }
 
-        inline T_Store_Tiled::T_Store_Tiled(int source, int tensor)
+        inline T_Store_Tiled::T_Store_Tiled(OperationTag source, OperationTag tensor)
             : BaseOperation()
             , m_srcTag(source)
             , m_tensorTag(tensor)
         {
         }
 
-        inline int T_Store_Tiled::getSrcTag() const
+        inline OperationTag T_Store_Tiled::getSrcTag() const
         {
             return m_srcTag;
         }
 
-        inline int T_Store_Tiled::getTensorTag() const
+        inline OperationTag T_Store_Tiled::getTensorTag() const
         {
             return m_tensorTag;
         }

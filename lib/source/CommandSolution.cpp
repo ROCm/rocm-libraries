@@ -17,12 +17,13 @@ namespace rocRoller
     {
     }
 
-    void CommandParameters::setDimensionInfo(int tag, KernelGraph::CoordinateGraph::Dimension dim)
+    void CommandParameters::setDimensionInfo(Operations::OperationTag                tag,
+                                             KernelGraph::CoordinateGraph::Dimension dim)
     {
         m_dimInfo[tag] = dim;
     }
 
-    std::map<int, KernelGraph::CoordinateGraph::Dimension>
+    std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension>
         CommandParameters::getDimensionInfo() const
     {
         return m_dimInfo;

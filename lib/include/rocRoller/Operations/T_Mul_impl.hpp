@@ -6,14 +6,14 @@ namespace rocRoller
 {
     namespace Operations
     {
-        inline T_Mul::T_Mul(int a, int b)
+        inline T_Mul::T_Mul(OperationTag a, OperationTag b)
             : BaseOperation()
             , a(a)
             , b(b)
         {
         }
 
-        inline std::unordered_set<int> T_Mul::getInputs() const
+        inline std::unordered_set<OperationTag> T_Mul::getInputs() const
         {
             return {a, b};
         }

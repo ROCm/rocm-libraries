@@ -17,12 +17,12 @@ namespace rocRoller
         {
         public:
             T_Mul() = delete;
-            T_Mul(int a, int b);
+            T_Mul(OperationTag a, OperationTag b);
 
-            std::unordered_set<int> getInputs() const;
-            std::string             toString() const;
+            std::unordered_set<OperationTag> getInputs() const;
+            std::string                      toString() const;
 
-            int a, b;
+            OperationTag a, b;
         };
 
     }

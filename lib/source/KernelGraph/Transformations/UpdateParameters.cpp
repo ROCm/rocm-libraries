@@ -322,7 +322,7 @@ namespace rocRoller
             }
 
         private:
-            std::map<int, Dimension> m_newDimensions;
+            std::map<Operations::OperationTag, Dimension> m_newDimensions;
         };
 
         KernelGraph UpdateParameters::apply(KernelGraph const& original)

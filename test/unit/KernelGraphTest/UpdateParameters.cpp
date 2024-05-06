@@ -26,9 +26,9 @@ namespace KernelGraphTest
 
         auto graph0 = KernelGraph::KernelGraph();
 
-        auto tagA = graph0.coordinates.addElement(MacroTile(0));
-        auto tagB = graph0.coordinates.addElement(MacroTile(1));
-        auto tagD = graph0.coordinates.addElement(MacroTile(2));
+        auto tagA = graph0.coordinates.addElement(MacroTile(Operations::OperationTag(0)));
+        auto tagB = graph0.coordinates.addElement(MacroTile(Operations::OperationTag(1)));
+        auto tagD = graph0.coordinates.addElement(MacroTile(Operations::OperationTag(2)));
 
         auto tileA = MacroTile({4, 5}, MemoryType::VGPR);
         auto tileB = MacroTile({4, 5}, MemoryType::VGPR);
@@ -42,8 +42,8 @@ namespace KernelGraphTest
         graph0.control.addElement(Sequence(), {kernel}, {assignD});
 
         auto params = std::make_shared<CommandParameters>();
-        params->setDimensionInfo(0, tileA);
-        params->setDimensionInfo(1, tileB);
+        params->setDimensionInfo(Operations::OperationTag(0), tileA);
+        params->setDimensionInfo(Operations::OperationTag(1), tileB);
 
         // Result of A + B should have same size as A (and B)
         auto graph1 = KernelGraph::UpdateParameters(params).apply(graph0);
@@ -53,9 +53,9 @@ namespace KernelGraphTest
         EXPECT_EQ(tileD.sizes[1], tileA.sizes[1]);
 
         // If A and B are different sizes, propagating size to A + B should fail
-        graph0.coordinates.setElement(tagD, MacroTile(2));
+        graph0.coordinates.setElement(tagD, MacroTile(Operations::OperationTag(2)));
         tileB = MacroTile({4, 7}, MemoryType::VGPR);
-        params->setDimensionInfo(1, tileB);
+        params->setDimensionInfo(Operations::OperationTag(1), tileB);
         EXPECT_THROW(KernelGraph::UpdateParameters(params).apply(graph0), FatalError);
     }
 }

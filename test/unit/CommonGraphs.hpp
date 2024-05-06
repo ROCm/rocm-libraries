@@ -11,6 +11,7 @@
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
+#include <rocRoller/Operations/OperationTag.hpp>
 
 namespace rocRollerTest
 {
@@ -144,7 +145,7 @@ namespace rocRollerTest
             int  m_waveM, m_waveN, m_waveK, m_waveB;
             bool m_useLDSA = false, m_useLDSB = false, m_useLDSD = false;
 
-            int m_tagA, m_tagB, m_tagC, m_tagD;
+            rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
 
             CommandPtr m_command;
         };
@@ -182,7 +183,7 @@ namespace rocRollerTest
             int m_macM, m_macN;
             int m_thrM, m_thrN;
 
-            int m_tagA, m_tagB, m_tagD;
+            rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagD;
 
             CommandPtr m_command;
         };
@@ -216,9 +217,9 @@ namespace rocRollerTest
         private:
             void createCommand();
 
-            int m_tag;
-            int m_macM, m_macN;
-            int m_thrM, m_thrN;
+            rocRoller::Operations::OperationTag m_tag;
+            int                                 m_macM, m_macN;
+            int                                 m_thrM, m_thrN;
 
             std::vector<size_t> m_literalStrides;
             CommandPtr          m_command;

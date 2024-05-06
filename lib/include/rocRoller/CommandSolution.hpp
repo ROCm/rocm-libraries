@@ -23,8 +23,10 @@ namespace rocRoller
         /**
          * Set (reset) a dimensions properties.
          */
-        void setDimensionInfo(int tag, KernelGraph::CoordinateGraph::Dimension dim);
-        std::map<int, KernelGraph::CoordinateGraph::Dimension> getDimensionInfo() const;
+        void setDimensionInfo(Operations::OperationTag                tag,
+                              KernelGraph::CoordinateGraph::Dimension dim);
+        std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension>
+            getDimensionInfo() const;
 
         /**
          * Manually override kernel launch dimensions.
@@ -86,10 +88,10 @@ namespace rocRoller
         bool getSplitStoreTileIntoWaveBlocks() const;
 
     private:
-        std::map<int, KernelGraph::CoordinateGraph::Dimension>  m_dimInfo;
-        std::optional<std::array<unsigned int, 3>>              m_workgroupSize;
-        std::optional<std::array<Expression::ExpressionPtr, 3>> m_workitemCount;
-        std::optional<std::pair<uint, uint>>                    m_wavefrontCounts;
+        std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;
+        std::optional<std::array<unsigned int, 3>>                                  m_workgroupSize;
+        std::optional<std::array<Expression::ExpressionPtr, 3>>                     m_workitemCount;
+        std::optional<std::pair<uint, uint>> m_wavefrontCounts;
         // TODO: replace it with the conditional node in the control graph
         float m_beta;
 

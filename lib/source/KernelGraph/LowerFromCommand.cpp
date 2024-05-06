@@ -24,7 +24,7 @@ namespace rocRoller
          * For example, given VGPR and Linear inputs, output should be Linear.
          */
         Dimension
-            promoteDimensions(int                                                             cTag,
+            promoteDimensions(Operations::OperationTag                                        cTag,
                               rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph const& graph,
                               std::vector<int> const&                                         dims)
         {
@@ -377,13 +377,17 @@ namespace rocRoller
                     auto sinputs = std::visit(
                         overloaded{
                             [](Operations::E_Ternary const& op) {
-                                return std::vector<int>{op.a, op.b, op.c};
+                                return std::vector<Operations::OperationTag>{op.a, op.b, op.c};
                             },
                             [](Operations::E_Binary const& op) {
-                                return std::vector<int>{op.a, op.b};
+                                return std::vector<Operations::OperationTag>{op.a, op.b};
                             },
-                            [](Operations::E_Unary const& op) { return std::vector<int>{op.a}; },
-                            [](Operations::Nop const& op) { return std::vector<int>{}; },
+                            [](Operations::E_Unary const& op) {
+                                return std::vector<Operations::OperationTag>{op.a};
+                            },
+                            [](Operations::Nop const& op) {
+                                return std::vector<Operations::OperationTag>{};
+                            },
                         },
                         *xop);
 
@@ -407,7 +411,8 @@ namespace rocRoller
                             coordinate_inputs.push_back(m_dim.at(sinput));
                     }
 
-                    int  cTag = std::visit([](auto const& a) -> int { return a.getTag(); }, *xop);
+                    auto cTag = std::visit(
+                        [](auto const& a) -> Operations::OperationTag { return a.getTag(); }, *xop);
                     auto dimension
                         = promoteDimensions(cTag, m_graph.coordinates, coordinate_inputs);
                     for(auto const& soutput : soutputs)
@@ -428,17 +433,20 @@ namespace rocRoller
                     // refers to the corresponding coordinate input tag, and uses DataType::None to
                     // represent a "deferred" type.
                     std::vector<Expression::ExpressionPtr> dflow(sinputs.size());
-                    std::transform(
-                        sinputs.cbegin(), sinputs.cend(), dflow.begin(), [=](int sinput) {
-                            if(m_dim.count(sinput) > 0)
-                            {
-                                return std::make_shared<Expression::Expression>(
-                                    Expression::DataFlowTag{
-                                        m_dim.at(sinput), Register::Type::Vector, DataType::None});
-                            }
-                            else
-                                return m_expr.at(sinput);
-                        });
+                    std::transform(sinputs.cbegin(),
+                                   sinputs.cend(),
+                                   dflow.begin(),
+                                   [=, this](Operations::OperationTag sinput) {
+                                       if(m_dim.count(sinput) > 0)
+                                       {
+                                           return std::make_shared<Expression::Expression>(
+                                               Expression::DataFlowTag{m_dim.at(sinput),
+                                                                       Register::Type::Vector,
+                                                                       DataType::None});
+                                       }
+                                       else
+                                           return m_expr.at(sinput);
+                                   });
 
                     // Translate XOp to an Expression
                     auto expr = std::visit(
@@ -576,13 +584,13 @@ namespace rocRoller
             int m_kernel;
 
             // command tag -> operation tag
-            std::map<int, int> m_op;
+            std::map<Operations::OperationTag, int> m_op;
 
             // literal command tag -> Expression
-            std::map<int, Expression::ExpressionPtr> m_expr;
+            std::map<Operations::OperationTag, Expression::ExpressionPtr> m_expr;
 
             // command tag -> dimension/coordinate tag
-            std::map<int, int> m_dim;
+            std::map<Operations::OperationTag, int> m_dim;
 
             CommandPtr m_command;
         };

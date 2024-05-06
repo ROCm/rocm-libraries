@@ -538,6 +538,7 @@ set(
   test/unit/VectorAddBenchmark.cpp
   test/unit/WaitCountObserverTest.cpp
   test/unit/WaitCountTest.cpp
+  test/unit/OperationTagTest.cpp
 )
 
 if (NOT ROCROLLER_TESTS_SKIP_GUIDEPOSTS)

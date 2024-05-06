@@ -46,7 +46,7 @@ namespace rocRollerTest::Graphs
         auto alphaLoadTag
             = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(alphaScalarTag));
 
-        auto betaLoadTag = -1;
+        rocRoller::Operations::OperationTag betaLoadTag;
         if(m_useBeta)
         {
             auto betaScalarTag = m_command->addOperation(rocRoller::Operations::Scalar(dataType));
@@ -187,8 +187,8 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto aLoadTag = -1;
-        auto bLoadTag = -1;
+        rocRoller::Operations::OperationTag aLoadTag;
+        rocRoller::Operations::OperationTag bLoadTag;
 
         if(m_useScalarLoads)
         {
@@ -546,8 +546,8 @@ namespace rocRollerTest::Graphs
 
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto tagInputTensor  = -1;
-        auto tagOutputTensor = -1;
+        rocRoller::Operations::OperationTag tagInputTensor;
+        rocRoller::Operations::OperationTag tagOutputTensor;
 
         if(!m_literalStrides.empty())
         {

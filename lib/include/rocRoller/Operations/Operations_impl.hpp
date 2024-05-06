@@ -12,206 +12,207 @@ namespace rocRoller
 {
     namespace Operations
     {
-        inline std::unordered_set<int> Inputs::call(Operation const& op)
+        inline std::unordered_set<OperationTag> Inputs::call(Operation const& op)
         {
             return std::visit(*this, op);
         }
 
-        inline std::unordered_set<int> Inputs::operator()(Tensor const& tensor)
+        inline std::unordered_set<OperationTag> Inputs::operator()(Tensor const& tensor)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Inputs::operator()(Scalar const& scalar)
+        inline std::unordered_set<OperationTag> Inputs::operator()(Scalar const& scalar)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Inputs::operator()(Literal const& literal)
+        inline std::unordered_set<OperationTag> Inputs::operator()(Literal const& literal)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Inputs::operator()(BlockScale const& blockScale)
+        inline std::unordered_set<OperationTag> Inputs::operator()(BlockScale const& blockScale)
         {
             return blockScale.getInputs();
         }
 
-        inline std::unordered_set<int> Inputs::operator()(T_Load_Linear const& load)
+        inline std::unordered_set<OperationTag> Inputs::operator()(T_Load_Linear const& load)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Inputs::operator()(T_Load_Scalar const& load)
+        inline std::unordered_set<OperationTag> Inputs::operator()(T_Load_Scalar const& load)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Inputs::operator()(T_Load_Tiled const& load)
+        inline std::unordered_set<OperationTag> Inputs::operator()(T_Load_Tiled const& load)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Inputs::operator()(T_Mul const& mul)
+        inline std::unordered_set<OperationTag> Inputs::operator()(T_Mul const& mul)
         {
             return mul.getInputs();
         }
 
-        inline std::unordered_set<int> Inputs::operator()(T_Store_Linear const& store)
+        inline std::unordered_set<OperationTag> Inputs::operator()(T_Store_Linear const& store)
         {
             return {store.getTag()};
         }
 
-        inline std::unordered_set<int> Inputs::operator()(T_Store_Tiled const& store)
+        inline std::unordered_set<OperationTag> Inputs::operator()(T_Store_Tiled const& store)
         {
             return {store.getTag()};
         }
 
-        inline std::unordered_set<int> Inputs::operator()(T_Execute const& exec)
+        inline std::unordered_set<OperationTag> Inputs::operator()(T_Execute const& exec)
         {
             return exec.getInputs();
         }
 
-        inline std::unordered_set<int> Inputs::call(XOp const& op)
+        inline std::unordered_set<OperationTag> Inputs::call(XOp const& op)
         {
             return std::visit(*this, op);
         }
 
-        inline std::unordered_set<int> Inputs::operator()(E_Unary const& unary)
+        inline std::unordered_set<OperationTag> Inputs::operator()(E_Unary const& unary)
         {
             return unary.getInputs();
         }
 
-        inline std::unordered_set<int> Inputs::operator()(E_Binary const& binary)
+        inline std::unordered_set<OperationTag> Inputs::operator()(E_Binary const& binary)
         {
             return binary.getInputs();
         }
 
-        inline std::unordered_set<int> Inputs::operator()(E_Ternary const& ternary)
+        inline std::unordered_set<OperationTag> Inputs::operator()(E_Ternary const& ternary)
         {
             return ternary.getInputs();
         }
 
-        inline std::unordered_set<int> Inputs::operator()(Nop const& exec)
+        inline std::unordered_set<OperationTag> Inputs::operator()(Nop const& exec)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Outputs::call(Operation const& op)
+        inline std::unordered_set<OperationTag> Outputs::call(Operation const& op)
         {
             return std::visit(*this, op);
         }
 
-        inline std::unordered_set<int> Outputs::operator()(Tensor const& tensor)
+        inline std::unordered_set<OperationTag> Outputs::operator()(Tensor const& tensor)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(Scalar const& scalar)
+        inline std::unordered_set<OperationTag> Outputs::operator()(Scalar const& scalar)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(Literal const& literal)
+        inline std::unordered_set<OperationTag> Outputs::operator()(Literal const& literal)
         {
             return {literal.getTag()};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(BlockScale const& blockScale)
+        inline std::unordered_set<OperationTag> Outputs::operator()(BlockScale const& blockScale)
         {
             return {blockScale.getTag()};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(T_Load_Linear const& load)
+        inline std::unordered_set<OperationTag> Outputs::operator()(T_Load_Linear const& load)
         {
             return {load.getTag()};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(T_Load_Scalar const& load)
+        inline std::unordered_set<OperationTag> Outputs::operator()(T_Load_Scalar const& load)
         {
             return {load.getTag()};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(T_Load_Tiled const& load)
+        inline std::unordered_set<OperationTag> Outputs::operator()(T_Load_Tiled const& load)
         {
             return {load.getTag()};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(T_Mul const& mul)
+        inline std::unordered_set<OperationTag> Outputs::operator()(T_Mul const& mul)
         {
             return {mul.getTag()};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(T_Store_Linear const& load)
+        inline std::unordered_set<OperationTag> Outputs::operator()(T_Store_Linear const& load)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(T_Store_Tiled const& load)
+        inline std::unordered_set<OperationTag> Outputs::operator()(T_Store_Tiled const& load)
         {
             return {};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(T_Execute const& exec)
+        inline std::unordered_set<OperationTag> Outputs::operator()(T_Execute const& exec)
         {
             return exec.getOutputs();
         }
 
-        inline std::unordered_set<int> Outputs::call(XOp const& op)
+        inline std::unordered_set<OperationTag> Outputs::call(XOp const& op)
         {
             return std::visit(*this, op);
         }
 
-        inline std::unordered_set<int> Outputs::operator()(E_Unary const& unary)
+        inline std::unordered_set<OperationTag> Outputs::operator()(E_Unary const& unary)
         {
             return unary.getOutputs();
         }
 
-        inline std::unordered_set<int> Outputs::operator()(E_Binary const& binary)
+        inline std::unordered_set<OperationTag> Outputs::operator()(E_Binary const& binary)
         {
             return binary.getOutputs();
         }
 
-        inline std::unordered_set<int> Outputs::operator()(E_Ternary const& ternary)
+        inline std::unordered_set<OperationTag> Outputs::operator()(E_Ternary const& ternary)
         {
             return ternary.getOutputs();
         }
 
-        inline std::unordered_set<int> Outputs::operator()(Nop const& exec)
+        inline std::unordered_set<OperationTag> Outputs::operator()(Nop const& exec)
         {
             return {};
         }
 
-        inline int TagVisitor::call(XOp const& op)
+        inline OperationTag TagVisitor::call(XOp const& op)
         {
             return std::visit(*this, op);
         }
 
-        inline int TagVisitor::operator()(E_Unary const& unary)
+        inline OperationTag TagVisitor::operator()(E_Unary const& unary)
         {
             return unary.getTag();
         }
 
-        inline int TagVisitor::operator()(E_Binary const& binary)
+        inline OperationTag TagVisitor::operator()(E_Binary const& binary)
         {
             return binary.getTag();
         }
 
-        inline int TagVisitor::operator()(E_Ternary const& ternary)
+        inline OperationTag TagVisitor::operator()(E_Ternary const& ternary)
         {
             return ternary.getTag();
         }
 
-        inline std::unordered_set<int> AssignOutputs::call(Operation& op, int nextTagValue)
+        inline std::unordered_set<OperationTag> AssignOutputs::call(Operation&   op,
+                                                                    OperationTag nextTagValue)
         {
             m_nextTagValue = nextTagValue;
 
             return std::visit(*this, op);
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(Tensor& tensor)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(Tensor& tensor)
         {
-            if(tensor.getTag() == -1)
+            if(tensor.getTag().uninitialized())
             {
                 tensor.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -220,9 +221,9 @@ namespace rocRoller
             return {tensor.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(Scalar& scalar)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(Scalar& scalar)
         {
-            if(scalar.getTag() == -1)
+            if(scalar.getTag().uninitialized())
             {
                 scalar.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -231,9 +232,9 @@ namespace rocRoller
             return {scalar.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(Literal& literal)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(Literal& literal)
         {
-            if(literal.getTag() == -1)
+            if(literal.getTag().uninitialized())
             {
                 literal.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -241,9 +242,9 @@ namespace rocRoller
             return {literal.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(BlockScale& blockScale)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(BlockScale& blockScale)
         {
-            if(blockScale.getTag() == -1)
+            if(blockScale.getTag().uninitialized())
             {
                 blockScale.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -252,9 +253,9 @@ namespace rocRoller
             return {blockScale.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(T_Load_Linear& load)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(T_Load_Linear& load)
         {
-            if(load.getTag() == -1)
+            if(load.getTag().uninitialized())
             {
                 load.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -263,9 +264,9 @@ namespace rocRoller
             return {load.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(T_Load_Scalar& load)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(T_Load_Scalar& load)
         {
-            if(load.getTag() == -1)
+            if(load.getTag().uninitialized())
             {
                 load.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -274,9 +275,9 @@ namespace rocRoller
             return {load.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(T_Load_Tiled& load)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(T_Load_Tiled& load)
         {
-            if(load.getTag() == -1)
+            if(load.getTag().uninitialized())
             {
                 load.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -285,9 +286,9 @@ namespace rocRoller
             return {load.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(T_Mul& mul)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(T_Mul& mul)
         {
-            if(mul.getTag() == -1)
+            if(mul.getTag().uninitialized())
             {
                 mul.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -296,9 +297,9 @@ namespace rocRoller
             return {mul.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(T_Store_Linear& store)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(T_Store_Linear& store)
         {
-            if(store.getTag() == -1)
+            if(store.getTag().uninitialized())
             {
                 store.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -307,9 +308,9 @@ namespace rocRoller
             return {store.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(T_Store_Tiled& store)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(T_Store_Tiled& store)
         {
-            if(store.getTag() == -1)
+            if(store.getTag().uninitialized())
             {
                 store.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -318,9 +319,9 @@ namespace rocRoller
             return {store.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(T_Execute& exec)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(T_Execute& exec)
         {
-            if(exec.getTag() == -1)
+            if(exec.getTag().uninitialized())
             {
                 exec.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -329,21 +330,22 @@ namespace rocRoller
             return {exec.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(Nop& nop)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(Nop& nop)
         {
             return {};
         }
 
-        inline std::unordered_set<int> AssignOutputs::call(XOp& op, int nextTagValue)
+        inline std::unordered_set<OperationTag> AssignOutputs::call(XOp&         op,
+                                                                    OperationTag nextTagValue)
         {
             m_nextTagValue = nextTagValue;
 
             return std::visit(*this, op);
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(E_Ternary& ternary)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(E_Ternary& ternary)
         {
-            if(ternary.getTag() == -1)
+            if(ternary.getTag().uninitialized())
             {
                 ternary.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -352,9 +354,9 @@ namespace rocRoller
             return {ternary.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(E_Binary& binary)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(E_Binary& binary)
         {
-            if(binary.getTag() == -1)
+            if(binary.getTag().uninitialized())
             {
                 binary.setTag(m_nextTagValue);
                 m_nextTagValue++;
@@ -363,9 +365,9 @@ namespace rocRoller
             return {binary.getTag()};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(E_Unary& unary)
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(E_Unary& unary)
         {
-            if(unary.getTag() == -1)
+            if(unary.getTag().uninitialized())
             {
                 unary.setTag(m_nextTagValue);
                 m_nextTagValue++;

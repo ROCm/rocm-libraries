@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2024 Advanced Micro Devices, Inc.
+ * Copyright 2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,26 +26,36 @@
 
 #pragma once
 
-#ifdef ROCROLLER_USE_HIP
-#include <hip/hip_runtime.h>
-#endif
-
-#include "DistinctType.hpp"
+#include <rocRoller/DataTypes/DistinctType.hpp>
 
 namespace rocRoller
 {
-    /**
- * \ingroup DataTypes
- */
-    struct Int8 : public DistinctType<int8_t, Int8>
+    namespace Operations
     {
-    };
-} // namespace rocRoller
+        struct OperationTag final : public DistinctType<int32_t, OperationTag>
+        {
+            explicit OperationTag(int value)
+                : DistinctType<int32_t, OperationTag>(value)
+            {
+            }
 
-namespace std
-{
-    inline ostream& operator<<(ostream& stream, const rocRoller::Int8 val)
-    {
-        return stream << static_cast<int32_t>(static_cast<int8_t>(val));
+            OperationTag()
+                : OperationTag(-1)
+            {
+            }
+
+            // Prefix increment operator
+            OperationTag& operator++();
+
+            // Postfix increment operator
+            OperationTag operator++(int);
+
+            bool operator<(OperationTag const&) const;
+            bool operator==(OperationTag const&) const;
+
+            bool uninitialized() const;
+        };
     }
-} // namespace std
+}
+
+#include "OperationTag_impl.hpp"

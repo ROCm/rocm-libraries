@@ -11,12 +11,12 @@ namespace rocRoller
             m_command = command;
         }
 
-        int BaseOperation::getTag() const
+        OperationTag BaseOperation::getTag() const
         {
             return m_tag;
         }
 
-        void BaseOperation::setTag(int tag)
+        void BaseOperation::setTag(OperationTag tag)
         {
             m_tag = tag;
         }

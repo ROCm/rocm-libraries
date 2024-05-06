@@ -10,13 +10,13 @@ namespace rocRoller
         {
         public:
             T_Load_Linear() = delete;
-            T_Load_Linear(int tensor);
+            T_Load_Linear(OperationTag tensor);
 
-            int         getTensorTag() const;
-            std::string toString() const;
+            OperationTag getTensorTag() const;
+            std::string  toString() const;
 
         private:
-            int m_tensorTag;
+            OperationTag m_tensorTag;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Load_Linear const& val);
@@ -25,13 +25,13 @@ namespace rocRoller
         {
         public:
             T_Load_Scalar() = delete;
-            T_Load_Scalar(int scalar);
+            T_Load_Scalar(OperationTag scalar);
 
-            int         getScalarTag() const;
-            std::string toString() const;
+            OperationTag getScalarTag() const;
+            std::string  toString() const;
 
         private:
-            int m_scalarTag;
+            OperationTag m_scalarTag;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Load_Scalar const& val);
@@ -40,13 +40,13 @@ namespace rocRoller
         {
         public:
             T_Load_Tiled() = delete;
-            T_Load_Tiled(int tensor);
+            T_Load_Tiled(OperationTag tensor);
 
-            int         getTensorTag() const;
-            std::string toString() const;
+            OperationTag getTensorTag() const;
+            std::string  toString() const;
 
         private:
-            int m_tensorTag;
+            OperationTag m_tensorTag;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Load_Tiled const& val);
@@ -55,15 +55,15 @@ namespace rocRoller
         {
         public:
             T_Store_Linear() = delete;
-            T_Store_Linear(int source, int tensor);
+            T_Store_Linear(OperationTag source, OperationTag tensor);
 
-            int         getSrcTag() const;
-            int         getTensorTag() const;
-            std::string toString() const;
+            OperationTag getSrcTag() const;
+            OperationTag getTensorTag() const;
+            std::string  toString() const;
 
         private:
-            int m_srcTag;
-            int m_tensorTag;
+            OperationTag m_srcTag;
+            OperationTag m_tensorTag;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Store_Linear const& val);
@@ -72,15 +72,15 @@ namespace rocRoller
         {
         public:
             T_Store_Tiled() = delete;
-            T_Store_Tiled(int source, int tensor);
+            T_Store_Tiled(OperationTag source, OperationTag tensor);
 
-            int         getSrcTag() const;
-            int         getTensorTag() const;
-            std::string toString() const;
+            OperationTag getSrcTag() const;
+            OperationTag getTensorTag() const;
+            std::string  toString() const;
 
         private:
-            int m_srcTag;
-            int m_tensorTag;
+            OperationTag m_srcTag;
+            OperationTag m_tensorTag;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Store_Tiled const& val);

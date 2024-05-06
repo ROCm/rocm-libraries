@@ -21,9 +21,9 @@ namespace rocRoller
     inline Command::Command(Command const& rhs) = default;
     inline Command::Command(Command&& rhs)      = default;
 
-    inline int Command::addOperation(std::shared_ptr<Operations::Operation> op)
+    inline Operations::OperationTag Command::addOperation(std::shared_ptr<Operations::Operation> op)
     {
-        int rv = -1;
+        Operations::OperationTag rv;
 
         if(op == nullptr)
             return rv;
@@ -54,7 +54,7 @@ namespace rocRoller
     }
 
     template <Operations::CConcreteOperation T>
-    inline int Command::addOperation(T&& op)
+    inline Operations::OperationTag Command::addOperation(T&& op)
     {
         return addOperation(std::make_shared<Operations::Operation>(std::forward<T>(op)));
     }
@@ -160,7 +160,8 @@ namespace rocRoller
         return result;
     }
 
-    inline std::shared_ptr<Operations::Operation> Command::findTag(int tag) const
+    inline std::shared_ptr<Operations::Operation>
+        Command::findTag(Operations::OperationTag const& tag) const
     {
         auto iter = m_tagMap.find(tag);
         if(iter == m_tagMap.end())
@@ -170,17 +171,17 @@ namespace rocRoller
     }
 
     template <Operations::CConcreteOperation T>
-    T Command::getOperation(int tag) const
+    T Command::getOperation(Operations::OperationTag const& tag) const
     {
         return std::get<T>(*findTag(tag));
     }
 
-    inline int Command::getNextTag() const
+    inline Operations::OperationTag Command::getNextTag() const
     {
         return m_nextTagValue;
     }
 
-    inline int Command::allocateTag()
+    inline Operations::OperationTag Command::allocateTag()
     {
         return m_nextTagValue++;
     }

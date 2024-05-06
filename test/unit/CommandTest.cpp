@@ -23,7 +23,7 @@ TEST(CommandTest, Basic)
 
     Operations::T_Store_Linear tsl(tagLoad, tagTensor);
     // tag value is assigned to an operation when it's added to the Command Graph
-    EXPECT_EQ(-1, tsl.getTag());
+    EXPECT_EQ(-1, static_cast<int32_t>(tsl.getTag()));
     auto store_linear = std::make_shared<Operations::Operation>(std::move(tsl));
     auto execute
         = std::make_shared<Operations::Operation>(Operations::T_Execute(command->getNextTag()));
@@ -31,7 +31,7 @@ TEST(CommandTest, Basic)
     command->addOperation(store_linear);
     command->addOperation(execute);
 
-    EXPECT_EQ(load_linear, command->findTag(1));
+    EXPECT_EQ(load_linear, command->findTag(Operations::OperationTag(1)));
 
     EXPECT_EQ(4, command->operations().size());
 }
@@ -42,7 +42,8 @@ TEST(CommandTest, ToString)
 
     EXPECT_EQ(0, command->operations().size());
 
-    command->addOperation(std::make_shared<Operations::Operation>(Operations::T_Load_Linear(-1)));
+    command->addOperation(std::make_shared<Operations::Operation>(
+        Operations::T_Load_Linear(Operations::OperationTag())));
     command->addOperation(
         std::make_shared<Operations::Operation>(Operations::T_Execute(command->getNextTag())));
 
@@ -126,18 +127,26 @@ TEST(CommandTest, XopInputOutputs)
     auto command = std::make_shared<rocRoller::Command>();
     command->allocateTag();
     command->allocateTag();
+    Operations::OperationTag tagA(0);
+    Operations::OperationTag tagB(1);
+    Operations::OperationTag tagC(2);
+    Operations::OperationTag tagD(3);
+    Operations::OperationTag tagE(4);
+    Operations::OperationTag tagF(5);
+
     Operations::T_Execute execute(command->getNextTag());
-    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Sub(0, 1)));
-    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Mul(2, 1)));
+    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Sub(tagA, tagB)));
+    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Mul(tagC, tagB)));
 
-    EXPECT_EQ(execute.getInputs(), std::unordered_set<int>({0, 1}));
-    EXPECT_EQ(execute.getOutputs(), std::unordered_set<int>({2, 3}));
+    EXPECT_EQ(execute.getInputs(), std::unordered_set<Operations::OperationTag>({tagA, tagB}));
+    EXPECT_EQ(execute.getOutputs(), std::unordered_set<Operations::OperationTag>({tagC, tagD}));
 
-    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Abs(3)));
-    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Neg(4)));
+    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Abs(tagD)));
+    execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Neg(tagE)));
 
-    EXPECT_EQ(execute.getInputs(), std::unordered_set<int>({0, 1}));
-    EXPECT_EQ(execute.getOutputs(), std::unordered_set<int>({2, 3, 4, 5}));
+    EXPECT_EQ(execute.getInputs(), std::unordered_set<Operations::OperationTag>({tagA, tagB}));
+    EXPECT_EQ(execute.getOutputs(),
+              std::unordered_set<Operations::OperationTag>({tagC, tagD, tagE, tagF}));
 }
 
 TEST(CommandTest, BlockScaleInline)
@@ -153,7 +162,7 @@ TEST(CommandTest, BlockScaleInline)
     EXPECT_EQ(block_scale.pointerMode(), Operations::BlockScale::PointerMode::Inline);
     EXPECT_EQ(block_scale.strides(), std::vector<size_t>({32, 1, 1}));
     EXPECT_EQ(command->getOperation<Operations::BlockScale>(block_scale_tag).getInputs(),
-              std::unordered_set<int>({dataTensor}));
+              std::unordered_set<Operations::OperationTag>({dataTensor}));
 }
 
 TEST(CommandTest, BlockScaleSeparate)
@@ -170,5 +179,5 @@ TEST(CommandTest, BlockScaleSeparate)
     EXPECT_EQ(block_scale.pointerMode(), Operations::BlockScale::PointerMode::Separate);
     EXPECT_EQ(block_scale.strides(), std::vector<size_t>({4, 32, 1}));
     EXPECT_EQ(command->getOperation<Operations::BlockScale>(block_scale_tag).getInputs(),
-              std::unordered_set<int>({dataTensor, scaleTensor}));
+              std::unordered_set<Operations::OperationTag>({dataTensor, scaleTensor}));
 }

@@ -30,82 +30,82 @@ namespace rocRoller
 
         struct Inputs
         {
-            std::unordered_set<int> call(Operation const&);
+            std::unordered_set<OperationTag> call(Operation const&);
 
-            std::unordered_set<int> operator()(Tensor const&);
-            std::unordered_set<int> operator()(Scalar const&);
-            std::unordered_set<int> operator()(Literal const&);
-            std::unordered_set<int> operator()(BlockScale const&);
-            std::unordered_set<int> operator()(T_Load_Linear const&);
-            std::unordered_set<int> operator()(T_Load_Scalar const&);
-            std::unordered_set<int> operator()(T_Load_Tiled const&);
-            std::unordered_set<int> operator()(T_Mul const&);
-            std::unordered_set<int> operator()(T_Store_Linear const&);
-            std::unordered_set<int> operator()(T_Store_Tiled const&);
-            std::unordered_set<int> operator()(T_Execute const&);
+            std::unordered_set<OperationTag> operator()(Tensor const&);
+            std::unordered_set<OperationTag> operator()(Scalar const&);
+            std::unordered_set<OperationTag> operator()(Literal const&);
+            std::unordered_set<OperationTag> operator()(BlockScale const&);
+            std::unordered_set<OperationTag> operator()(T_Load_Linear const&);
+            std::unordered_set<OperationTag> operator()(T_Load_Scalar const&);
+            std::unordered_set<OperationTag> operator()(T_Load_Tiled const&);
+            std::unordered_set<OperationTag> operator()(T_Mul const&);
+            std::unordered_set<OperationTag> operator()(T_Store_Linear const&);
+            std::unordered_set<OperationTag> operator()(T_Store_Tiled const&);
+            std::unordered_set<OperationTag> operator()(T_Execute const&);
 
-            std::unordered_set<int> call(XOp const&);
-            std::unordered_set<int> operator()(E_Unary const&);
-            std::unordered_set<int> operator()(E_Binary const&);
-            std::unordered_set<int> operator()(E_Ternary const&);
-            std::unordered_set<int> operator()(Nop const&);
+            std::unordered_set<OperationTag> call(XOp const&);
+            std::unordered_set<OperationTag> operator()(E_Unary const&);
+            std::unordered_set<OperationTag> operator()(E_Binary const&);
+            std::unordered_set<OperationTag> operator()(E_Ternary const&);
+            std::unordered_set<OperationTag> operator()(Nop const&);
         };
 
         struct Outputs
         {
-            std::unordered_set<int> call(Operation const&);
+            std::unordered_set<OperationTag> call(Operation const&);
 
-            std::unordered_set<int> operator()(Tensor const&);
-            std::unordered_set<int> operator()(Scalar const&);
-            std::unordered_set<int> operator()(Literal const&);
-            std::unordered_set<int> operator()(BlockScale const&);
-            std::unordered_set<int> operator()(T_Load_Linear const&);
-            std::unordered_set<int> operator()(T_Load_Scalar const&);
-            std::unordered_set<int> operator()(T_Load_Tiled const&);
-            std::unordered_set<int> operator()(T_Mul const&);
-            std::unordered_set<int> operator()(T_Store_Linear const&);
-            std::unordered_set<int> operator()(T_Store_Tiled const&);
-            std::unordered_set<int> operator()(T_Execute const&);
+            std::unordered_set<OperationTag> operator()(Tensor const&);
+            std::unordered_set<OperationTag> operator()(Scalar const&);
+            std::unordered_set<OperationTag> operator()(Literal const&);
+            std::unordered_set<OperationTag> operator()(BlockScale const&);
+            std::unordered_set<OperationTag> operator()(T_Load_Linear const&);
+            std::unordered_set<OperationTag> operator()(T_Load_Scalar const&);
+            std::unordered_set<OperationTag> operator()(T_Load_Tiled const&);
+            std::unordered_set<OperationTag> operator()(T_Mul const&);
+            std::unordered_set<OperationTag> operator()(T_Store_Linear const&);
+            std::unordered_set<OperationTag> operator()(T_Store_Tiled const&);
+            std::unordered_set<OperationTag> operator()(T_Execute const&);
 
-            std::unordered_set<int> call(XOp const&);
-            std::unordered_set<int> operator()(E_Unary const&);
-            std::unordered_set<int> operator()(E_Binary const&);
-            std::unordered_set<int> operator()(E_Ternary const&);
-            std::unordered_set<int> operator()(Nop const&);
+            std::unordered_set<OperationTag> call(XOp const&);
+            std::unordered_set<OperationTag> operator()(E_Unary const&);
+            std::unordered_set<OperationTag> operator()(E_Binary const&);
+            std::unordered_set<OperationTag> operator()(E_Ternary const&);
+            std::unordered_set<OperationTag> operator()(Nop const&);
         };
 
         struct TagVisitor
         {
-            int call(XOp const&);
-            int operator()(E_Unary const&);
-            int operator()(E_Binary const&);
-            int operator()(E_Ternary const&);
+            OperationTag call(XOp const&);
+            OperationTag operator()(E_Unary const&);
+            OperationTag operator()(E_Binary const&);
+            OperationTag operator()(E_Ternary const&);
         };
 
         struct AssignOutputs
         {
-            std::unordered_set<int> call(Operation&, int);
+            std::unordered_set<OperationTag> call(Operation&, OperationTag);
 
-            std::unordered_set<int> operator()(Tensor&);
-            std::unordered_set<int> operator()(Scalar&);
-            std::unordered_set<int> operator()(Literal&);
-            std::unordered_set<int> operator()(BlockScale&);
-            std::unordered_set<int> operator()(T_Load_Linear&);
-            std::unordered_set<int> operator()(T_Load_Scalar&);
-            std::unordered_set<int> operator()(T_Load_Tiled&);
-            std::unordered_set<int> operator()(T_Mul&);
-            std::unordered_set<int> operator()(T_Store_Linear&);
-            std::unordered_set<int> operator()(T_Store_Tiled&);
-            std::unordered_set<int> operator()(T_Execute&);
+            std::unordered_set<OperationTag> operator()(Tensor&);
+            std::unordered_set<OperationTag> operator()(Scalar&);
+            std::unordered_set<OperationTag> operator()(Literal&);
+            std::unordered_set<OperationTag> operator()(BlockScale&);
+            std::unordered_set<OperationTag> operator()(T_Load_Linear&);
+            std::unordered_set<OperationTag> operator()(T_Load_Scalar&);
+            std::unordered_set<OperationTag> operator()(T_Load_Tiled&);
+            std::unordered_set<OperationTag> operator()(T_Mul&);
+            std::unordered_set<OperationTag> operator()(T_Store_Linear&);
+            std::unordered_set<OperationTag> operator()(T_Store_Tiled&);
+            std::unordered_set<OperationTag> operator()(T_Execute&);
 
-            std::unordered_set<int> call(XOp&, int);
-            std::unordered_set<int> operator()(E_Unary&);
-            std::unordered_set<int> operator()(E_Binary&);
-            std::unordered_set<int> operator()(E_Ternary&);
-            std::unordered_set<int> operator()(Nop&);
+            std::unordered_set<OperationTag> call(XOp&, OperationTag);
+            std::unordered_set<OperationTag> operator()(E_Unary&);
+            std::unordered_set<OperationTag> operator()(E_Binary&);
+            std::unordered_set<OperationTag> operator()(E_Ternary&);
+            std::unordered_set<OperationTag> operator()(Nop&);
 
         private:
-            int m_nextTagValue = -1;
+            OperationTag m_nextTagValue;
         };
 
         struct ToStringVisitor

@@ -6,6 +6,7 @@
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Operations/OperationTag.hpp>
 #include <rocRoller/Serialization/Base_fwd.hpp>
 
 #include "Dimension_fwd.hpp"
@@ -26,11 +27,11 @@ namespace rocRoller
         {
             Expression::ExpressionPtr size, stride, offset;
 
-            int commandTag = -1;
+            Operations::OperationTag commandTag;
 
             BaseDimension() noexcept;
-            BaseDimension(int commandTag);
-            BaseDimension(int                       commandTag,
+            BaseDimension(Operations::OperationTag commandTag);
+            BaseDimension(Operations::OperationTag  commandTag,
                           Expression::ExpressionPtr size,
                           Expression::ExpressionPtr stride);
             BaseDimension(Expression::ExpressionPtr size, Expression::ExpressionPtr stride);
@@ -116,8 +117,10 @@ namespace rocRoller
             using BaseDimension::BaseDimension;
 
             User(std::string const& name);
-            User(int commandTag, std::string const& name);
-            User(int commandTag, std::string const& name, Expression::ExpressionPtr size);
+            User(Operations::OperationTag commandTag, std::string const& name);
+            User(Operations::OperationTag  commandTag,
+                 std::string const&        name,
+                 Expression::ExpressionPtr size);
 
             /**
              * @brief Constructor for a User dimension that is part of the scratch space.
@@ -328,8 +331,8 @@ namespace rocRoller
              * Construct MacroTile dimension with deferred sizes and
              * memory type.
              */
-            MacroTile(int commandTag);
-            MacroTile(int commandTag, int rank);
+            MacroTile(Operations::OperationTag commandTag);
+            MacroTile(Operations::OperationTag commandTag, int rank);
 
             /**
              * Construct MacroTile dimension with fully specified sizes
@@ -538,13 +541,14 @@ namespace rocRoller
         }
 
         template <typename T>
-        inline int getCommandTag(const T& x)
+        inline Operations::OperationTag getCommandTag(const T& x)
         {
-            return std::visit([](auto const& a) -> int { return a.commandTag; }, x);
+            return std::visit(
+                [](auto const& a) -> Operations::OperationTag { return a.commandTag; }, x);
         }
 
         template <typename T>
-        inline void setCommandTag(T& x, int commandTag)
+        inline void setCommandTag(T& x, Operations::OperationTag commandTag)
         {
             std::visit([commandTag](auto& a) { a.commandTag = commandTag; }, x);
         }

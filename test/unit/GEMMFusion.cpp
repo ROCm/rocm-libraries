@@ -165,7 +165,7 @@ namespace GEMMDriverTest
                 = execute.addXOp(rocRoller::Operations::E_Mul(tagLoadBeta, tagLoadC)); // beta * C
             auto tagAlphaAB = execute.addXOp(
                 rocRoller::Operations::E_Mul(tagLoadAlpha, tagAB)); // alpha * (A * B)
-            auto tagD = -1;
+            Operations::OperationTag tagD;
             if(gemm.betaInFma)
             {
                 tagD = execute.addXOp(rocRoller::Operations::E_Add(

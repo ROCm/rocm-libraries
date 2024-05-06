@@ -15,7 +15,7 @@ namespace rocRoller
             template <typename A, typename B, typename C, typename D>
             class DataParallelGEMMSolution : public GEMMSolution<A, B, C, D>
             {
-                int m_tagA, m_tagB, m_tagC, m_tagD;
+                Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
 
             public:
                 DataParallelGEMMSolution(SolutionParameters const& solutionParams)
@@ -83,7 +83,7 @@ namespace rocRoller
                     bool no_beta = m_solutionParams.problemParams.beta == 0.0
                                    && m_solutionParams.problemParams.alpha == 1.0;
 
-                    auto tagTensorA = -1;
+                    Operations::OperationTag tagTensorA;
                     //TODO: Handle transposed matrices more elegantly
                     switch(m_solutionParams.problemParams.transA)
                     {
@@ -100,7 +100,7 @@ namespace rocRoller
                     }
                     m_tagA = command->addOperation(Operations::T_Load_Tiled(tagTensorA));
 
-                    auto tagTensorB = -1;
+                    Operations::OperationTag tagTensorB;
                     //TODO: Handle transposed matrices more elegantly
                     switch(m_solutionParams.problemParams.transB)
                     {

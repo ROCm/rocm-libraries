@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Command_fwd.hpp"
-
+#include "OperationTag.hpp"
 #include <memory>
 
 namespace rocRoller
@@ -13,13 +13,13 @@ namespace rocRoller
         public:
             BaseOperation();
 
-            void setCommand(CommandPtr);
-            int  getTag() const;
-            void setTag(int tag);
+            void         setCommand(CommandPtr);
+            OperationTag getTag() const;
+            void         setTag(OperationTag tag);
 
         protected:
-            int                    m_tag = -1;
+            OperationTag           m_tag;
             std::weak_ptr<Command> m_command;
         };
     }
-}
+} // namespace rocRoller

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2023 Advanced Micro Devices, Inc.
+ * Copyright 2019-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,7 @@ namespace rocRoller
             return *this;
         }
 
-        operator const T&() const
+        explicit operator const T&() const
         {
             return value;
         }

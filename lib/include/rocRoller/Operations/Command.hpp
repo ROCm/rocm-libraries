@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "CommandArgument_fwd.hpp"
+#include "OperationTag.hpp"
 #include "Operations_fwd.hpp"
 
 #include "../DataTypes/DataTypes.hpp"
@@ -28,9 +29,9 @@ namespace rocRoller
         Command(Command const& rhs);
         Command(Command&& rhs);
 
-        int addOperation(std::shared_ptr<Operations::Operation> op);
+        Operations::OperationTag addOperation(std::shared_ptr<Operations::Operation> op);
         template <Operations::CConcreteOperation T>
-        int addOperation(T&& op);
+        Operations::OperationTag addOperation(T&& op);
 
         CommandArgumentPtr allocateArgument(VariableType  variableType,
                                             DataDirection direction = DataDirection::ReadWrite);
@@ -48,13 +49,13 @@ namespace rocRoller
                                                                DataDirection      direction,
                                                                std::string const& name);
 
-        std::shared_ptr<Operations::Operation> findTag(int tag) const;
+        std::shared_ptr<Operations::Operation> findTag(Operations::OperationTag const& tag) const;
 
         template <Operations::CConcreteOperation T>
-        T getOperation(int tag) const;
+        T getOperation(Operations::OperationTag const& tag) const;
 
-        int getNextTag() const;
-        int allocateTag();
+        Operations::OperationTag getNextTag() const;
+        Operations::OperationTag allocateTag();
 
         OperationList const& operations() const;
 
@@ -89,11 +90,11 @@ namespace rocRoller
 
         OperationList m_operations;
 
-        std::map<int, std::shared_ptr<Operations::Operation>> m_tagMap;
+        std::map<Operations::OperationTag, std::shared_ptr<Operations::Operation>> m_tagMap;
 
         std::vector<CommandArgumentPtr> m_commandArgs;
 
-        int m_nextTagValue = 0;
+        Operations::OperationTag m_nextTagValue{0};
 
         int m_runtimeArgsOffset = 0;
     };

@@ -27,25 +27,25 @@ namespace rocRoller
              * @param scale Optional tag of scale tensor (if not provided, treated as inline block scale)
              * @param strides Strides of the scale
             */
-            BlockScale(int                        data,
-                       int                        dimensions,
-                       std::optional<int>         scale   = {},
-                       std::vector<size_t> const& strides = {});
-
+            BlockScale(OperationTag                data,
+                       int                         dimensions,
+                       std::optional<OperationTag> scale   = {},
+                       std::vector<size_t> const&  strides = {});
             enum class PointerMode
             {
                 Separate, //< Scale is separate from data
                 Inline, //< Scale is inline with data
             };
-            std::unordered_set<int>    getInputs() const;
-            std::string                toString() const;
-            PointerMode                pointerMode() const;
-            const std::vector<size_t>& strides() const;
+
+            std::unordered_set<OperationTag> getInputs() const;
+            std::string                      toString() const;
+            PointerMode                      pointerMode() const;
+            const std::vector<size_t>&       strides() const;
 
         private:
-            const int                 m_data;
-            const std::optional<int>  m_scale;
-            const std::vector<size_t> m_strides;
+            const OperationTag                m_data;
+            const std::optional<OperationTag> m_scale;
+            const std::vector<size_t>         m_strides;
         };
 
     }

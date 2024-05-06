@@ -6,10 +6,10 @@ namespace rocRoller
 {
     namespace Operations
     {
-        BlockScale::BlockScale(int                        data,
-                               int                        dimensions,
-                               std::optional<int>         scale,
-                               std::vector<size_t> const& strides)
+        BlockScale::BlockScale(OperationTag                data,
+                               int                         dimensions,
+                               std::optional<OperationTag> scale,
+                               std::vector<size_t> const&  strides)
             : BaseOperation()
             , m_data(data)
             , m_scale(scale)
@@ -23,7 +23,7 @@ namespace rocRoller
         {
         }
 
-        std::unordered_set<int> BlockScale::getInputs() const
+        std::unordered_set<OperationTag> BlockScale::getInputs() const
         {
             if(pointerMode() == PointerMode::Inline)
                 return {m_data};

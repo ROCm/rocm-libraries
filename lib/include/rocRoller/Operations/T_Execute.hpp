@@ -19,37 +19,37 @@ namespace rocRoller
 
         struct E_Unary
         {
-            E_Unary(int a);
-            E_Unary(const std::initializer_list<unsigned>&);
-            std::string             toString() const;
-            int                     getTag() const;
-            void                    setTag(int tag);
-            std::unordered_set<int> getOutputs() const;
-            std::unordered_set<int> getInputs() const;
-            virtual std::string     name() const
+            E_Unary(OperationTag a);
+            E_Unary(const std::initializer_list<OperationTag>&);
+            std::string                      toString() const;
+            OperationTag                     getTag() const;
+            void                             setTag(OperationTag tag);
+            std::unordered_set<OperationTag> getOutputs() const;
+            std::unordered_set<OperationTag> getInputs() const;
+            virtual std::string              name() const
             {
                 return "";
             }
-            int dest = -1;
-            int a;
+            OperationTag dest;
+            OperationTag a;
         };
 
 // Macro for declaring a new Unary XOp
-#define MAKE_UNARY_XOP(FUNC)                              \
-    struct FUNC : public E_Unary                          \
-    {                                                     \
-        FUNC(int a)                                       \
-            : E_Unary(a)                                  \
-        {                                                 \
-        }                                                 \
-        FUNC(const std::initializer_list<unsigned>& args) \
-            : E_Unary(args)                               \
-        {                                                 \
-        }                                                 \
-        std::string name() const                          \
-        {                                                 \
-            return #FUNC;                                 \
-        }                                                 \
+#define MAKE_UNARY_XOP(FUNC)                                  \
+    struct FUNC : public E_Unary                              \
+    {                                                         \
+        FUNC(OperationTag a)                                  \
+            : E_Unary(a)                                      \
+        {                                                     \
+        }                                                     \
+        FUNC(const std::initializer_list<OperationTag>& args) \
+            : E_Unary(args)                                   \
+        {                                                     \
+        }                                                     \
+        std::string name() const                              \
+        {                                                     \
+            return #FUNC;                                     \
+        }                                                     \
     };
 
         MAKE_UNARY_XOP(E_Neg)
@@ -58,39 +58,39 @@ namespace rocRoller
 
         struct E_Binary
         {
-            E_Binary(int a, int b);
-            E_Binary(const std::initializer_list<unsigned>&);
+            E_Binary(OperationTag a, OperationTag b);
+            E_Binary(const std::initializer_list<OperationTag>&);
 
-            std::string             toString() const;
-            int                     getTag() const;
-            void                    setTag(int tag);
-            std::unordered_set<int> getOutputs() const;
-            std::unordered_set<int> getInputs() const;
-            virtual std::string     name() const
+            std::string                      toString() const;
+            OperationTag                     getTag() const;
+            void                             setTag(OperationTag tag);
+            std::unordered_set<OperationTag> getOutputs() const;
+            std::unordered_set<OperationTag> getInputs() const;
+            virtual std::string              name() const
             {
                 return "";
             }
-            int dest = -1;
-            int a;
-            int b;
+            OperationTag dest;
+            OperationTag a;
+            OperationTag b;
         };
 
 // Macro for defining a new binary XOp
-#define MAKE_BINARY_XOP(FUNC)                             \
-    struct FUNC : public E_Binary                         \
-    {                                                     \
-        FUNC(int a, int b)                                \
-            : E_Binary(a, b)                              \
-        {                                                 \
-        }                                                 \
-        FUNC(const std::initializer_list<unsigned>& args) \
-            : E_Binary(args)                              \
-        {                                                 \
-        }                                                 \
-        std::string name() const                          \
-        {                                                 \
-            return #FUNC;                                 \
-        }                                                 \
+#define MAKE_BINARY_XOP(FUNC)                                 \
+    struct FUNC : public E_Binary                             \
+    {                                                         \
+        FUNC(OperationTag a, OperationTag b)                  \
+            : E_Binary(a, b)                                  \
+        {                                                     \
+        }                                                     \
+        FUNC(const std::initializer_list<OperationTag>& args) \
+            : E_Binary(args)                                  \
+        {                                                     \
+        }                                                     \
+        std::string name() const                              \
+        {                                                     \
+            return #FUNC;                                     \
+        }                                                     \
     };
 
         MAKE_BINARY_XOP(E_Add)
@@ -103,40 +103,40 @@ namespace rocRoller
 
         struct E_Ternary
         {
-            E_Ternary(int a, int b, int c);
-            E_Ternary(const std::initializer_list<unsigned>&);
+            E_Ternary(OperationTag a, OperationTag b, OperationTag c);
+            E_Ternary(const std::initializer_list<OperationTag>&);
 
-            std::string             toString() const;
-            int                     getTag() const;
-            void                    setTag(int tag);
-            std::unordered_set<int> getOutputs() const;
-            std::unordered_set<int> getInputs() const;
-            virtual std::string     name() const
+            std::string                      toString() const;
+            OperationTag                     getTag() const;
+            void                             setTag(OperationTag tag);
+            std::unordered_set<OperationTag> getOutputs() const;
+            std::unordered_set<OperationTag> getInputs() const;
+            virtual std::string              name() const
             {
                 return "";
             }
-            int dest = -1;
-            int a;
-            int b;
-            int c;
+            OperationTag dest;
+            OperationTag a;
+            OperationTag b;
+            OperationTag c;
         };
 
 // Macro for defining a new ternary XOp
-#define MAKE_TERNARY_XOP(FUNC)                            \
-    struct FUNC : public E_Ternary                        \
-    {                                                     \
-        FUNC(int a, int b, int c)                         \
-            : E_Ternary(a, b, c)                          \
-        {                                                 \
-        }                                                 \
-        FUNC(const std::initializer_list<unsigned>& args) \
-            : E_Ternary(args)                             \
-        {                                                 \
-        }                                                 \
-        std::string name() const                          \
-        {                                                 \
-            return #FUNC;                                 \
-        }                                                 \
+#define MAKE_TERNARY_XOP(FUNC)                                \
+    struct FUNC : public E_Ternary                            \
+    {                                                         \
+        FUNC(OperationTag a, OperationTag b, OperationTag c)  \
+            : E_Ternary(a, b, c)                              \
+        {                                                     \
+        }                                                     \
+        FUNC(const std::initializer_list<OperationTag>& args) \
+            : E_Ternary(args)                                 \
+        {                                                     \
+        }                                                     \
+        std::string name() const                              \
+        {                                                     \
+            return #FUNC;                                     \
+        }                                                     \
     };
         MAKE_TERNARY_XOP(E_Conditional)
 
@@ -144,14 +144,14 @@ namespace rocRoller
         {
         public:
             T_Execute() = delete;
-            T_Execute(int starting_tag);
-            std::unordered_set<int> getInputs() const;
-            std::unordered_set<int> getOutputs() const;
-            int                     addXOp(std::shared_ptr<XOp>);
+            T_Execute(OperationTag starting_tag);
+            std::unordered_set<OperationTag> getInputs() const;
+            std::unordered_set<OperationTag> getOutputs() const;
+            OperationTag                     addXOp(std::shared_ptr<XOp>);
             template <CXOp T>
-            int         addXOp(T&& op);
-            int         getNextTag() const;
-            std::string toString() const;
+            OperationTag addXOp(T&& op);
+            OperationTag getNextTag() const;
+            std::string  toString() const;
 
             std::vector<std::shared_ptr<XOp>> getXOps() const
             {
@@ -161,10 +161,10 @@ namespace rocRoller
         private:
             std::vector<std::shared_ptr<XOp>> m_xops;
 
-            std::unordered_set<int> m_inputs;
-            std::unordered_set<int> m_outputs;
+            std::unordered_set<OperationTag> m_inputs;
+            std::unordered_set<OperationTag> m_outputs;
 
-            int m_nextTag;
+            OperationTag m_nextTag;
         };
     }
 }
