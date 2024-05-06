@@ -8,6 +8,7 @@ subtrees:
     - entries:
       - file: concepts/intro.rst
       - file: concepts/glossary.rst
+      - file: concepts/developer.rst
   - file: reference/reference.rst
     title: API Reference
     subtrees:

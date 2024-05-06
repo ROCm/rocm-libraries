@@ -10,3 +10,4 @@
 
 * :ref:`rocprim-intro`
 * :ref:`glossary`
+* :ref:`developer`
