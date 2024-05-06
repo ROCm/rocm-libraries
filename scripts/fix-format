@@ -2,8 +2,9 @@
 
 import argparse
 import pathlib
-import sys
+import stat
 import subprocess
+import sys
 
 try:
     from tqdm.auto import tqdm
@@ -24,15 +25,10 @@ sys.path.append(str(repo_dir / "scripts" / "lib"))
 from rrperf import git  # noqa: E402
 
 
-def run_clang_format(path: pathlib.Path):
-    cli1 = f"clang-format '{path}' | diff {path} -"
-    p = subprocess.run(
-        cli1,
-        shell=True,
-        stdout=subprocess.PIPE,
-    )
+def format_and_patch(command: str, path: pathlib.Path):
+    p = subprocess.run(command, shell=True, capture_output=True, text=True)
 
-    output = p.stdout.decode()
+    output = p.stdout
 
     if p.returncode == 0:
         assert output.strip() == ""
@@ -50,21 +46,42 @@ def run_clang_format(path: pathlib.Path):
     write(p2.stdout)
 
 
-def fix_file(path: pathlib.Path):
-    if path.suffix in {".h", ".hpp", ".cpp", ".h.in", ".hpp.in", ".cpp.in"}:
-        run_clang_format(path)
+def run_clang_format(path: pathlib.Path):
+    format_and_patch(f"clang-format '{path}' | diff {path} -", path)
+
+
+def run_black(path: pathlib.Path):
+    format_and_patch(f"black --quiet --check --diff {path}", path)
+
+
+def get_cpp_files(dir: pathlib.Path):
+    cpp_suffixes = {".h", ".hpp", ".cpp", ".h.in", ".hpp.in", ".cpp.in"}
+    return [
+        p for x in git.ls_tree(dir) if (p := pathlib.Path(x)).suffix in cpp_suffixes
+    ]
+
+
+def get_py_files(dir: pathlib.Path):
+    paths = []
+    for x in git.ls_tree(dir):
+        p = pathlib.Path(x)
+        if p.suffix in {".py"}:
+            paths.append(p)
+        elif p.is_file() and (stat.S_IXUSR & p.stat()[stat.ST_MODE]):
+            if "python" in p.read_text().splitlines()[0]:
+                paths.append(p)
+    return paths
 
 
 def fix_cpp(dir: pathlib.Path):
-    paths = git.ls_tree(dir)
+    paths = get_cpp_files(dir)
     write(f"Fixing {len(paths)} C++ files:")
-    paths = list(map(pathlib.Path, paths))
 
     if tqdm is not None:
         paths = tqdm(paths, unit=" files")
 
     for path in paths:
-        fix_file(path)
+        run_clang_format(path)
     write("Done.")
 
 
@@ -73,6 +90,18 @@ def check_python(dir: pathlib.Path):
     write(" ".join(command))
 
     subprocess.run(command, cwd=dir, check=False)
+
+
+def fix_python(dir: pathlib.Path):
+    paths = get_py_files(dir)
+    write(f"Fixing {len(paths)} Python files:")
+
+    if tqdm is not None:
+        paths = tqdm(paths, unit=" files")
+
+    for path in paths:
+        run_black(path)
+    write("Done.")
 
 
 if __name__ == "__main__":
@@ -103,3 +132,4 @@ if __name__ == "__main__":
 
     if args.python:
         check_python(args.dir)
+        fix_python(args.dir)

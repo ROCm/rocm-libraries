@@ -185,7 +185,6 @@ def get_render_group_args():
 
 
 def get_run_args(args, image_name, container_name):
-
     volume_args = sum([["-v", volume] for volume in args.volumes], [])
 
     env_args = [
