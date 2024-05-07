@@ -17,6 +17,9 @@ Documentation for rocThrust available at
 * Updated internal use of custom iterator in `thrust::detail::unique_by_key` to use rocPRIM's `rocprim::unique_by_key`.
 * Updated `adjecent_difference` to make use of `rocprim:adjecent_difference` when iterators are comparable and not equal otherwise use `rocprim:adjacent_difference_inplace`.
 
+### Fixes
+* Fixed incorrect implementation of `thrust::optional<T&>::emplace()`.
+
 ### Known issues
 * `thrust::reduce_by_key` outputs are not bit-wise reproducible, as run-to-run results for pseudo-associative reduction operators (e.g. floating-point arithmetic operators) are not deterministic on the same device.
 
@@ -47,7 +50,7 @@ Documentation for rocThrust available at
 
 ## rocThrust 2.18.0 for ROCm 5.7
 
-### Fixes 
+### Fixes
 * `lower_bound`, `upper_bound`, and `binary_search` failed to compile for certain types.
 * Fixed issue where `transform_iterator` would not compile with `__device__`-only operators.
 
