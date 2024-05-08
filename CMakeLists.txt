@@ -28,4 +28,6 @@ set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
 find_program(LLVM_DIS llvm-dis REQUIRED HINTS /opt/rocm/llvm/bin)
 
 add_subdirectory(src)
-add_subdirectory(test)
+if (CMAKE_BUILD_TYPE MATCHES Debug)
+  add_subdirectory(test)
+endif()

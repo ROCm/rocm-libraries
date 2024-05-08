@@ -60,9 +60,8 @@ class _LIBGPU_TYPE_VIS spin_mutex {
         __threadfence();
         // This counts as the atomic store operation 'X' described in "Fence-atomic synchronization" at
         // https://en.cppreference.com/w/cpp/atomic/atomic_thread_fence.
-        uint64_t oldOwner = atomicExch(&owner, INVALID_OWNER);
-        const uint64_t myBlockId = blockIdx.x + gridDim.x*blockIdx.y + gridDim.x*gridDim.y*blockIdx.z;
-        assert(oldOwner == myBlockId);
+        [[maybe_unused]] uint64_t oldOwner = atomicExch(&owner, INVALID_OWNER);
+        assert(oldOwner == blockIdx.x + gridDim.x*blockIdx.y + gridDim.x*gridDim.y*blockIdx.z);
     }
 };
 
