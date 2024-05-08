@@ -731,6 +731,8 @@ using invoke_result_t =
 #else // 2017+
   ::cuda::std::invoke_result_t<Invokable, Args...>;
 #endif
+#else
+  std::invoke_result_t<Invokable, Args...>;
 #endif
 
 template <class F, class... Us>
