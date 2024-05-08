@@ -32,7 +32,7 @@ enum {
 #elif defined(__gfx1034__)
     NUM_VCORES = 33U,
 #elif defined(__gfx1100__)
-    NUM_VCORES = 336U, // Conservative for demo
+    NUM_VCORES = 512U, // Conservative for demo
 // #elif defined(__gfx803__)
 //     NUM_VCORES = 15U,
 #elif defined(__HIP_DEVICE_COMPILE__)
@@ -41,8 +41,8 @@ enum {
 #else
     NUM_VCORES = 0U,
 #endif
-    MAIN_WORK_QUEUE_SIZE = 1024U, // TODO: Make this depend on NUM_VCORES or something.
-    CPU_WORK_QUEUE_SIZE = 1024U, // TODO: Make this depend on NUM_VCORES or something.
+    MAIN_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on NUM_VCORES or something.
+    CPU_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on NUM_VCORES or something.
 };
 extern __device__ uint32_t numVcores;
 
@@ -363,6 +363,7 @@ static inline __device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *workn
         for (uint32_t popIndex = atomicAdd(&mainWorkQueueIndex_pop, 0); myCount - popIndex >= MAIN_WORK_QUEUE_SIZE;
              popIndex = atomicAdd(&mainWorkQueueIndex_pop, 0)) {
             assert(atomicAdd(&activeVcoreCount, 0) != 0 && "Probable deadlock: No space left in main work queue and no threads are currently being executed!");
+            __builtin_amdgcn_s_sleep(32);
         }
     }
 
