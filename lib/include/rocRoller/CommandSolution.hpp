@@ -37,14 +37,6 @@ namespace rocRoller
         int  getManualKernelDimension() const;
 
         /**
-         * Manually pass the value of beta.
-         *
-         * TODO: replace it with the conditional node in the control graph.
-         */
-        void  setBetaValue(float beta);
-        float getBetaValue() const;
-
-        /**
          * Manually overrite workgroup sizes.
          *
          * TODO remove this.

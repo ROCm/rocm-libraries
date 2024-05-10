@@ -654,6 +654,7 @@ namespace GPUArchitectureGenerator
                  "v_ashrrev_i32_e32",
                  "v_ashrrev_i64",
                  "v_cmp_eq_i32",
+                 "v_cmp_eq_f32",
                  "v_cmp_eq_u32",
                  "v_cmp_eq_u32_e32",
                  "v_cmp_ge_u32",

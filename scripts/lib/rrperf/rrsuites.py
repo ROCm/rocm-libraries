@@ -598,6 +598,87 @@ def streamk():
         )
 
 
+def scalar_is_zero():
+    # SGEMM
+    yield GEMMRun(
+        M=3072,
+        N=4096,
+        K=4096,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        beta=0.0,
+        streamK=False,  # TODO: Make streamK and ConstantPropagation transformation can be both applied
+        **fp32,
+    )
+    yield GEMMRun(
+        M=3072,
+        N=4096,
+        K=4096,
+        mac_m=128,
+        mac_n=64,
+        mac_k=16,
+        beta=0.0,
+        streamK=False,
+        **fp32,
+    )
+    # HGEMM
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        beta=0.0,
+        streamK=False,
+        **fp16,
+    )
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        beta=0.0,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        streamK=False,
+        **fp16,
+    )
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        trans_A="N",
+        trans_B="T",
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        beta=0.0,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        prefetchInFlight=2,
+        prefetchLDSFactor=2,
+        streamK=False,
+        **fp16,
+    )
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        beta=0.0,
+        workgroup_size_x=64,
+        workgroup_size_y=4,
+        streamK=False,
+        **fp16,
+    )
+
+
 def tensile_benchmarks():
     yield from tensile_guidepost()
     yield from tensile_sgemm_guidepost()
@@ -619,6 +700,7 @@ def all():
     yield from codegen()
     yield from tensile_benchmarks()
     yield from streamk()
+    yield from scalar_is_zero()
 
 
 def hgemm_guideposts():

@@ -54,18 +54,6 @@ namespace rocRoller
         m_wavefrontCounts = wavefrontCounts;
     }
 
-    // TODO: replace it with the conditional node in the control graph
-    void CommandParameters::setBetaValue(float beta)
-    {
-        m_beta = beta;
-    }
-
-    // TODO: replace it with the conditional node in the control graph
-    float CommandParameters::getBetaValue() const
-    {
-        return m_beta;
-    }
-
     std::optional<std::pair<uint, uint>> CommandParameters::getManualWavefrontCounts() const
     {
         return m_wavefrontCounts;
@@ -285,10 +273,9 @@ namespace rocRoller
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_preParameters, m_context));
 
-        // TODO: replace it with the conditional node in the control graph
-        if(m_preParameters->getBetaValue() == 0)
+        // TODO: remove the condition by making ConstantPropagation and Streamk work simultaneously
+        if(!m_context->kernelOptions().streamK)
         {
-
             transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
         }
 
