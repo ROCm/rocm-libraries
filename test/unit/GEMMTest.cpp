@@ -34,7 +34,8 @@ namespace GEMMDriverTest
                        double             acceptableError,
                        bool               debuggable  = false,
                        bool               setIdentity = false,
-                       int                numIters    = 1)
+                       int                numIters    = 1,
+                       bool               notSetC     = false)
 
         {
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -113,6 +114,11 @@ namespace GEMMDriverTest
             std::shared_ptr<T> deviceA = make_shared_device(hostA);
             std::shared_ptr<T> deviceB = make_shared_device(hostB);
             std::shared_ptr<T> deviceC = make_shared_device(hostC);
+            if(notSetC)
+            {
+                deviceC = nullptr;
+            }
+
             std::shared_ptr<T> deviceD = make_shared_device<T>(M * N, 0.0);
 
             auto command  = std::make_shared<Command>();
@@ -267,9 +273,6 @@ namespace GEMMDriverTest
             // TODO: Calculate these values internally based on workgroup sizes.
             params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
             params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
-
-            // TODO: replace it with conditional node in the control graph
-            params->setBetaValue(gemm.beta);
 
             auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                 {gemm.macM, gemm.macK},
@@ -442,6 +445,13 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.beta = 0;
         basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMNotSetC)
+    {
+        GEMMProblem gemm;
+        gemm.beta = 0;
+        basicGEMM<float>(m_context, gemm, 1.e-6, false, false, 1, true);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
@@ -850,9 +860,9 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 10);
-        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 4);
-        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 4);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 18);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 8);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X1UnrollK)
@@ -881,9 +891,9 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 12);
-        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 4);
-        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 4);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 20);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 8);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1X2)
@@ -909,9 +919,9 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 10);
-        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 4);
-        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 4);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 18);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 8);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1X2UnrollK)
@@ -939,9 +949,9 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 16);
-        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 4);
-        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 4);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 24);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 8);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1x8)
@@ -1013,7 +1023,7 @@ namespace GEMMDriverTest
         std::string generatedCode = m_context->instructions()->toString();
 
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
-        EXPECT_EQ(countSubstring(generatedCode, "v_pack_B32_F16"), 88);
+        EXPECT_EQ(countSubstring(generatedCode, "v_pack_B32_F16"), 152);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2x4UnrollK)
