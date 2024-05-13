@@ -3,124 +3,92 @@ from rrperf.problems import GEMMRun, CodeGenRun, TensileRun
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
-fp16 = {
-    "type_A": "half",
-    "type_B": "half",
-    "type_C": "half",
-    "type_D": "half",
-}
+fp16 = dict(
+    type_A="half",
+    type_B="half",
+    type_C="half",
+    type_D="half",
+)
 
-fp32 = {
-    "type_A": "float",
-    "type_B": "float",
-    "type_C": "float",
-    "type_D": "float",
-}
+fp32 = dict(
+    type_A="float",
+    type_B="float",
+    type_C="float",
+    type_D="float",
+)
 
-tensile_guidepost_HGEMM = {
-    "M": 7680,
-    "N": 8448,
-    "K": 8448,  # matches the guidepost unit test
-    "trans_B": "T",
-}
+SGEMM_3072x4096x4096 = dict(
+    M=3072, N=4096, K=4096, mac_m=64, mac_n=64, mac_k=64, **fp32
+)
+
+HGEMM_7680x8448x8192 = dict(
+    M=7680, N=8448, K=8192, mac_m=64, mac_n=64, mac_k=64, **fp16
+)
+
+HGEMM_7680x8448x8448 = dict(
+    M=7680,
+    N=8448,
+    K=8448,  # matches the guidepost unit test
+    mac_m=64,
+    mac_n=64,
+    mac_k=64,
+    workgroup_size_x=128,
+    workgroup_size_y=2,
+    trans_A="N",
+    trans_B="T",
+    **fp16,
+)
+
+
+def update_parameters(*args, **kwargs):
+    rv = {}
+    for d in args:
+        rv.update(d)
+    rv.update(kwargs)
+    return rv
+
+
+def mkGEMM(*args, **kwargs):
+    return GEMMRun(**update_parameters(*args, **kwargs))
 
 
 def unit():
-    yield GEMMRun(
+    default = dict(
         M=1024,
         N=1024,
         K=128,
         mac_m=64,
         mac_n=64,
         mac_k=64,
-        **fp32,
         numWarmUp=1,
         numOuter=1,
         numInner=1,
     )
-    yield GEMMRun(
-        M=1024,
-        N=1024,
-        K=128,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
-        **fp16,
-        numWarmUp=1,
-        numOuter=1,
-        numInner=1,
-    )
+    yield mkGEMM(default, fp32)
+    yield mkGEMM(default, fp16)
 
 
 def sgemm():
-    yield GEMMRun(
-        M=3072,
-        N=4096,
-        K=4096,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
-        **fp32,
-    )
-    yield GEMMRun(
-        M=3072,
-        N=4096,
-        K=4096,
-        mac_m=128,
-        mac_n=64,
-        mac_k=16,
-        **fp32,
-    )
+    yield mkGEMM(SGEMM_3072x4096x4096)
+    yield mkGEMM(SGEMM_3072x4096x4096, mac_m=128, mac_n=64, mac_k=16)
 
 
 def hgemm_tensile_guidepost():
-    yield GEMMRun(
-        **tensile_guidepost_HGEMM,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        **fp16,
-    )
+    yield mkGEMM(HGEMM_7680x8448x8448)
 
 
 def hgemm():
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
-        **fp16,
-    )
-    # yield GEMMRun(
-    #     M=7680,
-    #     N=8448,
-    #     K=8192,
-    #     mac_m=128,
-    #     mac_n=256,
-    #     mac_k=16,
-    #     workgroup_size_x=256,
-    #     workgroup_size_y=1,
-    #     **fp16,
-    # )
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
+    yield mkGEMM(HGEMM_7680x8448x8192)
+    yield mkGEMM(
+        HGEMM_7680x8448x8192,
         mac_m=128,
         mac_n=256,
         mac_k=16,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        **fp16,
     )
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
+    yield mkGEMM(
+        HGEMM_7680x8448x8192,
         trans_A="N",
         trans_B="T",
         mac_m=128,
@@ -130,52 +98,47 @@ def hgemm():
         workgroup_size_y=2,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
-        **fp16,
     )
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
+    yield mkGEMM(
+        HGEMM_7680x8448x8192,
         mac_m=128,
         mac_n=256,
         mac_k=16,
         workgroup_size_x=64,
         workgroup_size_y=4,
-        **fp16,
     )
-    yield from hgemm_tensile_guidepost()
-    yield GEMMRun(
-        **tensile_guidepost_HGEMM,
+
+    yield mkGEMM(HGEMM_7680x8448x8192, trans_A="T", trans_B="N")
+    yield mkGEMM(HGEMM_7680x8448x8192, trans_A="T", trans_B="T")
+    yield mkGEMM(HGEMM_7680x8448x8192, trans_A="N", trans_B="T")
+
+    yield mkGEMM(HGEMM_7680x8448x8448)
+    yield mkGEMM(
+        HGEMM_7680x8448x8448,
         mac_m=128,
         mac_n=256,
         mac_k=16,
         workgroup_size_x=256,
         workgroup_size_y=1,
-        **fp16,
     )
-
-    yield GEMMRun(
-        **tensile_guidepost_HGEMM,
+    yield mkGEMM(
+        HGEMM_7680x8448x8448,
         mac_m=128,
         mac_n=256,
         mac_k=16,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        **fp16,
     )
-
-    yield GEMMRun(
-        **tensile_guidepost_HGEMM,
+    yield mkGEMM(
+        HGEMM_7680x8448x8448,
         mac_m=128,
         mac_n=256,
         mac_k=16,
         workgroup_size_x=64,
         workgroup_size_y=4,
-        **fp16,
     )
-
-    yield GEMMRun(
-        **tensile_guidepost_HGEMM,
+    yield mkGEMM(
+        HGEMM_7680x8448x8448,
         mac_m=128,
         mac_n=256,
         mac_k=16,
@@ -183,11 +146,10 @@ def hgemm():
         workgroup_size_y=2,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
-        **fp16,
     )
 
     for sched in ["Priority", "Cooperative", "Sequential"]:
-        yield GEMMRun(
+        yield mkGEMM(
             M=3840,
             N=4224,
             K=4224,
@@ -203,7 +165,7 @@ def hgemm():
             **fp16,
         )
 
-        yield GEMMRun(
+        yield mkGEMM(
             M=1024,
             N=50304,
             K=8192,
@@ -219,7 +181,7 @@ def hgemm():
             **fp16,
         )
 
-        yield GEMMRun(
+        yield mkGEMM(
             M=3840,
             N=4224,
             K=4224,
@@ -236,7 +198,7 @@ def hgemm():
             **fp16,
         )
 
-        yield GEMMRun(
+        yield mkGEMM(
             M=1024,
             N=50304,
             K=8192,
@@ -253,7 +215,7 @@ def hgemm():
             **fp16,
         )
 
-        yield GEMMRun(
+        yield mkGEMM(
             M=8448,
             N=8448,
             K=128,
@@ -269,44 +231,7 @@ def hgemm():
             **fp16,
         )
 
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
-        trans_A="T",
-        trans_B="N",
-        **fp16,
-    )
-
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
-        trans_A="T",
-        trans_B="T",
-        **fp16,
-    )
-
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
-        trans_A="N",
-        trans_B="T",
-        **fp16,
-    )
-
-    for sched in ["Priority", "Cooperative", "Sequential"]:
-        yield GEMMRun(
+        yield mkGEMM(
             M=7680,
             N=8448,
             K=8192,
@@ -322,28 +247,11 @@ def hgemm():
             **fp16,
         )
 
-    # yield GEMMRun(
-    #     M=7680,
-    #     N=8448,
-    #     K=8192,
-    #     mac_m=128,
-    #     mac_n=256,
-    #     mac_k=16,
-    #     workgroup_size_x=256,
-    #     workgroup_size_y=1,
-    #     trans_A="T",
-    #     trans_B="N",
-    #     visualize=False,
-    #     scheduler=sched,
-    #     match_memory_access=True,
-    #     **fp16,
-    # )
-
     yield from visualizer()
 
 
 def visualizer():
-    yield GEMMRun(
+    yield mkGEMM(
         M=512,
         N=768,
         K=512,
@@ -364,93 +272,50 @@ def visualizer():
 
 
 def guidepost_1():
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8448,
+    yield mkGEMM(
+        HGEMM_7680x8448x8448,
         mac_m=128,
         mac_n=256,
         mac_k=16,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        trans_A="N",
-        trans_B="T",
-        visualize=False,
         scheduler="Priority",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
-        **fp16,
     )
 
 
 def guidepost_2():
-    yield GEMMRun(
-        M=7680,
-        N=8448,
+    yield mkGEMM(
+        HGEMM_7680x8448x8448,
         K=8192,
         mac_m=128,
         mac_n=256,
         mac_k=16,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        trans_A="N",
-        trans_B="T",
-        visualize=False,
         scheduler="Priority",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
-        **fp16,
     )
 
 
-def guidepost_no_store_LDS_1():
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8448,
-        mac_m=128,
-        mac_n=256,
-        mac_k=16,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        trans_A="N",
-        trans_B="T",
-        storeLDS_D=False,
-        visualize=False,
-        scheduler="Priority",
-        prefetch=True,
-        prefetchInFlight=2,
-        prefetchLDSFactor=0,
-        **fp16,
-    )
-
-
-def guidepost_no_store_LDS_2():
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
-        mac_m=128,
-        mac_n=256,
-        mac_k=16,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        trans_A="N",
-        trans_B="T",
-        storeLDS_D=False,
-        visualize=False,
-        scheduler="Priority",
-        prefetch=True,
-        prefetchInFlight=2,
-        prefetchLDSFactor=0,
-        **fp16,
-    )
+def hgemm_no_store_LDS():
+    for K in [8448, 8192]:
+        yield mkGEMM(
+            HGEMM_7680x8448x8448,
+            K=K,
+            mac_m=128,
+            mac_n=256,
+            mac_k=16,
+            storeLDS_D=False,
+            scheduler="Priority",
+            prefetch=True,
+            prefetchInFlight=2,
+            prefetchLDSFactor=0,
+        )
 
 
 def tensile_asm_guidepost_1():
-    yield GEMMRun(
+    yield mkGEMM(
         M=7680,
         N=8448,
         K=8448,
@@ -471,7 +336,7 @@ def tensile_asm_guidepost_1():
 
 
 def tensile_asm_guidepost_2():
-    yield GEMMRun(
+    yield mkGEMM(
         M=7680,
         N=8448,
         K=8192,
@@ -518,13 +383,8 @@ def tensile_sgemm_guidepost():
 def streamk():
     for twoTile in {True, False}:
         # SGEMM
-        yield GEMMRun(
-            M=3072,
-            N=4096,
-            K=4096,
-            mac_m=64,
-            mac_n=64,
-            mac_k=64,
+        yield mkGEMM(
+            SGEMM_3072x4096x4096,
             workgroup_size_x=128,
             workgroup_size_y=2,
             trans_A="N",
@@ -535,13 +395,10 @@ def streamk():
             # prefetchLDSFactor=2,
             streamK=True,
             streamKTwoTile=twoTile,
-            **fp32,
         )
         # HGEMM
-        yield GEMMRun(
-            M=7680,
-            N=8448,
-            K=8448,
+        yield mkGEMM(
+            HGEMM_7680x8448x8448,
             mac_m=128,
             mac_n=256,
             mac_k=16,
@@ -549,133 +406,81 @@ def streamk():
             workgroup_size_y=2,
             trans_A="N",
             trans_B="T",
-            visualize=False,
             prefetch=False,  # TODO: Fix k loop unrolling with stream k
             # prefetchInFlight=2,
             # prefetchLDSFactor=2,
             streamK=True,
             streamKTwoTile=twoTile,
-            **fp16,
         )
-        yield GEMMRun(
-            M=7680,
-            N=8448,
-            K=8192,
+        yield mkGEMM(
+            HGEMM_7680x8448x8192,
             mac_m=128,
             mac_n=256,
             mac_k=16,
-            workgroup_size_x=128,
-            workgroup_size_y=2,
             trans_A="N",
             trans_B="T",
-            visualize=False,
             prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            # prefetchInFlight=2,
-            # prefetchLDSFactor=2,
             streamK=True,
             streamKTwoTile=twoTile,
-            **fp16,
         )
-        yield GEMMRun(
-            M=7680,
-            N=8448,
-            K=8192,
+        yield mkGEMM(
+            HGEMM_7680x8448x8192,
             mac_m=128,
             mac_n=256,
             mac_k=16,
-            workgroup_size_x=128,
-            workgroup_size_y=2,
             trans_A="N",
             trans_B="T",
-            visualize=False,
             prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            # prefetchInFlight=2,
-            # prefetchLDSFactor=2,
             streamK=True,
             streamKTwoTile=twoTile,
             numWGs=220,
-            **fp16,
         )
 
 
 def scalar_is_zero():
-    # SGEMM
-    yield GEMMRun(
-        M=3072,
-        N=4096,
-        K=4096,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
-        beta=0.0,
-        streamK=False,  # TODO: Make streamK and ConstantPropagation transformation can be both applied
-        **fp32,
-    )
-    yield GEMMRun(
-        M=3072,
-        N=4096,
-        K=4096,
-        mac_m=128,
-        mac_n=64,
-        mac_k=16,
+    # TODO: Make streamK and ConstantPropagation transformation can be both applied
+    sgemm = update_parameters(
+        SGEMM_3072x4096x4096,
         beta=0.0,
         streamK=False,
-        **fp32,
     )
-    # HGEMM
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
+    yield mkGEMM(sgemm)
+    yield mkGEMM(sgemm, mac_m=128, mac_n=64, mac_k=16)
+
+    hgemm = update_parameters(
+        HGEMM_7680x8448x8192,
         beta=0.0,
         streamK=False,
-        **fp16,
     )
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
+    yield mkGEMM(hgemm)
+    yield mkGEMM(
+        hgemm,
         mac_m=128,
         mac_n=256,
         mac_k=16,
-        beta=0.0,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        streamK=False,
-        **fp16,
     )
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
+    yield mkGEMM(
+        hgemm,
         trans_A="N",
         trans_B="T",
         mac_m=128,
         mac_n=256,
         mac_k=16,
-        beta=0.0,
         workgroup_size_x=128,
         workgroup_size_y=2,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
-        streamK=False,
-        **fp16,
     )
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
+    yield mkGEMM(
+        hgemm,
         mac_m=128,
         mac_n=256,
         mac_k=16,
         beta=0.0,
         workgroup_size_x=64,
         workgroup_size_y=4,
-        streamK=False,
-        **fp16,
     )
 
 
@@ -695,12 +500,11 @@ def codegen():
 def all():
     yield from sgemm()
     yield from hgemm()
-    yield from guidepost_no_store_LDS_1()
-    yield from guidepost_no_store_LDS_2()
-    yield from codegen()
+    yield from hgemm_no_store_LDS()
     yield from tensile_benchmarks()
     yield from streamk()
     yield from scalar_is_zero()
+    yield from codegen()
 
 
 def hgemm_guideposts():
