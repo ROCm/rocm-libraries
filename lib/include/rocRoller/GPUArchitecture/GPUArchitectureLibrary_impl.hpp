@@ -113,19 +113,14 @@ namespace rocRoller
 
         std::string archFile = Settings::getInstance()->get(Settings::ArchitectureFile);
 
-        // TODO: Support non-Linux OS
-        std::filesystem::path archPath
-            = std::filesystem::read_symlink("/proc/self/exe").parent_path();
-        archPath /= archFile;
-
         if(archFile.find(".yaml") != std::string::npos
            || archFile.find(".yml") != std::string::npos)
         {
-            return GPUArchitecture::readYaml(archPath.string());
+            return GPUArchitecture::readYaml(archFile);
         }
         else
         {
-            return GPUArchitecture::readMsgpack(archPath.string());
+            return GPUArchitecture::readMsgpack(archFile);
         }
     }
 }

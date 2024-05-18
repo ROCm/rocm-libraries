@@ -50,6 +50,10 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "mac_m", result.solutionParams.macM);
         iot::mapRequired(io, "mac_n", result.solutionParams.macN);
         iot::mapRequired(io, "mac_k", result.solutionParams.macK);
+        iot::mapRequired(io, "wave_m", result.solutionParams.waveM);
+        iot::mapRequired(io, "wave_n", result.solutionParams.waveN);
+        iot::mapRequired(io, "wave_k", result.solutionParams.waveK);
+        iot::mapRequired(io, "wave_b", result.solutionParams.waveB);
         iot::mapRequired(io, "workgroup_size_x", result.solutionParams.workgroupSizeX);
         iot::mapRequired(io, "workgroup_size_y", result.solutionParams.workgroupSizeY);
         iot::mapRequired(io, "unroll_x", result.solutionParams.unrollX);
@@ -165,33 +169,45 @@ int main(int argc, const char* argv[])
                     Settings::getInstance()->help());
 
     // Problem definition
-    po.addArg("M", Arg({"M"}, "Tensor Size M"));
-    po.addArg("N", Arg({"N"}, "Tensor Size N"));
-    po.addArg("K", Arg({"K"}, "Tensor Size K"));
+    po.addArg("M", Arg({"M"}, "Tensor size M."));
+    po.addArg("N", Arg({"N"}, "Tensor size N."));
+    po.addArg("K", Arg({"K"}, "Tensor size K."));
     po.addArg("trans_A",
-              Arg({"trans_A"}, "N: A is not to be transposed. T: A is to be transposed."));
+              Arg({"trans_A"}, "N: A is not to be transposed.  T: A is to be transposed."));
     po.addArg("trans_B",
-              Arg({"trans_B"}, "N: B is not to be transposed. T: B is to be transposed."));
-    po.addArg("alpha", Arg({"a", "alpha"}, "Alpha scalar"));
-    po.addArg("beta", Arg({"b", "beta"}, "Beta scalar"));
-    po.addArg("type_A", Arg({"type_A"}, "Datatype of A Matrix [float | half]"));
-    po.addArg("type_B", Arg({"type_B"}, "Datatype of B Matrix [float | half]"));
-    po.addArg("type_C", Arg({"type_C"}, "Datatype of C Matrix [float | half]"));
-    po.addArg("type_D", Arg({"type_D"}, "Datatype of D Matrix [float | half]"));
+              Arg({"trans_B"}, "N: B is not to be transposed.  T: B is to be transposed."));
+    po.addArg("alpha", Arg({"a", "alpha"}, "Alpha scalar."));
+    po.addArg("beta", Arg({"b", "beta"}, "Beta scalar."));
+    po.addArg("type_A", Arg({"type_A"}, "Datatype of A matrix [float | half].  Default: float."));
+    po.addArg("type_B", Arg({"type_B"}, "Datatype of B matrix [float | half].  Default: float."));
+    po.addArg("type_C", Arg({"type_C"}, "Datatype of C matrix [float | half].  Default: float."));
+    po.addArg("type_D", Arg({"type_D"}, "Datatype of D matrix [float | half].  Default: float."));
     po.addArg("type_acc", Arg({"type_acc"}, "Datatype of accumulation [float]"));
-
+    po.addArg("hgemm",
+              Arg({"hgemm"},
+                  "Enable (=1) to overwrite types to: --type_A=half --type_B=half --type_C=half "
+                  "--type_D=half "
+                  "--type_acc=float."));
     // Kernel options
-    po.addArg("mac_m", Arg({"mac_m"}, "Macro Tile Size M"));
-    po.addArg("mac_n", Arg({"mac_n"}, "Macro Tile Size N"));
-    po.addArg("mac_k", Arg({"mac_k"}, "Macro Tile Size K"));
-    po.addArg("workgroup_size_x", Arg({"workgroup_size_x"}, "Workgroup size in the x dimension"));
-    po.addArg("workgroup_size_y", Arg({"workgroup_size_y"}, "Workgroup size in the y dimension"));
-    po.addArg("unroll_x", Arg({"unroll_x"}, "Unroll Size in X"));
-    po.addArg("unroll_y", Arg({"unroll_y"}, "Unroll Size in Y"));
-    po.addArg("loadLDS_A", Arg({"loadLDS_A"}, "Use LDS when loading A Matrix"));
-    po.addArg("loadLDS_B", Arg({"loadLDS_B"}, "Use LDS when loading B Matrix"));
-    po.addArg("storeLDS_D", Arg({"storeLDS_D"}, "Use LDS when storing D Matrix"));
-    po.addArg("betaInFma", Arg({"betaInFma"}, "Use beta in fma instruction instead of alpha."));
+    po.addArg("mac_m", Arg({"mac_m"}, "(Macro) Tile size M."));
+    po.addArg("mac_n", Arg({"mac_n"}, "(Macro) Tile size N."));
+    po.addArg("mac_k", Arg({"mac_k"}, "(Macro) Tile size K."));
+
+    po.addArg("wave_m", Arg({"wave_m"}, "(MFMA) Tile size M."));
+    po.addArg("wave_n", Arg({"wave_n"}, "(MFMA) Tile size N."));
+    po.addArg("wave_k", Arg({"wave_k"}, "(MFMA) Tile size K."));
+    po.addArg("wave_b", Arg({"wave_b"}, "(MFMA) Tile size K."));
+    po.addArg("mfma",
+              Arg({"mfma"},
+                  "MFMA instruction to use.  Default 32x32x2x1 for floats, 32x32x8x1 for halfs."));
+    po.addArg("workgroup_size_x", Arg({"workgroup_size_x"}, "Workgroup size in the x dimension."));
+    po.addArg("workgroup_size_y", Arg({"workgroup_size_y"}, "Workgroup size in the y dimension."));
+    po.addArg("unroll_x", Arg({"unroll_x"}, "Unroll size in X."));
+    po.addArg("unroll_y", Arg({"unroll_y"}, "Unroll size in Y."));
+    po.addArg("loadLDS_A", Arg({"loadLDS_A"}, "Use LDS when loading A."));
+    po.addArg("loadLDS_B", Arg({"loadLDS_B"}, "Use LDS when loading B."));
+    po.addArg("storeLDS_D", Arg({"storeLDS_D"}, "Use LDS when storing D."));
+    po.addArg("betaInFma", Arg({"betaInFma"}, "Use beta in FMA instruction instead of alpha."));
     po.addArg("scheduler", Arg({"scheduler"}, "Which scheduler to use."));
     po.addArg("match_memory_access",
               Arg({"match_memory_access"},
@@ -202,9 +218,9 @@ int main(int argc, const char* argv[])
               Arg({"prefetchInFlight"}, "Number of prefetches in flight at the same time"));
     po.addArg("prefetchLDSFactor",
               Arg({"prefetchLDSFactor"}, "Prefetch 1/prefetchLDSFactor of MacroTile from LDS"));
-    po.addArg("streamK", Arg({"streamK"}, "Enable StreamK Algorithm."));
-    po.addArg("numWGs", Arg({"numWGs"}, "Number of workgroups to use with StreamK Algorithm."));
-    po.addArg("streamKTwoTile", Arg({"streamKTwoTile"}, "Enable streamKTwoTile Algorithm."));
+    po.addArg("streamK", Arg({"streamK"}, "Enable StreamK algorithm."));
+    po.addArg("numWGs", Arg({"numWGs"}, "Number of workgroups to use with StreamK algorithm."));
+    po.addArg("streamKTwoTile", Arg({"streamKTwoTile"}, "Enable two-tile StreamK algorithm."));
 
     // Benchmarking options
     po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
@@ -213,6 +229,7 @@ int main(int argc, const char* argv[])
     po.addArg("num_inner", Arg({"num_inner"}, "Number of inner runs."));
     po.addArg("visualize",
               Arg({"visualize"}, "Dump out volumes describing memory access patterns."));
+    po.addArg("save", Arg({"save"}, "Save assembly to file name."));
 
     po.addArg("device", Arg({"device"}, "GPU Device Ordinal"));
 
@@ -233,6 +250,16 @@ int main(int argc, const char* argv[])
         = fromString<Client::GEMMClient::TransposeType>(po.get("trans_A", std::string("N")));
     problem.transB
         = fromString<Client::GEMMClient::TransposeType>(po.get("trans_B", std::string("N")));
+
+    bool forceHGEMM = po.get("hgemm", false);
+    if(forceHGEMM)
+    {
+        problem.typeA   = "half";
+        problem.typeB   = "half";
+        problem.typeC   = "half";
+        problem.typeD   = "half";
+        problem.typeAcc = "float";
+    }
 
     Client::GEMMClient::SolutionParameters solution;
     solution.problemParams = problem;
@@ -269,6 +296,53 @@ int main(int argc, const char* argv[])
     solution.streamKTwoTile = po.get("streamKTwoTile", false);
     AssertFatal(!solution.streamKTwoTile || solution.streamK);
 
+    std::string mfma = po.get("mfma", std::string());
+    if(!mfma.empty())
+    {
+        bool fail = false;
+        try
+        {
+            std::istringstream iss(mfma);
+            std::string        token;
+
+            iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
+            std::getline(iss, token, 'x');
+            solution.waveM = std::stoi(token);
+            std::getline(iss, token, 'x');
+            solution.waveN = std::stoi(token);
+            std::getline(iss, token, 'x');
+            solution.waveK = std::stoi(token);
+            iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+            std::getline(iss, token, 'x');
+            solution.waveB = std::stoi(token);
+        }
+        catch(const std::invalid_argument&)
+        {
+            fail = true;
+        }
+        catch(const std::ios_base::failure&)
+        {
+            fail = true;
+        }
+        fail |= (solution.waveM < 1) || (solution.waveN < 1) || (solution.waveK < 1)
+                || (solution.waveB < 1);
+        if(fail)
+        {
+            std::cout << "Invalid format for MFMA instruction." << std::endl;
+            std::cout << std::endl;
+            std::cout << "The MFMA argument should be formatted like:" << std::endl;
+            std::cout << std::endl;
+            std::cout << "    --mfma=MxNxKxB" << std::endl;
+            std::cout << std::endl;
+            std::cout << "For example: --mfma=32x32x2x1" << std::endl;
+            exit(1);
+        }
+    }
+    solution.waveM = po.get("wave_m", solution.waveM);
+    solution.waveN = po.get("wave_n", solution.waveN);
+    solution.waveK = po.get("wave_k", solution.waveK);
+    solution.waveB = po.get("wave_b", solution.waveB);
+
     Client::RunParameters runParams;
     runParams.numWarmUp = po.get("num_warmup", 3);
     runParams.numOuter  = po.get("num_outer", 5);
@@ -277,6 +351,13 @@ int main(int argc, const char* argv[])
 
     bool doVisualize = po.get("visualize", false);
     bool checkResult = true;
+
+    std::string assembly = po.get("save", std::string());
+    if(!assembly.empty())
+    {
+        Settings::getInstance()->set(Settings::SaveAssembly, true);
+        Settings::getInstance()->set(Settings::AssemblyFile, assembly);
+    }
 
     std::string filename = po.get("yaml", std::string());
 

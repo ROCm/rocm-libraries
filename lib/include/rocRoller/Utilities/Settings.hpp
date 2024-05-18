@@ -18,6 +18,8 @@
 #include <rocRoller/Utilities/Concepts.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
+#include <rocRoller/Utilities/DefaultArchitectureFilePath.hpp>
+
 namespace rocRoller
 {
     /**
@@ -102,7 +104,7 @@ namespace rocRoller
         static inline const SettingsOption<std::string> ArchitectureFile{
             "ROCROLLER_ARCHITECTURE_FILE",
             "GPU Architecture file",
-            "source/rocRoller/GPUArchitecture_def.msgpack",
+            rocRoller::DefaultArchitectureFilePath,
             -1};
 
         static inline const SettingsOption<std::string> AssemblyFile{

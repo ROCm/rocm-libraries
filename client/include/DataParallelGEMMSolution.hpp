@@ -180,8 +180,8 @@ namespace rocRoller
 
                     if(m_solutionParams.prefetch)
                     {
-                        kernelOptions->unrollK           = 2;
                         kernelOptions->prefetch          = true;
+                        kernelOptions->unrollK           = m_solutionParams.prefetchInFlight;
                         kernelOptions->prefetchInFlight  = m_solutionParams.prefetchInFlight;
                         kernelOptions->prefetchLDSFactor = m_solutionParams.prefetchLDSFactor;
 
@@ -244,6 +244,15 @@ namespace rocRoller
                     {
                         Throw<FatalError>("Unsupported datatype combination in client");
                     }
+
+                    if(m_solutionParams.waveM > 0)
+                        wave_m = m_solutionParams.waveM;
+                    if(m_solutionParams.waveN > 0)
+                        wave_n = m_solutionParams.waveN;
+                    if(m_solutionParams.waveK > 0)
+                        wave_k = m_solutionParams.waveK;
+                    if(m_solutionParams.waveB > 0)
+                        wave_b = m_solutionParams.waveB;
 
                     uint wavetile_per_wavefront_m = wavefrontSize * m_solutionParams.macM / wave_m
                                                     / m_solutionParams.workgroupSizeX;

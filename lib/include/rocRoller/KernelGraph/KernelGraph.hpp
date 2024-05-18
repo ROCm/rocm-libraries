@@ -14,12 +14,20 @@
 
 namespace rocRoller
 {
+
+    /**
+     * @ingroup rocRoller
+     * @defgroup KernelGraph Kernel Graph
+     *
+     * @brief Graph (both coordinate and control) representation of a GPU kernel.
+     */
+
     namespace KernelGraph
     {
-        /*
-         * Kernel graph containers
+        /**
+         * @brief Kernel graph container: control and coordinate graphs, control-to-coordinate mapper.
+	 * @ingroup KernelGraph
          */
-
         class KernelGraph
         {
             std::vector<GraphConstraint> m_constraints{&NoDanglingMappings};
@@ -74,14 +82,18 @@ namespace rocRoller
 
         /**
          * Translate from Command to (initial) KernelGraph.
-         *
+	 *
          * Resulting KernelGraph matches the Command operations
          * closely.
+	 *
+	 * @ingroup KernelGraph
          */
         KernelGraph translate(CommandPtr);
 
-        /*
-         * Code generation
+        /**
+         * Generate assembly from a KernelGraph.
+	 *
+	 * @ingroup KernelGraph
          */
         Generator<Instruction> generate(KernelGraph, AssemblyKernelPtr);
 

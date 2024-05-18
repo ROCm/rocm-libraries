@@ -1,6 +1,37 @@
+/**
+ * @ingroup KernelGraph
+ * @defgroup Transformations Transformations
+ * @brief Graph transformations (lowering passes).
+ *
+ * A graph transformation...
+ *
+ * Lowering passes include:
+ * - AddComputeIndex
+ * - AddConvert
+ * - AddDeallocate
+ * - AddLDS
+ * - AddStreamK
+ * - CleanArguments
+ * - CleanLoops
+ * - ConnectWorkgroups
+ * - ConstantPropagation
+ * - FuseExpressions
+ * - FuseLoops
+ * - InlineIncrements
+ * - LoopOverTileNumbers
+ * - LowerLinear
+ * - LowerTensorContraction
+ * - LowerTile
+ * - OrderEpilogueBlocks
+ * - OrderMemory
+ * - Simplify
+ * - UnrollLoops
+ * - UpdateParameters
+ */
+
 #pragma once
 
-#include <memory>
+#include <vector>
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 
@@ -24,7 +55,8 @@ namespace rocRoller
             virtual std::string name() const                       = 0;
 
             /**
-             * @brief The list of assumptions that must hold before applying this transformation.
+             * @brief List of assumptions that must hold before
+             * applying this transformation.
              */
             virtual std::vector<GraphConstraint> preConstraints() const
             {
@@ -32,7 +64,8 @@ namespace rocRoller
             }
 
             /**
-             * @brief The list of ongoing assumptions that can be made after applying this transformation.
+             * @brief List of ongoing assumptions that can be made
+             * after applying this transformation.
              */
             virtual std::vector<GraphConstraint> postConstraints() const
             {

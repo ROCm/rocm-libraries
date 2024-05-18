@@ -17,7 +17,7 @@ option(BUILD_SHARED_LIBS                "Build using shared libraries" ON)
 set(YAML_BACKEND "YAML_CPP" CACHE STRING "YAML backend used for serialization")
 set_property(CACHE YAML_BACKEND PROPERTY STRINGS YAML_CPP LLVM)
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   if (YAML_BACKEND STREQUAL "LLVM")
     message(FATAL_ERROR "LLVM YAML backend not supported with Clang")
   endif()
@@ -31,7 +31,7 @@ else()
   set(EXTRA_LINK_OPTIONS )
 endif()
 
-if (ROCROLLER_ENABLE_TIMERS)
+if(ROCROLLER_ENABLE_TIMERS)
   add_definitions(-DROCROLLER_ENABLE_TIMERS)
   add_compile_options(-pg -fno-omit-frame-pointer)
 endif()
@@ -194,6 +194,9 @@ if(ROCROLLER_USE_HIP)
   target_link_libraries(GPUArchitectureGenerator PUBLIC hip::host)
   target_compile_definitions(GPUArchitectureGenerator PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
 endif()
+
+set(ROCROLLER_DEFAULT_ARCHITECTURE_FILE_PATH "${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.msgpack")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/lib/include/rocRoller/Utilities/DefaultArchitectureFilePath.hpp.in ${CMAKE_CURRENT_SOURCE_DIR}/lib/include/rocRoller/Utilities/DefaultArchitectureFilePath.hpp)
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/source/rocRoller)
 add_custom_command(

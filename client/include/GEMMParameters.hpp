@@ -16,9 +16,8 @@ namespace rocRoller
         {
 
             /**
-         * @brief Indicates whether a matrix is supplied in transposed form or not
-         *
-         */
+             * @brief Indicates whether a matrix is supplied in transposed form or not
+             */
             enum class TransposeType
             {
                 T,
@@ -30,15 +29,14 @@ namespace rocRoller
             std::string toString(TransposeType trans);
 
             /**
-         * @brief Parameters of a GEMM problem.
-         *  D = alpha * A * B + beta * C
-         * where
-         * A is a m x k matrix,
-         * B is a k x n matrix,
-         * C and D are m x n matrices, and
-         * alpha and beta are scalars
-         *
-         */
+             * @brief Parameters of a GEMM problem
+             *  D = alpha * A * B + beta * C
+             * where
+             * A is a m x k matrix,
+             * B is a k x n matrix,
+             * C and D are m x n matrices, and
+             * alpha and beta are scalars
+             */
             struct ProblemParameters
             {
                 int   m;
@@ -59,17 +57,22 @@ namespace rocRoller
             };
 
             /**
-         * @brief Solution parameters common to all approaches to solving GEMMs.
-         *
-         */
+             * @brief Solution parameters common to all approaches to solving GEMMs.
+             */
             struct SolutionParameters
             {
                 ProblemParameters problemParams;
 
-                // Macro Tile Size
+                // Macro tile size
                 int macM;
                 int macN;
                 int macK;
+
+                // MFMA instruction
+                int waveM = -1;
+                int waveN = -1;
+                int waveK = -1;
+                int waveB = -1;
 
                 // Number of wave tiles to execute per workgroup
                 int workgroupSizeX = 64;

@@ -1,12 +1,128 @@
 /**
- * AddLDS -- add load/store through LDS to the graph.
- *
- * Load/store operations inside loops, and tagged with MemoryType LDS
- * or WAVE_LDS, are transformed.
- *
- * An entire tile is loaded once per loop iteration (which may be
- * unrolled) into LDS.  Subsequent loads in the loop read from LDS.
- *
+@class AddLDS
+@brief Add load/store through LDS to the graph; and prefetching.
+
+# Overview
+
+Load/store operations inside loops, and tagged with MemoryType LDS
+or WAVE_LDS, are transformed.
+
+An entire tile is loaded once per loop iteration (which may be
+unrolled) into LDS.  Subsequent loads in the loop read from LDS.
+
+## Prefetching
+
+Prefetching is automatically applied to tiles loaded through LDS
+within an unrolled ForLoop.
+
+Prefetching is controlled by:
+
+1. `bool prefetch` - Enable the prefetch transformation.
+
+2. `int prefetchInFlight` - How many loads are put in-flight.
+
+3. `bool prefetchMixMemOps` - Should global loads be inter-mixed with
+    math operations, or isolated?
+
+4. `int prefetchLDSFactor` - Ratio of how many sub-tiles are
+   prefetched from LDS before the next unroll segment.
+
+### Single prefetch
+
+Focusing on how the two sets of buffers are operated on, we can view
+the control flow of loads vertically as follows
+
+    Buf0      Buf1
+    ============== for loop preamble
+     PG        PG
+     CL
+    -------------- barrier
+     PL
+    ============== unrolled for loop begin (counter += 2)
+    -=-=-=-=-=-=-= unroll u=0 segment
+     CV
+     OPR
+     PG        CL
+    -------------- barrier
+               PL
+    -=-=-=-=-=-=-= unroll u=1 segment
+               CV
+               OPR
+     CL        PG
+    -------------- barrier
+     PL
+    ============== for loop end
+
+where
+
+- `PG` denotes _prefetch global_: issuing global to vgpr loads
+- `CL` denotes _commit to lds_: vgpr to lds stores
+- `PL` denotes _prefetch lds_: issuing lds to vgpr loads
+- `CV` denotes _commit to vgpr_: waiting on lds to vgpr loads
+- `OPR` denotes _operating on vgpr_: doing math (hopefully many cycles)
+
+The order of these must be: `PG CL PL CV OPR`.
+
+Note that:
+
+1. Within the for-loop, there is always a barrier between a `CL` and a
+   `PL`.
+
+2. Global prefetches are not stalled by barriers.
+
+3. Within a unrolled segment; `CV` and `OPR` can be mixed.  The
+   rocRoller scheduler will make sure, eg, appropriate wait-counts are
+   inserted to enforce dependencies.
+
+4. The `PL` may be a "partial" prefetch.  In this case, the remaining
+   loads from LDS into VGPRs happends in the immediately following
+   `CV`.
+
+### Two prefetches, unrolled
+
+With two-prefetches, we obtain
+
+    Buf0      Buf1      Buf2
+    ======================== for loop preamble
+     PG        PG        PG
+     CL
+    ------------------------ barrier
+     PL
+    ======================== unrolled for loop begin (counter += 3)
+    -=-=-=-=-=-=-=-=-=-=-=-= unroll u=0 segment
+     CV
+     OPR
+     PG        CL
+    ------------------------ barrier
+               PL
+    -=-=-=-=-=-=-=-=-=-=-=-= unroll u=1 segment
+               CV
+               OPR
+               PG        CL
+    ------------------------ barrier
+                         PL
+    -=-=-=-=-=-=-=-=-=-=-=-= unroll u=2 segment
+                         CV
+                         OPR
+     CL                  PG
+    ------------------------ barrier
+     PL
+    ======================== for loop end
+
+In the single pre-fetch mode, we have $U=2$ unrolled segments.  In the
+two-prefetch mode, we have $U=3$ unrolled segments.  In both cases,
+the scheduling of operations in unrolled segment $u$ are:
+
+    -=-=-=-=-=-=-=-=-=-=-=-=-=- unroll u segment
+    CV  [u]
+    OPR [u]
+    PG  [u]     CL [(u+1) % U]
+    --------------------------- barrier
+                PL [(u+1) % U]
+
+*/
+
+/*
  * A unique LDS allocation is required for each: User, ForLoop, and
  * Unroll.  This is encapsulated by the LDSSpec struct (see below).
  *
@@ -64,6 +180,7 @@
  *    c. Issue a barrier.
  *
  * 4. Construct prefetch segments.
+ *
  */
 
 #include "KernelGraph/ControlGraph/ControlGraph.hpp"
@@ -83,7 +200,6 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
         namespace CF = rocRoller::KernelGraph::ControlGraph;
 
         using GD = rocRoller::Graph::Direction;
@@ -92,10 +208,6 @@ namespace rocRoller
         using namespace CoordinateGraph;
         using namespace Expression;
         using namespace Register;
-
-        /*
-         * Helpers
-         */
 
         /**
          * @brief Return Unroll coordinate beside (as part of a Split
@@ -1055,7 +1167,7 @@ namespace rocRoller
             std::map<int, int> operationUnroll;
 
             //
-            // Find unroll bodies
+            // Find unroll bodies.
             //
             // Need to build `operationUnroll` mapping.
             //
@@ -1065,8 +1177,12 @@ namespace rocRoller
             // Unroll coordinate.  We then associate the unroll value from
             // the SetCoordinate node to the starting body edge.
             //
-            // Second pass, go through the body edges again, and
+            // Second pass: Go through the body edges again, and
             // propagate the Unroll value down.
+            //
+            // After the second pass, we have essentially coloured the
+            // body of the ForLoop according the prefetch Unroll
+            // value.
             //
             // Finally we need to find the unroll value for all of the multiplies.
             // We do this by populating macroTileToCoordVal with mappings from

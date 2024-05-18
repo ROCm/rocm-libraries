@@ -1,6 +1,6 @@
-# rocRoller Library Overview
+# Design Overview
 
-- [rocRoller Library Overview](#rocroller-library-overview)
+- [Design Overview](#design-overview)
   - [Introduction](#introduction)
     - [Overview](#overview)
   - [Command](#command)
@@ -257,10 +257,6 @@ And the following gets the wait count for the `global_store_byte` instruction on
 ```C++
 GPUArchitectureLibrary::GetArch("GFX90a").GetInstructionInfo("global_store_byte").getWaitCount()
 ```
-
-## Doxygen documentation pages
-
-DoxygenLink
 
 ## Other Topics
 
