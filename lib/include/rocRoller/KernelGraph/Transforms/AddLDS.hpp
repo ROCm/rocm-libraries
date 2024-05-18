@@ -19,6 +19,8 @@ namespace rocRoller
          *
          * Modifies the coordinate and control graphs to add LDS
          * information.
+	 *
+	 * @ingroup Transformations
          */
         class AddLDS : public GraphTransform
         {

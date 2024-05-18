@@ -190,7 +190,7 @@ mark_as_doc(build_sphinx)
 
 # adds the link from the sphinx site to the doxygen site
 add_custom_target(changedoxylink
-    COMMAND sed -i 's;DoxygenLink;<a\ href=doxygen\/html\/index.html>Doxygen\ link\ <\/a>;g' ${SPHINX_HTML_DIR}/DesignOverview.html
+    COMMAND sed -i 's;DoxygenLink;<a\ href=doxygen\/html\/index.html>Doxygen\ link\ <\/a>;g' ${SPHINX_HTML_DIR}/Development.html
     DEPENDS build_sphinx
 )
 mark_as_doc(changedoxylink)

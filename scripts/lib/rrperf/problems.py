@@ -83,6 +83,11 @@ class GEMMSolution:
     mac_n: int = 16
     mac_k: int = 16
 
+    wave_m: int = -1
+    wave_n: int = -1
+    wave_k: int = -1
+    wave_b: int = -1
+
     workgroup_size_x: int = 64 * 2
     workgroup_size_y: int = 2
 

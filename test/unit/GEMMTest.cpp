@@ -63,6 +63,9 @@ namespace GEMMDriverTest
                 = gemm.wavefrontSize * gemm.macM / gemm.waveM / gemm.workgroupSizeX;
             uint wavetilePerWavefrontN = gemm.macN / gemm.waveN / gemm.workgroupSizeY;
 
+            AssertFatal(wavetilePerWavefrontM > 0, "Bad size (M)");
+            AssertFatal(wavetilePerWavefrontN > 0, "Bad size (N)");
+
             AssertFatal(gemm.macM % (gemm.waveM * wavetilePerWavefrontM) == 0,
                         "WaveTile size mismatch (M)");
             AssertFatal(gemm.macN % (gemm.waveN * wavetilePerWavefrontN) == 0,
@@ -800,6 +803,32 @@ namespace GEMMDriverTest
                 }
             }
         }
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Prefetch3)
+    {
+        GEMMProblem gemm;
+        gemm.m                 = 4096;
+        gemm.n                 = 4096;
+        gemm.k                 = 2048 * 3;
+        gemm.loadLDSA          = true;
+        gemm.loadLDSB          = true;
+        gemm.storeLDSD         = false;
+        gemm.fuseLoops         = false;
+        gemm.unrollK           = 3;
+        gemm.macM              = 128;
+        gemm.macN              = 16;
+        gemm.macK              = 64;
+        gemm.waveM             = 16;
+        gemm.waveN             = 16;
+        gemm.waveK             = 16;
+        gemm.workgroupSizeX    = 256;
+        gemm.workgroupSizeY    = 1;
+        gemm.prefetch          = true;
+        gemm.prefetchInFlight  = 3;
+        gemm.prefetchLDSFactor = 2;
+        gemm.prefetchMixMemOps = true;
+        basicGEMM<Half>(m_context, gemm, 5.e-5);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16)
