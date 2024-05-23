@@ -57,7 +57,7 @@ namespace rocRoller
 
         const int mfmt = (sizeof(T) == 4) ? 23 : 10;
         uint32_t  x;
-        if(sizeof(T) == 4)
+        if constexpr(sizeof(T) == 4)
             x = reinterpret_cast<uint32_t&>(_x);
         else
             x = reinterpret_cast<uint16_t&>(_x);
@@ -66,7 +66,7 @@ namespace rocRoller
         int      exponent, bias;
         uint32_t sign;
 
-        if(sizeof(T) == 4)
+        if constexpr(sizeof(T) == 4)
         {
             head     = x & 0xFF800000;
             mantissa = x & 0x7FFFFF;
@@ -86,9 +86,9 @@ namespace rocRoller
         uint32_t signed_inf = (sign << 7) + (((1 << we) - 1) << wm);
 
         // Deal with inf and NaNs
-        if(negative_zero_nan)
+        if constexpr(negative_zero_nan)
         {
-            if(sizeof(T) == 4)
+            if constexpr(sizeof(T) == 4)
             {
                 if((x & 0x7F800000) == 0x7F800000)
                     return 0x80;
@@ -102,7 +102,7 @@ namespace rocRoller
         }
         else
         {
-            if(sizeof(T) == 4)
+            if constexpr(sizeof(T) == 4)
             {
                 if((x & 0x7F800000) == 0x7F800000)
                     return signed_inf + (mantissa != 0 ? 1 : 0);
@@ -243,7 +243,7 @@ namespace rocRoller
         constexpr int wmo = is_half ? 10 : (is_float ? 23 : 7);
 
         T fInf, fNegInf, fNaN, fNeg0;
-        if(is_half)
+        if constexpr(is_half)
         {
             const uint16_t ihInf    = 0x7C00;
             const uint16_t ihNegInf = 0xFC00;
@@ -254,7 +254,7 @@ namespace rocRoller
             fNaN                    = reinterpret_cast<const Half&>(ihNaN);
             fNeg0                   = reinterpret_cast<const Half&>(ihNeg0);
         }
-        else if(is_float)
+        else if constexpr(is_float)
         {
             const uint32_t ifInf    = 0x7F800000;
             const uint32_t ifNegInf = 0xFF800000;
@@ -272,7 +272,7 @@ namespace rocRoller
         uint32_t sign     = x >> 7;
         uint32_t mantissa = x & ((1 << wm) - 1);
         int      exponent = (x & 0x7F) >> wm;
-        if(negative_zero_nan)
+        if constexpr(negative_zero_nan)
         {
             if(x == 0x80)
                 return fNaN;
@@ -285,7 +285,7 @@ namespace rocRoller
                 return (mantissa == 0) ? (sign ? fNegInf : fInf) : fNaN;
         }
         typename std::conditional<sizeof(T) == 2, uint16_t, uint32_t>::type retval;
-        if(we == 5 && is_half && !negative_zero_nan)
+        if constexpr(we == 5 && is_half && !negative_zero_nan)
         {
             retval = x << 8;
             return reinterpret_cast<const T&>(retval);
@@ -321,7 +321,7 @@ namespace rocRoller
             exponent = 0;
         }
 
-        if(sizeof(T) == 2)
+        if constexpr(sizeof(T) == 2)
             retval = (sign << 15) | (exponent << 10) | mantissa;
         else
             retval = (sign << 31) | (exponent << 23) | mantissa;
