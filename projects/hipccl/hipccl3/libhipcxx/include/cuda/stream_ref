@@ -181,7 +181,7 @@ public:
       case ::hipSuccess:
         break;
       default:
-        ::hipGetLastError(); // Clear CUDA error state
+        (void)::hipGetLastError(); // Clear CUDA error state
         ::hip::__throw_hip_error(__result, "Failed to query stream."); // TODO(HIP/AMD): check if exists otherwise throw hip::hip_error{__result, "Failed to query stream."};
     }
     return true;
