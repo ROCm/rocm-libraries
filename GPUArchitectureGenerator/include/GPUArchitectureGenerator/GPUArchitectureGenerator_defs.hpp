@@ -35,6 +35,9 @@ namespace GPUArchitectureGenerator
            rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
            rocRoller::GPUArchitectureTarget("gfx942"),
            rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+           rocRoller::GPUArchitectureTarget("gfx950:xnack+"),
+           rocRoller::GPUArchitectureTarget("gfx950"),
+           rocRoller::GPUArchitectureTarget("gfx950:sramecc+"),
            rocRoller::GPUArchitectureTarget("gfx1010"),
            rocRoller::GPUArchitectureTarget("gfx1011"),
            rocRoller::GPUArchitectureTarget("gfx1012"),
@@ -120,7 +123,9 @@ namespace GPUArchitectureGenerator
                               rocRoller::GPUArchitectureTarget("gfx941"),
                               rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
                               rocRoller::GPUArchitectureTarget("gfx942"),
-                              rocRoller::GPUArchitectureTarget("gfx942:sramecc+")}},
+                              rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+                              rocRoller::GPUArchitectureTarget("gfx950"),
+                              rocRoller::GPUArchitectureTarget("gfx950:sramecc+")}},
                             {rocRoller::GPUCapability::Waitcnt0Disabled,
                              {
                                  rocRoller::GPUArchitectureTarget("gfx908"),
@@ -130,6 +135,8 @@ namespace GPUArchitectureGenerator
                                  rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
                                  rocRoller::GPUArchitectureTarget("gfx942"),
                                  rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx950"),
+                                 rocRoller::GPUArchitectureTarget("gfx950:sramecc+"),
                              }},
                             {rocRoller::GPUCapability::HasAccCD,
                              {
@@ -139,6 +146,8 @@ namespace GPUArchitectureGenerator
                                  rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
                                  rocRoller::GPUArchitectureTarget("gfx942"),
                                  rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx950"),
+                                 rocRoller::GPUArchitectureTarget("gfx950:sramecc+"),
                              }},
                             {rocRoller::GPUCapability::ArchAccUnifiedRegs,
                              {
@@ -149,6 +158,8 @@ namespace GPUArchitectureGenerator
                                  rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
                                  rocRoller::GPUArchitectureTarget("gfx942"),
                                  rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx950"),
+                                 rocRoller::GPUArchitectureTarget("gfx950:sramecc+"),
                              }},
                             {rocRoller::GPUCapability::HasWave64, SupportedISAs}};
 
@@ -175,6 +186,11 @@ namespace GPUArchitectureGenerator
     inline bool Is94XGPU(rocRoller::GPUArchitectureTarget const& input)
     {
         return input.toString().find("gfx94") == 0;
+    }
+
+    inline bool Is95XGPU(rocRoller::GPUArchitectureTarget const& input)
+    {
+        return input.toString().find("gfx95") == 0;
     }
 
     inline std::vector<rocRoller::GPUArchitectureTarget> gfx9ISAs()
@@ -210,6 +226,16 @@ namespace GPUArchitectureGenerator
         return retval;
     }
 
+    inline std::vector<rocRoller::GPUArchitectureTarget> gfx95XISAs()
+    {
+        std::vector<rocRoller::GPUArchitectureTarget> retval;
+        std::copy_if(SupportedISAs.begin(),
+                     SupportedISAs.end(),
+                     std::back_inserter(retval),
+                     [](rocRoller::GPUArchitectureTarget const& x) -> bool { return Is95XGPU(x); });
+        return retval;
+    }
+
     // GPUCapability -> <Predicate that returns true given an isa that supports it.>
     const std::unordered_map<rocRoller::GPUCapability,
                              std::function<bool(const rocRoller::GPUArchitectureTarget&)>,
@@ -232,7 +258,6 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::PackedWorkitemIDs,
              [](rocRoller::GPUArchitectureTarget x) -> bool { return Is90aGPU(x) || Is94XGPU(x); }},
-
     };
     // This is the way to add a set of instructions that have the same wait value and wait queues.
     const std::vector<std::tuple<std::vector<rocRoller::GPUArchitectureTarget>,
@@ -1019,6 +1044,99 @@ namespace GPUArchitectureGenerator
                 // V_MFMA_F32_{*}_BF8_BF8
                 rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x32_fp8_fp8", 0, {}, 4),
                 rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x16_fp8_fp8", 0, {}, 8),
+            }},
+           {gfx95XISAs(),
+            {
+                rocRoller::GPUInstructionInfo("v_mov_b64", -1, {}, 0),
+                // V_MFMA_F32_{*}_F32
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x1_2b_f32", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x1f32", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x1_4b_f32", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x1f32", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_4x4x1_16b_f32", 0, {}, 2),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_4x4x1f32", 0, {}, 2),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x2_f32", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x2f32", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x4_f32", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x4f32", 0, {}, 8),
+                // V_MFMA_F32_{*}_F16
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x4_2b_f16", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x4f16", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x4_4b_f16", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x4f16", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_4x4x4_16b_f16", 0, {}, 2),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_4x4x4f16", 0, {}, 2),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x8_f16", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x8f16", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x16_f16", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x16f16", 0, {}, 4),
+                // These two instructions are new
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x32_f16", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x16_f16", 0, {}, 8),
+                // V_MFMA_F32_{*}_BF16
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x4_2b_bf16", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x4bf16", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x4bf16_1k", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x4_4b_bf16", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x4bf16", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x4bf16_1k", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_4x4x4_16b_bf16", 0, {}, 2),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_4x4x4bf16", 0, {}, 2),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_4x4x4bf16_1k", 0, {}, 2),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x8_bf16", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x8bf16", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x8bf16_1k", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x16_bf16", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x16bf16", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x16bf16_1k", 0, {}, 4),
+                // These two instructions are new
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x32_bf16", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x16_bf16", 0, {}, 8),
+                // V_MFMA_I32_{*}_I8
+                rocRoller::GPUInstructionInfo("v_mfma_i32_32x32x4_2b_i8", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_i32_32x32x4i8", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_i32_16x16x4_4b_i8", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_i32_16x16x4i8", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_i32_4x4x4_16b_i8", 0, {}, 2),
+                rocRoller::GPUInstructionInfo("v_mfma_i32_4x4x4i8", 0, {}, 2),
+                rocRoller::GPUInstructionInfo("v_mfma_i32_32x32x16_i8", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_i32_32x32x16i8", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_i32_16x16x32_i8", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_i32_16x16x32i8", 0, {}, 4),
+                // These two instructions are new
+                rocRoller::GPUInstructionInfo("v_mfma_i32_16x16x64_i8", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_i32_32x32x32_i8", 0, {}, 8),
+                // V_MFMA_F32_{*}_XF32
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x8xf32", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x4xf32", 0, {}, 8),
+                // V_MFMA_F64_{*}_F64
+                rocRoller::GPUInstructionInfo("v_mfma_f64_16x16x4_f64", 0, {}, 8),
+                // gfx950 increases the cycles of v_mfma_f64_16x16x4f64 to 64 (32 in gfx940)
+                rocRoller::GPUInstructionInfo("v_mfma_f64_16x16x4f64", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_f64_4x4x4_4b_f64", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f64_4x4x4f64", 0, {}, 4),
+                // V_MFMA_F32_{*}_BF8_BF8
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x32_bf8_bf8", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x16_bf8_bf8", 0, {}, 8),
+                // V_MFMA_F32_{*}_BF8_FP8
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x32_bf8_fp8", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x16_bf8_fp8", 0, {}, 8),
+                // V_MFMA_F32_{*}_FP8_BF8
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x32_fp8_bf8", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x16_fp8_bf8", 0, {}, 8),
+                // V_MFMA_F32_{*}_BF8_BF8
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x32_fp8_fp8", 0, {}, 4),
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x16_fp8_fp8", 0, {}, 8),
+                // V_MFMA_F32_{*}_F8F6F4 (new in 950)
+                // TODO: instructions below have different cycles depending on the matrix type,
+                //       but currently GPUInstructionInfo assumes each instruction has only
+                //       a fixed latency.
+                // if (either matrix is F8) -> 32 cycles   else() -> 16 cycles
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x128_f8f6f4", 0, {}, 32),
+                rocRoller::GPUInstructionInfo("v_mfma_scale_f32_16x16x128_f8f6f4", 0, {}, 32),
+                // if (either matrix is F8) -> 64 cycles   else() -> 32 cycles
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x64_f8f6f4", 0, {}, 64),
+                rocRoller::GPUInstructionInfo("v_mfma_scale_f32_32x32x64_f8f6f4", 0, {}, 64),
             }}};
 
     const std::unordered_map<std::string, std::vector<rocRoller::GPUArchitectureTarget>>
