@@ -3,6 +3,13 @@ from rrperf.problems import GEMMRun, CodeGenRun, TensileRun
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
+fp8fp8_fp32 = dict(
+    type_A="fp8",
+    type_B="fp8",
+    type_C="float",
+    type_D="float",
+)
+
 fp16 = dict(
     type_A="half",
     type_B="half",
@@ -495,6 +502,20 @@ def codegen():
     yield CodeGenRun(instCount=40000, instructions="comments")
     yield CodeGenRun(instCount=40000, instructions="simple_mfma")
     yield CodeGenRun(instCount=40000, instructions="complex_mfma_with_coop")
+
+
+def f8gemm():
+    yield GEMMRun(
+        M=1024,
+        N=1024,
+        K=1024,
+        mac_m=64,
+        mac_n=16,
+        mac_k=64,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
+        **fp8fp8_fp32,
+    )
 
 
 def all():

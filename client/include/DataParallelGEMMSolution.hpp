@@ -226,7 +226,6 @@ namespace rocRoller
 
                     if constexpr(std::is_same_v<A, float> && std::is_same_v<B, float>)
                     {
-                        // wave tile sizes
                         wave_m = 32;
                         wave_n = 32;
                         wave_k = 2;
@@ -234,10 +233,16 @@ namespace rocRoller
                     }
                     else if constexpr(std::is_same_v<A, Half> && std::is_same_v<B, Half>)
                     {
-                        // wave tile sizes
                         wave_m = 32;
                         wave_n = 32;
                         wave_k = 8;
+                        wave_b = 1;
+                    }
+                    else if constexpr(std::is_same_v<A, FP8_NANOO> && std::is_same_v<B, FP8_NANOO>)
+                    {
+                        wave_m = 16;
+                        wave_n = 16;
+                        wave_k = 32;
                         wave_b = 1;
                     }
                     else
@@ -254,27 +259,38 @@ namespace rocRoller
                     if(m_solutionParams.waveB > 0)
                         wave_b = m_solutionParams.waveB;
 
-                    uint wavetile_per_wavefront_m = wavefrontSize * m_solutionParams.macM / wave_m
-                                                    / m_solutionParams.workgroupSizeX;
-                    uint wavetile_per_wavefront_n
+                    AssertFatal(m_solutionParams.macM * m_solutionParams.macK
+                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementSize
+                                    > wave_m * wave_k,
+                                "Not enough elements (A).");
+                    AssertFatal(m_solutionParams.macN * m_solutionParams.macK
+                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementSize
+                                    > wave_n * wave_k,
+                                "Not enough elements (B).");
+
+                    uint wavetilePerWavefrontM = wavefrontSize * m_solutionParams.macM / wave_m
+                                                 / m_solutionParams.workgroupSizeX;
+                    uint wavetilePerWavefrontN
                         = m_solutionParams.macN / wave_n / m_solutionParams.workgroupSizeY;
 
-                    AssertFatal(m_solutionParams.macM % (wave_m * wavetile_per_wavefront_m) == 0,
+                    AssertFatal(wavetilePerWavefrontM > 0, "WaveTile size mismatch.");
+                    AssertFatal(wavetilePerWavefrontN > 0, "WaveTile size mismatch.");
+
+                    AssertFatal(m_solutionParams.macM % (wave_m * wavetilePerWavefrontM) == 0,
                                 "WaveTile size mismatch (M)",
                                 ShowValue(m_solutionParams.macM),
                                 ShowValue(wave_m),
-                                ShowValue(wavetile_per_wavefront_m));
-                    AssertFatal(m_solutionParams.macN % (wave_n * wavetile_per_wavefront_n) == 0,
+                                ShowValue(wavetilePerWavefrontM));
+                    AssertFatal(m_solutionParams.macN % (wave_n * wavetilePerWavefrontN) == 0,
                                 "WaveTile size mismatch (N)",
                                 ShowValue(m_solutionParams.macN),
                                 ShowValue(wave_n),
-                                ShowValue(wavetile_per_wavefront_n));
+                                ShowValue(wavetilePerWavefrontN));
 
                     auto params = std::make_shared<CommandParameters>();
                     params->setManualKernelDimension(2);
                     // TODO: Calculate these values internally based on workgroup sizes.
-                    params->setWaveTilesPerWavefront(wavetile_per_wavefront_m,
-                                                     wavetile_per_wavefront_n);
+                    params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {m_solutionParams.macM, m_solutionParams.macK},
@@ -326,10 +342,9 @@ namespace rocRoller
 
                     auto postParams = std::make_shared<CommandParameters>();
                     postParams->setManualWavefrontCount(
-                        {static_cast<uint>(m_solutionParams.macM / wave_m
-                                           / wavetile_per_wavefront_m),
+                        {static_cast<uint>(m_solutionParams.macM / wave_m / wavetilePerWavefrontM),
                          static_cast<uint>(m_solutionParams.macN / wave_n
-                                           / wavetile_per_wavefront_n)});
+                                           / wavetilePerWavefrontN)});
 
                     auto kernelName = m_solutionParams.generateKernelName();
 
@@ -352,7 +367,7 @@ namespace rocRoller
                     bool no_beta = m_solutionParams.problemParams.beta == 0.0
                                    && m_solutionParams.problemParams.alpha == 1.0;
 
-                    runtimeArgs.append("A", m_dA.get());
+                    runtimeArgs.append("A", (void*)m_dA.get());
                     runtimeArgs.append("d_a_limit",
                                        (size_t)m_solutionParams.problemParams.m
                                            * m_solutionParams.problemParams.k);
@@ -374,7 +389,7 @@ namespace rocRoller
                                            (size_t)m_solutionParams.problemParams.m);
                     }
 
-                    runtimeArgs.append("B", m_dB.get());
+                    runtimeArgs.append("B", (void*)m_dB.get());
                     runtimeArgs.append("d_b_limit",
                                        (size_t)m_solutionParams.problemParams.k
                                            * m_solutionParams.problemParams.n);
@@ -398,7 +413,7 @@ namespace rocRoller
 
                     if(!no_beta)
                     {
-                        runtimeArgs.append("C", m_dC.get());
+                        runtimeArgs.append("C", (void*)m_dC.get());
                         runtimeArgs.append("d_c_limit",
                                            (size_t)m_solutionParams.problemParams.m
                                                * m_solutionParams.problemParams.n);
@@ -413,7 +428,7 @@ namespace rocRoller
                         runtimeArgs.append("beta", m_solutionParams.problemParams.beta);
                     }
 
-                    runtimeArgs.append("D", m_dD.get());
+                    runtimeArgs.append("D", (void*)m_dD.get());
                     runtimeArgs.append("d_d_limit",
                                        (size_t)m_solutionParams.problemParams.m
                                            * m_solutionParams.problemParams.n);
