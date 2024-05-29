@@ -502,6 +502,7 @@ set(
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
   test/unit/FP8Test.cpp
+  test/unit/FP6Test.cpp
   test/unit/HazardObserverTest.cpp
   test/unit/HypergraphTest.cpp
   test/unit/InstructionTest.cpp

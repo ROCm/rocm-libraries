@@ -35,6 +35,7 @@
 #include <string>
 
 #include "DataTypes_BFloat16.hpp"
+#include "DataTypes_FP6.hpp"
 #include "DataTypes_FP8_NANOO.hpp"
 #include "DataTypes_Half.hpp"
 #include "DataTypes_Int8.hpp"
@@ -85,6 +86,9 @@ namespace rocRoller
         Halfx2, //< Two 16bit floating point; packed into 32bits
         FP8_NANOO, //< 8bit floating point in NANOO format
         FP8x4_NANOO, //< Four 8bit floating point in NANOO format; packed into 32bits
+        // TODO: add BF6 and BF6x16
+        FP6, //< 6bit floating point in 2e3m format
+        FP6x16, //< 16 6bit floating point in FP6 format; packed into 96bits
         Int8x4, //< Four 8bit signed integers; packed into 32bits
         Int8, //< 8bit signed integer
         Int16, //< 16bit signed integer
@@ -705,6 +709,19 @@ namespace rocRoller
     {
     };
 
+    template <>
+    struct TypeInfo<FP6> : public BaseTypeInfo<FP6,
+                                               DataType::FP6,
+                                               DataType::FP6,
+                                               PointerType::Value,
+                                               1,
+                                               1,
+                                               false,
+                                               false,
+                                               true>
+    {
+    };
+
     struct FP8x4_NANOO : public DistinctType<uint32_t, FP8x4_NANOO>
     {
     };
@@ -719,6 +736,26 @@ namespace rocRoller
                                                        false,
                                                        false,
                                                        true>
+    {
+    };
+
+    struct FP6x16
+    {
+        uint32_t a;
+        uint32_t b;
+        uint32_t c;
+    };
+
+    template <>
+    struct TypeInfo<FP6x16> : public BaseTypeInfo<FP6x16,
+                                                  DataType::FP6x16,
+                                                  DataType::FP6x16,
+                                                  PointerType::Value,
+                                                  1,
+                                                  3,
+                                                  false,
+                                                  false,
+                                                  false>
     {
     };
 
@@ -872,7 +909,9 @@ namespace rocRoller
     DeclareEnumTypeInfo(Half, Half);
     DeclareEnumTypeInfo(Halfx2, Halfx2);
     DeclareEnumTypeInfo(FP8_NANOO, FP8_NANOO);
+    DeclareEnumTypeInfo(FP6, FP6);
     DeclareEnumTypeInfo(FP8x4_NANOO, FP8x4_NANOO);
+    DeclareEnumTypeInfo(FP6x16, FP6x16);
     DeclareEnumTypeInfo(Int8x4, Int8x4);
     DeclareEnumTypeInfo(Int32, int32_t);
     DeclareEnumTypeInfo(Int64, int64_t);

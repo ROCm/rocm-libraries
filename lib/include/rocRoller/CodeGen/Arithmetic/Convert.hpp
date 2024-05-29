@@ -17,6 +17,7 @@ namespace rocRoller
     SpecializeGetGeneratorConvert(Half);
     SpecializeGetGeneratorConvert(Halfx2);
     SpecializeGetGeneratorConvert(FP8x4_NANOO);
+    SpecializeGetGeneratorConvert(FP6x16);
     SpecializeGetGeneratorConvert(Int32);
     SpecializeGetGeneratorConvert(Int64);
     SpecializeGetGeneratorConvert(UInt32);
