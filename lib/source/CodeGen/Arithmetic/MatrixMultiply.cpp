@@ -61,7 +61,8 @@ namespace rocRoller
                         ShowValue(B),
                         ShowValue(lanesPerWavefront),
                         ShowValue(M * K * B / lanesPerWavefront),
-                        ShowValue(lhs->valueCount()));
+                        ShowValue(lhs->valueCount()),
+                        ShowValue(packing));
             AssertFatal(r1hs->valueCount() * packing == (size_t)K * N * B / lanesPerWavefront,
                         "B matrix size mismatch",
                         ShowValue(K),
@@ -69,7 +70,8 @@ namespace rocRoller
                         ShowValue(B),
                         ShowValue(lanesPerWavefront),
                         ShowValue(K * N * B / lanesPerWavefront),
-                        ShowValue(r1hs->valueCount()));
+                        ShowValue(r1hs->valueCount()),
+                        ShowValue(packing));
             AssertFatal(r2hs->valueCount() == (size_t)M * N * B / lanesPerWavefront,
                         "C matrix size mismatch",
                         ShowValue(M),
@@ -108,9 +110,31 @@ namespace rocRoller
                         "Invalid DEST (D) data type",
                         ShowValue(lhs->variableType()));
 
-            auto mfma
-                = concatenate("v_mfma_", typeStr<ACC>(), "_", M, "x", N, "x", K, typeStr<INPUT>());
-            co_yield_(Instruction(mfma, {dest}, {lhs, r1hs, r2hs}, {}, ""));
+            std::string inputType;
+            std::string modifier;
+            if constexpr(INPUT == DataType::FP8x4_NANOO)
+            {
+                if((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128))
+                {
+                    inputType = "_f8f6f4";
+                    // TODO: input matrix types of f8f6f4 can be fp8/bf8, fp6/bf6, fp4 or
+                    //       mixed, where the types are indicated in cbsz and blgp. Here
+                    //       only fp8 is handled and has to be enhanced to support rest types.
+                    std::string cbsz = "cbsz:[0]"; // Matrix A type
+                    std::string blgp = "blgp:[0]"; // Matrix B type
+                    modifier         = concatenate(cbsz, " ", blgp);
+                }
+                else
+                {
+                    inputType = "_fp8_fp8";
+                }
+            }
+            else
+                inputType = typeStr<INPUT>();
+
+            auto mfma = concatenate(
+                "v_mfma_", typeStr<ACC>(), "_", M, "x", N, "x", K, std::move(inputType));
+            co_yield_(Instruction(mfma, {dest}, {lhs, r1hs, r2hs}, {modifier}, ""));
         }
     }
 }

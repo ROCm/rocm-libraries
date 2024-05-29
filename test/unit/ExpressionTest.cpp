@@ -2365,6 +2365,63 @@ namespace ExpressionTest
                 EXPECT_GT(assembledKernel.size(), 0);
             }
         }
+
+        void MFMA_F8F6F4(DataType          typeA,
+                         DataType          typeB,
+                         int               M,
+                         int               N,
+                         int               K,
+                         int               batches,
+                         int               regCountA,
+                         int               regCountB,
+                         std::string const result)
+        {
+            if(m_context->targetArchitecture().target().getVersionString() != "gfx950")
+            {
+                GTEST_SKIP() << "Skipping MFMA F8F6F4 tests for "
+                             << m_context->targetArchitecture().target().getVersionString();
+            }
+
+            auto A_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
+            auto B_tile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
+
+            A_tile->sizes = {M, K};
+            A_tile->vgpr
+                = std::make_shared<Register::Value>(m_context,
+                                                    Register::Type::Vector,
+                                                    typeA,
+                                                    regCountA,
+                                                    Register::AllocationOptions::FullyContiguous());
+            A_tile->vgpr->allocateNow();
+
+            B_tile->sizes = {K, N};
+            B_tile->vgpr
+                = std::make_shared<Register::Value>(m_context,
+                                                    Register::Type::Vector,
+                                                    typeB,
+                                                    regCountB,
+                                                    Register::AllocationOptions::FullyContiguous());
+            B_tile->vgpr->allocateNow();
+
+            auto ic
+                = std::make_shared<Register::Value>(m_context,
+                                                    Register::Type::Accumulator,
+                                                    DataType::Float,
+                                                    M * N * batches / 64,
+                                                    Register::AllocationOptions::FullyContiguous());
+            ic->allocateNow();
+
+            auto A = std::make_shared<Expression::Expression>(A_tile);
+            auto B = std::make_shared<Expression::Expression>(B_tile);
+            auto C = ic->expression();
+
+            auto expr
+                = std::make_shared<Expression::Expression>(Expression::MatrixMultiply(A, B, C));
+
+            m_context->schedule(Expression::generate(ic, expr, m_context));
+
+            EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
+        }
     };
 
     TEST_P(ARCH_ExpressionTest, BasicExpression01)
@@ -2890,6 +2947,34 @@ namespace ExpressionTest
             std::vector<char> assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
+    }
+
+    TEST_P(ARCH_ExpressionTest, MFMA_F32_32x32x64_F8F6F4)
+    {
+        MFMA_F8F6F4(
+            DataType::FP8x4_NANOO,
+            DataType::FP8x4_NANOO,
+            32,
+            32,
+            64,
+            1,
+            32 * 64 / 64 / 4, // M * K / 64 / 4
+            64 * 32 / 64 / 4, // K * N / 64 / 4
+            R"(v_mfma_f32_32x32x64_f8f6f4 a[0:15], v[0:7], v[8:15], a[0:15] cbsz:[0] blgp:[0])");
+    }
+
+    TEST_P(ARCH_ExpressionTest, MFMA_F32_16x16x128_F8F6F4)
+    {
+        MFMA_F8F6F4(
+            DataType::FP8x4_NANOO,
+            DataType::FP8x4_NANOO,
+            16,
+            16,
+            128,
+            1,
+            16 * 128 / 64 / 4, // M * K / 64 / 4
+            128 * 16 / 64 / 4, // K * N / 64 / 4
+            R"(v_mfma_f32_16x16x128_f8f6f4 a[0:3], v[0:7], v[8:15], a[0:3] cbsz:[0] blgp:[0])");
     }
 
     INSTANTIATE_TEST_SUITE_P(ARCH_ExpressionTests, ARCH_ExpressionTest, supportedISATuples());
