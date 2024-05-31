@@ -35,7 +35,12 @@ namespace rocRoller
             ConstraintStatus retval;
             for(int i = 0; i < constraints.size(); i++)
             {
-                retval.combine(constraints[i](*this));
+                auto check = constraints[i](*this);
+                if(!check.satisfied)
+                {
+                    Log::warn("Constraint failed: {}", check.explanation);
+                }
+                retval.combine(check);
             }
             return retval;
         }
@@ -48,6 +53,11 @@ namespace rocRoller
         void KernelGraph::addConstraints(const std::vector<GraphConstraint>& constraints)
         {
             m_constraints.insert(m_constraints.end(), constraints.begin(), constraints.end());
+        }
+
+        std::vector<GraphConstraint> KernelGraph::getConstraints() const
+        {
+            return m_constraints;
         }
 
         KernelGraph KernelGraph::transform(std::shared_ptr<GraphTransform> const& transformation)

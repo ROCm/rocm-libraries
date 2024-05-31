@@ -218,6 +218,8 @@ class GEMMRun(GEMM):
 class GEMMResult(GEMM, RRPerfResult):
     """GEMM result interface."""
 
+    rnorm: float = field(repr=False, default=None, hash=False)
+
     def compact(self):
         def TF(x):
             return {True: "T", False: "F"}[x]

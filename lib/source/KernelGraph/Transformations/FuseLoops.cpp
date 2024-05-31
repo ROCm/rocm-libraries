@@ -345,7 +345,7 @@ namespace rocRoller
                 }
 
                 auto children
-                    = graph.control.getOutputNodeIndices<Sequence>(fusedLoopTag).to<std::vector>();
+                    = graph.control.getOutputNodeIndices<Body>(fusedLoopTag).to<std::vector>();
 
                 auto loads = filter(graph.control.isElemType<LoadTiled>(),
                                     graph.control.depthFirstVisit(

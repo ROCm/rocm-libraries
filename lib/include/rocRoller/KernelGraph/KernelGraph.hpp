@@ -72,6 +72,8 @@ namespace rocRoller
              */
             void addConstraints(const std::vector<GraphConstraint>& constraints);
 
+            std::vector<GraphConstraint> getConstraints() const;
+
             /**
              * @brief Returns new KernelGraph given a particular transformation
              *

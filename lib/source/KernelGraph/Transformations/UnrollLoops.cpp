@@ -269,6 +269,8 @@ namespace rocRoller
                 if(unrollAmount == 1)
                     return;
 
+                Log::debug("  Unrolling loop {}, amount {}", tag, unrollAmount);
+
                 auto loopCarriedDependencies = findLoopCarriedDependencies(graph, tag);
 
                 // TODO: Iron out storage node duplication
@@ -381,7 +383,9 @@ namespace rocRoller
                 // Function for adding a SetCoordinate nodes around all load and
                 // store operations. Only adds a SetCoordinate node if the coordinate is needed
                 // by the load/store operation.
-                auto connectWithSetCoord = [&](const auto& toConnect, unsigned int coordValue) {
+                auto connectWithSetCoord = [&](std::vector<int> const& toConnect,
+                                               unsigned int coordValue) -> std::vector<int> {
+                    std::vector<int> rv;
                     for(auto const& body : toConnect)
                     {
                         graph.control.addElement(Body(), {tag}, {body});
@@ -399,9 +403,15 @@ namespace rocRoller
                                 graph.mapper.connect<Unroll>(setCoord, unrollDimension);
 
                                 graph.control.addElement(Body(), {setCoord}, {op});
+                                rv.push_back(setCoord);
+                            }
+                            else
+                            {
+                                rv.push_back(op);
                             }
                         }
                     }
+                    return rv;
                 };
 
                 std::vector<std::vector<int>> duplicatedBodies;
@@ -455,7 +465,7 @@ namespace rocRoller
                 std::set<int> previousStores;
                 for(int i = 0; i < unrollAmount; i++)
                 {
-                    connectWithSetCoord(duplicatedBodies[i], i);
+                    duplicatedBodies[i] = connectWithSetCoord(duplicatedBodies[i], i);
                     auto currentLoads
                         = filter(graph.control.isElemType<LoadTiled>(),
                                  graph.control.depthFirstVisit(duplicatedBodies[i], GD::Downstream))

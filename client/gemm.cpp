@@ -81,6 +81,7 @@ struct rocRoller::Serialization::
 
         iot::mapRequired(io, "checked", result.benchmarkResults.checked);
         iot::mapRequired(io, "correct", result.benchmarkResults.correct);
+        iot::mapRequired(io, "rnorm", result.benchmarkResults.rnorm);
     }
 
     static void mapping(IO& io, Client::GEMMClient::Result& result, EmptyContext& ctx)

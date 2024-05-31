@@ -25,6 +25,7 @@ namespace rocRoller
             std::vector<size_t> kernelExecute;
             bool                checked = false;
             bool                correct = true;
+            double              rnorm   = 1.e12;
         };
 
         class BenchmarkSolution

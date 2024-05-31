@@ -54,7 +54,10 @@ namespace rocRoller
                             == (hipError_t)HIP_SUCCESS);
 
                         result.benchmarkResults.checked = true;
-                        result.benchmarkResults.correct = this->validate(h_A, h_B, h_C, h_D);
+
+                        auto [correct, rnorm]           = this->validate(h_A, h_B, h_C, h_D);
+                        result.benchmarkResults.correct = correct;
+                        result.benchmarkResults.rnorm   = rnorm;
                     }
 
                     return result;

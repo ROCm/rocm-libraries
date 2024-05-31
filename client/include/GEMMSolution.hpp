@@ -30,10 +30,10 @@ namespace rocRoller
                     m_problemParams = problemParams;
                 }
 
-                bool validate(std::vector<A> h_A,
-                              std::vector<B> h_B,
-                              std::vector<C> h_C,
-                              std::vector<D> h_D)
+                std::pair<bool, double> validate(std::vector<A> h_A,
+                                                 std::vector<B> h_B,
+                                                 std::vector<C> h_C,
+                                                 std::vector<D> h_D)
                 {
                     // Host result
                     std::vector<D> h_result(m_problemParams.m * m_problemParams.n, 0.0);
@@ -59,7 +59,7 @@ namespace rocRoller
                         std::cerr << "WARNING: Result incorrect. RNorm too large: " << rnorm
                                   << std::endl;
                     }
-                    return isCorrect;
+                    return {isCorrect, rnorm};
                 }
 
                 BenchmarkResults benchmark(RunParameters const&       runParams,
