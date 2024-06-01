@@ -6,7 +6,7 @@ subtrees:
     - file: what-is-hipcub
   - caption: Reference
     entries:
-    - file: data-type-support
+    - file: reference/data-type-support
     - file: doxygen/html/index
       title: API library
   - caption: About
