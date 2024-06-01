@@ -9,13 +9,13 @@
 hipCUB documentation
 ===========================
 
-Welcome to the hipCUB docs home page! To learn more, see :ref:`what-is-hipcub`.
+Welcome to the hipCUB docs home page! To learn more, see :ref:`what-is-hipcub`
 
 Our documentation is structured as follows:
 
 .. grid:: 2
 
-  .. grid-item-card::API Reference
+  .. grid-item-card:: API Reference
 
     * :ref:`data-type-support`
     * :doc:`API library <../doxygen/html/index>`
