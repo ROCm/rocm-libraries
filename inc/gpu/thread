@@ -35,6 +35,8 @@ enum {
     NUM_VCORES = 512U, // Conservative for demo
 // #elif defined(__gfx803__)
 //     NUM_VCORES = 15U,
+#elif defined(__gfx902__)
+    NUM_VCORES = 7U,
 #elif defined(__HIP_DEVICE_COMPILE__)
 #warning "Running on a gpu that hasn't had NUM_VCORES configured"
     NUM_VCORES = 15U,
