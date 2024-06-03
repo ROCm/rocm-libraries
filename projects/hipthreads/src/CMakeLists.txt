@@ -33,9 +33,9 @@ target_compile_definitions(GpuThreads PUBLIC __HIP__)
 #TODO: define an install target, and a GpuThreadsConfig.cmake so find_package can be used
 
 
-add_custom_command(TARGET GpuThreads POST_BUILD
-    COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/GpuThreads.dir/gpu/thread-host-x86_64-unknown-linux-gnu.bc
-)
-add_custom_command(TARGET GpuThreads POST_BUILD
-    COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/GpuThreads.dir/gpu/thread-hip-amdgcn-amd-amdhsa-gfx1100.bc
-)
+# add_custom_command(TARGET GpuThreads POST_BUILD
+#     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/GpuThreads.dir/gpu/thread-host-x86_64-unknown-linux-gnu.bc
+# )
+# add_custom_command(TARGET GpuThreads POST_BUILD
+#     COMMAND ${LLVM_DIS} ${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/GpuThreads.dir/gpu/thread-hip-amdgcn-amd-amdhsa-gfx1100.bc
+# )
