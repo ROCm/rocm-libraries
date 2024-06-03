@@ -11,10 +11,10 @@ namespace rocRoller
          *
          * | Arch | 1st Inst  | 2nd Inst          | NOPs |
          * | ---- | --------- | ----------------- | ---- |
-         * | 94x  | v_cmpx_*  | v_* read EXEC     | 4    |
-         * | 94x  | v_cmpx_*  | v_readlane_*      | 2    |
-         * | 94x  | v_cmpx_*  | v_readfirstlane_* | 2    |
-         * | 94x  | v_cmpx_*  | v_writelane_*     | 2    |
+         * | 94x  | v_cmpx_*  | v_* read EXEC     | 2    |
+         * | 94x  | v_cmpx_*  | v_readlane_*      | 4    |
+         * | 94x  | v_cmpx_*  | v_readfirstlane_* | 4    |
+         * | 94x  | v_cmpx_*  | v_writelane_*     | 4    |
          * | 94x  | v_cmpx_*  | v_*               | 0    |
          *
          */

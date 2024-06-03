@@ -9,28 +9,28 @@ namespace rocRoller
         /**
          * @brief 94x rules for VALU Trans Writes
          *
-         * | Arch | 1st Inst         | 2nd Inst | NOPs |
-         * | ---- | ---------------- | -------- | ---- |
-         * | 94x  | v_exp_f32        | v_*      | 1    |
-         * | 94x  | v_log_f32        | v_*      | 1    |
-         * | 94x  | v_rcp_f32        | v_*      | 1    |
-         * | 94x  | v_rcp_iflag_f32  | v_*      | 1    |
-         * | 94x  | v_rsq_f32        | v_*      | 1    |
-         * | 94x  | v_rcp_f64        | v_*      | 1    |
-         * | 94x  | v_rsq_f64        | v_*      | 1    |
-         * | 94x  | v_sqrt_f32       | v_*      | 1    |
-         * | 94x  | v_sqrt_f64       | v_*      | 1    |
-         * | 94x  | v_sin_f32        | v_*      | 1    |
-         * | 94x  | v_cos_f32        | v_*      | 1    |
-         * | 94x  | v_rcp_f16        | v_*      | 1    |
-         * | 94x  | v_sqrt_f16       | v_*      | 1    |
-         * | 94x  | v_rsq_f16        | v_*      | 1    |
-         * | 94x  | v_log_f16        | v_*      | 1    |
-         * | 94x  | v_exp_f16        | v_*      | 1    |
-         * | 94x  | v_sin_f16        | v_*      | 1    |
-         * | 94x  | v_cos_f16        | v_*      | 1    |
-         * | 94x  | v_exp_legacy_f32 | v_*      | 1    |
-         * | 94x  | v_log_legacy_f32 | v_*      | 1    |
+         * | Arch | 1st Inst (trans op)  | 2nd Inst (non-trans op)  | NOPs |
+         * | ---- | -------------------- | ------------------------ | ---- |
+         * | 94x  | v_exp_f32            | v_*                      | 1    |
+         * | 94x  | v_log_f32            | v_*                      | 1    |
+         * | 94x  | v_rcp_f32            | v_*                      | 1    |
+         * | 94x  | v_rcp_iflag_f32      | v_*                      | 1    |
+         * | 94x  | v_rsq_f32            | v_*                      | 1    |
+         * | 94x  | v_rcp_f64            | v_*                      | 1    |
+         * | 94x  | v_rsq_f64            | v_*                      | 1    |
+         * | 94x  | v_sqrt_f32           | v_*                      | 1    |
+         * | 94x  | v_sqrt_f64           | v_*                      | 1    |
+         * | 94x  | v_sin_f32            | v_*                      | 1    |
+         * | 94x  | v_cos_f32            | v_*                      | 1    |
+         * | 94x  | v_rcp_f16            | v_*                      | 1    |
+         * | 94x  | v_sqrt_f16           | v_*                      | 1    |
+         * | 94x  | v_rsq_f16            | v_*                      | 1    |
+         * | 94x  | v_log_f16            | v_*                      | 1    |
+         * | 94x  | v_exp_f16            | v_*                      | 1    |
+         * | 94x  | v_sin_f16            | v_*                      | 1    |
+         * | 94x  | v_cos_f16            | v_*                      | 1    |
+         * | 94x  | v_exp_legacy_f32     | v_*                      | 1    |
+         * | 94x  | v_log_legacy_f32     | v_*                      | 1    |
          *
          */
         class VALUTransWrite94x : public WaitStateObserver<VALUTransWrite94x>
