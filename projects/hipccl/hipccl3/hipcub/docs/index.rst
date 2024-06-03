@@ -9,9 +9,11 @@
 hipCUB documentation
 ===========================
 
-Welcome to the hipCUB docs home page! To learn more, see :ref:`what-is-hipcub`
+hipCUB is a thin header-only wrapper library on top of rocPRIM or CUB. It enables developers to port project
+using CUB library to the `HIP <https://github.com/ROCm-Developer-Tools/HIP>`_ layer and to run them
+on AMD hardware. To learn more, see :ref:`what-is-hipcub`
 
-Our documentation is structured as follows:
+The documentation is structured as follows:
 
 .. grid:: 2
 
