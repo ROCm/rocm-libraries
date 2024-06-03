@@ -13,6 +13,8 @@ hipCUB is a thin header-only wrapper library on top of rocPRIM or CUB. It enable
 using CUB library to the `HIP <https://github.com/ROCm-Developer-Tools/HIP>`_ layer and to run them
 on AMD hardware. To learn more, see :ref:`what-is-hipcub`
 
+You can access rocRAND code on our `GitHub repository <https://github.com/ROCm/hipCUB>`_.
+
 The documentation is structured as follows:
 
 .. grid:: 2
