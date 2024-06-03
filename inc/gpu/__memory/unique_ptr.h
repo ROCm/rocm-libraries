@@ -552,10 +552,10 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
               class = typename std::enable_if<std::is_trivially_copyable<_Up>::value &&
                                               std::is_same<deleter_type, gpu::host_delete<element_type[]>>::value>::type>
     __host__ _LIBGPU_INLINE_VISIBILITY unique_ptr(std::unique_ptr<_Up> &&__u, std::size_t __n)
-        : __ptr_(static_cast<pointer>(gpu::malloc(sizeof(element_type[__n]) == 0 ? 1 : sizeof(element_type[__n]))), __value_init_tag()) {
+        : __ptr_(static_cast<pointer>(gpu::malloc((__n * sizeof(element_type)) == 0 ? 1 : (__n * sizeof(element_type)))), __value_init_tag()) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast" // Suppress "old-style-cast" warnings because hipStreamPerThread uses one
-        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(__ptr_.first(), static_cast<pointer>(__u.get()), sizeof(element_type[__n]),
+        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(__ptr_.first(), static_cast<pointer>(__u.get()), __n * sizeof(element_type),
                                             hipMemcpyHostToDevice, hipStreamPerThread));
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hipStreamPerThread));
 #pragma clang diagnostic pop
@@ -574,10 +574,10 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
                                         std::is_same<deleter_type, gpu::host_delete<element_type[]>>::value>::type>
     __host__ _LIBGPU_INLINE_VISIBILITY std::unique_ptr<_Up[]> move_to_host(std::size_t __n) && {
         // Avoid calling any constructor by calling `operator new[]` directly instead of using a new-expression
-        void* __buf = operator new[](sizeof(element_type[__n]));
+        void* __buf = operator new[](__n * sizeof(element_type));
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wold-style-cast" // Suppress "old-style-cast" warnings because hipStreamPerThread uses one
-        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(__buf, __ptr_.first(), sizeof(element_type[__n]), hipMemcpyDeviceToHost, hipStreamPerThread));
+        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(__buf, __ptr_.first(), __n * sizeof(element_type), hipMemcpyDeviceToHost, hipStreamPerThread));
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hipStreamPerThread));
 #pragma clang diagnostic pop
         // Even if we allowed a deleter other than gpu::host_delete, we wouldn't want to invoke it here because we're
@@ -854,7 +854,7 @@ make_unique(std::size_t __n) {
     typedef std::remove_extent_t<_Tp> _Up;
     static_assert(std::is_trivially_default_constructible<_Up>::value,
                   "Host code can't invoke a non-trivial constructor for objects in device memory");
-    void *__buf = gpu::malloc(sizeof(_Up[__n]) == 0 ? 1 : sizeof(_Up[__n]));
+    void *__buf = gpu::malloc((__n * sizeof(_Up)) == 0 ? 1 : (__n * sizeof(_Up)));
     return unique_ptr<_Tp, host_delete<_Tp>>(static_cast<_Up *>(__buf));
 }
 
