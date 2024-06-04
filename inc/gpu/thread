@@ -7,6 +7,7 @@
 #include <iostream>
 #include <cstdint>
 #include <memory>
+#include <atomic>
 
 // TODO: Define a custom assert macro for the GPU that cleans up the thread state before invoking __assert_fail(#expr,
 // __FILE__, __LINE__, __ASSERT_FUNCTION). Maybe do the cleanup work in a function that wraps around __assert_fail?
@@ -40,6 +41,7 @@ enum {
 #else
     NUM_VCORES = 0U,
 #endif
+    CPU_WORK_QUEUE_SIZE = 1024U, // TODO: Make this depend on NUM_VCORES or something.
 };
 extern __device__ uint32_t numVcores;
 
@@ -114,7 +116,7 @@ struct WorkNode_Header {
 
     WorkNode_Header **link_to_self = nullptr; // (link_to_self == nullptr || *link_to_self = this)
     // Enables thread::detach() to copy a worknode into memory the gpu can free on its own.
-    // Can be either nullptr, &workListHead, &currentWorkNode[blockIdx.x], or &(prev->next)
+    // Can be either nullptr, &(prev->next), &workListHead, &currentWorkNode[blockIdx.x], or &cpuWorkQueue[i]
     // Use currentWorkNode[blockIdx.x] = nullptr to indicate we're idle
     // Use link_to_self == nullptr to indicate we're locked?
     WorkNode_Header *next = nullptr; // Must always be device-accessible. Either zero-copy pinned host memory, or device memory
@@ -189,6 +191,10 @@ static __device__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&.
 // TODO: These globals currently prevent us from being a header-only library
 // Maybe use an inline (non-static) __device__ function that returns a pointer to a static local variable instead?
 // E.g. https://stackoverflow.com/questions/51612866/global-variables-in-header-only-library
+
+extern __device__ WorkNode_Header *cpuWorkQueue[CPU_WORK_QUEUE_SIZE];
+extern std::atomic<uint32_t> cpuWorkQueueIndex_push;
+extern __device__ uint32_t cpuWorkQueueIndex_pop;
 
 // TODO: should these be static members of WorkNode_Header?
 extern __device__ WorkNode_Header *workListHead;
@@ -288,17 +294,17 @@ __host__ WorkNode<Callable_t>::WorkNode(uint32_t width, Callable_t &&callable) :
 
 // TODO: many of these might be better as member functions of WorkNode or WorkNode_Header, and we could potentially make
 // a bunch of WorkNode_Header's member variables private
-static inline __device__ void insertWorkNodeAtTail(WorkNode_Header *worknode) {
-    // TODO: use __shfl_up to allow multiple lanes to call insertWorkNodeAtTail at once.
-    WorkNode_Header **currentTail = worknode->link_to_self = lockAndFetchTail();
-    *(worknode->link_to_self) = worknode;
-    if (currentTail != &workListHead) {
-        WorkNode_Header* prev = reinterpret_cast<WorkNode_Header*>(reinterpret_cast<char*>(currentTail) - offsetof(WorkNode_Header, next));
+static inline __device__ void insertWorkNode(WorkNode_Header **location, WorkNode_Header *worknode) {
+    // TODO: use __shfl_up to allow multiple lanes to call insertWorkNode at once.
+    worknode->link_to_self = location;
+    *location = worknode;
+    if (location != &workListHead) {
+        WorkNode_Header* prev = reinterpret_cast<WorkNode_Header*>(reinterpret_cast<char*>(location) - offsetof(WorkNode_Header, next));
         worknode->vthread_id = prev->vthread_id + prev->width;
     } else {
+        // TODO: Is this right?
         worknode->vthread_id = 1;
     }
-    setAndUnlockTail(&(worknode->next));
 }
 
 static inline __device__ void setCurrentWorkNode(WorkNode_Header *node) {
@@ -315,14 +321,34 @@ static inline __device__ void setCurrentWorkNode(WorkNode_Header *node) {
     }
 }
 static inline __device__ WorkNode_Header *popWorkNodeFromHead() {
-    // assert(workListHead != nullptr);
     WorkNode_Header *head = reinterpret_cast<WorkNode_Header *>(atomicAdd(reinterpret_cast<uintptr_t*>(&workListHead), 0));
+    if (head == nullptr)
+        return nullptr;
+    // assert(head->link_to_self == &workListHead);
     workListHead = head->next;
-    setCurrentWorkNode(head);
     if (workListHead != nullptr) {
         workListHead->link_to_self = &workListHead;
     }
     return head;
+}
+
+static inline __device__ WorkNode_Header *popWorkNodeFromCpuQueue() {
+    // TODO: does this need to be an atomic load, or is it enough to mark cpuWorkQueueIndex_pop as volatile?
+    uint32_t index = atomicAdd(&cpuWorkQueueIndex_pop, 0) % CPU_WORK_QUEUE_SIZE;
+    WorkNode_Header *work = nullptr;
+    // Atomic ops are only atomic with respect to the actions of other GPU cores, not the copy engine. In other words,
+    // the copy engine can execute a write in the middle of an atomic op. Thus, if we don't have this 'if' guarding the
+    // atomicExch, it's possible for the atomicExch to load nullptr from cpuWorkQueue[i], the copy engine writes a
+    // non-null value to cpuWorkQueue[i], then the atomicExch over-writes it with null, and finally atomicExch returns
+    // null as if nothing happened.
+    if (reinterpret_cast<WorkNode_Header *>(atomicAdd(reinterpret_cast<uintptr_t *>(&cpuWorkQueue[index]), 0)) != nullptr) {
+        work = reinterpret_cast<WorkNode_Header*>(atomicExch(reinterpret_cast<uintptr_t*>(&cpuWorkQueue[index]), 0));
+    }
+    if (work != nullptr) {
+        // TODO: does this actually need to be an atomicOp, or is it enough to mark cpuWorkQueueIndex_pop as volatile?
+        atomicAdd(&cpuWorkQueueIndex_pop, 1);
+    }
+    return work;
 }
 
 // Returns true if there was work waiting
@@ -331,15 +357,27 @@ static inline __device__ bool invokeNext() {
     __shared__ WorkNode_Header *worknode_s;
     if (threadIdx.x == 0) {
         currentTail = lockAndFetchTail();
-        if (currentTail == &workListHead) {
+        WorkNode_Header *workFromCpu = popWorkNodeFromCpuQueue();
+        WorkNode_Header *workFromMainQueue = popWorkNodeFromHead();
+        if (workListHead == nullptr) {
+            currentTail = &workListHead;
+        }
+
+        if (workFromMainQueue != nullptr) {
+            if (workFromCpu != nullptr) {
+                insertWorkNode(currentTail, workFromCpu);
+            }
+            setCurrentWorkNode(workFromMainQueue);
+            worknode_s = workFromMainQueue;
+        }
+        else if (workFromCpu != nullptr) {
+            setCurrentWorkNode(workFromCpu);
+            worknode_s = workFromCpu;
+        }
+        else {
             // assert(workListHead == nullptr);
             setAndUnlockTail(&workListHead);
             worknode_s = nullptr;
-        } else {
-            worknode_s = popWorkNodeFromHead();
-            if (workListHead == nullptr) {
-                currentTail = &workListHead;
-            }
         }
     }
     __syncthreads();
@@ -415,13 +453,17 @@ static __global__ void threading_main() {
 template <class Callable_t>
 static __global__ void insertWorkNodeFromHost(WorkNode_Header *worknode) {
     worknode->wrapper_fn = wrapper<Callable_t>;
-    insertWorkNodeAtTail(worknode);
+    WorkNode_Header **currentTail = lockAndFetchTail();
+    insertWorkNode(currentTail, worknode);
+    setAndUnlockTail(&(worknode->next));
 }
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcuda-compat" // Suppress "ignored 'inline' attribute on kernel function" warnings
 inline __global__ void insertWorkNodeFromHostV2(WorkNode_Header *worknode) {
-    insertWorkNodeAtTail(worknode);
+    WorkNode_Header **currentTail = lockAndFetchTail();
+    insertWorkNode(currentTail, worknode);
+    setAndUnlockTail(&(worknode->next));
 }
 #pragma clang diagnostic pop
 
@@ -666,7 +708,10 @@ inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_f
     // worknode_d shouldn't result in a strict-aliasing violation.
     worknode_d = reinterpret_cast<WorkNode_Header *>(typed_worknode_ptr);
     // TODO: Should we bother initializing worknodeSize? It's never used in device code...
-    insertWorkNodeAtTail(worknode_d);
+
+    WorkNode_Header **currentTail = lockAndFetchTail();
+    insertWorkNode(currentTail, worknode_d);
+    setAndUnlockTail(&(worknode_d->next));
 #endif // __HIP_DEVICE_COMPILE__
 }
 
