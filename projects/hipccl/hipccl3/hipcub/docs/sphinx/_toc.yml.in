@@ -4,9 +4,9 @@ root: index
 subtrees:
   - entries:
     - file: what-is-hipcub
-  - caption: Reference
+  - caption: API reference
     entries:
-    - file: data-type-support
+    - file: api-reference/data-type-support
     - file: doxygen/html/index
       title: API library
   - caption: About
