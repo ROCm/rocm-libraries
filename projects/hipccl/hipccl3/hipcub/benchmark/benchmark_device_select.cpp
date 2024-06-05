@@ -518,7 +518,7 @@ benchmark::RegisterBenchmark( \
 
 #define CREATE_UNIQUE_BY_KEY_BENCHMARK(K, V, p) \
 benchmark::RegisterBenchmark( \
-    ("unique_by_key<" #K ", "#V", unsigned int>(p = " #p")"), \
+    ("unique_by_key<Key Datatype:" #K ",Value Type:"#V",Selected Output Datatype:unsigned int>(Probability:" #p")"), \
     &run_unique_by_key_benchmark<K, V>, size, stream, p \
 )
 
