@@ -604,8 +604,8 @@ void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmar
 
 #define CREATE_MULTI_RANGE_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS) \
 benchmark::RegisterBenchmark( \
-    (std::string("multi_histogram_range") + "<" #CHANNELS ", " #ACTIVE_CHANNELS ", " #T ">" + \
-        "(" + std::to_string(BINS) + " bins)" \
+    (std::string("multi_histogram_range") + "<Channels:"#CHANNELS ",Active Channels:" #ACTIVE_CHANNELS ",Datatype:" #T ">" + \
+        "(Bin Count:" + std::to_string(BINS) + " bins)" \
     ).c_str(), \
     [=](benchmark::State& state) { \
         run_multi_range_benchmark<T, CHANNELS, ACTIVE_CHANNELS>( \
