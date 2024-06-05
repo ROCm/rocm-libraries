@@ -340,7 +340,7 @@ auto run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 # define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                                \
     benchmark::RegisterBenchmark(                                               \
-        std::string(std::string("block_adjacent_difference<Datatype:" #T)       \
+        (std::string("block_adjacent_difference<Datatype:" #T)       \
             + std::string(",Block Size:" #BS)                                   \
             + std::string(">.SubAlgorithm Name:") + name                        \
             + std::string("<Items Per Thread:" #IPT)                            \

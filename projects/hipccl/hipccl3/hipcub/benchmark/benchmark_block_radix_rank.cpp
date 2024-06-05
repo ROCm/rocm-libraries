@@ -157,12 +157,19 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, KIND, BS, IPT)                                                       \
-    benchmark::RegisterBenchmark(                                                                \
-        (std::string("block_radix_rank<" #T ", " #KIND ", " #BS ", " #IPT ">.") + name).c_str(), \
-        &run_benchmark<T, KIND, BS, IPT>,                                                        \
-        stream,                                                                                  \
-        size)
+#define CREATE_BENCHMARK(T, KIND, BS, IPT)              \
+    benchmark::RegisterBenchmark(                       \
+        (std::string("block_radix_rank<Datatype:" #T    \
+            ",Kind:" #KIND                              \
+            ",Block Size:" #BS                          \
+            ",Items Per Thread:" #IPT                   \
+            ">.") + name                                \
+        ).c_str(),                                      \
+        &run_benchmark<T, KIND, BS, IPT>,               \
+        stream,                                         \
+        size                                            \
+    )
+
 
 // clang-format off
 #define CREATE_BENCHMARK_KINDS(type, block, ipt)                                \
