@@ -303,6 +303,7 @@ int main(int argc, char* argv[])
     hipStream_t     stream = 0; // default
     hipDeviceProp_t devProp;
     int             device_id = 0;
+
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
