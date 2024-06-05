@@ -405,7 +405,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         ); \
         benchmarks.push_back( \
             benchmark::RegisterBenchmark( \
-                (std::string("sort_keys") + "<" #Key ">, descending").c_str(), \
+                (std::string("sort_keys") + "<Key Type:" #Key ">, descending").c_str(), \
                 [=](benchmark::State& state) { run_sort_keys_benchmark<Key, true>(state, stream, size, keys_input); } \
             ) \
         ); \
@@ -422,7 +422,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         ); \
         benchmarks.push_back( \
             benchmark::RegisterBenchmark( \
-                (std::string("sort_pairs") + "<" #Key ", " #Value">, descending").c_str(), \
+                (std::string("sort_pairs") + "<Key Type:" #Key ",Value Type:" #Value">, descending").c_str(), \
                 [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value, true>(state, stream, size, keys_input); } \
             ) \
         ); \
