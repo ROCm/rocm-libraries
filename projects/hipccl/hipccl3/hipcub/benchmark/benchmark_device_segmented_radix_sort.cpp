@@ -427,7 +427,7 @@ benchmark::RegisterBenchmark( \
 
 #define CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(Key, Value, SEGMENTS) \
 benchmark::RegisterBenchmark( \
-    (std::string("sort_pairs") + "<Key Datatype" #Key ",Value Datatype:" #Value ">" + \
+    (std::string("sort_pairs") + "<Key Datatype:" #Key ",Value Datatype:" #Value ">" + \
         "(Segments:~" + std::to_string(SEGMENTS) + " segments), descending" \
     ).c_str(), \
     [=](benchmark::State& state) { \
