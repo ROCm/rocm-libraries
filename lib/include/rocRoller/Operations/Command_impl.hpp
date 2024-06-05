@@ -60,22 +60,22 @@ namespace rocRoller
     }
 
     // Allocate a single command argument by incrementing the most recent offset.
-    inline CommandArgumentPtr Command::allocateArgument(VariableType  variableType,
-                                                        DataDirection direction)
+    inline CommandArgumentPtr Command::allocateArgument(VariableType variableType,
+                                                        Operations::OperationTag const& tag,
+                                                        ArgumentType                    argType,
+                                                        DataDirection                   direction)
     {
-        std::string name = concatenate("user_",
-                                       variableType.dataType,
-                                       "_",
-                                       variableType.pointerType,
-                                       "_",
-                                       m_commandArgs.size());
+        std::string name
+            = concatenate("user_", variableType.dataType, "_", variableType.pointerType, "_", tag);
 
-        return allocateArgument(variableType, direction, name);
+        return allocateArgument(variableType, tag, argType, direction, name);
     }
 
-    inline CommandArgumentPtr Command::allocateArgument(VariableType       variableType,
-                                                        DataDirection      direction,
-                                                        std::string const& name)
+    inline CommandArgumentPtr Command::allocateArgument(VariableType variableType,
+                                                        Operations::OperationTag const& tag,
+                                                        ArgumentType                    argType,
+                                                        DataDirection                   direction,
+                                                        std::string const&              name)
     {
         // TODO Fix argument alignment
         auto info      = DataTypeInfo::Get(variableType.dataType);
@@ -88,6 +88,7 @@ namespace rocRoller
         m_runtimeArgsOffset += variableType.getElementSize();
         m_commandArgs.emplace_back(std::make_shared<CommandArgument>(
             shared_from_this(), variableType, old_offset, direction, name));
+        m_argOffsetMap[std::make_tuple(tag, argType, -1)] = old_offset;
         return m_commandArgs[m_commandArgs.size() - 1];
     }
 
@@ -97,17 +98,24 @@ namespace rocRoller
     }
 
     inline std::vector<CommandArgumentPtr>
-        Command::allocateArgumentVector(DataType dataType, int length, DataDirection direction)
+        Command::allocateArgumentVector(DataType                        dataType,
+                                        int                             length,
+                                        Operations::OperationTag const& tag,
+                                        ArgumentType                    argType,
+                                        DataDirection                   direction)
     {
         std::string name = concatenate("user", m_commandArgs.size());
-        return allocateArgumentVector(dataType, length, direction, name);
+        return allocateArgumentVector(dataType, length, tag, argType, direction, name);
     }
 
     // Allocate a vector of command arguments by incrementing the most recent offset.
-    inline std::vector<CommandArgumentPtr> Command::allocateArgumentVector(DataType      dataType,
-                                                                           int           length,
-                                                                           DataDirection direction,
-                                                                           std::string const& name)
+    inline std::vector<CommandArgumentPtr>
+        Command::allocateArgumentVector(DataType                        dataType,
+                                        int                             length,
+                                        Operations::OperationTag const& tag,
+                                        ArgumentType                    argType,
+                                        DataDirection                   direction,
+                                        std::string const&              name)
     {
         std::vector<CommandArgumentPtr> args;
         for(int i = 0; i < length; i++)
@@ -119,6 +127,7 @@ namespace rocRoller
                                                   direction,
                                                   concatenate(name, "_", i)));
             args.push_back(m_commandArgs[m_commandArgs.size() - 1]);
+            m_argOffsetMap[std::make_tuple(tag, argType, i)] = m_runtimeArgsOffset;
             m_runtimeArgsOffset += DataTypeInfo::Get(dataType).elementSize;
         }
 
@@ -158,6 +167,12 @@ namespace rocRoller
         }
 
         return result;
+    }
+
+    inline CommandArguments Command::createArguments() const
+    {
+        auto argOffsetMapPtr = std::make_shared<const ArgumentOffsetMap>(m_argOffsetMap);
+        return CommandArguments(argOffsetMapPtr, m_runtimeArgsOffset);
     }
 
     inline std::shared_ptr<Operations::Operation>

@@ -13,6 +13,6 @@ namespace rocRoller
          * Function that's designed to be customized to visualize the relationship
          * between different graph dimensions and the memory locations accessed.
          */
-        void visualize(CommandPtr command, CommandKernel& kc, KernelArguments const& commandArgs);
+        void visualize(CommandPtr command, CommandKernel& kc, CommandArguments const& commandArgs);
     }
 }

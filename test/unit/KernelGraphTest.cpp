@@ -1554,18 +1554,19 @@ namespace KernelGraphTest
         ASSERT_THAT(hipMemcpy(d_alpha.get(), &alpha, 1 * sizeof(float), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("d_a", d_a.get());
-        runtimeArgs.append("d_a_limit", nx);
-        runtimeArgs.append("d_a_size", nx);
-        runtimeArgs.append("d_a_stride", (size_t)1);
-        runtimeArgs.append("alpha", d_alpha.get());
-        runtimeArgs.append("d_b", d_b.get());
-        runtimeArgs.append("d_b_limit", nx);
-        runtimeArgs.append("d_b_size", nx);
-        runtimeArgs.append("d_b_stride", (size_t)1);
+        CommandArguments commandArgs = command->createArguments();
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandArgs.setArgument(xTensorTag, ArgumentType::Value, d_a.get());
+        commandArgs.setArgument(xTensorTag, ArgumentType::Limit, nx);
+        commandArgs.setArgument(xTensorTag, ArgumentType::Size, 0, nx);
+        commandArgs.setArgument(xTensorTag, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(alphaScalarTag, ArgumentType::Value, d_alpha.get());
+        commandArgs.setArgument(reluTensorTag, ArgumentType::Value, d_b.get());
+        commandArgs.setArgument(reluTensorTag, ArgumentType::Limit, nx);
+        commandArgs.setArgument(reluTensorTag, ArgumentType::Size, 0, nx);
+        commandArgs.setArgument(reluTensorTag, ArgumentType::Stride, 0, (size_t)1);
+
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * sizeof(float), hipMemcpyDefault),
                     HasHipSuccess(0));
@@ -1611,17 +1612,18 @@ namespace KernelGraphTest
 
         std::vector<int> r(nx), x(nx);
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("d_a", d_a.get());
-        runtimeArgs.append("d_a_limit", nx);
-        runtimeArgs.append("d_a_size", nx);
-        runtimeArgs.append("d_a_stride", (size_t)1);
-        runtimeArgs.append("d_b", d_b.get());
-        runtimeArgs.append("d_b_limit", nx);
-        runtimeArgs.append("d_b_size", nx);
-        runtimeArgs.append("d_b_stride", (size_t)1);
+        CommandArguments commandArgs = command->createArguments();
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
+        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, nx);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, nx);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
+        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, nx);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, nx);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
+
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * sizeof(int), hipMemcpyDefault),
                     HasHipSuccess(0));
@@ -1800,10 +1802,12 @@ namespace KernelGraphTest
         VariableType doubleVal{DataType::Double, PointerType::Value};
         auto         command = std::make_shared<Command>();
 
-        auto a = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
-        auto b = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto aTag = command->allocateTag();
+        auto a    = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value));
+        auto bTag = command->allocateTag();
+        auto b    = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value));
 
         m_context->kernel()->addCommandArguments(command->getArguments());
 

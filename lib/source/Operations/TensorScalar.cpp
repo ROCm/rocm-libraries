@@ -77,15 +77,28 @@ namespace rocRoller
                 // update DataDirection
                 m_pointer
                     = ptr->allocateArgument({m_variableType.dataType, PointerType::PointerGlobal},
+                                            m_tag,
+                                            ArgumentType::Value,
                                             DataDirection::ReadWrite,
                                             base + "_pointer");
 
-                m_extent = ptr->allocateArgument(
-                    DataType::Int64, DataDirection::ReadOnly, base + "_extent");
-                m_sizes = ptr->allocateArgumentVector(
-                    DataType::Int64, m_numDims, DataDirection::ReadOnly, base + "_size");
-                m_strides = ptr->allocateArgumentVector(
-                    DataType::Int64, m_numDims, DataDirection::ReadOnly, base + "_stride");
+                m_extent  = ptr->allocateArgument(DataType::Int64,
+                                                 m_tag,
+                                                 ArgumentType::Limit,
+                                                 DataDirection::ReadOnly,
+                                                 base + "_extent");
+                m_sizes   = ptr->allocateArgumentVector(DataType::Int64,
+                                                      m_numDims,
+                                                      m_tag,
+                                                      ArgumentType::Size,
+                                                      DataDirection::ReadOnly,
+                                                      base + "_size");
+                m_strides = ptr->allocateArgumentVector(DataType::Int64,
+                                                        m_numDims,
+                                                        m_tag,
+                                                        ArgumentType::Stride,
+                                                        DataDirection::ReadOnly,
+                                                        base + "_stride");
             }
         }
 
@@ -125,7 +138,8 @@ namespace rocRoller
         {
             if(auto ptr = m_command.lock())
             {
-                m_pointer = ptr->allocateArgument(m_variableType, DataDirection::ReadOnly);
+                m_pointer = ptr->allocateArgument(
+                    m_variableType, m_tag, ArgumentType::Value, DataDirection::ReadOnly);
             }
         }
 

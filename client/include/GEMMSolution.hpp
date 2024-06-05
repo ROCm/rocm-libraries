@@ -1,6 +1,7 @@
 #pragma once
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelOptions.hpp>
+#include <rocRoller/Operations/CommandArguments.hpp>
 
 #include "BenchmarkSolution.hpp"
 #include "GEMMParameters.hpp"
@@ -62,8 +63,8 @@ namespace rocRoller
                     return {isCorrect, rnorm};
                 }
 
-                BenchmarkResults benchmark(RunParameters const&       runParams,
-                                           rocRoller::KernelArguments runtimeArgs)
+                BenchmarkResults benchmark(RunParameters const& runParams,
+                                           CommandArguments     runtimeArgs)
                 {
                     BenchmarkResults result;
 

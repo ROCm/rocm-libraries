@@ -323,9 +323,12 @@ amdhsa.kernels:
         VariableType floatVal{DataType::Float, PointerType::Value};
         VariableType uintVal{DataType::UInt32, PointerType::Value};
 
-        auto ptr_arg  = command->allocateArgument(floatPtr);
-        auto val_arg  = command->allocateArgument(floatVal);
-        auto size_arg = command->allocateArgument(uintVal);
+        auto ptrTag   = command->allocateTag();
+        auto ptr_arg  = command->allocateArgument(floatPtr, ptrTag, ArgumentType::Value);
+        auto valTag   = command->allocateTag();
+        auto val_arg  = command->allocateArgument(floatVal, valTag, ArgumentType::Value);
+        auto sizeTag  = command->allocateTag();
+        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
 
         auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
         auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
@@ -387,12 +390,13 @@ amdhsa.kernels:
 
         ASSERT_THAT(hipMemset(ptr.get(), 0, sizeof(float)), HasHipSuccess(0));
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("ptr", ptr.get());
-        runtimeArgs.append("val", val);
-        runtimeArgs.append("size", size);
+        CommandArguments commandArgs = command->createArguments();
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandArgs.setArgument(ptrTag, ArgumentType::Value, ptr.get());
+        commandArgs.setArgument(valTag, ArgumentType::Value, val);
+        commandArgs.setArgument(sizeTag, ArgumentType::Limit, size);
+
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         float resultValue = 0.0f;
         ASSERT_THAT(hipMemcpy(&resultValue, ptr.get(), sizeof(float), hipMemcpyDefault),

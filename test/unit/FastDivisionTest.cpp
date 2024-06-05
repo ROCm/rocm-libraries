@@ -31,8 +31,9 @@ namespace FastDivisionTest
     {
         auto command = std::make_shared<Command>();
 
-        auto a = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto aTag = command->allocateTag();
+        auto a    = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value));
 
         auto expr      = a / Expression::literal(8u);
         auto expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
@@ -88,11 +89,13 @@ namespace FastDivisionTest
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::UInt32, 1);
         auto a_unsigned = reg2->expression();
 
-        auto b_signed = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto bSignedTag = command->allocateTag();
+        auto b_signed   = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, bSignedTag, ArgumentType::Value));
 
-        auto b_unsigned = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::UInt32, PointerType::Value}));
+        auto bUnsignedTag = command->allocateTag();
+        auto b_unsigned   = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::UInt32, PointerType::Value}, bUnsignedTag, ArgumentType::Value));
 
         auto expr      = a / b_signed;
         auto expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
@@ -118,8 +121,9 @@ namespace FastDivisionTest
     {
         auto command = std::make_shared<Command>();
 
-        auto a = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto aTag = command->allocateTag();
+        auto a    = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value));
 
         auto expr      = a % Expression::literal(8u);
         auto expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
@@ -178,11 +182,13 @@ namespace FastDivisionTest
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::UInt32, 1);
         auto a_unsigned = reg2->expression();
 
-        auto b_signed = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto bSignedTag = command->allocateTag();
+        auto b_signed   = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, bSignedTag, ArgumentType::Value));
 
-        auto b_unsigned = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::UInt32, PointerType::Value}));
+        auto bUnsignedTag = command->allocateTag();
+        auto b_unsigned   = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::UInt32, PointerType::Value}, bUnsignedTag, ArgumentType::Value));
 
         auto        expr      = a % b_signed;
         auto        expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
@@ -262,10 +268,15 @@ namespace FastDivisionTest
 
             auto infoResult = DataTypeInfo::Get(dataTypeResult);
 
-            auto result_arg
-                = command->allocateArgument({dataTypeResult, PointerType::PointerGlobal});
-            auto a_arg = command->allocateArgument({dataTypeA, PointerType::Value});
-            auto b_arg = command->allocateArgument({dataTypeB, PointerType::Value});
+            auto resultTag  = command->allocateTag();
+            auto result_arg = command->allocateArgument(
+                {dataTypeResult, PointerType::PointerGlobal}, resultTag, ArgumentType::Value);
+            auto aTag  = command->allocateTag();
+            auto a_arg = command->allocateArgument(
+                {dataTypeA, PointerType::Value}, aTag, ArgumentType::Value);
+            auto bTag  = command->allocateTag();
+            auto b_arg = command->allocateArgument(
+                {dataTypeB, PointerType::Value}, bTag, ArgumentType::Value);
 
             auto result_exp = std::make_shared<Expression::Expression>(result_arg);
 
@@ -375,19 +386,20 @@ namespace FastDivisionTest
                     if(b == 0)
                         continue;
 
-                    KernelArguments runtimeArgs;
-                    runtimeArgs.append("result", d_result.get());
-                    runtimeArgs.append("a", a);
-                    runtimeArgs.append("b", b);
+                    CommandArguments commandArgs = command->createArguments();
+
+                    commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
+                    commandArgs.setArgument(aTag, ArgumentType::Value, a);
+                    commandArgs.setArgument(bTag, ArgumentType::Value, b);
 
                     if(dataTypeB == DataType::UInt32 && b == 1)
                     {
-                        EXPECT_THROW(commandKernel.launchKernel(runtimeArgs.runtimeArguments()),
+                        EXPECT_THROW(commandKernel.launchKernel(commandArgs.runtimeArguments()),
                                      FatalError);
                     }
                     else
                     {
-                        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+                        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
                         R result;
                         ASSERT_THAT(
@@ -450,8 +462,12 @@ namespace FastDivisionTest
 
             auto command = std::make_shared<Command>();
 
-            auto result_arg = command->allocateArgument({dataTypeA, PointerType::PointerGlobal});
-            auto a_arg      = command->allocateArgument({dataTypeA, PointerType::Value});
+            auto resultTag  = command->allocateTag();
+            auto result_arg = command->allocateArgument(
+                {dataTypeA, PointerType::PointerGlobal}, resultTag, ArgumentType::Value);
+            auto aTag  = command->allocateTag();
+            auto a_arg = command->allocateArgument(
+                {dataTypeA, PointerType::Value}, aTag, ArgumentType::Value);
 
             auto result_exp = std::make_shared<Expression::Expression>(result_arg);
             auto a_exp      = std::make_shared<Expression::Expression>(a_arg);
@@ -522,11 +538,12 @@ namespace FastDivisionTest
 
             for(A a : numerators)
             {
-                KernelArguments runtimeArgs;
-                runtimeArgs.append("result", d_result.get());
-                runtimeArgs.append("a", a);
+                CommandArguments commandArgs = command->createArguments();
 
-                commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+                commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
+                commandArgs.setArgument(aTag, ArgumentType::Value, a);
+
+                commandKernel.launchKernel(commandArgs.runtimeArguments());
 
                 A result;
                 ASSERT_THAT(hipMemcpy(&result, d_result.get(), sizeof(A), hipMemcpyDefault),

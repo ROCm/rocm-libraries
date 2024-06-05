@@ -64,13 +64,19 @@ namespace rocRollerTest
         VariableType floatVal{DataType::Float, PointerType::Value};
         VariableType uintVal{DataType::UInt32, PointerType::Value};
 
-        auto ptr_arg  = command->allocateArgument(floatPtr);
-        auto val_arg  = command->allocateArgument(floatVal);
-        auto size_arg = command->allocateArgument(uintVal);
+        auto ptrTag   = command->allocateTag();
+        auto ptr_arg  = command->allocateArgument(floatPtr, ptrTag, ArgumentType::Value);
+        auto valTag   = command->allocateTag();
+        auto val_arg  = command->allocateArgument(floatVal, valTag, ArgumentType::Value);
+        auto sizeTag  = command->allocateTag();
+        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
 
-        auto ptr_arg2  = command->allocateArgument(floatPtr);
-        auto val_arg2  = command->allocateArgument(floatVal);
-        auto size_arg2 = command->allocateArgument(uintVal);
+        auto ptr2Tag   = command->allocateTag();
+        auto ptr_arg2  = command->allocateArgument(floatPtr, ptr2Tag, ArgumentType::Value);
+        auto val2Tag   = command->allocateTag();
+        auto val_arg2  = command->allocateArgument(floatVal, val2Tag, ArgumentType::Value);
+        auto size2Tag  = command->allocateTag();
+        auto size_arg2 = command->allocateArgument(uintVal, size2Tag, ArgumentType::Limit);
 
         auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
         auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
@@ -184,17 +190,17 @@ namespace rocRollerTest
         ASSERT_THAT(hipMemset(ptr.get(), 0, sizeof(float)), HasHipSuccess(0));
         ASSERT_THAT(hipMemset(ptr2.get(), 0, sizeof(float)), HasHipSuccess(0));
 
-        KernelArguments runtimeArgs;
+        CommandArguments commandArgs = command->createArguments();
 
-        runtimeArgs.append("ptr1", ptr.get());
-        runtimeArgs.append("val1", val);
-        runtimeArgs.append("size1", size);
+        commandArgs.setArgument(ptrTag, ArgumentType::Value, ptr.get());
+        commandArgs.setArgument(valTag, ArgumentType::Value, val);
+        commandArgs.setArgument(sizeTag, ArgumentType::Limit, size);
 
-        runtimeArgs.append("ptr2", ptr2.get());
-        runtimeArgs.append("val2", val2);
-        runtimeArgs.append("size2", size2);
+        commandArgs.setArgument(ptr2Tag, ArgumentType::Value, ptr2.get());
+        commandArgs.setArgument(val2Tag, ArgumentType::Value, val2);
+        commandArgs.setArgument(size2Tag, ArgumentType::Limit, size2);
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         float resultValue1 = 0.0f;
         float resultValue2 = 0.0f;
@@ -223,9 +229,12 @@ namespace rocRollerTest
         VariableType intVal{DataType::Int32, PointerType::Value};
         VariableType uintVal{DataType::UInt32, PointerType::Value};
 
-        auto ptr_arg  = command->allocateArgument(intPtr);
-        auto val_arg  = command->allocateArgument(intVal);
-        auto size_arg = command->allocateArgument(uintVal);
+        auto ptrTag   = command->allocateTag();
+        auto ptr_arg  = command->allocateArgument(intPtr, ptrTag, ArgumentType::Value);
+        auto valTag   = command->allocateTag();
+        auto val_arg  = command->allocateArgument(intVal, valTag, ArgumentType::Value);
+        auto sizeTag  = command->allocateTag();
+        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
 
         auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
         auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
@@ -326,12 +335,12 @@ namespace rocRollerTest
 
         ASSERT_THAT(hipMemset(h_ptr.get(), 0, sizeof(int)), HasHipSuccess(0));
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("ptr", h_ptr.get());
-        runtimeArgs.append("val", h_val);
-        runtimeArgs.append("size", h_size);
+        CommandArguments commandArgs = command->createArguments();
+        commandArgs.setArgument(ptrTag, ArgumentType::Value, h_ptr.get());
+        commandArgs.setArgument(valTag, ArgumentType::Value, h_val);
+        commandArgs.setArgument(sizeTag, ArgumentType::Limit, h_size);
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         int resultValue = 0;
         ASSERT_THAT(hipMemcpy(&resultValue, h_ptr.get(), sizeof(int), hipMemcpyDefault),
@@ -352,9 +361,13 @@ namespace rocRollerTest
         VariableType UInt64Value(DataType::UInt64, PointerType::Value);
         VariableType Int64Pointer(DataType::Int64, PointerType::PointerGlobal);
 
-        auto result_exp = command->allocateArgument(Int64Pointer)->expression();
-        auto a_exp      = command->allocateArgument(Int64Value)->expression();
-        auto b_exp      = command->allocateArgument(Int64Value)->expression();
+        auto resultTag = command->allocateTag();
+        auto result_exp
+            = command->allocateArgument(Int64Pointer, resultTag, ArgumentType::Value)->expression();
+        auto aTag  = command->allocateTag();
+        auto a_exp = command->allocateArgument(Int64Value, aTag, ArgumentType::Value)->expression();
+        auto bTag  = command->allocateTag();
+        auto b_exp = command->allocateArgument(Int64Value, bTag, ArgumentType::Value)->expression();
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -423,12 +436,12 @@ namespace rocRollerTest
 
         CommandKernel commandKernel(m_context);
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("result", d_result.get());
-        runtimeArgs.append("a", 0x11111111FFFFFFFF);
-        runtimeArgs.append("b", 0x1111111111111111);
+        CommandArguments commandArgs = command->createArguments();
+        commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
+        commandArgs.setArgument(aTag, ArgumentType::Value, 0x11111111FFFFFFFF);
+        commandArgs.setArgument(bTag, ArgumentType::Value, 0x1111111111111111);
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(&result, d_result.get(), sizeof(int64_t), hipMemcpyDefault),
                     HasHipSuccess(0));
@@ -451,9 +464,12 @@ namespace rocRollerTest
         VariableType intVal{DataType::Int32, PointerType::Value};
         VariableType uintVal{DataType::UInt32, PointerType::Value};
 
-        auto ptr_arg  = command->allocateArgument(intPtr);
-        auto val_arg  = command->allocateArgument(intVal);
-        auto size_arg = command->allocateArgument(uintVal);
+        auto ptrTag   = command->allocateTag();
+        auto ptr_arg  = command->allocateArgument(intPtr, ptrTag, ArgumentType::Value);
+        auto valTag   = command->allocateTag();
+        auto val_arg  = command->allocateArgument(intVal, valTag, ArgumentType::Value);
+        auto sizeTag  = command->allocateTag();
+        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
 
         auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
         auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
@@ -581,12 +597,12 @@ namespace rocRollerTest
 
         ASSERT_THAT(hipMemset(h_ptr.get(), 0, sizeof(int)), HasHipSuccess(0));
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("ptr", h_ptr.get());
-        runtimeArgs.append("val", h_val);
-        runtimeArgs.append("size", h_size);
+        CommandArguments commandArgs = command->createArguments();
+        commandArgs.setArgument(ptrTag, ArgumentType::Value, h_ptr.get());
+        commandArgs.setArgument(valTag, ArgumentType::Value, h_val);
+        commandArgs.setArgument(sizeTag, ArgumentType::Limit, h_size);
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         int resultValue = 0;
         ASSERT_THAT(hipMemcpy(&resultValue, h_ptr.get(), sizeof(int), hipMemcpyDefault),

@@ -282,8 +282,11 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
         if(m_context->kernelOptions().streamK)
         {
-            auto numCUsArg
-                = m_command->allocateArgument(DataType::UInt32, DataDirection::ReadOnly, "numCUs");
+            auto numCUsArg  = m_command->allocateArgument(DataType::UInt32,
+                                                         m_command->getNextTag(),
+                                                         ArgumentType::Value,
+                                                         DataDirection::ReadOnly,
+                                                         "numCUs");
             auto numCUsExpr = std::make_shared<Expression::Expression>(numCUsArg);
 
             transforms.push_back(std::make_shared<KernelGraph::AddStreamK>(

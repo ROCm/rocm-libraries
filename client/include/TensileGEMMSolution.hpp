@@ -15,6 +15,15 @@ namespace rocRoller
             template <typename A, typename B, typename C, typename D>
             class TensileGEMMSolution : public GEMMSolution<A, B, C, D>
             {
+                Operations::OperationTag m_tagD, m_tagA, m_tagB, m_tagC;
+                Operations::OperationTag m_offsetDTag, m_offsetATag, m_offsetBTag, m_offsetCTag;
+                Operations::OperationTag m_alphaTag, m_betaTag;
+                Operations::OperationTag m_sizesFree0Tag, m_sizesFree1Tag, m_sizesFree2Tag,
+                    m_sizesSum0Tag;
+                Operations::OperationTag m_origStaggerUIterTag, m_numWorkGroups0Tag,
+                    m_numWorkGroups1Tag, m_numFullBlocksTag, m_wgmRemainder1Tag,
+                    m_magicNumberWgmRemainder1Tag, m_paddingTag;
+
             public:
                 TensileGEMMSolution(SolutionParameters const& solutionParams);
 
@@ -77,56 +86,108 @@ namespace rocRoller
                     VariableType ulongVal{DataType::UInt64, PointerType::Value};
                     VariableType intVal{DataType::Int32, PointerType::Value};
 
-                    auto               sizeC_arg   = command->allocateArgument(ulongVal);
-                    auto               sizeA_arg   = command->allocateArgument(ulongVal);
-                    auto               sizeB_arg   = command->allocateArgument(ulongVal);
-                    auto               D_arg       = command->allocateArgument(floatPtr);
-                    auto               C_arg       = command->allocateArgument(floatPtr);
-                    auto               A_arg       = command->allocateArgument(floatPtr);
-                    auto               B_arg       = command->allocateArgument(floatPtr);
-                    auto               OffsetD_arg = command->allocateArgument(ulongVal);
-                    auto               OffsetC_arg = command->allocateArgument(ulongVal);
-                    auto               OffsetA_arg = command->allocateArgument(ulongVal);
-                    auto               OffsetB_arg = command->allocateArgument(ulongVal);
-                    auto               alpha_arg   = command->allocateArgument(floatVal);
-                    CommandArgumentPtr beta_arg;
-                    beta_arg                          = command->allocateArgument(floatVal);
-                    auto strideD0_arg                 = command->allocateArgument(uintVal);
-                    auto strideD1_arg                 = command->allocateArgument(uintVal);
-                    auto strideC0_arg                 = command->allocateArgument(uintVal);
-                    auto strideC1_arg                 = command->allocateArgument(uintVal);
-                    auto strideA0_arg                 = command->allocateArgument(uintVal);
-                    auto strideA1_arg                 = command->allocateArgument(uintVal);
-                    auto strideB0_arg                 = command->allocateArgument(uintVal);
-                    auto strideB1_arg                 = command->allocateArgument(uintVal);
-                    auto SizesFree0_arg               = command->allocateArgument(uintVal);
-                    auto SizesFree1_arg               = command->allocateArgument(uintVal);
-                    auto SizesFree2_arg               = command->allocateArgument(uintVal);
-                    auto SizesSum0_arg                = command->allocateArgument(uintVal);
-                    auto OrigStaggerUIter_arg         = command->allocateArgument(intVal);
-                    auto NumWorkGroups0_arg           = command->allocateArgument(uintVal);
-                    auto NumWorkGroups1_arg           = command->allocateArgument(uintVal);
-                    auto NumFullBlocks_arg            = command->allocateArgument(uintVal);
-                    auto WgmRemainder1_arg            = command->allocateArgument(uintVal);
-                    auto MagicNumberWgmRemainder1_arg = command->allocateArgument(uintVal);
-                    auto padding_arg                  = command->allocateArgument(uintVal);
+                    m_tagD    = command->allocateTag();
+                    auto DArg = command->allocateArgument(floatPtr, m_tagD, ArgumentType::Value);
+                    auto DExp = std::make_shared<Expression::Expression>(DArg);
+                    auto strideDArg = command->allocateArgumentVector(
+                        uintVal.dataType, 2, m_tagD, ArgumentType::Stride);
+                    auto strideD0Exp = std::make_shared<Expression::Expression>(strideDArg[0]);
+                    auto strideD1Exp = std::make_shared<Expression::Expression>(strideDArg[1]);
 
-                    auto sizeC_exp      = std::make_shared<Expression::Expression>(sizeC_arg);
-                    auto sizeA_exp      = std::make_shared<Expression::Expression>(sizeA_arg);
-                    auto sizeB_exp      = std::make_shared<Expression::Expression>(sizeB_arg);
-                    auto D_exp          = std::make_shared<Expression::Expression>(D_arg);
-                    auto C_exp          = std::make_shared<Expression::Expression>(C_arg);
-                    auto A_exp          = std::make_shared<Expression::Expression>(A_arg);
-                    auto B_exp          = std::make_shared<Expression::Expression>(B_arg);
-                    auto alpha_exp      = std::make_shared<Expression::Expression>(alpha_arg);
-                    auto strideD0_exp   = std::make_shared<Expression::Expression>(strideD0_arg);
-                    auto strideD1_exp   = std::make_shared<Expression::Expression>(strideD1_arg);
-                    auto strideC0_exp   = std::make_shared<Expression::Expression>(strideC0_arg);
-                    auto strideC1_exp   = std::make_shared<Expression::Expression>(strideC1_arg);
-                    auto strideA0_exp   = std::make_shared<Expression::Expression>(strideA0_arg);
-                    auto strideA1_exp   = std::make_shared<Expression::Expression>(strideA1_arg);
-                    auto strideB0_exp   = std::make_shared<Expression::Expression>(strideB0_arg);
-                    auto strideB1_exp   = std::make_shared<Expression::Expression>(strideB1_arg);
+                    m_tagC    = command->allocateTag();
+                    auto CArg = command->allocateArgument(floatPtr, m_tagC, ArgumentType::Value);
+                    auto CExp = std::make_shared<Expression::Expression>(CArg);
+                    auto limitCArg
+                        = command->allocateArgument(ulongVal, m_tagC, ArgumentType::Limit);
+                    auto limitCExp  = std::make_shared<Expression::Expression>(limitCArg);
+                    auto strideCArg = command->allocateArgumentVector(
+                        uintVal.dataType, 2, m_tagC, ArgumentType::Stride);
+                    auto strideC0Exp = std::make_shared<Expression::Expression>(strideCArg[0]);
+                    auto strideC1Exp = std::make_shared<Expression::Expression>(strideCArg[1]);
+
+                    m_tagA    = command->allocateTag();
+                    auto AArg = command->allocateArgument(floatPtr, m_tagA, ArgumentType::Value);
+                    auto AExp = std::make_shared<Expression::Expression>(AArg);
+                    auto limitAArg
+                        = command->allocateArgument(ulongVal, m_tagA, ArgumentType::Limit);
+                    auto limitAExp  = std::make_shared<Expression::Expression>(limitAArg);
+                    auto strideAArg = command->allocateArgumentVector(
+                        uintVal.dataType, 2, m_tagA, ArgumentType::Stride);
+                    auto strideA0Exp = std::make_shared<Expression::Expression>(strideAArg[0]);
+                    auto strideA1Exp = std::make_shared<Expression::Expression>(strideAArg[1]);
+
+                    m_tagB    = command->allocateTag();
+                    auto BArg = command->allocateArgument(floatPtr, m_tagB, ArgumentType::Value);
+                    auto BExp = std::make_shared<Expression::Expression>(BArg);
+                    auto limitBArg
+                        = command->allocateArgument(ulongVal, m_tagB, ArgumentType::Limit);
+                    auto limitBExp  = std::make_shared<Expression::Expression>(limitBArg);
+                    auto strideBArg = command->allocateArgumentVector(
+                        uintVal.dataType, 2, m_tagB, ArgumentType::Stride);
+                    auto strideB0Exp = std::make_shared<Expression::Expression>(strideBArg[0]);
+                    auto strideB1Exp = std::make_shared<Expression::Expression>(strideBArg[1]);
+
+                    m_offsetDTag = command->allocateTag();
+                    auto offsetDArg
+                        = command->allocateArgument(ulongVal, m_offsetDTag, ArgumentType::Value);
+                    auto offsetDExp = std::make_shared<Expression::Expression>(offsetDArg);
+                    m_offsetCTag    = command->allocateTag();
+                    auto offsetCArg
+                        = command->allocateArgument(ulongVal, m_offsetCTag, ArgumentType::Value);
+                    auto offsetCExp = std::make_shared<Expression::Expression>(offsetCArg);
+                    m_offsetATag    = command->allocateTag();
+                    auto offsetAArg
+                        = command->allocateArgument(ulongVal, m_offsetATag, ArgumentType::Value);
+                    auto offsetAExp = std::make_shared<Expression::Expression>(offsetAArg);
+                    m_offsetBTag    = command->allocateTag();
+                    auto offsetBArg
+                        = command->allocateArgument(ulongVal, m_offsetBTag, ArgumentType::Value);
+                    auto offsetBExp = std::make_shared<Expression::Expression>(offsetBArg);
+
+                    m_alphaTag = command->allocateTag();
+                    auto alphaArg
+                        = command->allocateArgument(floatVal, m_alphaTag, ArgumentType::Value);
+                    auto alphaExp = std::make_shared<Expression::Expression>(alphaArg);
+                    m_betaTag     = command->allocateTag();
+                    auto betaArg
+                        = command->allocateArgument(floatVal, m_betaTag, ArgumentType::Value);
+                    auto betaExp = std::make_shared<Expression::Expression>(betaArg);
+
+                    m_sizesFree0Tag = command->allocateTag();
+                    auto SizesFree0_arg
+                        = command->allocateArgument(uintVal, m_sizesFree0Tag, ArgumentType::Size);
+                    m_sizesFree1Tag = command->allocateTag();
+                    auto SizesFree1_arg
+                        = command->allocateArgument(uintVal, m_sizesFree1Tag, ArgumentType::Size);
+                    m_sizesFree2Tag = command->allocateTag();
+                    auto SizesFree2_arg
+                        = command->allocateArgument(uintVal, m_sizesFree2Tag, ArgumentType::Size);
+                    m_sizesSum0Tag = command->allocateTag();
+                    auto SizesSum0_arg
+                        = command->allocateArgument(uintVal, m_sizesSum0Tag, ArgumentType::Size);
+
+                    m_origStaggerUIterTag     = command->allocateTag();
+                    auto OrigStaggerUIter_arg = command->allocateArgument(
+                        intVal, m_origStaggerUIterTag, ArgumentType::Value);
+                    m_numWorkGroups0Tag     = command->allocateTag();
+                    auto NumWorkGroups0_arg = command->allocateArgument(
+                        uintVal, m_numWorkGroups0Tag, ArgumentType::Value);
+                    m_numWorkGroups1Tag     = command->allocateTag();
+                    auto NumWorkGroups1_arg = command->allocateArgument(
+                        uintVal, m_numWorkGroups1Tag, ArgumentType::Value);
+                    m_numFullBlocksTag     = command->allocateTag();
+                    auto NumFullBlocks_arg = command->allocateArgument(
+                        uintVal, m_numFullBlocksTag, ArgumentType::Value);
+                    m_wgmRemainder1Tag     = command->allocateTag();
+                    auto WgmRemainder1_arg = command->allocateArgument(
+                        uintVal, m_wgmRemainder1Tag, ArgumentType::Value);
+                    m_magicNumberWgmRemainder1Tag     = command->allocateTag();
+                    auto MagicNumberWgmRemainder1_arg = command->allocateArgument(
+                        uintVal, m_magicNumberWgmRemainder1Tag, ArgumentType::Value);
+                    m_paddingTag = command->allocateTag();
+                    auto padding_arg
+                        = command->allocateArgument(uintVal, m_paddingTag, ArgumentType::Value);
+
                     auto SizesFree0_exp = std::make_shared<Expression::Expression>(SizesFree0_arg);
                     auto SizesFree1_exp = std::make_shared<Expression::Expression>(SizesFree1_arg);
                     auto SizesFree2_exp = std::make_shared<Expression::Expression>(SizesFree2_arg);
@@ -143,10 +204,6 @@ namespace rocRoller
                         = std::make_shared<Expression::Expression>(WgmRemainder1_arg);
                     auto MagicNumberWgmRemainder1_exp
                         = std::make_shared<Expression::Expression>(MagicNumberWgmRemainder1_arg);
-                    auto OffsetD_exp = std::make_shared<Expression::Expression>(OffsetD_arg);
-                    auto OffsetC_exp = std::make_shared<Expression::Expression>(OffsetC_arg);
-                    auto OffsetA_exp = std::make_shared<Expression::Expression>(OffsetA_arg);
-                    auto OffsetB_exp = std::make_shared<Expression::Expression>(OffsetB_arg);
                     auto padding_exp = std::make_shared<Expression::Expression>(padding_arg);
 
                     auto k = m_context->kernel();
@@ -154,96 +211,94 @@ namespace rocRoller
                     k->setKernelName("Cijk_Ailk_Bjlk_HHS_BH_MT128x256x16_MI32x32x8x1_SE_K1");
                     k->setKernelDimensions(3);
 
-                    k->addArgument({"sizeC",
+                    k->addArgument({"limitC",
                                     {DataType::UInt64, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    sizeC_exp});
-                    k->addArgument({"sizeA",
+                                    limitCExp});
+                    k->addArgument({"limitA",
                                     {DataType::UInt64, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    sizeA_exp});
-                    k->addArgument({"sizeB",
+                                    limitAExp});
+                    k->addArgument({"limitB",
                                     {DataType::UInt64, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    sizeB_exp});
+                                    limitBExp});
 
                     k->addArgument({"D",
                                     {DataType::Float, PointerType::PointerGlobal},
                                     DataDirection::ReadWrite,
-                                    D_exp});
+                                    DExp});
                     k->addArgument({"C",
                                     {DataType::Float, PointerType::PointerGlobal},
                                     DataDirection::ReadOnly,
-                                    C_exp});
+                                    CExp});
                     k->addArgument({"A",
                                     {DataType::Float, PointerType::PointerGlobal},
                                     DataDirection::ReadOnly,
-                                    A_exp});
+                                    AExp});
                     k->addArgument({"B",
                                     {DataType::Float, PointerType::PointerGlobal},
                                     DataDirection::ReadOnly,
-                                    B_exp});
+                                    BExp});
 
                     k->addArgument({"OffsetD",
                                     {DataType::UInt64, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    OffsetD_exp});
+                                    offsetDExp});
                     k->addArgument({"OffsetC",
                                     {DataType::UInt64, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    OffsetC_exp});
+                                    offsetCExp});
                     k->addArgument({"OffsetA",
                                     {DataType::UInt64, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    OffsetA_exp});
+                                    offsetAExp});
                     k->addArgument({"OffsetB",
                                     {DataType::UInt64, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    OffsetB_exp});
+                                    offsetBExp});
 
                     k->addArgument({"alpha",
                                     {DataType::Float, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    alpha_exp});
-
-                    auto beta_exp = std::make_shared<Expression::Expression>(beta_arg);
+                                    alphaExp});
                     k->addArgument({"beta",
                                     {DataType::Float, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    beta_exp});
+                                    betaExp});
 
                     k->addArgument({"strideD0",
                                     {DataType::UInt32, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    strideD0_exp});
+                                    strideD0Exp});
                     k->addArgument({"strideD1",
                                     {DataType::UInt32, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    strideD1_exp});
+                                    strideD1Exp});
                     k->addArgument({"strideC0",
                                     {DataType::UInt32, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    strideC0_exp});
+                                    strideC0Exp});
                     k->addArgument({"strideC1",
                                     {DataType::UInt32, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    strideC1_exp});
+                                    strideC1Exp});
                     k->addArgument({"strideA0",
                                     {DataType::UInt32, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    strideA0_exp});
+                                    strideA0Exp});
                     k->addArgument({"strideA1",
                                     {DataType::UInt32, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    strideA1_exp});
+                                    strideA1Exp});
                     k->addArgument({"strideB0",
                                     {DataType::UInt32, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    strideB0_exp});
+                                    strideB0Exp});
                     k->addArgument({"strideB1",
                                     {DataType::UInt32, PointerType::Value},
                                     DataDirection::ReadOnly,
-                                    strideB1_exp});
+                                    strideB1Exp});
 
                     k->addArgument({"SizesFree0",
                                     {DataType::UInt32, PointerType::Value},
@@ -313,75 +368,108 @@ namespace rocRoller
                     return commandKernel;
                 }
 
-                KernelArguments makeArgs(std::shared_ptr<A> m_dA,
-                                         std::shared_ptr<B> m_dB,
-                                         std::shared_ptr<C> m_dC,
-                                         std::shared_ptr<D> m_dD)
+                CommandArguments makeArgs(std::shared_ptr<A> m_dA,
+                                          std::shared_ptr<B> m_dB,
+                                          std::shared_ptr<C> m_dC,
+                                          std::shared_ptr<D> m_dD)
                 {
-                    KernelArguments kargs(true);
-                    kargs.reserve(1024, 128);
+                    CommandArguments commandArgs = this->m_command->createArguments();
 
-                    kargs.append("sizeC",
-                                 (size_t)m_solutionParams.problemParams.m
-                                     * m_solutionParams.problemParams.n);
-                    kargs.append("sizeA",
-                                 (size_t)m_solutionParams.problemParams.m
-                                     * m_solutionParams.problemParams.k);
-                    kargs.append("sizeB",
-                                 (size_t)m_solutionParams.problemParams.k
-                                     * m_solutionParams.problemParams.n);
+                    commandArgs.setArgument(m_tagD, ArgumentType::Value, m_dD.get());
+                    commandArgs.setArgument(m_tagC, ArgumentType::Value, m_dC.get());
+                    commandArgs.setArgument(m_tagA, ArgumentType::Value, m_dA.get());
+                    commandArgs.setArgument(m_tagB, ArgumentType::Value, m_dB.get());
 
-                    kargs.append("D", m_dD.get());
-                    kargs.append("C", m_dC.get());
-                    kargs.append("A", m_dA.get());
-                    kargs.append("B", m_dB.get());
+                    commandArgs.setArgument(m_tagC,
+                                            ArgumentType::Limit,
+                                            (size_t)m_solutionParams.problemParams.m
+                                                * m_solutionParams.problemParams.n);
+                    commandArgs.setArgument(m_tagA,
+                                            ArgumentType::Limit,
+                                            (size_t)m_solutionParams.problemParams.m
+                                                * m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_tagB,
+                                            ArgumentType::Limit,
+                                            (size_t)m_solutionParams.problemParams.k
+                                                * m_solutionParams.problemParams.n);
 
-                    kargs.append("OffsetD", (unsigned long long)0);
-                    kargs.append("OffsetC", (unsigned long long)0);
-                    kargs.append("OffsetA", (unsigned long long)0);
-                    kargs.append("OffsetB", (unsigned long long)0);
+                    commandArgs.setArgument(
+                        m_offsetDTag, ArgumentType::Value, (unsigned long long)0);
+                    commandArgs.setArgument(
+                        m_offsetCTag, ArgumentType::Value, (unsigned long long)0);
+                    commandArgs.setArgument(
+                        m_offsetATag, ArgumentType::Value, (unsigned long long)0);
+                    commandArgs.setArgument(
+                        m_offsetBTag, ArgumentType::Value, (unsigned long long)0);
 
-                    kargs.append("alpha", m_solutionParams.problemParams.alpha);
-                    kargs.append("beta", m_solutionParams.problemParams.beta);
+                    commandArgs.setArgument(
+                        m_alphaTag, ArgumentType::Value, m_solutionParams.problemParams.alpha);
+                    commandArgs.setArgument(
+                        m_betaTag, ArgumentType::Value, m_solutionParams.problemParams.beta);
 
-                    kargs.append("strideD0", (unsigned int)m_solutionParams.problemParams.m);
-                    kargs.append("strideD1",
-                                 (unsigned int)m_solutionParams.problemParams.m
-                                     * m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_tagD,
+                                            ArgumentType::Stride,
+                                            0,
+                                            (unsigned int)m_solutionParams.problemParams.m);
+                    commandArgs.setArgument(m_tagD,
+                                            ArgumentType::Stride,
+                                            1,
+                                            (unsigned int)m_solutionParams.problemParams.m
+                                                * m_solutionParams.problemParams.k);
 
-                    kargs.append("strideC0", (unsigned int)m_solutionParams.problemParams.m);
-                    kargs.append("strideC1",
-                                 (unsigned int)m_solutionParams.problemParams.m
-                                     * m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_tagC,
+                                            ArgumentType::Stride,
+                                            0,
+                                            (unsigned int)m_solutionParams.problemParams.m);
+                    commandArgs.setArgument(m_tagC,
+                                            ArgumentType::Stride,
+                                            1,
+                                            (unsigned int)m_solutionParams.problemParams.m
+                                                * m_solutionParams.problemParams.k);
 
-                    kargs.append("strideA0", (unsigned int)m_solutionParams.problemParams.m);
-                    kargs.append("strideA1",
-                                 (unsigned int)m_solutionParams.problemParams.m
-                                     * m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_tagA,
+                                            ArgumentType::Stride,
+                                            0,
+                                            (unsigned int)m_solutionParams.problemParams.m);
+                    commandArgs.setArgument(m_tagA,
+                                            ArgumentType::Stride,
+                                            1,
+                                            (unsigned int)m_solutionParams.problemParams.m
+                                                * m_solutionParams.problemParams.k);
 
-                    kargs.append("strideB0", (unsigned int)m_solutionParams.problemParams.n);
-                    kargs.append("strideB1",
-                                 (unsigned int)m_solutionParams.problemParams.n
-                                     * m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_tagB,
+                                            ArgumentType::Stride,
+                                            0,
+                                            (unsigned int)m_solutionParams.problemParams.n);
+                    commandArgs.setArgument(m_tagB,
+                                            ArgumentType::Stride,
+                                            1,
+                                            (unsigned int)m_solutionParams.problemParams.n
+                                                * m_solutionParams.problemParams.k);
 
-                    kargs.append("SizesFree0", (unsigned int)m_solutionParams.problemParams.m);
-                    kargs.append("SizesFree1", (unsigned int)m_solutionParams.problemParams.n);
-                    kargs.append("SizesFree2", 1);
-                    kargs.append("SizesSum0", (unsigned int)m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_sizesFree0Tag,
+                                            ArgumentType::Size,
+                                            (unsigned int)m_solutionParams.problemParams.m);
+                    commandArgs.setArgument(m_sizesFree1Tag,
+                                            ArgumentType::Size,
+                                            (unsigned int)m_solutionParams.problemParams.n);
+                    commandArgs.setArgument(m_sizesFree2Tag, ArgumentType::Size, 1);
+                    commandArgs.setArgument(m_sizesSum0Tag,
+                                            ArgumentType::Size,
+                                            (unsigned int)m_solutionParams.problemParams.k);
 
-                    kargs.append("OrigStaggerUIter", 0);
+                    commandArgs.setArgument(m_origStaggerUIterTag, ArgumentType::Value, 0);
 
-                    kargs.append("NumWorkGroups0", 60);
-                    kargs.append("NumWorkGroups1", 33);
-                    kargs.append("NumFullBlocks", 2);
+                    commandArgs.setArgument(m_numWorkGroups0Tag, ArgumentType::Value, 60);
+                    commandArgs.setArgument(m_numWorkGroups1Tag, ArgumentType::Value, 33);
+                    commandArgs.setArgument(m_numFullBlocksTag, ArgumentType::Value, 2);
 
-                    kargs.append("WgmRemainder1", 3);
-                    kargs.append("MagicNumberWgmRemainder1", 715827883);
-                    kargs.append("padding", 0);
+                    commandArgs.setArgument(m_wgmRemainder1Tag, ArgumentType::Value, 3);
+                    commandArgs.setArgument(
+                        m_magicNumberWgmRemainder1Tag, ArgumentType::Value, 715827883);
+                    commandArgs.setArgument(m_paddingTag, ArgumentType::Value, 0);
 
-                    Log::getLogger()->debug(kargs.toString());
-
-                    return kargs;
+                    return commandArgs;
                 }
             };
         }

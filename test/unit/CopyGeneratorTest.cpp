@@ -370,16 +370,18 @@ namespace CopyGeneratorTest
         auto command = std::make_shared<Command>();
 
         VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};
-        VariableType floatVal{DataType::Float, PointerType::Value};
         VariableType uintVal{DataType::UInt32, PointerType::Value};
 
-        auto ptr_arg  = command->allocateArgument(floatPtr);
-        auto val_arg  = command->allocateArgument(floatPtr);
-        auto size_arg = command->allocateArgument(uintVal);
+        auto inputTag   = command->allocateTag();
+        auto input_arg  = command->allocateArgument(floatPtr, inputTag, ArgumentType::Value);
+        auto outputTag  = command->allocateTag();
+        auto output_arg = command->allocateArgument(floatPtr, outputTag, ArgumentType::Value);
+        auto sizeTag    = command->allocateTag();
+        auto size_arg   = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
 
-        auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
-        auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
-        auto size_exp = std::make_shared<Expression::Expression>(size_arg);
+        auto input_exp  = std::make_shared<Expression::Expression>(input_arg);
+        auto output_exp = std::make_shared<Expression::Expression>(output_arg);
+        auto size_exp   = std::make_shared<Expression::Expression>(size_arg);
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -388,14 +390,14 @@ namespace CopyGeneratorTest
 
         k->setKernelDimensions(1);
 
-        k->addArgument({"output",
-                        {DataType::Float, PointerType::PointerGlobal},
-                        DataDirection::WriteOnly,
-                        ptr_exp});
         k->addArgument({"input",
                         {DataType::Float, PointerType::PointerGlobal},
                         DataDirection::ReadOnly,
-                        val_exp});
+                        input_exp});
+        k->addArgument({"output",
+                        {DataType::Float, PointerType::PointerGlobal},
+                        DataDirection::WriteOnly,
+                        output_exp});
 
         k->setWorkgroupSize({1, 1, 1});
         k->setWorkitemCount({size_exp, one, one});
@@ -448,12 +450,12 @@ namespace CopyGeneratorTest
         ASSERT_THAT(hipMemcpy(input_ptr.get(), val, size * sizeof(float), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("output", output_ptr.get());
-        runtimeArgs.append("input", input_ptr.get());
-        runtimeArgs.append("size", size);
+        CommandArguments commandArgs = command->createArguments();
+        commandArgs.setArgument(outputTag, ArgumentType::Value, output_ptr.get());
+        commandArgs.setArgument(inputTag, ArgumentType::Value, input_ptr.get());
+        commandArgs.setArgument(sizeTag, ArgumentType::Limit, size);
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         float resultValue[size]   = {0.0f, 0.0f, 0.0f, 0.0f};
         float expectedValue[size] = {2.0f, 3.0f, 5.0f, 7.0f};

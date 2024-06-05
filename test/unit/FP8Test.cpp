@@ -16,6 +16,12 @@ using namespace rocRoller;
 
 namespace rocRollerTest
 {
+    struct FP8Problem
+    {
+        std::shared_ptr<Command>            command;
+        rocRoller::Operations::OperationTag resultTag, aTag;
+    };
+
     class FP8Test : public GPUContextFixture
     {
     };
@@ -25,17 +31,19 @@ namespace rocRollerTest
     /**
      * Loads FP8x4 to GPU, unpacks to individual FP8s, convert to float, store to CPU
     */
-    void genFP8x4LoadToFloatStore(rocRoller::ContextPtr m_context, int N)
+    void genFP8x4LoadToFloatStore(rocRoller::ContextPtr context, FP8Problem& prob, int N)
     {
-        auto k = m_context->kernel();
+        auto k = context->kernel();
 
         k->setKernelDimensions(1);
-        auto command = std::make_shared<Command>();
+        prob.command = std::make_shared<Command>();
 
-        auto result_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::FP8_NANOO, PointerType::PointerGlobal}));
+        prob.resultTag  = prob.command->allocateTag();
+        auto result_exp = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::Float, PointerType::PointerGlobal}, prob.resultTag, ArgumentType::Value));
+        prob.aTag       = prob.command->allocateTag();
+        auto a_exp      = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::FP8_NANOO, PointerType::PointerGlobal}, prob.aTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -53,51 +61,51 @@ namespace rocRollerTest
         k->setWorkitemCount({one, one, one});
         k->setDynamicSharedMemBytes(zero);
 
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
+        context->schedule(k->preamble());
+        context->schedule(k->prolog());
 
         auto kb = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_result, s_a;
-            co_yield m_context->argLoader()->getValue("result", s_result);
-            co_yield m_context->argLoader()->getValue("a", s_a);
+            co_yield context->argLoader()->getValue("result", s_result);
+            co_yield context->argLoader()->getValue("a", s_a);
 
             auto result_ptr
-                = Register::Value::Placeholder(m_context,
+                = Register::Value::Placeholder(context,
                                                Register::Type::Vector,
                                                {DataType::Float, PointerType::PointerGlobal},
                                                1,
                                                Register::AllocationOptions::FullyContiguous());
 
             auto a_ptr
-                = Register::Value::Placeholder(m_context,
+                = Register::Value::Placeholder(context,
                                                Register::Type::Vector,
                                                {DataType::UInt32, PointerType::PointerGlobal},
                                                1,
                                                Register::AllocationOptions::FullyContiguous());
             auto v_a = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::UInt32, 1);
+                context, Register::Type::Vector, DataType::UInt32, 1);
 
             auto v_temp = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::FP8_NANOO, 1);
+                context, Register::Type::Vector, DataType::FP8_NANOO, 1);
 
             co_yield v_a->allocate();
             co_yield a_ptr->allocate();
             co_yield result_ptr->allocate();
 
-            co_yield m_context->copier()->copy(result_ptr, s_result, "Move pointer.");
-            co_yield m_context->copier()->copy(a_ptr, s_a, "Move pointer.");
+            co_yield context->copier()->copy(result_ptr, s_result, "Move pointer.");
+            co_yield context->copier()->copy(a_ptr, s_a, "Move pointer.");
 
             auto bpi = DataTypeInfo::Get(a_ptr->variableType().dataType).elementSize;
             auto bpo = DataTypeInfo::Get(result_ptr->variableType().dataType).elementSize;
 
             for(int i = 0; i < N; i++)
             {
-                co_yield m_context->mem()->loadFlat(v_a, a_ptr, i * bpi, bpi);
+                co_yield context->mem()->loadFlat(v_a, a_ptr, i * bpi, bpi);
 
                 // Bitmask each FP8 of FP8x4, convert to float, then store
                 for(int fp8_idx = 0; fp8_idx < numFP8PerElement; fp8_idx++)
                 {
-                    co_yield m_context->copier()->copy(v_temp, v_a, "Move to temp");
+                    co_yield context->copier()->copy(v_temp, v_a, "Move to temp");
 
                     co_yield_(Instruction::Comment("Mask for lower 8 bits"));
                     co_yield generateOp<Expression::BitwiseAnd>(
@@ -106,11 +114,11 @@ namespace rocRollerTest
                     co_yield_(Instruction::Comment("Convert to float"));
                     co_yield generateOp<Expression::Convert<DataType::Float>>(v_temp, v_temp);
 
-                    co_yield m_context->mem()->storeFlat(result_ptr,
-                                                         v_temp,
-                                                         (i * numFP8PerElement + fp8_idx) * bpo,
-                                                         bpo,
-                                                         "Store to result");
+                    co_yield context->mem()->storeFlat(result_ptr,
+                                                       v_temp,
+                                                       (i * numFP8PerElement + fp8_idx) * bpo,
+                                                       bpo,
+                                                       "Store to result");
 
                     co_yield_(Instruction::Comment(
                         "Shift right so lower 8 bits is the fp8 to manipulate"));
@@ -120,15 +128,15 @@ namespace rocRollerTest
             }
         };
 
-        m_context->schedule(kb());
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
+        context->schedule(kb());
+        context->schedule(k->postamble());
+        context->schedule(k->amdgpu_metadata());
     }
 
     /**
      * @param N number of FP8x4; so Nx4 float results
      */
-    void executeFP8x4LoadToFloatStore(rocRoller::ContextPtr m_context)
+    void executeFP8x4LoadToFloatStore(rocRoller::ContextPtr context)
     {
         int N = 256;
 
@@ -138,17 +146,19 @@ namespace rocRollerTest
 
         std::vector<float> result(a.size() * numFP8PerElement);
 
-        genFP8x4LoadToFloatStore(m_context, a.size());
-        CommandKernel commandKernel(m_context);
+        FP8Problem prob;
+        genFP8x4LoadToFloatStore(context, prob, a.size());
+        CommandKernel commandKernel(context);
 
         auto d_a      = make_shared_device(a);
         auto d_result = make_shared_device<float>(result.size());
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("result", d_result.get());
-        runtimeArgs.append("a", d_a.get());
+        CommandArguments commandArgs = prob.command->createArguments();
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandArgs.setArgument(prob.resultTag, ArgumentType::Value, d_result.get());
+        commandArgs.setArgument(prob.aTag, ArgumentType::Value, d_a.get());
+
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(
             hipMemcpy(
@@ -188,7 +198,8 @@ namespace rocRollerTest
         }
         else
         {
-            genFP8x4LoadToFloatStore(m_context, 2);
+            FP8Problem prob;
+            genFP8x4LoadToFloatStore(m_context, prob, 2);
             std::vector<char> assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
@@ -204,10 +215,12 @@ namespace rocRollerTest
         k->setKernelDimensions(1);
         auto command = std::make_shared<Command>();
 
-        auto result_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::FP8_NANOO, PointerType::PointerGlobal}));
+        auto resultTag  = command->allocateTag();
+        auto result_exp = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::UInt32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
+        auto aTag       = command->allocateTag();
+        auto a_exp      = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::FP8_NANOO, PointerType::PointerGlobal}, aTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -294,13 +307,13 @@ namespace rocRollerTest
     /**
      * @param N number of FP8x4; so Nx4 float results
      */
-    void executeFP8LoadGather(rocRoller::ContextPtr m_context, int N)
+    void executeFP8LoadGather(rocRoller::ContextPtr context, int N)
     {
-        genFP8LoadGather(m_context, N);
+        genFP8LoadGather(context, N);
         std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
-            = m_context->instructions()->getExecutableKernel();
+            = context->instructions()->getExecutableKernel();
 
-        std::vector<char> a(N);
+        std::vector<uint8_t> a(N);
         for(int i = 0; i < N; i++)
             a[i] = i + 10;
 
@@ -310,6 +323,7 @@ namespace rocRollerTest
         KernelArguments kargs;
         kargs.append<void*>("result", d_result.get());
         kargs.append<void*>("a", d_a.get());
+
         KernelInvocation invocation;
 
         executableKernel->executeKernel(kargs, invocation);

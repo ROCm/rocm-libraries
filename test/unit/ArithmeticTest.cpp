@@ -66,16 +66,23 @@ namespace ArithmeticTest
 
             auto command = std::make_shared<Command>();
 
-            auto resultExpr = std::make_shared<Expression::Expression>(
-                command->allocateArgument({dataType, PointerType::PointerGlobal}));
+            auto resultTag  = command->allocateTag();
+            auto resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {dataType, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
+            auto comparisonResultTag  = command->allocateTag();
             auto comparisonResultExpr = std::make_shared<Expression::Expression>(
-                command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal}));
-            auto aExpr = std::make_shared<Expression::Expression>(
-                command->allocateArgument({dataType, PointerType::Value}));
-            auto bExpr = std::make_shared<Expression::Expression>(
-                command->allocateArgument({dataType, PointerType::Value}));
-            auto shExpr = std::make_shared<Expression::Expression>(
-                command->allocateArgument({DataType::UInt32, PointerType::Value}));
+                command->allocateArgument({DataType::UInt32, PointerType::PointerGlobal},
+                                          comparisonResultTag,
+                                          ArgumentType::Value));
+            auto aTag   = command->allocateTag();
+            auto aExpr  = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {dataType, PointerType::Value}, aTag, ArgumentType::Value));
+            auto bTag   = command->allocateTag();
+            auto bExpr  = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {dataType, PointerType::Value}, bTag, ArgumentType::Value));
+            auto shTag  = command->allocateTag();
+            auto shExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {DataType::UInt32, PointerType::Value}, shTag, ArgumentType::Value));
 
             auto one  = std::make_shared<Expression::Expression>(1u);
             auto zero = std::make_shared<Expression::Expression>(0u);
@@ -323,15 +330,16 @@ namespace ArithmeticTest
 
                         for(uint32_t shift : TestValues::shiftValues)
                         {
-                            KernelArguments runtimeArgs;
+                            CommandArguments commandArgs = command->createArguments();
 
-                            runtimeArgs.append("result", d_result.get());
-                            runtimeArgs.append("comparisonResult", d_comparisonResult.get());
-                            runtimeArgs.append("a", a);
-                            runtimeArgs.append("b", b);
-                            runtimeArgs.append("shift", shift);
+                            commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
+                            commandArgs.setArgument(
+                                comparisonResultTag, ArgumentType::Value, d_comparisonResult.get());
+                            commandArgs.setArgument(aTag, ArgumentType::Value, a);
+                            commandArgs.setArgument(bTag, ArgumentType::Value, b);
+                            commandArgs.setArgument(shTag, ArgumentType::Value, shift);
 
-                            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+                            commandKernel.launchKernel(commandArgs.runtimeArguments());
 
                             std::vector<T> result(resultSize);
                             ASSERT_THAT(hipMemcpy(result.data(),
@@ -455,16 +463,21 @@ namespace ArithmeticTest
 
         auto command = std::make_shared<Command>();
 
-        auto resultExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
-        auto cond_resultExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::PointerGlobal}));
-        auto aExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::Value}));
-        auto bExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::Value}));
-        auto cExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::Value}));
+        auto resultTag       = command->allocateTag();
+        auto resultExpr      = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
+        auto condResultTag   = command->allocateTag();
+        auto cond_resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::PointerGlobal}, condResultTag, ArgumentType::Value));
+        auto aTag            = command->allocateTag();
+        auto aExpr           = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::Value}, aTag, ArgumentType::Value));
+        auto bTag            = command->allocateTag();
+        auto bExpr           = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::Value}, bTag, ArgumentType::Value));
+        auto cTag            = command->allocateTag();
+        auto cExpr           = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::Value}, cTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -623,14 +636,16 @@ namespace ArithmeticTest
                     for(float c : TestValues::floatValues)
                     {
 
-                        KernelArguments runtimeArgs;
-                        runtimeArgs.append("result", d_result.get());
-                        runtimeArgs.append("cond_result", d_cond_result.get());
-                        runtimeArgs.append("a", a);
-                        runtimeArgs.append("b", b);
-                        runtimeArgs.append("c", c);
+                        CommandArguments commandArgs = command->createArguments();
 
-                        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+                        commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
+                        commandArgs.setArgument(
+                            condResultTag, ArgumentType::Value, d_cond_result.get());
+                        commandArgs.setArgument(aTag, ArgumentType::Value, a);
+                        commandArgs.setArgument(bTag, ArgumentType::Value, b);
+                        commandArgs.setArgument(cTag, ArgumentType::Value, c);
+
+                        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
                         std::vector<float> result(6);
                         ASSERT_THAT(hipMemcpy(result.data(),
@@ -686,11 +701,13 @@ namespace ArithmeticTest
 
         auto command = std::make_shared<Command>();
 
-        auto resultExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
+        auto resultTag  = command->allocateTag();
+        auto resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
 
-        auto aExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::Value}));
+        auto aTag  = command->allocateTag();
+        auto aExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::Value}, aTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -757,11 +774,12 @@ namespace ArithmeticTest
             for(float a : TestValues::floatValues)
             {
 
-                KernelArguments runtimeArgs;
-                runtimeArgs.append("result", d_result.get());
-                runtimeArgs.append("a", a);
+                CommandArguments commandArgs = command->createArguments();
 
-                commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+                commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
+                commandArgs.setArgument(aTag, ArgumentType::Value, a);
+
+                commandKernel.launchKernel(commandArgs.runtimeArguments());
 
                 std::vector<float> result(1);
                 ASSERT_THAT(hipMemcpy(result.data(),
@@ -790,14 +808,18 @@ namespace ArithmeticTest
 
         auto command = std::make_shared<Command>();
 
-        auto resultExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
-        auto aExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::Value}));
-        auto bExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
-        auto cExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
+        auto resultTag  = command->allocateTag();
+        auto resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
+        auto aTag       = command->allocateTag();
+        auto aExpr      = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::Value}, aTag, ArgumentType::Value));
+        auto bTag       = command->allocateTag();
+        auto bExpr      = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Half, PointerType::PointerGlobal}, bTag, ArgumentType::Value));
+        auto cTag       = command->allocateTag();
+        auto cExpr      = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::PointerGlobal}, cTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -923,12 +945,15 @@ namespace ArithmeticTest
             auto                cDevice = make_shared_device<float>(c);
             auto                dResult = make_shared_device<float>(12);
 
-            KernelArguments runtimeArgs;
-            runtimeArgs.append("result", dResult.get());
-            runtimeArgs.append("a", a);
-            runtimeArgs.append("b", bDevice.get());
-            runtimeArgs.append("c", cDevice.get());
-            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+            CommandArguments commandArgs = command->createArguments();
+
+            commandArgs.setArgument(resultTag, ArgumentType::Value, dResult.get());
+            commandArgs.setArgument(aTag, ArgumentType::Value, a);
+            commandArgs.setArgument(bTag, ArgumentType::Value, bDevice.get());
+            commandArgs.setArgument(cTag, ArgumentType::Value, cDevice.get());
+
+            commandKernel.launchKernel(commandArgs.runtimeArguments());
+
             //6 different options
             std::vector<float> result(12);
             ASSERT_THAT(
@@ -989,14 +1014,18 @@ namespace ArithmeticTest
 
         auto command = std::make_shared<Command>();
 
-        auto resultExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Double, PointerType::PointerGlobal}));
-        auto cond_resultExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::PointerGlobal}));
-        auto aExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Double, PointerType::Value}));
-        auto bExpr = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Double, PointerType::Value}));
+        auto resultTag       = command->allocateTag();
+        auto resultExpr      = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Double, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
+        auto condResultTag   = command->allocateTag();
+        auto cond_resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::PointerGlobal}, condResultTag, ArgumentType::Value));
+        auto aTag            = command->allocateTag();
+        auto aExpr           = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Double, PointerType::Value}, aTag, ArgumentType::Value));
+        auto bTag            = command->allocateTag();
+        auto bExpr           = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Double, PointerType::Value}, bTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -1159,13 +1188,15 @@ namespace ArithmeticTest
             {
                 for(double b : TestValues::doubleValues)
                 {
-                    KernelArguments runtimeArgs;
-                    runtimeArgs.append("result", d_result.get());
-                    runtimeArgs.append("cond_result", d_cond_result.get());
-                    runtimeArgs.append("a", a);
-                    runtimeArgs.append("b", b);
+                    CommandArguments commandArgs = command->createArguments();
 
-                    commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+                    commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
+                    commandArgs.setArgument(
+                        condResultTag, ArgumentType::Value, d_cond_result.get());
+                    commandArgs.setArgument(aTag, ArgumentType::Value, a);
+                    commandArgs.setArgument(bTag, ArgumentType::Value, b);
+
+                    commandKernel.launchKernel(commandArgs.runtimeArguments());
 
                     std::vector<double> result(5);
                     ASSERT_THAT(hipMemcpy(result.data(),

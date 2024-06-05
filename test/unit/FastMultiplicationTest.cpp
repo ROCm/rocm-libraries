@@ -33,8 +33,9 @@ namespace FastMultiplicationTest
 
         auto command = std::make_shared<Command>();
 
-        auto a = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto aTag = command->allocateTag();
+        auto a    = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value));
 
         ExpectCommutative(a, std::make_shared<Expression::Expression>(0), "0i");
 
@@ -108,11 +109,13 @@ namespace FastMultiplicationTest
     {
         auto command = std::make_shared<Command>();
 
-        auto a = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto aTag = command->allocateTag();
+        auto a    = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value));
 
-        auto b_unsigned = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::UInt32, PointerType::Value}));
+        auto bTag       = command->allocateTag();
+        auto b_unsigned = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::UInt32, PointerType::Value}, bTag, ArgumentType::Value));
 
         auto expr      = a * b_unsigned;
         auto expr_fast = rocRoller::Expression::fastMultiplication(expr);
@@ -130,8 +133,12 @@ namespace FastMultiplicationTest
     {
         auto command = std::make_shared<Command>();
 
-        auto result_arg = command->allocateArgument({DataType::Int32, PointerType::PointerGlobal});
-        auto a_arg      = command->allocateArgument({DataType::Int32, PointerType::Value});
+        auto resultTag  = command->allocateTag();
+        auto result_arg = command->allocateArgument(
+            {DataType::Int32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value);
+        auto aTag  = command->allocateTag();
+        auto a_arg = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value);
 
         auto result_exp = std::make_shared<Expression::Expression>(result_arg);
         auto a_exp      = std::make_shared<Expression::Expression>(a_arg);
@@ -200,11 +207,12 @@ namespace FastMultiplicationTest
 
         for(int a : values)
         {
-            KernelArguments runtimeArgs;
-            runtimeArgs.append("result", d_result.get());
-            runtimeArgs.append("a", a);
+            CommandArguments commandArgs = command->createArguments();
 
-            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+            commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
+            commandArgs.setArgument(aTag, ArgumentType::Value, a);
+
+            commandKernel.launchKernel(commandArgs.runtimeArguments());
 
             int result;
             ASSERT_THAT(hipMemcpy(&result, d_result.get(), sizeof(int), hipMemcpyDefault),
@@ -218,8 +226,12 @@ namespace FastMultiplicationTest
     {
         auto command = std::make_shared<Command>();
 
-        auto result_arg = command->allocateArgument({DataType::Int64, PointerType::PointerGlobal});
-        auto a_arg      = command->allocateArgument({DataType::Int64, PointerType::Value});
+        auto resultTag  = command->allocateTag();
+        auto result_arg = command->allocateArgument(
+            {DataType::Int64, PointerType::PointerGlobal}, resultTag, ArgumentType::Value);
+        auto aTag  = command->allocateTag();
+        auto a_arg = command->allocateArgument(
+            {DataType::Int64, PointerType::Value}, aTag, ArgumentType::Value);
 
         auto result_exp = std::make_shared<Expression::Expression>(result_arg);
         auto a_exp      = std::make_shared<Expression::Expression>(a_arg);
@@ -287,11 +299,12 @@ namespace FastMultiplicationTest
 
         for(auto a : values)
         {
-            KernelArguments runtimeArgs;
-            runtimeArgs.append("result", d_result.get());
-            runtimeArgs.append("a", a);
+            CommandArguments commandArgs = command->createArguments();
 
-            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+            commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
+            commandArgs.setArgument(aTag, ArgumentType::Value, a);
+
+            commandKernel.launchKernel(commandArgs.runtimeArguments());
 
             int64_t result;
             ASSERT_THAT(hipMemcpy(&result, d_result.get(), sizeof(int64_t), hipMemcpyDefault),
