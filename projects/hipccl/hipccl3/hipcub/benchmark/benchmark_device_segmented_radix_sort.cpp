@@ -382,8 +382,8 @@ benchmark::RegisterBenchmark( \
 
 #define CREATE_SORT_KEYS_DESCENDING_BENCHMARK(Key, SEGMENTS) \
 benchmark::RegisterBenchmark( \
-    (std::string("sort_keys") + "<" #Key ">" + \
-        "(~" + std::to_string(SEGMENTS) + " segments), descending" \
+    (std::string("sort_keys") + "<Key Datatype:" #Key ">" + \
+        "(Segments:~" + std::to_string(SEGMENTS) + " segments), descending" \
     ).c_str(), \
     [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, Descending); } \
 )
@@ -427,8 +427,8 @@ benchmark::RegisterBenchmark( \
 
 #define CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(Key, Value, SEGMENTS) \
 benchmark::RegisterBenchmark( \
-    (std::string("sort_pairs") + "<" #Key ", " #Value ">" + \
-        "(~" + std::to_string(SEGMENTS) + " segments), descending" \
+    (std::string("sort_pairs") + "<Key Datatype" #Key ",Value Datatype:" #Value ">" + \
+        "(Segments:~" + std::to_string(SEGMENTS) + " segments), descending" \
     ).c_str(), \
     [=](benchmark::State& state) { \
         run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, Descending); } \
