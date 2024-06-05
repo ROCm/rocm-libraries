@@ -354,13 +354,13 @@ void run_threeway(benchmark::State& state,
 
 #define CREATE_BENCHMARK_FLAGGED(T, T_FLAG, SPLIT_T)               \
 benchmark::RegisterBenchmark(                                      \
-    "parition_flagged<" #T ", " #T_FLAG ">(" #SPLIT_T "%)",        \
+    "parition_flagged<Dataype:" #T ",Flag Type:" #T_FLAG ">(Split Threshold:" #SPLIT_T "%)",        \
     &run_flagged<T, T_FLAG>, stream, static_cast<T>(SPLIT_T), size \
 )
 
 #define CREATE_BENCHMARK_PREDICATE(T, SPLIT_T)               \
 benchmark::RegisterBenchmark(                                \
-    "parition_predicate<" #T ">(" #SPLIT_T "%)",             \
+    "parition_predicate<Datatype:" #T ">(Split Threshold:" #SPLIT_T "%)",             \
     &run_predicate<T>, stream, static_cast<T>(SPLIT_T), size \
 )
 
