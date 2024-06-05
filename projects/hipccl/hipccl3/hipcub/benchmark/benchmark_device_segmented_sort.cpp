@@ -376,18 +376,18 @@ void run_sort_pairs_benchmark(benchmark::State &state,
             .c_str(),                                    \
         [=](benchmark::State &state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size); }), \
     benchmark::RegisterBenchmark(                        \
-        (std::string("sort_keys") + "<" #Key ">" +       \
-         "(~" + std::to_string(SEGMENTS) + " segments), descending") \
+        (std::string("sort_keys") + "<Key Type:" #Key ">" +       \
+         "(Number of segments:~" + std::to_string(SEGMENTS) + " segments), descending") \
             .c_str(),                                    \
         [=](benchmark::State &state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, true); }), \
     benchmark::RegisterBenchmark(                        \
-        (std::string("sort_keys") + "<" #Key ">" +       \
-         "(~" + std::to_string(SEGMENTS) + " segments), stable") \
+        (std::string("sort_keys") + "<Key Type" #Key ">" +       \
+         "(Number of segments:~" + std::to_string(SEGMENTS) + " segments), stable") \
             .c_str(),                                    \
         [=](benchmark::State &state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, false, true); }), \
     benchmark::RegisterBenchmark(                        \
-        (std::string("sort_keys") + "<" #Key ">" +       \
-         "(~" + std::to_string(SEGMENTS) + " segments), descending, stable") \
+        (std::string("sort_keys") + "<Key Type" #Key ">" +       \
+         "(Number of segments:~" + std::to_string(SEGMENTS) + " segments), descending, stable") \
             .c_str(),                                    \
         [=](benchmark::State &state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, true, true); })
 
@@ -419,18 +419,18 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark *> &ben
             .c_str(),                                           \
         [=](benchmark::State &state) { run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size); }), \
     benchmark::RegisterBenchmark(                               \
-        (std::string("sort_pairs") + "<" #Key ", " #Value ">" + \
-         "(~" + std::to_string(SEGMENTS) + " segments), descending")        \
+        (std::string("sort_pairs") + "<Key Type:" #Key ",Value Type:" #Value ">" + \
+         "(Number of segments:~" + std::to_string(SEGMENTS) + " segments), descending")        \
             .c_str(),                                           \
         [=](benchmark::State &state) { run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, true); }), \
     benchmark::RegisterBenchmark(                               \
-        (std::string("sort_pairs") + "<" #Key ", " #Value ">" + \
-         "(~" + std::to_string(SEGMENTS) + " segments), stable")        \
+        (std::string("sort_pairs") + "<Key Type:" #Key ",Value Type:" #Value ">" + \
+         "(Number of segments:~" + std::to_string(SEGMENTS) + " segments), stable")        \
             .c_str(),                                           \
         [=](benchmark::State &state) { run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, false, true); }), \
     benchmark::RegisterBenchmark(                               \
-        (std::string("sort_pairs") + "<" #Key ", " #Value ">" + \
-         "(~" + std::to_string(SEGMENTS) + " segments), descending, stable")        \
+        (std::string("sort_pairs") + "<Key Type:" #Key ",Value Type:" #Value ">" + \
+         "(Number of segments:~" + std::to_string(SEGMENTS) + " segments), descending, stable")        \
             .c_str(),                                           \
         [=](benchmark::State &state) { run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, true, true); })
 
