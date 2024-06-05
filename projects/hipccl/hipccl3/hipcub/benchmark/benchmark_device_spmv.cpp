@@ -169,11 +169,13 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipDeviceSynchronize());
 }
 
-#define CREATE_BENCHMARK(T, p)         \
-benchmark::RegisterBenchmark(          \
-    ("CsrMV<" #T ">(p = " #p")"),      \
-    &run_benchmark<T>, size, stream, p \
-)
+#define CREATE_BENCHMARK(T, p)                          \
+    benchmark::RegisterBenchmark(                       \
+        (std::string("device_spmv_CsrMV<Datatpye:" #T)  \
+            + std::string(",Probability:" #p ">.")      \
+        ).c_str(),                                      \
+        &run_benchmark<T>, size, stream, p              \
+    )
 
 #define BENCHMARK_TYPE(type)         \
     CREATE_BENCHMARK(type, 1.0e-6f), \
