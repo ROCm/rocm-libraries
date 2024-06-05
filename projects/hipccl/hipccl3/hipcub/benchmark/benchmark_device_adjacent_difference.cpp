@@ -180,13 +180,18 @@ void run_benchmark(benchmark::State& state, const std::size_t size, const hipStr
 
 using namespace std::string_literals;
 
-#define CREATE_BENCHMARK(T, left, copy)                                    \
-    benchmark::RegisterBenchmark(("Subtract" + (left ? "Left"s : "Right"s) \
-                                  + (copy ? "Copy"s : ""s) + "<" #T ">")   \
-                                     .c_str(),                             \
-                                 &run_benchmark<T, left, copy>,            \
-                                 size,                                     \
-                                 stream)
+#define CREATE_BENCHMARK(T, left, copy)                         \
+    benchmark::RegisterBenchmark(                               \
+        (std::string("device_adjacent_difference"               \
+            "<Datatype:" #T ">."                                \
+            "SubAlgorithm Name:Subtract")                       \
+            + std::string(left ? "Left" : "Right")              \
+            + std::string(copy ? "Copy" : "")                   \
+        ).c_str(),                                              \
+        &run_benchmark<T, left, copy>,                          \
+        size,                                                   \
+        stream                                                  \
+        )
 
 // clang-format off
 #define CREATE_BENCHMARKS(T)           \
