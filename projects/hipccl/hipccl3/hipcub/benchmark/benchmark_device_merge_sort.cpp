@@ -233,7 +233,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 #define CREATE_SORT_KEYS_BENCHMARK(T)                                                           \
     benchmarks.push_back(                                                                       \
         benchmark::RegisterBenchmark(                                                           \
-            (std::string("device_merge_sort<SubAlgorithm Name:sort_keys,Key:" #T ">.")          \
+            (std::string("device_merge_sort_sort_keys<Key DataType:" #T ">.")                   \
             ).c_str(),                                                                          \
             [=](benchmark::State& state) { run_sort_keys_benchmark<T>(state, stream, size); }   \
         )                                                                                       \
@@ -242,9 +242,9 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 #define CREATE_SORT_PAIRS_BENCHMARK(T, V)                                                               \
     benchmarks.push_back(                                                                               \
         benchmark::RegisterBenchmark(                                                                   \
-                (std::string("device_merge_sort<SubAlgorithm Name:sort_pairs"                           \
-                ",Key:" #T                                                                              \
-                ",Value:" #V ">.")                                                                      \
+                (std::string("device_merge_sort_sort_pairs<"                                            \
+                ",Key Datatype:" #T                                                                              \
+                ",Value Datatype:" #V ">.")                                                                      \
                 ).c_str(),                                                                              \
                 [=](benchmark::State& state) { run_sort_pairs_benchmark<T, V>(state, stream, size); }   \
         )                                                                                               \
