@@ -337,17 +337,6 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
-// #define CREATE_BENCHMARK(item_size, item_alignment, size_type, num_tlev, num_wlev, num_blev)     \
-    // benchmark::RegisterBenchmark(                                                                \
-    //     "{lvl:device,item_size:" #item_size ",item_alignment:" #item_alignment                   \
-    //     ",size_type:" #size_type ",algo:batch_memcpy,num_tlev:" #num_tlev ",num_wlev:" #num_wlev \
-    //     ",num_blev:" #num_blev ",cfg:default_config}",                                           \
-    //     [=](benchmark::State& state)                                                             \
-    //     {                                                                                        \
-    //         run_benchmark<benchmark_utils::custom_aligned_type<item_size, item_alignment>,       \
-    //                       size_type>(state, stream, num_tlev, num_wlev, num_blev);               \
-    //     })
-
 #define CREATE_BENCHMARK(IS, IA, T, num_tlev, num_wlev, num_blev)                   \
     benchmark::RegisterBenchmark(                                                   \
         (std::string("device_batch_memcpy<Datatype:" #T                             \
@@ -359,7 +348,7 @@ void run_benchmark(benchmark::State& state,
         ).c_str(),                                                                  \
         [=](benchmark::State& state){                                               \
             run_benchmark<benchmark_utils::custom_aligned_type<IS, IA>,             \
-                          T>(state, stream, num_tlev, num_wlev, num_blev);  \
+                          T>(state, stream, num_tlev, num_wlev, num_blev);          \
         }                                                                           \
     )
 
