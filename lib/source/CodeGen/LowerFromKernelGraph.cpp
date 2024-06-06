@@ -7,6 +7,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
+#include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
 #include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
@@ -305,6 +306,42 @@ namespace rocRoller
 
                 co_yield Instruction::Label(botLabel);
                 co_yield Instruction::Unlock("Unlock Conditional");
+            }
+
+            Generator<Instruction> operator()(int tag, AssertOp const& op, Transformer coords)
+            {
+                auto assertOpKind = m_context->kernelOptions().assertOpKind;
+                AssertFatal(assertOpKind < AssertOpKind::Count, "Invalid AssertOpKind");
+
+                if(assertOpKind == AssertOpKind::NoOp)
+                {
+                    co_yield Instruction::Nop("AssertOpKind == NoOp");
+                }
+                else
+                {
+                    auto passedLabel = m_context->labelAllocator()->label("AssertPassed");
+
+                    co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Assert");
+
+                    auto expr            = m_fastArith(op.condition);
+                    auto conditionResult = m_context->brancher()->resultRegister(expr);
+
+                    co_yield Expression::generate(conditionResult, expr, m_context);
+
+                    co_yield m_context->brancher()->branchIfNonZero(
+                        passedLabel,
+                        conditionResult,
+                        concatenate("Assert: Passed, jump to ", passedLabel->toString()));
+
+                    auto failedLabel = m_context->labelAllocator()->label("AssertFailed");
+                    co_yield Instruction::Label(failedLabel);
+                    co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
+
+                    co_yield Instruction::Wait(WaitCount::Zero("DEBUG: Wait after branch",
+                                                               m_context->targetArchitecture()));
+                    co_yield Instruction::Label(passedLabel);
+                    co_yield Instruction::Unlock("Unlock Assert");
+                }
             }
 
             Generator<Instruction> operator()(int tag, DoWhileOp const& op, Transformer coords)

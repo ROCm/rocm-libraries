@@ -431,6 +431,29 @@ namespace rocRollerTest
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(control.toDOT()));
     }
 
+    TEST(ControlGraphTest, AssertOp)
+    {
+        using GD             = rocRoller::Graph::Direction;
+        ControlGraph control = ControlGraph();
+
+        int kernelIndex = control.addElement(Kernel());
+        int assertOp    = control.addElement(AssertOp());
+        control.addElement(Body(), {kernelIndex}, {assertOp});
+
+        int dummyIndex  = control.addElement(Assign());
+        int passedIndex = control.addElement(Sequence(), {assertOp}, {dummyIndex});
+
+        auto assertOps = control
+                             .findNodes(
+                                 kernelIndex,
+                                 [&](int tag) -> bool {
+                                     return isOperation<AssertOp>(control.getElement(tag));
+                                 },
+                                 GD::Downstream)
+                             .to<std::vector>();
+        EXPECT_EQ(assertOps.size(), 1);
+    }
+
     TEST(ControlGraphTest, getSetCoordinates)
     {
         KernelGraph::KernelGraph kg;

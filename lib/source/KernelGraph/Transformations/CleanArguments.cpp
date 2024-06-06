@@ -227,6 +227,13 @@ namespace rocRoller
                 return cleanOp;
             }
 
+            Operation visitOperation(int tag, AssertOp const& op)
+            {
+                auto cleanOp      = op;
+                cleanOp.condition = cleanExpr(op.condition);
+                return cleanOp;
+            }
+
             Operation visitOperation(int tag, ForLoopOp const& op)
             {
                 auto cleanOp      = op;

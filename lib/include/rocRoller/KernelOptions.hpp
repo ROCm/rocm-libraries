@@ -5,6 +5,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 
+#include "AssertOpKinds_fwd.hpp"
 #include "Utilities/EnumBitset.hpp"
 #include "Utilities/Settings_fwd.hpp"
 
@@ -95,6 +96,8 @@ namespace rocRoller
          * kernel if there are enough available SGPRs.
          */
         int minLaunchTimeExpressionComplexity = 10;
+
+        AssertOpKind assertOpKind = AssertOpKind::NoOp;
 
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);
