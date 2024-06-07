@@ -177,13 +177,13 @@ namespace rocRoller
 
 namespace rocRoller
 {
-    template <typename T>
+    template <typename TA, typename TB, typename TC>
     void GenerateRandomInput(std::mt19937::result_type seed,
-                             std::vector<T>&           A,
+                             std::vector<TA>&          A,
                              size_t                    sizeA,
-                             std::vector<T>&           B,
+                             std::vector<TB>&          B,
                              size_t                    sizeB,
-                             std::vector<T>&           C,
+                             std::vector<TC>&          C,
                              size_t                    sizeC)
     {
         auto rngA = RandomGenerator(seed + 1);
@@ -194,17 +194,17 @@ namespace rocRoller
         {
 #pragma omp section
             {
-                A = rngA.vector<T>(sizeA, -1.f, 1.f);
+                A = rngA.vector<TA>(sizeA, -1.f, 1.f);
             }
 
 #pragma omp section
             {
-                B = rngB.vector<T>(sizeB, -1.f, 1.f);
+                B = rngB.vector<TB>(sizeB, -1.f, 1.f);
             }
 
 #pragma omp section
             {
-                C = rngC.vector<T>(sizeC, -1.f, 1.f);
+                C = rngC.vector<TC>(sizeC, -1.f, 1.f);
             }
         }
     }

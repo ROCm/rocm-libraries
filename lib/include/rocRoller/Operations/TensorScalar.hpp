@@ -2,6 +2,7 @@
 
 #include "../DataTypes/DataTypes.hpp"
 #include "CommandArgument.hpp"
+#include "CommandArguments_fwd.hpp"
 #include "Operation.hpp"
 #include "TensorScalar_fwd.hpp"
 

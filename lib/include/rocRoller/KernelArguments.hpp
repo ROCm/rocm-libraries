@@ -1,5 +1,5 @@
 /**
- * Copyright 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,10 +36,13 @@ namespace rocRoller
     class KernelArguments
     {
     public:
-        explicit KernelArguments(bool log = true);
+        explicit KernelArguments(bool log = true, size_t bytes = 0);
         virtual ~KernelArguments();
 
         void reserve(size_t bytes, size_t count);
+
+        template <typename T>
+        void writeValue(size_t offset, T value);
 
         template <typename T>
         void append(std::string const& argName, T value);
@@ -120,9 +123,6 @@ namespace rocRoller
         std::string stringForValue(T value, bool bound) const;
 
         void appendRecord(std::string const& argName, Arg record);
-
-        template <typename T>
-        void writeValue(size_t offset, T value);
 
         std::vector<uint8_t> m_data;
 

@@ -267,8 +267,9 @@ namespace ExpressionTest
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
         auto a = reg->expression();
 
-        auto b = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Int32, PointerType::Value}));
+        auto bTag = command->allocateTag();
+        auto b    = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value));
 
         {
             auto expr    = Expression::fastDivision(a / b, m_context);

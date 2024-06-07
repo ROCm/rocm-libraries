@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "CommandArgument_fwd.hpp"
+#include "CommandArguments.hpp"
+#include "CommandArguments_fwd.hpp"
 #include "OperationTag.hpp"
 #include "Operations_fwd.hpp"
 
@@ -33,19 +35,27 @@ namespace rocRoller
         template <Operations::CConcreteOperation T>
         Operations::OperationTag addOperation(T&& op);
 
-        CommandArgumentPtr allocateArgument(VariableType  variableType,
+        CommandArgumentPtr allocateArgument(VariableType variableType,
+                                            Operations::OperationTag const&,
+                                            ArgumentType  argType,
                                             DataDirection direction = DataDirection::ReadWrite);
-        CommandArgumentPtr allocateArgument(VariableType       variableType,
+        CommandArgumentPtr allocateArgument(VariableType variableType,
+                                            Operations::OperationTag const&,
+                                            ArgumentType       argType,
                                             DataDirection      direction,
                                             std::string const& name);
 
-        std::vector<CommandArgumentPtr> allocateArgumentVector(DataType      dataType,
-                                                               int           length,
+        std::vector<CommandArgumentPtr> allocateArgumentVector(DataType dataType,
+                                                               int      length,
+                                                               Operations::OperationTag const& tag,
+                                                               ArgumentType  argType,
                                                                DataDirection direction
                                                                = DataDirection::ReadWrite);
 
-        std::vector<CommandArgumentPtr> allocateArgumentVector(DataType           dataType,
-                                                               int                length,
+        std::vector<CommandArgumentPtr> allocateArgumentVector(DataType dataType,
+                                                               int      length,
+                                                               Operations::OperationTag const& tag,
+                                                               ArgumentType       argType,
                                                                DataDirection      direction,
                                                                std::string const& name);
 
@@ -84,6 +94,8 @@ namespace rocRoller
          */
         std::array<Expression::ExpressionPtr, 3> createWorkItemCount() const;
 
+        CommandArguments createArguments() const;
+
     private:
         /// Does this command need to synchronize before continuing the calling CPU thread?
         bool m_sync = false;
@@ -91,6 +103,8 @@ namespace rocRoller
         OperationList m_operations;
 
         std::map<Operations::OperationTag, std::shared_ptr<Operations::Operation>> m_tagMap;
+
+        ArgumentOffsetMap m_argOffsetMap;
 
         std::vector<CommandArgumentPtr> m_commandArgs;
 

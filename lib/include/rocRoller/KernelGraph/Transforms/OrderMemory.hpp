@@ -11,6 +11,7 @@ namespace rocRoller
          * @brief After OrderMemory, there should be no ambiguously ordered memory nodes of the same type.
          */
         ConstraintStatus NoAmbiguousNodes(const KernelGraph& k);
+        ConstraintStatus NoBadBodyEdges(const KernelGraph& k);
 
         /**
          * @brief Ensure there are no ambiguous memory operations in the control graph.
@@ -33,9 +34,9 @@ namespace rocRoller
             {
                 if(m_checkOrder)
                 {
-                    return {&NoAmbiguousNodes};
+                    return {&NoBadBodyEdges, &NoAmbiguousNodes};
                 }
-                return {};
+                return {&NoBadBodyEdges};
             }
 
         private:

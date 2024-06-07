@@ -17,23 +17,34 @@ using namespace rocRoller;
 
 namespace rocRollerTest
 {
+    struct HalfPrecisionProblem
+    {
+        std::shared_ptr<Command>            command;
+        rocRoller::Operations::OperationTag resultTag, aTag, bTag;
+    };
+
     class HalfPrecisionTest : public CurrentGPUContextFixture
     {
     };
 
-    void genHalfPrecisionMultiplyAdd(rocRoller::ContextPtr m_context, int N)
+    void genHalfPrecisionMultiplyAdd(rocRoller::ContextPtr m_context,
+                                     HalfPrecisionProblem& prob,
+                                     int                   N)
     {
         auto k = m_context->kernel();
 
         k->setKernelDimensions(1);
-        auto command = std::make_shared<Command>();
+        prob.command = std::make_shared<Command>();
 
-        auto result_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
-        auto b_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
+        prob.resultTag  = prob.command->allocateTag();
+        auto result_exp = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::Half, PointerType::PointerGlobal}, prob.resultTag, ArgumentType::Value));
+        prob.aTag       = prob.command->allocateTag();
+        auto a_exp      = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::Half, PointerType::PointerGlobal}, prob.aTag, ArgumentType::Value));
+        prob.bTag       = prob.command->allocateTag();
+        auto b_exp      = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::Half, PointerType::PointerGlobal}, prob.bTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -114,19 +125,24 @@ namespace rocRollerTest
         m_context->schedule(k->amdgpu_metadata());
     }
 
-    void genHalfPrecisionMultiplyAddConvert(rocRoller::ContextPtr m_context, int N)
+    void genHalfPrecisionMultiplyAddConvert(rocRoller::ContextPtr m_context,
+                                            HalfPrecisionProblem& prob,
+                                            int                   N)
     {
         auto k = m_context->kernel();
 
         k->setKernelDimensions(1);
-        auto command = std::make_shared<Command>();
+        prob.command = std::make_shared<Command>();
 
-        auto result_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
-        auto b_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
+        prob.resultTag  = prob.command->allocateTag();
+        auto result_exp = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::Half, PointerType::PointerGlobal}, prob.resultTag, ArgumentType::Value));
+        prob.aTag       = prob.command->allocateTag();
+        auto a_exp      = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::Half, PointerType::PointerGlobal}, prob.aTag, ArgumentType::Value));
+        prob.bTag       = prob.command->allocateTag();
+        auto b_exp      = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::Half, PointerType::PointerGlobal}, prob.bTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -216,10 +232,11 @@ namespace rocRollerTest
     void
         executeHalfPrecisionMultiplyAdd(rocRoller::ContextPtr m_context, int N, bool convertToFloat)
     {
+        HalfPrecisionProblem prob;
         if(convertToFloat)
-            genHalfPrecisionMultiplyAddConvert(m_context, N);
+            genHalfPrecisionMultiplyAddConvert(m_context, prob, N);
         else
-            genHalfPrecisionMultiplyAdd(m_context, N);
+            genHalfPrecisionMultiplyAdd(m_context, prob, N);
 
         CommandKernel     commandKernel(m_context);
         RandomGenerator   random(314273u);
@@ -231,12 +248,13 @@ namespace rocRollerTest
         auto d_b      = make_shared_device(b);
         auto d_result = make_shared_device<Half>(N);
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("result", d_result.get());
-        runtimeArgs.append("a", d_a.get());
-        runtimeArgs.append("b", d_b.get());
+        CommandArguments commandArgs = prob.command->createArguments();
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandArgs.setArgument(prob.resultTag, ArgumentType::Value, d_result.get());
+        commandArgs.setArgument(prob.aTag, ArgumentType::Value, d_a.get());
+        commandArgs.setArgument(prob.bTag, ArgumentType::Value, d_b.get());
+
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(result.data(), d_result.get(), sizeof(Half) * N, hipMemcpyDefault),
                     HasHipSuccess(0));
@@ -257,21 +275,24 @@ namespace rocRollerTest
         executeHalfPrecisionMultiplyAdd(m_context, 8, true);
     }
 
-    void genHalfPrecisionPack(rocRoller::ContextPtr m_context, int N)
+    void genHalfPrecisionPack(rocRoller::ContextPtr m_context, HalfPrecisionProblem& prob, int N)
     {
         AssertFatal(N % 2 == 0, "HalfPrecisionPack tests should only operate on even sizes");
 
         auto k = m_context->kernel();
 
         k->setKernelDimensions(1);
-        auto command = std::make_shared<Command>();
+        prob.command = std::make_shared<Command>();
 
-        auto result_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
-        auto a_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
-        auto b_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
+        prob.resultTag  = prob.command->allocateTag();
+        auto result_exp = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::Half, PointerType::PointerGlobal}, prob.resultTag, ArgumentType::Value));
+        prob.aTag       = prob.command->allocateTag();
+        auto a_exp      = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::Half, PointerType::PointerGlobal}, prob.aTag, ArgumentType::Value));
+        prob.bTag       = prob.command->allocateTag();
+        auto b_exp      = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {DataType::Half, PointerType::PointerGlobal}, prob.bTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -435,7 +456,8 @@ namespace rocRollerTest
 
     void executeHalfPrecisionPack(rocRoller::ContextPtr m_context, int N)
     {
-        genHalfPrecisionPack(m_context, N);
+        HalfPrecisionProblem prob;
+        genHalfPrecisionPack(m_context, prob, N);
 
         CommandKernel     commandKernel(m_context);
         RandomGenerator   random(316473u);
@@ -447,12 +469,13 @@ namespace rocRollerTest
         auto d_b      = make_shared_device(b);
         auto d_result = make_shared_device<Half>(N * 2);
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("result", d_result.get());
-        runtimeArgs.append("a", d_a.get());
-        runtimeArgs.append("b", d_b.get());
+        CommandArguments commandArgs = prob.command->createArguments();
 
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandArgs.setArgument(prob.resultTag, ArgumentType::Value, d_result.get());
+        commandArgs.setArgument(prob.aTag, ArgumentType::Value, d_a.get());
+        commandArgs.setArgument(prob.bTag, ArgumentType::Value, d_b.get());
+
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(
             hipMemcpy(result.data(), d_result.get(), sizeof(Half) * N * 2, hipMemcpyDefault),
@@ -523,28 +546,29 @@ namespace rocRollerTest
         auto tagTensorC = command->addOperation(rocRoller::Operations::Tensor(2, dataType));
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagC, tagTensorC));
 
-        KernelArguments runtimeArgs;
+        CommandArguments commandArgs = command->createArguments();
 
-        runtimeArgs.append("user0", d_a.get());
-        runtimeArgs.append("d_a_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_a_size_0", (size_t)nx);
-        runtimeArgs.append("d_a_size_1", (size_t)ny);
-        runtimeArgs.append("d_a_stride_0", (size_t)(ny));
-        runtimeArgs.append("d_a_stride_1", (size_t)(1));
+        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
+        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
+        commandArgs.setArgument(tagTensorC, ArgumentType::Value, d_c.get());
 
-        runtimeArgs.append("user1", d_b.get());
-        runtimeArgs.append("d_b_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_b_size_0", (size_t)nx);
-        runtimeArgs.append("d_b_size_1", (size_t)ny);
-        runtimeArgs.append("d_b_stride_0", (size_t)(ny));
-        runtimeArgs.append("d_b_stride_1", (size_t)(1));
+        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)nx * ny);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)nx);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)ny);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)ny);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
 
-        runtimeArgs.append("user2", d_c.get());
-        runtimeArgs.append("d_c_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_c_size_0", (size_t)nx);
-        runtimeArgs.append("d_c_size_1", (size_t)ny);
-        runtimeArgs.append("d_c_stride_0", (size_t)(ny));
-        runtimeArgs.append("d_c_stride_1", (size_t)(1));
+        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)nx * ny);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)nx);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)ny);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)ny);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)1);
+
+        commandArgs.setArgument(tagTensorC, ArgumentType::Limit, (size_t)nx * ny);
+        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)nx);
+        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)ny);
+        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 0, (size_t)ny);
+        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 1, (size_t)1);
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -563,7 +587,7 @@ namespace rocRollerTest
         params->setManualWorkitemCount({NX, NY, NZ});
 
         CommandKernel commandKernel(command, "HalfPrecisionAdd", params);
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(r.data(), d_c.get(), nx * ny * sizeof(Half), hipMemcpyDefault),
                     HasHipSuccess(0));

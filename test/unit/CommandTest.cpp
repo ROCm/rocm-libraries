@@ -181,3 +181,32 @@ TEST(CommandTest, BlockScaleSeparate)
     EXPECT_EQ(command->getOperation<Operations::BlockScale>(block_scale_tag).getInputs(),
               std::unordered_set<Operations::OperationTag>({dataTensor, scaleTensor}));
 }
+
+TEST(CommandTest, SetCommandArguments)
+{
+    auto command = std::make_shared<rocRoller::Command>();
+
+    auto tagTensorA = command->addOperation(Operations::Tensor(1, DataType::Float));
+    auto tagLoadA   = command->addOperation(Operations::T_Load_Linear(tagTensorA));
+
+    auto tagScalarB = command->addOperation(Operations::Scalar(DataType::Float));
+    auto tagLoadB   = command->addOperation(Operations::T_Load_Scalar(tagScalarB));
+
+    Operations::T_Execute execute(command->getNextTag());
+    auto                  tagResult = execute.addXOp(Operations::E_Mul(tagLoadA, tagLoadB));
+    command->addOperation(std::move(execute));
+
+    auto tagTensorResult = command->addOperation(Operations::Tensor(1, DataType::Float));
+    command->addOperation(Operations::T_Store_Linear(tagResult, tagTensorResult));
+
+    CommandArguments commandArgs = command->createArguments();
+
+    commandArgs.setArgument(tagTensorA, ArgumentType::Limit, 10);
+    EXPECT_THROW({ commandArgs.setArgument(tagTensorA, ArgumentType::Size, 10); }, FatalError);
+    commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, 10);
+    EXPECT_THROW({ commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1); }, FatalError);
+    commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, 1);
+
+    commandArgs.setArgument(tagScalarB, ArgumentType::Value, 2);
+    EXPECT_THROW({ commandArgs.setArgument(tagScalarB, ArgumentType::Limit, 10); }, FatalError);
+}

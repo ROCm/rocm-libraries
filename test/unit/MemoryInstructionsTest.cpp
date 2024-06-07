@@ -728,10 +728,12 @@ namespace MemoryInstructionsTest
 
             auto command = std::make_shared<Command>();
 
-            auto result_exp = std::make_shared<Expression::Expression>(
-                command->allocateArgument({DataType::Int32, PointerType::PointerGlobal}));
-            auto a_exp = std::make_shared<Expression::Expression>(
-                command->allocateArgument({DataType::Int32, PointerType::PointerGlobal}));
+            auto resultTag  = command->allocateTag();
+            auto result_exp = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {DataType::Int32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
+            auto aTag       = command->allocateTag();
+            auto a_exp      = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {DataType::Int32, PointerType::PointerGlobal}, aTag, ArgumentType::Value));
 
             auto one  = std::make_shared<Expression::Expression>(1u);
             auto zero = std::make_shared<Expression::Expression>(0u);
@@ -916,8 +918,9 @@ namespace MemoryInstructionsTest
             auto k       = m_context->kernel();
             auto command = std::make_shared<Command>();
 
-            auto result_exp = std::make_shared<Expression::Expression>(
-                command->allocateArgument({DataType::Int32, PointerType::PointerGlobal}));
+            auto resultTag  = command->allocateTag();
+            auto result_exp = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {DataType::Int32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
 
             auto workItemCountExpr = std::make_shared<Expression::Expression>(workItemCount);
             auto one               = std::make_shared<Expression::Expression>(1u);
@@ -1252,8 +1255,11 @@ namespace MemoryInstructionsTest
             auto k       = m_context->kernel();
             auto command = std::make_shared<Command>();
 
+            auto resultTag  = command->allocateTag();
             auto result_exp = std::make_shared<Expression::Expression>(
-                command->allocateArgument({DataType::FP8x4_NANOO, PointerType::PointerGlobal}));
+                command->allocateArgument({DataType::FP8x4_NANOO, PointerType::PointerGlobal},
+                                          resultTag,
+                                          ArgumentType::Value));
 
             auto workItemCountExpr = std::make_shared<Expression::Expression>(N);
             auto one               = std::make_shared<Expression::Expression>(1u);

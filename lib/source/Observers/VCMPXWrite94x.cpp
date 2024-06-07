@@ -37,13 +37,13 @@ namespace rocRoller
             if(GPUInstructionInfo::isVReadlane(inst.getOpCode())
                || GPUInstructionInfo::isVWritelane(inst.getOpCode()))
             {
-                return checkRegister(m_context.lock()->getExec()).value_or(0) - 2;
+                return checkRegister(m_context.lock()->getExec()).value_or(0);
             }
 
             // Check if VALU reads EXEC as constant
             if(GPUInstructionInfo::isVALU(inst.getOpCode()))
             {
-                return checkSrcs(inst).value_or(0);
+                return checkSrcs(inst).value_or(0) - 2;
             }
             return 0;
         }

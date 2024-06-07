@@ -683,10 +683,10 @@ namespace rocRoller
         void orderMemoryNodes(KernelGraph& graph, std::vector<int> const& nodes, bool ordered)
         {
             std::set<std::pair<int, int>> pairs;
-            for(int i = 1; i < nodes.size(); i++)
-            {
-                pairs.insert(std::make_pair(nodes[i - 1], nodes[i]));
-            }
+            // Cartesian product; mimics the std::set version above
+            for(int i = 0; i < nodes.size(); ++i)
+                for(int j = 0; j < nodes.size(); ++j)
+                    pairs.insert(std::make_pair(nodes[i], nodes[j]));
             orderMemoryNodes(graph, pairs, ordered);
         }
 

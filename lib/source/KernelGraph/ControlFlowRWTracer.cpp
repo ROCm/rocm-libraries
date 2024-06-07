@@ -158,11 +158,11 @@ namespace rocRoller::KernelGraph
                     nodes.insert(tag);
 
             // If there are none, we have a problem.
-            AssertFatal(!nodes.empty(),
-                        "Invalid control graph!",
-                        ShowValue(m_graph.control),
-                        ShowValue(candidates),
-                        ShowValue(m_completedControlNodes));
+            AssertRecoverable(!nodes.empty(),
+                              "Invalid control graph!",
+                              ShowValue(m_graph.control),
+                              ShowValue(candidates),
+                              ShowValue(m_completedControlNodes));
 
             // Visit all the nodes we found.
             for(auto const& tag : nodes)

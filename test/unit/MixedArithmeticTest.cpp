@@ -75,7 +75,7 @@ namespace MixedArithmeticTest
         return stream;
     }
 
-    std::shared_ptr<void> createDeviceArray(std::vector<CommandArgumentValue> const& values)
+    std::shared_ptr<uint8_t> createDeviceArray(std::vector<CommandArgumentValue> const& values)
     {
         KernelArguments args;
 
@@ -328,19 +328,32 @@ namespace MixedArithmeticTest
 
             CommandArgumentPtr lhsArg, rhsArg, destArg;
 
-            destArg = command->allocateArgument(
-                param.resultVarType.getPointer(), DataDirection::WriteOnly, "dest");
+            auto tagDest = command->allocateTag();
+            destArg      = command->allocateArgument(param.resultVarType.getPointer(),
+                                                tagDest,
+                                                ArgumentType::Value,
+                                                DataDirection::WriteOnly,
+                                                "dest");
 
+            rocRoller::Operations::OperationTag tagLhs, tagRhs;
             if(param.lhsRegType != Register::Type::Literal)
             {
-                lhsArg = command->allocateArgument(
-                    param.lhsVarType.getPointer(), DataDirection::ReadOnly, "lhs");
+                tagLhs = command->allocateTag();
+                lhsArg = command->allocateArgument(param.lhsVarType.getPointer(),
+                                                   tagLhs,
+                                                   ArgumentType::Value,
+                                                   DataDirection::ReadOnly,
+                                                   "lhs");
             }
 
             if(param.rhsRegType != Register::Type::Literal)
             {
-                rhsArg = command->allocateArgument(
-                    param.rhsVarType.getPointer(), DataDirection::ReadOnly, "rhs");
+                tagRhs = command->allocateTag();
+                rhsArg = command->allocateArgument(param.rhsVarType.getPointer(),
+                                                   tagRhs,
+                                                   ArgumentType::Value,
+                                                   DataDirection::ReadOnly,
+                                                   "rhs");
             }
 
             m_context->kernel()->addCommandArguments(command->getArguments());
@@ -438,24 +451,23 @@ namespace MixedArithmeticTest
             int numResultValues = param.lhsValues.size() * param.rhsValues.size();
             int numResultBytes  = numResultValues * param.resultVarType.getElementSize();
 
-            auto                  d_result = make_shared_device<uint8_t>(numResultBytes);
-            std::shared_ptr<void> d_lhs;
-            std::shared_ptr<void> d_rhs;
+            auto                     d_result = make_shared_device<uint8_t>(numResultBytes);
+            std::shared_ptr<uint8_t> d_lhs, d_rhs;
 
-            KernelArguments commandArgs;
+            CommandArguments commandArgs = command->createArguments();
 
-            commandArgs.append("result", (void*)d_result.get());
+            commandArgs.setArgument(tagDest, ArgumentType::Value, d_result.get());
 
             if(lhsArg)
             {
                 d_lhs = createDeviceArray(param.lhsValues);
-                commandArgs.append("lhs", d_lhs.get());
+                commandArgs.setArgument(tagLhs, ArgumentType::Value, d_lhs.get());
             }
 
             if(rhsArg)
             {
                 d_rhs = createDeviceArray(param.rhsValues);
-                commandArgs.append("rhs", d_rhs.get());
+                commandArgs.setArgument(tagRhs, ArgumentType::Value, d_rhs.get());
             }
 
             commandKernel.launchKernel(commandArgs.runtimeArguments());
@@ -523,25 +535,43 @@ namespace MixedArithmeticTest
 
             CommandArgumentPtr arg1Arg, arg2Arg, arg3Arg, destArg;
 
-            destArg = command->allocateArgument(
-                param.resultVarType.getPointer(), DataDirection::WriteOnly, "dest");
+            auto tagDest = command->allocateTag();
+            destArg      = command->allocateArgument(param.resultVarType.getPointer(),
+                                                tagDest,
+                                                ArgumentType::Value,
+                                                DataDirection::WriteOnly,
+                                                "dest");
+
+            rocRoller::Operations::OperationTag tagArg1, tagArg2, tagArg3;
 
             if(param.arg1RegType != Register::Type::Literal)
             {
-                arg1Arg = command->allocateArgument(
-                    param.arg1VarType.getPointer(), DataDirection::ReadOnly, "arg1");
+                tagArg1 = command->allocateTag();
+                arg1Arg = command->allocateArgument(param.arg1VarType.getPointer(),
+                                                    tagArg1,
+                                                    ArgumentType::Value,
+                                                    DataDirection::ReadOnly,
+                                                    "arg1");
             }
 
             if(param.arg2RegType != Register::Type::Literal)
             {
-                arg2Arg = command->allocateArgument(
-                    param.arg2VarType.getPointer(), DataDirection::ReadOnly, "arg2");
+                tagArg2 = command->allocateTag();
+                arg2Arg = command->allocateArgument(param.arg2VarType.getPointer(),
+                                                    tagArg2,
+                                                    ArgumentType::Value,
+                                                    DataDirection::ReadOnly,
+                                                    "arg2");
             }
 
             if(param.arg3RegType != Register::Type::Literal)
             {
-                arg3Arg = command->allocateArgument(
-                    param.arg3VarType.getPointer(), DataDirection::ReadOnly, "arg3");
+                tagArg3 = command->allocateTag();
+                arg3Arg = command->allocateArgument(param.arg3VarType.getPointer(),
+                                                    tagArg3,
+                                                    ArgumentType::Value,
+                                                    DataDirection::ReadOnly,
+                                                    "arg3");
             }
 
             m_context->kernel()->addCommandArguments(command->getArguments());
@@ -662,31 +692,29 @@ namespace MixedArithmeticTest
                 = param.arg1Values.size() * param.arg2Values.size() * param.arg3Values.size();
             int numResultBytes = numResultValues * param.resultVarType.getElementSize();
 
-            auto                  d_result = make_shared_device<uint8_t>(numResultBytes);
-            std::shared_ptr<void> d_arg1;
-            std::shared_ptr<void> d_arg2;
-            std::shared_ptr<void> d_arg3;
+            auto                     d_result = make_shared_device<uint8_t>(numResultBytes);
+            std::shared_ptr<uint8_t> d_arg1, d_arg2, d_arg3;
 
-            KernelArguments commandArgs;
+            CommandArguments commandArgs = command->createArguments();
 
-            commandArgs.append("result", (void*)d_result.get());
+            commandArgs.setArgument(tagDest, ArgumentType::Value, d_result.get());
 
             if(arg1Arg)
             {
                 d_arg1 = createDeviceArray(param.arg1Values);
-                commandArgs.append("arg1", d_arg1.get());
+                commandArgs.setArgument(tagArg1, ArgumentType::Value, d_arg1.get());
             }
 
             if(arg2Arg)
             {
                 d_arg2 = createDeviceArray(param.arg2Values);
-                commandArgs.append("arg2", d_arg2.get());
+                commandArgs.setArgument(tagArg2, ArgumentType::Value, d_arg2.get());
             }
 
             if(arg3Arg)
             {
                 d_arg3 = createDeviceArray(param.arg3Values);
-                commandArgs.append("arg3", d_arg3.get());
+                commandArgs.setArgument(tagArg3, ArgumentType::Value, d_arg3.get());
             }
 
             commandKernel.launchKernel(commandArgs.runtimeArguments());

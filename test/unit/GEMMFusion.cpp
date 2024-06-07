@@ -188,57 +188,12 @@ namespace GEMMDriverTest
                 rocRoller::Operations::Tensor(2, dataType, oneStridesN)); // E
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagRelu, tagTensorRelu));
 
-            KernelArguments runtimeArgs;
-
-            runtimeArgs.append("A", deviceA.get());
-            runtimeArgs.append("d_a_limit", (size_t)M * K);
-            runtimeArgs.append("d_a_size_0", (size_t)M);
-            runtimeArgs.append("d_a_size_1", (size_t)K);
-            if(gemm.transA == "N")
-            {
-                runtimeArgs.append("d_a_stride_0", (size_t)1);
-                runtimeArgs.append("d_a_stride_1", (size_t)M);
-            }
-            else
-            {
-                runtimeArgs.append("d_a_stride_0", (size_t)K);
-                runtimeArgs.append("d_a_stride_1", (size_t)1);
-            }
-
-            runtimeArgs.append("B", deviceB.get());
-            runtimeArgs.append("d_b_limit", (size_t)K * N);
-            runtimeArgs.append("d_b_size_0", (size_t)K);
-            runtimeArgs.append("d_b_size_1", (size_t)N);
-            if(gemm.transB == "N")
-            {
-                runtimeArgs.append("d_b_stride_0", (size_t)1);
-                runtimeArgs.append("d_b_stride_1", (size_t)K);
-            }
-            else
-            {
-                runtimeArgs.append("d_b_stride_0", (size_t)N);
-                runtimeArgs.append("d_b_stride_1", (size_t)1);
-            }
-
-            runtimeArgs.append("C", deviceC.get());
-            runtimeArgs.append("d_c_limit", (size_t)M * N);
-            runtimeArgs.append("d_c_size_0", (size_t)M);
-            runtimeArgs.append("d_c_size_1", (size_t)N);
-            runtimeArgs.append("d_c_stride_0", (size_t)1);
-            runtimeArgs.append("d_c_stride_1", (size_t)M);
-
-            runtimeArgs.append("alpha", alpha);
-
-            runtimeArgs.append("beta", beta);
-
-            runtimeArgs.append("reluAlpha", static_cast<T>(reluAlpha));
-
-            runtimeArgs.append("D", deviceD.get());
-            runtimeArgs.append("d_d_limit", (size_t)M * N);
-            runtimeArgs.append("d_d_size_0", (size_t)M);
-            runtimeArgs.append("d_d_size_1", (size_t)N);
-            runtimeArgs.append("d_d_stride_0", (size_t)1);
-            runtimeArgs.append("d_d_stride_1", (size_t)M);
+            auto tagScratch = command->allocateTag();
+            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                                      tagScratch,
+                                      ArgumentType::Value,
+                                      DataDirection::ReadWrite,
+                                      rocRoller::SCRATCH);
 
             auto kernelOptions                           = std::make_shared<KernelOptions>();
             kernelOptions->fuseLoops                     = gemm.fuseLoops;
@@ -322,21 +277,69 @@ namespace GEMMDriverTest
                 {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
                  static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
 
-            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                      DataDirection::ReadWrite,
-                                      rocRoller::SCRATCH);
-
             CommandKernel commandKernel(
                 command, testKernelName(), params, postParams, kernelOptions);
 
+            CommandArguments commandArgs = command->createArguments();
+
+            commandArgs.setArgument(tagTensorA, ArgumentType::Value, deviceA.get());
+            commandArgs.setArgument(tagTensorB, ArgumentType::Value, deviceB.get());
+            commandArgs.setArgument(tagTensorC, ArgumentType::Value, deviceC.get());
+            commandArgs.setArgument(tagTensorRelu, ArgumentType::Value, deviceD.get());
+
+            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
+            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
+            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
+            if(gemm.transA == "N")
+            {
+                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
+                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
+            }
+            else
+            {
+                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)K);
+                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
+            }
+
+            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
+            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
+            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
+            if(gemm.transB == "N")
+            {
+                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
+                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
+            }
+            else
+            {
+                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)N);
+                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)1);
+            }
+
+            commandArgs.setArgument(tagTensorC, ArgumentType::Limit, (size_t)M * N);
+            commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)M);
+            commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)N);
+            commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 0, (size_t)1);
+            commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 1, (size_t)M);
+
+            commandArgs.setArgument(tagScalarAlpha, ArgumentType::Value, alpha);
+
+            commandArgs.setArgument(tagScalarBeta, ArgumentType::Value, beta);
+
+            commandArgs.setArgument(tagTensorRelu, ArgumentType::Limit, (size_t)M * N);
+            commandArgs.setArgument(tagTensorRelu, ArgumentType::Size, 0, (size_t)M);
+            commandArgs.setArgument(tagTensorRelu, ArgumentType::Size, 1, (size_t)N);
+            commandArgs.setArgument(tagTensorRelu, ArgumentType::Stride, 0, (size_t)1);
+            commandArgs.setArgument(tagTensorRelu, ArgumentType::Stride, 1, (size_t)M);
+
+            commandArgs.setArgument(
+                tagScalarReluAlpha, ArgumentType::Value, static_cast<T>(reluAlpha));
             // Create scratch space
             auto scratchSpaceRequired = commandKernel.scratchSpaceRequired();
             auto deviceScratch        = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
-            runtimeArgs.append(rocRoller::SCRATCH, static_cast<void*>(deviceScratch.get()));
-
+            commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
             if(gemm.streamK)
             {
-                runtimeArgs.append("numWGs", gemm.numCUs);
+                commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numCUs);
             }
 
             // Host result
@@ -373,7 +376,7 @@ namespace GEMMDriverTest
                 ASSERT_THAT(hipMemset(deviceScratch.get(), 0, scratchSpaceRequired),
                             HasHipSuccess(0));
 
-                commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+                commandKernel.launchKernel(commandArgs.runtimeArguments());
                 m_context = commandKernel.getContext();
 
                 ASSERT_THAT(

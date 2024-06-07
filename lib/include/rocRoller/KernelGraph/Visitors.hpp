@@ -376,6 +376,8 @@ namespace rocRoller
             KernelGraph    graph;
             GraphReindexer reindexer;
 
+            graph.addConstraints(original.getConstraints());
+
             if(visitor.rewriteCoordinates())
             {
                 // add coordinate roots

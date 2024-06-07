@@ -1,5 +1,5 @@
 /**
- * Copyright 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -79,9 +79,10 @@ namespace rocRoller
         return stream;
     }
 
-    KernelArguments::KernelArguments(bool log)
+    KernelArguments::KernelArguments(bool log, size_t bytes)
         : m_log(log)
     {
+        m_data.insert(m_data.begin(), bytes, 0);
     }
 
     KernelArguments::~KernelArguments() {}

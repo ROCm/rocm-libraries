@@ -1,6 +1,7 @@
 #pragma once
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelOptions.hpp>
+#include <rocRoller/Operations/CommandArguments.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
 
 namespace rocRoller
@@ -25,6 +26,7 @@ namespace rocRoller
             std::vector<size_t> kernelExecute;
             bool                checked = false;
             bool                correct = true;
+            double              rnorm   = 1.e12;
         };
 
         class BenchmarkSolution
@@ -32,8 +34,8 @@ namespace rocRoller
         public:
             rocRoller::CommandPtr                     getCommand();
             std::shared_ptr<rocRoller::CommandKernel> getKernel();
-            BenchmarkResults                          benchmark(RunParameters const&       runParams,
-                                                                rocRoller::KernelArguments runtimeArgs);
+            BenchmarkResults                          benchmark(RunParameters const& runParams,
+                                                                CommandArguments     runtimeArgs);
 
         protected:
             rocRoller::CommandPtr                     m_command;

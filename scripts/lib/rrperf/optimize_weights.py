@@ -204,6 +204,8 @@ class Result:
 
     output_file: str = field(default="", compare=False)
 
+    rnorm: float = field(default=math.inf)
+
     @property
     def passed(self):
         return math.isfinite(self.time)
@@ -284,6 +286,7 @@ def bench(
                 result_data = yaml.safe_load(f)
             if result_data["correct"]:
                 result.time = float(np.median(result_data["kernelExecute"]))
+            result.rnorm = result_data["rnorm"]
 
         print(result.summary)
 
@@ -297,6 +300,14 @@ def bench(
 
     finally:
         lock.release()
+
+
+def sanity_check(results: List[Result]):
+    rnorms = {r.rnorm for r in results if r.passed}
+    print(f"RNorms: {rnorms}")
+    if len(rnorms) != 1:
+        print("Differing rnorms!!!")
+        raise ValueError
 
 
 prev_results = {}
@@ -426,6 +437,7 @@ def genetic(args):
 
             gen_dir = args.output_dir / f"gen_{i}"
             results = generation(gen_dir, args.problem, inputs)
+            sanity_check(results)
 
             write_generation(args.output_dir, i, results)
 

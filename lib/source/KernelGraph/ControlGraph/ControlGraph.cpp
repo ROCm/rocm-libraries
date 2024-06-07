@@ -159,6 +159,7 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         auto allNodes = std::move(sequenceNodes);
         allNodes.insert(bodyNodes.begin(), bodyNodes.end());
+        allNodes.insert(elseNodes.begin(), elseNodes.end());
         allNodes.insert(incNodes.begin(), incNodes.end());
         allNodes.insert(initNodes.begin(), initNodes.end());
 

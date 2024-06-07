@@ -69,6 +69,7 @@ kernelExecute:   [ 11345953, 11285794, 11359553, 11373794, 11348034, 11430433,
                    11296513, 11409154, 11417954, 11372353 ]
 checked:         true
 correct:         true
+rnorm:           2.5e-05
 ...
 """
     assert cmd[0] == "client/gemm"

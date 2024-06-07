@@ -1612,8 +1612,12 @@ namespace ExpressionTest
     TEST_F(ExpressionTest, EvaluateConditional)
     {
         auto command = std::make_shared<Command>();
-        auto ca      = command->allocateArgument({DataType::Double, PointerType::Value});
-        auto cb      = command->allocateArgument({DataType::Double, PointerType::Value});
+        auto aTag    = command->allocateTag();
+        auto ca      = command->allocateArgument(
+            {DataType::Double, PointerType::Value}, aTag, ArgumentType::Value);
+        auto bTag = command->allocateTag();
+        auto cb   = command->allocateArgument(
+            {DataType::Double, PointerType::Value}, bTag, ArgumentType::Value);
 
         auto a = std::make_shared<Expression::Expression>(ca);
         auto b = std::make_shared<Expression::Expression>(cb);
@@ -1662,8 +1666,12 @@ namespace ExpressionTest
     TEST_F(ExpressionTest, EvaluateLogical)
     {
         auto command = std::make_shared<Command>();
-        auto ca      = command->allocateArgument({DataType::Int32, PointerType::Value});
-        auto cb      = command->allocateArgument({DataType::Int32, PointerType::Value});
+        auto aTag    = command->allocateTag();
+        auto ca      = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value);
+        auto bTag = command->allocateTag();
+        auto cb   = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value);
 
         auto a = std::make_shared<Expression::Expression>(ca);
         auto b = std::make_shared<Expression::Expression>(cb);
@@ -1693,8 +1701,12 @@ namespace ExpressionTest
     TEST_F(ExpressionTest, EvaluateShifts)
     {
         auto command = std::make_shared<Command>();
-        auto ca      = command->allocateArgument({DataType::Int32, PointerType::Value});
-        auto cb      = command->allocateArgument({DataType::Int32, PointerType::Value});
+        auto aTag    = command->allocateTag();
+        auto ca      = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value);
+        auto bTag = command->allocateTag();
+        auto cb   = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value);
 
         auto a = std::make_shared<Expression::Expression>(ca);
         auto b = std::make_shared<Expression::Expression>(cb);
@@ -1735,8 +1747,12 @@ namespace ExpressionTest
     TEST_F(ExpressionTest, EvaluateConditionalTernary)
     {
         auto command = std::make_shared<Command>();
-        auto ca      = command->allocateArgument({DataType::Int32, PointerType::Value});
-        auto cb      = command->allocateArgument({DataType::Int32, PointerType::Value});
+        auto aTag    = command->allocateTag();
+        auto ca      = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value);
+        auto bTag = command->allocateTag();
+        auto cb   = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value);
 
         auto a = std::make_shared<Expression::Expression>(ca);
         auto b = std::make_shared<Expression::Expression>(cb);
@@ -1769,8 +1785,12 @@ namespace ExpressionTest
     TEST_F(ExpressionTest, EvaluateBitwiseOps)
     {
         auto command = std::make_shared<Command>();
-        auto ca      = command->allocateArgument({DataType::Int32, PointerType::Value});
-        auto cb      = command->allocateArgument({DataType::Int32, PointerType::Value});
+        auto aTag    = command->allocateTag();
+        auto ca      = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value);
+        auto bTag = command->allocateTag();
+        auto cb   = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value);
 
         auto a = std::make_shared<Expression::Expression>(ca);
         auto b = std::make_shared<Expression::Expression>(cb);
@@ -1805,8 +1825,12 @@ namespace ExpressionTest
     TEST_F(ExpressionTest, EvaluateMultiplyHigh)
     {
         auto command = std::make_shared<Command>();
-        auto ca      = command->allocateArgument({DataType::Int32, PointerType::Value});
-        auto cb      = command->allocateArgument({DataType::Int32, PointerType::Value});
+        auto aTag    = command->allocateTag();
+        auto ca      = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value);
+        auto bTag = command->allocateTag();
+        auto cb   = command->allocateArgument(
+            {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value);
 
         auto a = std::make_shared<Expression::Expression>(ca);
         auto b = std::make_shared<Expression::Expression>(cb);
@@ -1854,8 +1878,12 @@ namespace ExpressionTest
     TEST_F(ExpressionTest, EvaluateMultiplyHighUnsigned)
     {
         auto command = std::make_shared<Command>();
-        auto ca      = command->allocateArgument({DataType::UInt32, PointerType::Value});
-        auto cb      = command->allocateArgument({DataType::UInt32, PointerType::Value});
+        auto aTag    = command->allocateTag();
+        auto ca      = command->allocateArgument(
+            {DataType::UInt32, PointerType::Value}, aTag, ArgumentType::Value);
+        auto bTag = command->allocateTag();
+        auto cb   = command->allocateArgument(
+            {DataType::UInt32, PointerType::Value}, bTag, ArgumentType::Value);
 
         auto a = std::make_shared<Expression::Expression>(ca);
         auto b = std::make_shared<Expression::Expression>(cb);
@@ -1891,7 +1919,9 @@ namespace ExpressionTest
     TEST_F(ExpressionTest, EvaluateExponential2)
     {
         auto command = std::make_shared<Command>();
-        auto ca      = command->allocateArgument({DataType::Float, PointerType::Value});
+        auto aTag    = command->allocateTag();
+        auto ca      = command->allocateArgument(
+            {DataType::Float, PointerType::Value}, aTag, ArgumentType::Value);
 
         auto a = std::make_shared<Expression::Expression>(ca);
 

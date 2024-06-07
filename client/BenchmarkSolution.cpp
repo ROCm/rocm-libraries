@@ -14,8 +14,8 @@ namespace rocRoller
             return m_kernel;
         }
 
-        BenchmarkResults BenchmarkSolution::benchmark(RunParameters const&       runParams,
-                                                      rocRoller::KernelArguments runtimeArgs)
+        BenchmarkResults BenchmarkSolution::benchmark(RunParameters const& runParams,
+                                                      CommandArguments     runtimeArgs)
         {
             BenchmarkResults result;
             result.runParams = runParams;

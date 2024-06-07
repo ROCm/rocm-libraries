@@ -43,7 +43,7 @@ namespace rocRoller
             for(auto ambiguousPair : ambiguousNodes)
             {
                 retval.combine(false,
-                               concatenate("Ambiguous Memory Nodes Found: (",
+                               concatenate("Ambiguous memory nodes found: (",
                                            ambiguousPair.first,
                                            ",",
                                            ambiguousPair.second,
@@ -59,7 +59,21 @@ namespace rocRoller
                     searchPattern += concatenate("|(\\(", searchNode, "\\))");
                 }
                 searchPattern.erase(0, 1);
-                retval.combine(true, concatenate("Regex Search String:\n", searchPattern));
+                retval.combine(true, concatenate("Handy regex search string:\n", searchPattern));
+            }
+            return retval;
+        }
+
+        ConstraintStatus NoBadBodyEdges(const KernelGraph& graph)
+        {
+            ConstraintStatus retval;
+            try
+            {
+                ControlFlowRWTracer tracer(graph);
+            }
+            catch(RecoverableError&)
+            {
+                retval.combine(false, "Invalid control graph!");
             }
             return retval;
         }

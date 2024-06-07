@@ -28,7 +28,7 @@ namespace GEMMDriverTest
 {
     struct GEMMTestGPU : public CurrentGPUContextFixture
     {
-        template <typename T>
+        template <typename T, typename TD = T>
         void basicGEMM(ContextPtr&        m_context,
                        const GEMMProblem& gemm,
                        double             acceptableError,
@@ -39,6 +39,13 @@ namespace GEMMDriverTest
 
         {
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+            if constexpr(std::is_same_v<T, FP8_NANOO>)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+            }
+
+            auto dataTypeAB = TypeInfo<T>::Var.dataType;
+            auto dataTypeD  = TypeInfo<TD>::Var.dataType;
 
             // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
             int   M     = gemm.m;
@@ -56,6 +63,12 @@ namespace GEMMDriverTest
                             "MacroTile size mismatch (K unroll)");
             }
 
+            auto bpe = DataTypeInfo::Get(dataTypeAB).elementSize;
+            AssertFatal(gemm.macM * gemm.macK * bpe > gemm.waveM * gemm.waveK,
+                        "Not enough elements (A).");
+            AssertFatal(gemm.macN * gemm.macK * bpe > gemm.waveN * gemm.waveK,
+                        "Not enough elements (B).");
+
             AssertFatal(gemm.workgroupSizeX % gemm.wavefrontSize == 0,
                         "Workgroup Size X must be multiply of wave front size");
 
@@ -63,13 +76,15 @@ namespace GEMMDriverTest
                 = gemm.wavefrontSize * gemm.macM / gemm.waveM / gemm.workgroupSizeX;
             uint wavetilePerWavefrontN = gemm.macN / gemm.waveN / gemm.workgroupSizeY;
 
-            AssertFatal(wavetilePerWavefrontM > 0, "Bad size (M)");
-            AssertFatal(wavetilePerWavefrontN > 0, "Bad size (N)");
+            AssertFatal(wavetilePerWavefrontM > 0, "WaveTile size mismatch (M).");
+            AssertFatal(wavetilePerWavefrontN > 0, "WaveTile size mismatch (N).");
 
             AssertFatal(gemm.macM % (gemm.waveM * wavetilePerWavefrontM) == 0,
                         "WaveTile size mismatch (M)");
             AssertFatal(gemm.macN % (gemm.waveN * wavetilePerWavefrontN) == 0,
                         "WaveTile size mismatch (N)");
+
+            Log::debug("GEMMTest jamming: {}x{}", wavetilePerWavefrontM, wavetilePerWavefrontN);
 
             uint workgroupSizeX = gemm.workgroupSizeX * gemm.workgroupSizeY;
             uint workgroupSizeY = 1;
@@ -100,9 +115,9 @@ namespace GEMMDriverTest
             auto NZ = std::make_shared<Expression::Expression>(1u);
 
             // Host data
-            std::vector<T> hostA;
-            std::vector<T> hostB;
-            std::vector<T> hostC;
+            std::vector<T>  hostA;
+            std::vector<T>  hostB;
+            std::vector<TD> hostC;
 
             GenerateRandomInput(31415u, hostA, M * K, hostB, K * N, hostC, M * N);
 
@@ -114,15 +129,10 @@ namespace GEMMDriverTest
                 std::fill(hostC.begin(), hostC.end(), static_cast<T>(0.0));
             }
 
-            std::shared_ptr<T> deviceA = make_shared_device(hostA);
-            std::shared_ptr<T> deviceB = make_shared_device(hostB);
-            std::shared_ptr<T> deviceC = make_shared_device(hostC);
-            if(notSetC)
-            {
-                deviceC = nullptr;
-            }
-
-            std::shared_ptr<T> deviceD = make_shared_device<T>(M * N, 0.0);
+            std::shared_ptr<T>  deviceA = make_shared_device(hostA);
+            std::shared_ptr<T>  deviceB = make_shared_device(hostB);
+            std::shared_ptr<TD> deviceC = (notSetC) ? nullptr : make_shared_device(hostC);
+            std::shared_ptr<TD> deviceD = make_shared_device<TD>(M * N, TD{});
 
             auto command  = std::make_shared<Command>();
             auto dataType = TypeInfo<T>::Var.dataType;
@@ -135,15 +145,15 @@ namespace GEMMDriverTest
                                                   : std::vector<size_t>({});
 
             auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataType, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
+                2, dataTypeAB, gemm.transA == "N" ? oneStridesN : oneStridesT)); // A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
-                2, dataType, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
+                2, dataTypeAB, gemm.transB == "N" ? oneStridesN : oneStridesT)); // B
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             auto tagTensorC = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataType, oneStridesN)); // C
+                rocRoller::Operations::Tensor(2, dataTypeD, oneStridesN)); // C
             auto tagLoadC = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
             auto tagScalarAlpha
@@ -181,59 +191,15 @@ namespace GEMMDriverTest
             command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
             auto tagTensorD = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataType, oneStridesN)); // D
+                rocRoller::Operations::Tensor(2, dataTypeD, oneStridesN)); // D
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
-            KernelArguments runtimeArgs;
-
-            runtimeArgs.append("A", deviceA.get());
-            runtimeArgs.append("d_a_limit", (size_t)M * K);
-            runtimeArgs.append("d_a_size_0", (size_t)M);
-            runtimeArgs.append("d_a_size_1", (size_t)K);
-            if(gemm.transA == "N")
-            {
-                runtimeArgs.append("d_a_stride_0", (size_t)1);
-                runtimeArgs.append("d_a_stride_1", (size_t)M);
-            }
-            else
-            {
-                runtimeArgs.append("d_a_stride_0", (size_t)K);
-                runtimeArgs.append("d_a_stride_1", (size_t)1);
-            }
-
-            runtimeArgs.append("B", deviceB.get());
-            runtimeArgs.append("d_b_limit", (size_t)K * N);
-            runtimeArgs.append("d_b_size_0", (size_t)K);
-            runtimeArgs.append("d_b_size_1", (size_t)N);
-            if(gemm.transB == "N")
-            {
-                runtimeArgs.append("d_b_stride_0", (size_t)1);
-                runtimeArgs.append("d_b_stride_1", (size_t)K);
-            }
-            else
-            {
-                runtimeArgs.append("d_b_stride_0", (size_t)N);
-                runtimeArgs.append("d_b_stride_1", (size_t)1);
-            }
-
-            runtimeArgs.append("C", deviceC.get());
-            runtimeArgs.append("d_c_limit", (size_t)M * N);
-            runtimeArgs.append("d_c_size_0", (size_t)M);
-            runtimeArgs.append("d_c_size_1", (size_t)N);
-            runtimeArgs.append("d_c_stride_0", (size_t)1);
-            runtimeArgs.append("d_c_stride_1", (size_t)M);
-
-            runtimeArgs.append("alpha", alpha);
-
-            runtimeArgs.append("beta", beta);
-
-            runtimeArgs.append("D", deviceD.get());
-            runtimeArgs.append("d_d_limit", (size_t)M * N);
-            runtimeArgs.append("d_d_size_0", (size_t)M);
-            runtimeArgs.append("d_d_size_1", (size_t)N);
-            runtimeArgs.append("d_d_stride_0", (size_t)1);
-            runtimeArgs.append("d_d_stride_1", (size_t)M);
-
+            auto tagScratch = command->allocateTag();
+            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                                      tagScratch,
+                                      ArgumentType::Value,
+                                      DataDirection::ReadWrite,
+                                      rocRoller::SCRATCH);
             auto kernelOptions                           = std::make_shared<KernelOptions>();
             kernelOptions->fuseLoops                     = gemm.fuseLoops;
             kernelOptions->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
@@ -316,25 +282,71 @@ namespace GEMMDriverTest
                 {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
                  static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
 
-            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                      DataDirection::ReadWrite,
-                                      rocRoller::SCRATCH);
-
             CommandKernel commandKernel(
                 command, testKernelName(), params, postParams, kernelOptions);
+
+            CommandArguments commandArgs = command->createArguments();
+
+            commandArgs.setArgument(tagTensorA, ArgumentType::Value, deviceA.get());
+            commandArgs.setArgument(tagTensorB, ArgumentType::Value, deviceB.get());
+            commandArgs.setArgument(tagTensorC, ArgumentType::Value, deviceC.get());
+            commandArgs.setArgument(tagTensorD, ArgumentType::Value, deviceD.get());
+
+            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
+            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
+            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
+            if(gemm.transA == "N")
+            {
+                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
+                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
+            }
+            else
+            {
+                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)K);
+                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
+            }
+
+            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
+            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
+            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
+            if(gemm.transB == "N")
+            {
+                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
+                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
+            }
+            else
+            {
+                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)N);
+                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)1);
+            }
+
+            commandArgs.setArgument(tagTensorC, ArgumentType::Limit, (size_t)M * N);
+            commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)M);
+            commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)N);
+            commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 0, (size_t)1);
+            commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 1, (size_t)M);
+
+            commandArgs.setArgument(tagScalarAlpha, ArgumentType::Value, alpha);
+
+            commandArgs.setArgument(tagScalarBeta, ArgumentType::Value, beta);
+
+            commandArgs.setArgument(tagTensorD, ArgumentType::Limit, (size_t)M * N);
+            commandArgs.setArgument(tagTensorD, ArgumentType::Size, 0, (size_t)M);
+            commandArgs.setArgument(tagTensorD, ArgumentType::Size, 1, (size_t)N);
+            commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 0, (size_t)1);
+            commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 1, (size_t)M);
 
             // Create scratch space
             auto scratchSpaceRequired = commandKernel.scratchSpaceRequired();
             auto deviceScratch        = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
-            runtimeArgs.append(rocRoller::SCRATCH, static_cast<void*>(deviceScratch.get()));
-
+            commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
             if(gemm.streamK)
             {
-                runtimeArgs.append("numWGs", gemm.numCUs);
+                commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numCUs);
             }
 
             // Host result
-            std::vector<T> h_result(M * N, 0.0);
+            std::vector<TD> h_result(M * N, TD{});
             rocRoller::CPUMM(h_result,
                              hostC,
                              hostA,
@@ -348,20 +360,20 @@ namespace GEMMDriverTest
                              gemm.transB == "T");
 
             // Device result
-            std::vector<T> d_result(M * N);
+            std::vector<TD> d_result(M * N);
 
             for(int iteration = 0; iteration < numIters; ++iteration)
             {
-                ASSERT_THAT(hipMemset(deviceD.get(), 0, M * N * sizeof(T)), HasHipSuccess(0));
+                ASSERT_THAT(hipMemset(deviceD.get(), 0, M * N * sizeof(TD)), HasHipSuccess(0));
                 ASSERT_THAT(hipMemset(deviceScratch.get(), 0, scratchSpaceRequired),
                             HasHipSuccess(0));
 
-                commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+                commandKernel.launchKernel(commandArgs.runtimeArguments());
                 m_context = commandKernel.getContext();
 
                 ASSERT_THAT(
                     hipMemcpy(
-                        d_result.data(), deviceD.get(), M * N * sizeof(T), hipMemcpyDeviceToHost),
+                        d_result.data(), deviceD.get(), M * N * sizeof(TD), hipMemcpyDeviceToHost),
                     HasHipSuccess(0));
 
                 double rnorm = relativeNorm(d_result, h_result);
@@ -837,6 +849,93 @@ namespace GEMMDriverTest
         gemm.waveK = 8;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
+    {
+        GEMMProblem gemm;
+
+        // 4x2 jamming
+        uint wavesPerWGX = 16;
+        uint wavesPerWGY = 2;
+
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 32;
+
+        gemm.macM = wavesPerWGX * gemm.waveM;
+        gemm.macN = wavesPerWGY * gemm.waveN;
+        gemm.macK = 2 * gemm.waveK;
+
+        gemm.loadLDSA = true;
+        gemm.loadLDSB = true;
+
+        gemm.workgroupSizeX = 256;
+        gemm.workgroupSizeY = 1;
+
+        gemm.m = 33 * gemm.macM;
+        gemm.n = 17 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.alpha = 2.1;
+        gemm.beta  = 0.75;
+
+        gemm.transA = "N";
+        gemm.transB = "T";
+
+        basicGEMM<FP8_NANOO, float>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_TN)
+    {
+        GEMMProblem gemm;
+
+        // 1x1 jamming
+        uint wavesPerWGX = 4;
+        uint wavesPerWGY = 1;
+
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 32;
+
+        gemm.macM = wavesPerWGX * gemm.waveM;
+        gemm.macN = wavesPerWGY * gemm.waveN;
+        gemm.macK = 2 * gemm.waveK;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = false;
+
+        gemm.workgroupSizeX = 256;
+        gemm.workgroupSizeY = 1;
+
+        gemm.m = 33 * gemm.macM;
+        gemm.n = 17 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.alpha = 2.1;
+        gemm.beta  = 0.75;
+
+        gemm.transA = "T";
+        gemm.transB = "N";
+
+        basicGEMM<FP8_NANOO, float>(m_context, gemm, 2.e-5);
+
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        {
+            std::string generatedCode = m_context->instructions()->toString();
+
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load"), 3);
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "), 2);
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 1);
+
+            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b"), 2);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), 1);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b32 "), 1);
+
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read"), 4);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read_b64 "), 4);
+        }
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2)

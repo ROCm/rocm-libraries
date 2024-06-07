@@ -112,29 +112,28 @@ namespace MatrixMultiplyTest
         auto tagTensorD = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeD)); // D
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
-        KernelArguments runtimeArgs;
+        CommandArguments commandArgs = command->createArguments();
 
-        // tiled?
-        runtimeArgs.append("A", (void*)d_A.get());
-        runtimeArgs.append("d_a_limit", (size_t)M * K);
-        runtimeArgs.append("d_a_size_0", (size_t)M);
-        runtimeArgs.append("d_a_size_1", (size_t)K);
-        runtimeArgs.append("d_a_stride_0", (size_t)1);
-        runtimeArgs.append("d_a_stride_1", (size_t)M);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_A.get());
+        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
 
-        runtimeArgs.append("B", (void*)d_B.get());
-        runtimeArgs.append("d_b_limit", (size_t)K * N);
-        runtimeArgs.append("d_b_size_0", (size_t)K);
-        runtimeArgs.append("d_b_size_1", (size_t)N);
-        runtimeArgs.append("d_b_stride_0", (size_t)1);
-        runtimeArgs.append("d_b_stride_1", (size_t)K);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_B.get());
+        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
 
-        runtimeArgs.append("D", (void*)d_D.get());
-        runtimeArgs.append("d_d_limit", (size_t)M * N);
-        runtimeArgs.append("d_d_size_0", (size_t)M);
-        runtimeArgs.append("d_d_size_1", (size_t)N);
-        runtimeArgs.append("d_d_stride_0", (size_t)1);
-        runtimeArgs.append("d_d_stride_1", (size_t)M);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Value, d_D.get());
+        commandArgs.setArgument(tagTensorD, ArgumentType::Limit, (size_t)M * N);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Size, 0, (size_t)M);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Size, 1, (size_t)N);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 1, (size_t)M);
 
         auto kernelOptions                           = std::make_shared<KernelOptions>();
         kernelOptions->packMultipleElementsInto1VGPR = true;
@@ -163,7 +162,7 @@ namespace MatrixMultiplyTest
 
         commandKernel = std::make_shared<CommandKernel>(
             command, "MatrixMultiplyMacroTile", params, postParams, kernelOptions);
-        commandKernel->launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel->launchKernel(commandArgs.runtimeArguments());
 
         std::vector<ACC> D(M * N);
         ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(ACC), hipMemcpyDefault),
@@ -402,29 +401,28 @@ namespace MatrixMultiplyTest
         auto tagTensorD = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeD)); // D
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
-        KernelArguments runtimeArgs;
+        CommandArguments commandArgs = command->createArguments();
 
-        // tiled?
-        runtimeArgs.append("A", (void*)d_A.get());
-        runtimeArgs.append("d_a_limit", (size_t)M * K);
-        runtimeArgs.append("d_a_size_0", (size_t)M);
-        runtimeArgs.append("d_a_size_1", (size_t)K);
-        runtimeArgs.append("d_a_stride_0", (size_t)1);
-        runtimeArgs.append("d_a_stride_1", (size_t)M);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_A.get());
+        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
 
-        runtimeArgs.append("B", (void*)d_B.get());
-        runtimeArgs.append("d_b_limit", (size_t)K * N);
-        runtimeArgs.append("d_b_size_0", (size_t)K);
-        runtimeArgs.append("d_b_size_1", (size_t)N);
-        runtimeArgs.append("d_b_stride_0", (size_t)1);
-        runtimeArgs.append("d_b_stride_1", (size_t)K);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_B.get());
+        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
 
-        runtimeArgs.append("D", (void*)d_D.get());
-        runtimeArgs.append("d_d_limit", (size_t)M * N);
-        runtimeArgs.append("d_d_size_0", (size_t)M);
-        runtimeArgs.append("d_d_size_1", (size_t)N);
-        runtimeArgs.append("d_d_stride_0", (size_t)1);
-        runtimeArgs.append("d_d_stride_1", (size_t)M);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Value, d_D.get());
+        commandArgs.setArgument(tagTensorD, ArgumentType::Limit, (size_t)M * N);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Size, 0, (size_t)M);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Size, 1, (size_t)N);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 1, (size_t)M);
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -445,7 +443,7 @@ namespace MatrixMultiplyTest
         postParams->setManualWavefrontCount({2u, 2u});
 
         CommandKernel commandKernel(command, "MatrixMultiplyAB", params, postParams);
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         std::vector<ACC> D(M * N);
         ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(ACC), hipMemcpyDefault),
@@ -549,36 +547,35 @@ namespace MatrixMultiplyTest
         auto tagTensorD = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // D
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
-        KernelArguments runtimeArgs;
+        CommandArguments commandArgs = command->createArguments();
 
-        // tiled?
-        runtimeArgs.append("A", d_A.get());
-        runtimeArgs.append("d_a_limit", (size_t)M * K);
-        runtimeArgs.append("d_a_size_0", (size_t)M);
-        runtimeArgs.append("d_a_size_1", (size_t)K);
-        runtimeArgs.append("d_a_stride_0", (size_t)1);
-        runtimeArgs.append("d_a_stride_1", (size_t)M);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_A.get());
+        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
 
-        runtimeArgs.append("B", d_B.get());
-        runtimeArgs.append("d_b_limit", (size_t)K * N);
-        runtimeArgs.append("d_b_size_0", (size_t)K);
-        runtimeArgs.append("d_b_size_1", (size_t)N);
-        runtimeArgs.append("d_b_stride_0", (size_t)1);
-        runtimeArgs.append("d_b_stride_1", (size_t)K);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_B.get());
+        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
 
-        runtimeArgs.append("C", d_C.get());
-        runtimeArgs.append("d_c_limit", (size_t)M * N);
-        runtimeArgs.append("d_c_size_0", (size_t)M);
-        runtimeArgs.append("d_c_size_1", (size_t)N);
-        runtimeArgs.append("d_c_stride_0", (size_t)1);
-        runtimeArgs.append("d_c_stride_1", (size_t)M);
+        commandArgs.setArgument(tagTensorC, ArgumentType::Value, d_C.get());
+        commandArgs.setArgument(tagTensorC, ArgumentType::Limit, (size_t)M * N);
+        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)M);
+        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)N);
+        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 1, (size_t)M);
 
-        runtimeArgs.append("D", d_D.get());
-        runtimeArgs.append("d_d_limit", (size_t)M * N);
-        runtimeArgs.append("d_d_size_0", (size_t)M);
-        runtimeArgs.append("d_d_size_1", (size_t)N);
-        runtimeArgs.append("d_d_stride_0", (size_t)1);
-        runtimeArgs.append("d_d_stride_1", (size_t)M);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Value, d_D.get());
+        commandArgs.setArgument(tagTensorD, ArgumentType::Limit, (size_t)M * N);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Size, 0, (size_t)M);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Size, 1, (size_t)N);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 0, (size_t)1);
+        commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 1, (size_t)M);
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -603,7 +600,7 @@ namespace MatrixMultiplyTest
         params->setManualWorkitemCount({NX, NY, NZ});
 
         CommandKernel commandKernel(command, "ABC", params, postParams);
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         std::vector<T> D(M * N, 0.f);
         ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),

@@ -16,6 +16,8 @@ namespace rocRoller
             template <typename A, typename B, typename C, typename D>
             class StreamKGEMMSolution : public DataParallelGEMMSolution<A, B, C, D>
             {
+                Operations::OperationTag m_scratchTag;
+
             public:
                 StreamKGEMMSolution(SolutionParameters const& solutionParams)
                 {
@@ -68,7 +70,10 @@ namespace rocRoller
                             == (hipError_t)HIP_SUCCESS);
 
                         result.benchmarkResults.checked = true;
-                        result.benchmarkResults.correct = this->validate(h_A, h_B, h_C, h_D);
+
+                        auto [correct, rnorm]           = this->validate(h_A, h_B, h_C, h_D);
+                        result.benchmarkResults.correct = correct;
+                        result.benchmarkResults.rnorm   = rnorm;
                     }
 
                     return result;
@@ -79,8 +84,11 @@ namespace rocRoller
                 {
                     auto command = DataParallelGEMMSolution<A, B, C, D>::makeCommand();
 
+                    m_scratchTag = command->allocateTag();
                     command->allocateArgument(
                         VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                        m_scratchTag,
+                        ArgumentType::Value,
                         DataDirection::ReadWrite,
                         rocRoller::SCRATCH);
 
@@ -108,16 +116,16 @@ namespace rocRoller
                     return kernelOptions;
                 }
 
-                KernelArguments makeArgs(std::shared_ptr<A>       m_dA,
-                                         std::shared_ptr<B>       m_dB,
-                                         std::shared_ptr<C>       m_dC,
-                                         std::shared_ptr<D>       m_dD,
-                                         std::shared_ptr<uint8_t> m_dScratch)
+                CommandArguments makeArgs(std::shared_ptr<A>       m_dA,
+                                          std::shared_ptr<B>       m_dB,
+                                          std::shared_ptr<C>       m_dC,
+                                          std::shared_ptr<D>       m_dD,
+                                          std::shared_ptr<uint8_t> m_dScratch)
                 {
-                    auto runtimeArgs
+                    auto commandArgs
                         = DataParallelGEMMSolution<A, B, C, D>::makeArgs(m_dA, m_dB, m_dC, m_dD);
 
-                    runtimeArgs.append(rocRoller::SCRATCH, static_cast<void*>(m_dScratch.get()));
+                    commandArgs.setArgument(m_scratchTag, ArgumentType::Value, m_dScratch.get());
 
                     // Determine the number of CUs on the device
                     hipDeviceProp_t deviceProperties;
@@ -139,14 +147,10 @@ namespace rocRoller
                                 "StreamK kernel requires that the number of workgroups is not "
                                 "greater than the number of compute units * occupancy.");
 
-                    runtimeArgs.append("numWGs", this->m_solutionParams.numWGs);
-
-                    bool logArgs = Log::getLogger()->should_log(spdlog::level::debug);
-
-                    if(logArgs)
-                        Log::getLogger()->debug(runtimeArgs.toString());
-
-                    return runtimeArgs;
+                    commandArgs.setArgument(this->m_command->getNextTag(),
+                                            ArgumentType::Value,
+                                            this->m_solutionParams.numWGs);
+                    return commandArgs;
                 }
             };
         }

@@ -449,9 +449,9 @@ namespace rocRoller
             };
         }
 
-        void visualize(CommandPtr             command,
-                       CommandKernel&         commandKernel,
-                       KernelArguments const& commandArgs)
+        void visualize(CommandPtr              command,
+                       CommandKernel&          commandKernel,
+                       CommandArguments const& commandArgs)
         {
             auto filename = Settings::getInstance()->get(Settings::LogFile) + "gemm.vis";
             std::cout << "Visualizing to " << filename << std::endl;

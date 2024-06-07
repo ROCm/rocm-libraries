@@ -210,9 +210,15 @@ TEST_F(ExpressionTransformationTest, LaunchTimeSubExpressions)
 {
     auto command = std::make_shared<Command>();
 
-    auto arg1 = command->allocateArgument(DataType::Int32, DataDirection::ReadOnly, "arg1");
-    auto arg2 = command->allocateArgument(DataType::Int32, DataDirection::ReadOnly, "arg2");
-    auto arg3 = command->allocateArgument(DataType::Int64, DataDirection::ReadOnly, "arg3");
+    auto arg1Tag = command->allocateTag();
+    auto arg1    = command->allocateArgument(
+        DataType::Int32, arg1Tag, ArgumentType::Value, DataDirection::ReadOnly, "arg1");
+    auto arg2Tag = command->allocateTag();
+    auto arg2    = command->allocateArgument(
+        DataType::Int32, arg2Tag, ArgumentType::Value, DataDirection::ReadOnly, "arg2");
+    auto arg3Tag = command->allocateTag();
+    auto arg3    = command->allocateArgument(
+        DataType::Int64, arg3Tag, ArgumentType::Value, DataDirection::ReadOnly, "arg3");
 
     auto arg1e = arg1->expression();
     auto arg2e = arg2->expression();

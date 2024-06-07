@@ -32,8 +32,9 @@ namespace LowerExponentialTest
               };
 
         auto command = std::make_shared<Command>();
-        auto a       = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::Float, PointerType::Value}));
+        auto aTag    = command->allocateTag();
+        auto a       = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::Value}, aTag, ArgumentType::Value));
 
         ExpectCommutative(a,
                           "Exponential2(Multiply(1.44270f, CommandArgument(user_Float_Value_0)))");
@@ -47,9 +48,12 @@ namespace LowerExponentialTest
 
             auto command = std::make_shared<Command>();
 
-            auto result_arg
-                = command->allocateArgument({DataType::Float, PointerType::PointerGlobal});
-            auto a_arg = command->allocateArgument({DataType::Float, PointerType::Value});
+            auto resultTag  = command->allocateTag();
+            auto result_arg = command->allocateArgument(
+                {DataType::Float, PointerType::PointerGlobal}, resultTag, ArgumentType::Value);
+            auto aTag  = command->allocateTag();
+            auto a_arg = command->allocateArgument(
+                {DataType::Float, PointerType::Value}, aTag, ArgumentType::Value);
 
             auto result_exp = std::make_shared<Expression::Expression>(result_arg);
             auto a_exp      = std::make_shared<Expression::Expression>(a_arg);
@@ -119,11 +123,12 @@ namespace LowerExponentialTest
 
             CommandKernel commandKernel(m_context);
 
-            KernelArguments runtimeArgs;
-            runtimeArgs.append("result", d_result.get());
-            runtimeArgs.append("a", a);
+            CommandArguments commandArgs = command->createArguments();
 
-            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+            commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
+            commandArgs.setArgument(aTag, ArgumentType::Value, a);
+
+            commandKernel.launchKernel(commandArgs.runtimeArguments());
 
             float result;
             ASSERT_THAT(hipMemcpy(&result, d_result.get(), sizeof(float), hipMemcpyDefault),

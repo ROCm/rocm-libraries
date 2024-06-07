@@ -99,40 +99,81 @@ namespace rocRollerTest
         VariableType ulongVal{DataType::UInt64, PointerType::Value};
         VariableType intVal{DataType::Int32, PointerType::Value};
 
-        auto               sizeC_arg = command->allocateArgument(ulongVal);
-        auto               sizeA_arg = command->allocateArgument(ulongVal);
-        auto               sizeB_arg = command->allocateArgument(ulongVal);
-        auto               D_arg     = command->allocateArgument(floatPtr);
-        auto               C_arg     = command->allocateArgument(floatPtr);
-        auto               A_arg     = command->allocateArgument(floatPtr);
-        auto               B_arg     = command->allocateArgument(floatPtr);
-        auto               alpha_arg = command->allocateArgument(floatVal);
-        CommandArgumentPtr beta_arg;
+        auto SizeCTag  = command->allocateTag();
+        auto sizeC_arg = command->allocateArgument(ulongVal, SizeCTag, ArgumentType::Limit);
+        auto SizeATag  = command->allocateTag();
+        auto sizeA_arg = command->allocateArgument(ulongVal, SizeATag, ArgumentType::Limit);
+        auto SizeBTag  = command->allocateTag();
+        auto sizeB_arg = command->allocateArgument(ulongVal, SizeBTag, ArgumentType::Limit);
+        auto DTag      = command->allocateTag();
+        auto D_arg     = command->allocateArgument(floatPtr, DTag, ArgumentType::Value);
+        auto CTag      = command->allocateTag();
+        auto C_arg     = command->allocateArgument(floatPtr, CTag, ArgumentType::Value);
+        auto ATag      = command->allocateTag();
+        auto A_arg     = command->allocateArgument(floatPtr, ATag, ArgumentType::Value);
+        auto BTag      = command->allocateTag();
+        auto B_arg     = command->allocateArgument(floatPtr, BTag, ArgumentType::Value);
+        auto alphaTag  = command->allocateTag();
+        auto alpha_arg = command->allocateArgument(floatVal, alphaTag, ArgumentType::Value);
+        CommandArgumentPtr                  beta_arg;
+        rocRoller::Operations::OperationTag betaTag;
         if(hasBeta)
-            beta_arg = command->allocateArgument(floatVal);
-        auto strideD0_arg                 = command->allocateArgument(uintVal);
-        auto strideD1_arg                 = command->allocateArgument(uintVal);
-        auto strideC0_arg                 = command->allocateArgument(uintVal);
-        auto strideC1_arg                 = command->allocateArgument(uintVal);
-        auto strideA0_arg                 = command->allocateArgument(uintVal);
-        auto strideA1_arg                 = command->allocateArgument(uintVal);
-        auto strideB0_arg                 = command->allocateArgument(uintVal);
-        auto strideB1_arg                 = command->allocateArgument(uintVal);
-        auto SizesFree0_arg               = command->allocateArgument(uintVal);
-        auto SizesFree1_arg               = command->allocateArgument(uintVal);
-        auto SizesFree2_arg               = command->allocateArgument(uintVal);
-        auto SizesSum0_arg                = command->allocateArgument(uintVal);
-        auto OrigStaggerUIter_arg         = command->allocateArgument(intVal);
-        auto NumWorkGroups0_arg           = command->allocateArgument(uintVal);
-        auto NumWorkGroups1_arg           = command->allocateArgument(uintVal);
-        auto NumFullBlocks_arg            = command->allocateArgument(uintVal);
-        auto WgmRemainder1_arg            = command->allocateArgument(uintVal);
-        auto MagicNumberWgmRemainder1_arg = command->allocateArgument(uintVal);
-        auto OffsetD_arg                  = command->allocateArgument(uintVal);
-        auto OffsetC_arg                  = command->allocateArgument(uintVal);
-        auto OffsetA_arg                  = command->allocateArgument(uintVal);
-        auto OffsetB_arg                  = command->allocateArgument(uintVal);
-        auto padding_arg                  = command->allocateArgument(uintVal);
+        {
+            betaTag  = command->allocateTag();
+            beta_arg = command->allocateArgument(floatVal, betaTag, ArgumentType::Value);
+        }
+        auto strideD0Tag    = command->allocateTag();
+        auto strideD0_arg   = command->allocateArgument(uintVal, strideD0Tag, ArgumentType::Stride);
+        auto strideD1Tag    = command->allocateTag();
+        auto strideD1_arg   = command->allocateArgument(uintVal, strideD1Tag, ArgumentType::Stride);
+        auto strideC0Tag    = command->allocateTag();
+        auto strideC0_arg   = command->allocateArgument(uintVal, strideC0Tag, ArgumentType::Stride);
+        auto strideC1Tag    = command->allocateTag();
+        auto strideC1_arg   = command->allocateArgument(uintVal, strideC1Tag, ArgumentType::Stride);
+        auto strideA0Tag    = command->allocateTag();
+        auto strideA0_arg   = command->allocateArgument(uintVal, strideA0Tag, ArgumentType::Stride);
+        auto strideA1Tag    = command->allocateTag();
+        auto strideA1_arg   = command->allocateArgument(uintVal, strideA1Tag, ArgumentType::Stride);
+        auto strideB0Tag    = command->allocateTag();
+        auto strideB0_arg   = command->allocateArgument(uintVal, strideB0Tag, ArgumentType::Stride);
+        auto strideB1Tag    = command->allocateTag();
+        auto strideB1_arg   = command->allocateArgument(uintVal, strideB1Tag, ArgumentType::Stride);
+        auto sizesFree0Tag  = command->allocateTag();
+        auto SizesFree0_arg = command->allocateArgument(uintVal, sizesFree0Tag, ArgumentType::Size);
+        auto sizesFree1Tag  = command->allocateTag();
+        auto SizesFree1_arg = command->allocateArgument(uintVal, sizesFree1Tag, ArgumentType::Size);
+        auto sizesFree2Tag  = command->allocateTag();
+        auto SizesFree2_arg = command->allocateArgument(uintVal, sizesFree2Tag, ArgumentType::Size);
+        auto sizesSum0Tag   = command->allocateTag();
+        auto SizesSum0_arg  = command->allocateArgument(uintVal, sizesSum0Tag, ArgumentType::Size);
+        auto origStaggerUIterTag = command->allocateTag();
+        auto OrigStaggerUIter_arg
+            = command->allocateArgument(intVal, origStaggerUIterTag, ArgumentType::Value);
+        auto numWorkGroups0Tag = command->allocateTag();
+        auto NumWorkGroups0_arg
+            = command->allocateArgument(uintVal, numWorkGroups0Tag, ArgumentType::Value);
+        auto numWorkGroups1Tag = command->allocateTag();
+        auto NumWorkGroups1_arg
+            = command->allocateArgument(uintVal, numWorkGroups1Tag, ArgumentType::Value);
+        auto numFullBlocksTag = command->allocateTag();
+        auto NumFullBlocks_arg
+            = command->allocateArgument(uintVal, numFullBlocksTag, ArgumentType::Value);
+        auto wgmRemainder1Tag = command->allocateTag();
+        auto WgmRemainder1_arg
+            = command->allocateArgument(uintVal, wgmRemainder1Tag, ArgumentType::Value);
+        auto magicNumberWgmRemainder1Tag = command->allocateTag();
+        auto MagicNumberWgmRemainder1_arg
+            = command->allocateArgument(uintVal, magicNumberWgmRemainder1Tag, ArgumentType::Value);
+        auto offsetDTag  = command->allocateTag();
+        auto OffsetD_arg = command->allocateArgument(uintVal, offsetDTag, ArgumentType::Value);
+        auto offsetCTag  = command->allocateTag();
+        auto OffsetC_arg = command->allocateArgument(uintVal, offsetCTag, ArgumentType::Value);
+        auto offsetATag  = command->allocateTag();
+        auto OffsetA_arg = command->allocateArgument(uintVal, offsetATag, ArgumentType::Value);
+        auto offsetBTag  = command->allocateTag();
+        auto OffsetB_arg = command->allocateArgument(uintVal, offsetBTag, ArgumentType::Value);
+        auto paddingTag  = command->allocateTag();
+        auto padding_arg = command->allocateArgument(uintVal, paddingTag, ArgumentType::Value);
 
         auto sizeC_exp            = std::make_shared<Expression::Expression>(sizeC_arg);
         auto sizeA_exp            = std::make_shared<Expression::Expression>(sizeA_arg);
@@ -317,58 +358,58 @@ namespace rocRollerTest
 
         unsigned long long sizeC = hostC.size(), sizeA = hostA.size(), sizeB = hostB.size();
 
-        KernelArguments kargs(true);
-        kargs.reserve(1024, 128);
+        CommandArguments commandArgs = command->createArguments();
 
-        kargs.append("sizeC", sizeC);
-        kargs.append("sizeA", sizeA);
-        kargs.append("sizeB", sizeB);
+        commandArgs.setArgument(SizeATag, ArgumentType::Limit, sizeA);
+        commandArgs.setArgument(SizeBTag, ArgumentType::Limit, sizeB);
+        commandArgs.setArgument(SizeCTag, ArgumentType::Limit, sizeC);
 
         auto D = make_shared_device<float>(sizeC);
         auto C = make_shared_device(hostC);
         auto A = make_shared_device(hostA);
         auto B = make_shared_device(hostB);
 
-        kargs.append("D", D.get());
-        kargs.append("C", D.get());
-        kargs.append("A", A.get());
-        kargs.append("B", B.get());
+        commandArgs.setArgument(ATag, ArgumentType::Value, A.get());
+        commandArgs.setArgument(BTag, ArgumentType::Value, B.get());
+        commandArgs.setArgument(CTag, ArgumentType::Value, C.get());
+        commandArgs.setArgument(DTag, ArgumentType::Value, D.get());
 
-        kargs.append("alpha", alpha);
+        commandArgs.setArgument(alphaTag, ArgumentType::Value, alpha);
         if(hasBeta)
-            kargs.append("beta", beta);
+            commandArgs.setArgument(betaTag, ArgumentType::Value, beta);
 
-        kargs.append("strideD0", strideD0);
-        kargs.append("strideD1", strideD1);
+        commandArgs.setArgument(strideA0Tag, ArgumentType::Stride, strideA0);
+        commandArgs.setArgument(strideA1Tag, ArgumentType::Stride, strideA1);
 
-        kargs.append("strideC0", strideC0);
-        kargs.append("strideC1", strideC1);
+        commandArgs.setArgument(strideB0Tag, ArgumentType::Stride, strideB0);
+        commandArgs.setArgument(strideB1Tag, ArgumentType::Stride, strideB1);
 
-        kargs.append("strideA0", strideA0);
-        kargs.append("strideA1", strideA1);
+        commandArgs.setArgument(strideC0Tag, ArgumentType::Stride, strideC0);
+        commandArgs.setArgument(strideC1Tag, ArgumentType::Stride, strideC1);
 
-        kargs.append("strideB0", strideB0);
-        kargs.append("strideB1", strideB1);
+        commandArgs.setArgument(strideD0Tag, ArgumentType::Stride, strideD0);
+        commandArgs.setArgument(strideD1Tag, ArgumentType::Stride, strideD1);
 
-        kargs.append("SizesFree0", SizesFree0);
-        kargs.append("SizesFree1", SizesFree1);
-        kargs.append("SizesFree2", SizesFree2);
-        kargs.append("SizesSum0", SizesSum0);
+        commandArgs.setArgument(sizesFree0Tag, ArgumentType::Size, SizesFree0);
+        commandArgs.setArgument(sizesFree1Tag, ArgumentType::Size, SizesFree1);
+        commandArgs.setArgument(sizesFree2Tag, ArgumentType::Size, SizesFree2);
+        commandArgs.setArgument(sizesSum0Tag, ArgumentType::Size, SizesSum0);
 
-        kargs.append("OrigStaggerUIter", OrigStaggerUIter);
+        commandArgs.setArgument(origStaggerUIterTag, ArgumentType::Value, OrigStaggerUIter);
 
-        kargs.append("NumWorkGroups0", NumWorkGroups0);
-        kargs.append("NumWorkGroups1", NumWorkGroups1);
-        kargs.append("NumFullBlocks", NumFullBlocks);
+        commandArgs.setArgument(numWorkGroups0Tag, ArgumentType::Value, NumWorkGroups0);
+        commandArgs.setArgument(numWorkGroups1Tag, ArgumentType::Value, NumWorkGroups1);
+        commandArgs.setArgument(numFullBlocksTag, ArgumentType::Value, NumFullBlocks);
 
-        kargs.append("WgmRemainder1", WgmRemainder1);
-        kargs.append("MagicNumberWgmRemainder1", MagicNumberWgmRemainder1);
+        commandArgs.setArgument(wgmRemainder1Tag, ArgumentType::Value, WgmRemainder1);
+        commandArgs.setArgument(
+            magicNumberWgmRemainder1Tag, ArgumentType::Value, MagicNumberWgmRemainder1);
 
-        kargs.append("OffsetD", OffsetD);
-        kargs.append("OffsetC", OffsetC);
-        kargs.append("OffsetA", OffsetA);
-        kargs.append("OffsetB", OffsetB);
-        kargs.append("padding", padding);
+        commandArgs.setArgument(offsetDTag, ArgumentType::Value, OffsetD);
+        commandArgs.setArgument(offsetCTag, ArgumentType::Value, OffsetC);
+        commandArgs.setArgument(offsetBTag, ArgumentType::Value, OffsetB);
+        commandArgs.setArgument(offsetATag, ArgumentType::Value, OffsetA);
+        commandArgs.setArgument(paddingTag, ArgumentType::Value, padding);
 
         double total_time = 0;
         int    iters      = 10;
@@ -380,7 +421,7 @@ namespace rocRollerTest
             ASSERT_THAT(hipEventCreate(&begin), HasHipSuccess(0));
             ASSERT_THAT(hipEventCreate(&end), HasHipSuccess(0));
             ASSERT_THAT(hipEventRecord(begin, 0), HasHipSuccess(0));
-            commandKernel.launchKernel(kargs.runtimeArguments());
+            commandKernel.launchKernel(commandArgs.runtimeArguments());
             ASSERT_THAT(hipEventRecord(end, 0), HasHipSuccess(0));
             ASSERT_THAT(hipMemcpy(hostD.data(), D.get(), sizeC * sizeof(float), hipMemcpyDefault),
                         HasHipSuccess(0));
@@ -577,40 +618,81 @@ namespace rocRollerTest
         VariableType ulongVal{DataType::UInt64, PointerType::Value};
         VariableType intVal{DataType::Int32, PointerType::Value};
 
-        auto               sizeC_arg = command->allocateArgument(ulongVal);
-        auto               sizeA_arg = command->allocateArgument(ulongVal);
-        auto               sizeB_arg = command->allocateArgument(ulongVal);
-        auto               D_arg     = command->allocateArgument(floatPtr);
-        auto               C_arg     = command->allocateArgument(floatPtr);
-        auto               A_arg     = command->allocateArgument(floatPtr);
-        auto               B_arg     = command->allocateArgument(floatPtr);
-        auto               alpha_arg = command->allocateArgument(floatVal);
-        CommandArgumentPtr beta_arg;
+        auto SizeCTag  = command->allocateTag();
+        auto sizeC_arg = command->allocateArgument(ulongVal, SizeCTag, ArgumentType::Limit);
+        auto SizeATag  = command->allocateTag();
+        auto sizeA_arg = command->allocateArgument(ulongVal, SizeATag, ArgumentType::Limit);
+        auto SizeBTag  = command->allocateTag();
+        auto sizeB_arg = command->allocateArgument(ulongVal, SizeBTag, ArgumentType::Limit);
+        auto DTag      = command->allocateTag();
+        auto D_arg     = command->allocateArgument(floatPtr, DTag, ArgumentType::Value);
+        auto CTag      = command->allocateTag();
+        auto C_arg     = command->allocateArgument(floatPtr, CTag, ArgumentType::Value);
+        auto ATag      = command->allocateTag();
+        auto A_arg     = command->allocateArgument(floatPtr, ATag, ArgumentType::Value);
+        auto BTag      = command->allocateTag();
+        auto B_arg     = command->allocateArgument(floatPtr, BTag, ArgumentType::Value);
+        auto alphaTag  = command->allocateTag();
+        auto alpha_arg = command->allocateArgument(floatVal, alphaTag, ArgumentType::Value);
+        CommandArgumentPtr                  beta_arg;
+        rocRoller::Operations::OperationTag betaTag;
         if(hasBeta)
-            beta_arg = command->allocateArgument(floatVal);
-        auto strideD0_arg                 = command->allocateArgument(uintVal);
-        auto strideD1_arg                 = command->allocateArgument(uintVal);
-        auto strideC0_arg                 = command->allocateArgument(uintVal);
-        auto strideC1_arg                 = command->allocateArgument(uintVal);
-        auto strideA0_arg                 = command->allocateArgument(uintVal);
-        auto strideA1_arg                 = command->allocateArgument(uintVal);
-        auto strideB0_arg                 = command->allocateArgument(uintVal);
-        auto strideB1_arg                 = command->allocateArgument(uintVal);
-        auto SizesFree0_arg               = command->allocateArgument(uintVal);
-        auto SizesFree1_arg               = command->allocateArgument(uintVal);
-        auto SizesFree2_arg               = command->allocateArgument(uintVal);
-        auto SizesSum0_arg                = command->allocateArgument(uintVal);
-        auto OrigStaggerUIter_arg         = command->allocateArgument(intVal);
-        auto NumWorkGroups0_arg           = command->allocateArgument(uintVal);
-        auto NumWorkGroups1_arg           = command->allocateArgument(uintVal);
-        auto NumFullBlocks_arg            = command->allocateArgument(uintVal);
-        auto WgmRemainder1_arg            = command->allocateArgument(uintVal);
-        auto MagicNumberWgmRemainder1_arg = command->allocateArgument(uintVal);
-        auto OffsetD_arg                  = command->allocateArgument(uintVal);
-        auto OffsetC_arg                  = command->allocateArgument(uintVal);
-        auto OffsetA_arg                  = command->allocateArgument(uintVal);
-        auto OffsetB_arg                  = command->allocateArgument(uintVal);
-        auto padding_arg                  = command->allocateArgument(uintVal);
+        {
+            betaTag  = command->allocateTag();
+            beta_arg = command->allocateArgument(floatVal, betaTag, ArgumentType::Value);
+        }
+        auto strideD0Tag    = command->allocateTag();
+        auto strideD0_arg   = command->allocateArgument(uintVal, strideD0Tag, ArgumentType::Stride);
+        auto strideD1Tag    = command->allocateTag();
+        auto strideD1_arg   = command->allocateArgument(uintVal, strideD1Tag, ArgumentType::Stride);
+        auto strideC0Tag    = command->allocateTag();
+        auto strideC0_arg   = command->allocateArgument(uintVal, strideC0Tag, ArgumentType::Stride);
+        auto strideC1Tag    = command->allocateTag();
+        auto strideC1_arg   = command->allocateArgument(uintVal, strideC1Tag, ArgumentType::Stride);
+        auto strideA0Tag    = command->allocateTag();
+        auto strideA0_arg   = command->allocateArgument(uintVal, strideA0Tag, ArgumentType::Stride);
+        auto strideA1Tag    = command->allocateTag();
+        auto strideA1_arg   = command->allocateArgument(uintVal, strideA1Tag, ArgumentType::Stride);
+        auto strideB0Tag    = command->allocateTag();
+        auto strideB0_arg   = command->allocateArgument(uintVal, strideB0Tag, ArgumentType::Stride);
+        auto strideB1Tag    = command->allocateTag();
+        auto strideB1_arg   = command->allocateArgument(uintVal, strideB1Tag, ArgumentType::Stride);
+        auto sizesFree0Tag  = command->allocateTag();
+        auto SizesFree0_arg = command->allocateArgument(uintVal, sizesFree0Tag, ArgumentType::Size);
+        auto sizesFree1Tag  = command->allocateTag();
+        auto SizesFree1_arg = command->allocateArgument(uintVal, sizesFree1Tag, ArgumentType::Size);
+        auto sizesFree2Tag  = command->allocateTag();
+        auto SizesFree2_arg = command->allocateArgument(uintVal, sizesFree2Tag, ArgumentType::Size);
+        auto sizesSum0Tag   = command->allocateTag();
+        auto SizesSum0_arg  = command->allocateArgument(uintVal, sizesSum0Tag, ArgumentType::Size);
+        auto origStaggerUIterTag = command->allocateTag();
+        auto OrigStaggerUIter_arg
+            = command->allocateArgument(intVal, origStaggerUIterTag, ArgumentType::Value);
+        auto numWorkGroups0Tag = command->allocateTag();
+        auto NumWorkGroups0_arg
+            = command->allocateArgument(uintVal, numWorkGroups0Tag, ArgumentType::Value);
+        auto numWorkGroups1Tag = command->allocateTag();
+        auto NumWorkGroups1_arg
+            = command->allocateArgument(uintVal, numWorkGroups1Tag, ArgumentType::Value);
+        auto numFullBlocksTag = command->allocateTag();
+        auto NumFullBlocks_arg
+            = command->allocateArgument(uintVal, numFullBlocksTag, ArgumentType::Value);
+        auto wgmRemainder1Tag = command->allocateTag();
+        auto WgmRemainder1_arg
+            = command->allocateArgument(uintVal, wgmRemainder1Tag, ArgumentType::Value);
+        auto magicNumberWgmRemainder1Tag = command->allocateTag();
+        auto MagicNumberWgmRemainder1_arg
+            = command->allocateArgument(uintVal, magicNumberWgmRemainder1Tag, ArgumentType::Value);
+        auto offsetDTag  = command->allocateTag();
+        auto OffsetD_arg = command->allocateArgument(uintVal, offsetDTag, ArgumentType::Value);
+        auto offsetCTag  = command->allocateTag();
+        auto OffsetC_arg = command->allocateArgument(uintVal, offsetCTag, ArgumentType::Value);
+        auto offsetATag  = command->allocateTag();
+        auto OffsetA_arg = command->allocateArgument(uintVal, offsetATag, ArgumentType::Value);
+        auto offsetBTag  = command->allocateTag();
+        auto OffsetB_arg = command->allocateArgument(uintVal, offsetBTag, ArgumentType::Value);
+        auto paddingTag  = command->allocateTag();
+        auto padding_arg = command->allocateArgument(uintVal, paddingTag, ArgumentType::Value);
 
         auto sizeC_exp            = std::make_shared<Expression::Expression>(sizeC_arg);
         auto sizeA_exp            = std::make_shared<Expression::Expression>(sizeA_arg);
@@ -819,58 +901,58 @@ namespace rocRollerTest
 
         unsigned long long sizeC = hostC.size(), sizeA = hostA.size(), sizeB = hostB.size();
 
-        KernelArguments kargs(true);
-        kargs.reserve(1024, 128);
+        CommandArguments commandArgs = command->createArguments();
 
-        kargs.append("sizeC", sizeC);
-        kargs.append("sizeA", sizeA);
-        kargs.append("sizeB", sizeB);
+        commandArgs.setArgument(SizeATag, ArgumentType::Limit, sizeA);
+        commandArgs.setArgument(SizeBTag, ArgumentType::Limit, sizeB);
+        commandArgs.setArgument(SizeCTag, ArgumentType::Limit, sizeC);
 
         auto D = make_shared_device<float>(sizeC);
         auto C = make_shared_device(hostC);
         auto A = make_shared_device(hostA);
         auto B = make_shared_device(hostB);
 
-        kargs.append("D", D.get());
-        kargs.append("C", D.get());
-        kargs.append("A", A.get());
-        kargs.append("B", B.get());
+        commandArgs.setArgument(ATag, ArgumentType::Value, A.get());
+        commandArgs.setArgument(BTag, ArgumentType::Value, B.get());
+        commandArgs.setArgument(CTag, ArgumentType::Value, C.get());
+        commandArgs.setArgument(DTag, ArgumentType::Value, D.get());
 
-        kargs.append("alpha", alpha);
+        commandArgs.setArgument(alphaTag, ArgumentType::Value, alpha);
         if(hasBeta)
-            kargs.append("beta", beta);
+            commandArgs.setArgument(betaTag, ArgumentType::Value, beta);
 
-        kargs.append("strideD0", strideD0);
-        kargs.append("strideD1", strideD1);
+        commandArgs.setArgument(strideA0Tag, ArgumentType::Stride, strideA0);
+        commandArgs.setArgument(strideA1Tag, ArgumentType::Stride, strideA1);
 
-        kargs.append("strideC0", strideC0);
-        kargs.append("strideC1", strideC1);
+        commandArgs.setArgument(strideB0Tag, ArgumentType::Stride, strideB0);
+        commandArgs.setArgument(strideB1Tag, ArgumentType::Stride, strideB1);
 
-        kargs.append("strideA0", strideA0);
-        kargs.append("strideA1", strideA1);
+        commandArgs.setArgument(strideC0Tag, ArgumentType::Stride, strideC0);
+        commandArgs.setArgument(strideC1Tag, ArgumentType::Stride, strideC1);
 
-        kargs.append("strideB0", strideB0);
-        kargs.append("strideB1", strideB1);
+        commandArgs.setArgument(strideD0Tag, ArgumentType::Stride, strideD0);
+        commandArgs.setArgument(strideD1Tag, ArgumentType::Stride, strideD1);
 
-        kargs.append("SizesFree0", SizesFree0);
-        kargs.append("SizesFree1", SizesFree1);
-        kargs.append("SizesFree2", SizesFree2);
-        kargs.append("SizesSum0", SizesSum0);
+        commandArgs.setArgument(sizesFree0Tag, ArgumentType::Size, SizesFree0);
+        commandArgs.setArgument(sizesFree1Tag, ArgumentType::Size, SizesFree1);
+        commandArgs.setArgument(sizesFree2Tag, ArgumentType::Size, SizesFree2);
+        commandArgs.setArgument(sizesSum0Tag, ArgumentType::Size, SizesSum0);
 
-        kargs.append("OrigStaggerUIter", OrigStaggerUIter);
+        commandArgs.setArgument(origStaggerUIterTag, ArgumentType::Value, OrigStaggerUIter);
 
-        kargs.append("NumWorkGroups0", NumWorkGroups0);
-        kargs.append("NumWorkGroups1", NumWorkGroups1);
-        kargs.append("NumFullBlocks", NumFullBlocks);
+        commandArgs.setArgument(numWorkGroups0Tag, ArgumentType::Value, NumWorkGroups0);
+        commandArgs.setArgument(numWorkGroups1Tag, ArgumentType::Value, NumWorkGroups1);
+        commandArgs.setArgument(numFullBlocksTag, ArgumentType::Value, NumFullBlocks);
 
-        kargs.append("WgmRemainder1", WgmRemainder1);
-        kargs.append("MagicNumberWgmRemainder1", MagicNumberWgmRemainder1);
+        commandArgs.setArgument(wgmRemainder1Tag, ArgumentType::Value, WgmRemainder1);
+        commandArgs.setArgument(
+            magicNumberWgmRemainder1Tag, ArgumentType::Value, MagicNumberWgmRemainder1);
 
-        kargs.append("OffsetD", OffsetD);
-        kargs.append("OffsetC", OffsetC);
-        kargs.append("OffsetA", OffsetA);
-        kargs.append("OffsetB", OffsetB);
-        kargs.append("padding", padding);
+        commandArgs.setArgument(offsetDTag, ArgumentType::Value, OffsetD);
+        commandArgs.setArgument(offsetCTag, ArgumentType::Value, OffsetC);
+        commandArgs.setArgument(offsetBTag, ArgumentType::Value, OffsetB);
+        commandArgs.setArgument(offsetATag, ArgumentType::Value, OffsetA);
+        commandArgs.setArgument(paddingTag, ArgumentType::Value, padding);
 
         double total_time = 0;
         int    iters      = 10;
@@ -882,7 +964,7 @@ namespace rocRollerTest
             ASSERT_THAT(hipEventCreate(&begin), HasHipSuccess(0));
             ASSERT_THAT(hipEventCreate(&end), HasHipSuccess(0));
             ASSERT_THAT(hipEventRecord(begin, 0), HasHipSuccess(0));
-            commandKernel.launchKernel(kargs.runtimeArguments());
+            commandKernel.launchKernel(commandArgs.runtimeArguments());
             ASSERT_THAT(hipEventRecord(end, 0), HasHipSuccess(0));
             ASSERT_THAT(hipMemcpy(hostD.data(), D.get(), sizeC * sizeof(float), hipMemcpyDefault),
                         HasHipSuccess(0));
@@ -1083,40 +1165,81 @@ namespace rocRollerTest
         VariableType ulongVal{DataType::UInt64, PointerType::Value};
         VariableType intVal{DataType::Int32, PointerType::Value};
 
-        auto               sizeC_arg = command->allocateArgument(ulongVal);
-        auto               sizeA_arg = command->allocateArgument(ulongVal);
-        auto               sizeB_arg = command->allocateArgument(ulongVal);
-        auto               D_arg     = command->allocateArgument(floatPtr);
-        auto               C_arg     = command->allocateArgument(floatPtr);
-        auto               A_arg     = command->allocateArgument(floatPtr);
-        auto               B_arg     = command->allocateArgument(floatPtr);
-        auto               alpha_arg = command->allocateArgument(floatVal);
-        CommandArgumentPtr beta_arg;
+        auto SizeCTag  = command->allocateTag();
+        auto sizeC_arg = command->allocateArgument(ulongVal, SizeCTag, ArgumentType::Limit);
+        auto SizeATag  = command->allocateTag();
+        auto sizeA_arg = command->allocateArgument(ulongVal, SizeATag, ArgumentType::Limit);
+        auto SizeBTag  = command->allocateTag();
+        auto sizeB_arg = command->allocateArgument(ulongVal, SizeBTag, ArgumentType::Limit);
+        auto DTag      = command->allocateTag();
+        auto D_arg     = command->allocateArgument(floatPtr, DTag, ArgumentType::Value);
+        auto CTag      = command->allocateTag();
+        auto C_arg     = command->allocateArgument(floatPtr, CTag, ArgumentType::Value);
+        auto ATag      = command->allocateTag();
+        auto A_arg     = command->allocateArgument(floatPtr, ATag, ArgumentType::Value);
+        auto BTag      = command->allocateTag();
+        auto B_arg     = command->allocateArgument(floatPtr, BTag, ArgumentType::Value);
+        auto alphaTag  = command->allocateTag();
+        auto alpha_arg = command->allocateArgument(floatVal, alphaTag, ArgumentType::Value);
+        CommandArgumentPtr                  beta_arg;
+        rocRoller::Operations::OperationTag betaTag;
         if(hasBeta)
-            beta_arg = command->allocateArgument(floatVal);
-        auto strideD0_arg                 = command->allocateArgument(uintVal);
-        auto strideD1_arg                 = command->allocateArgument(uintVal);
-        auto strideC0_arg                 = command->allocateArgument(uintVal);
-        auto strideC1_arg                 = command->allocateArgument(uintVal);
-        auto strideA0_arg                 = command->allocateArgument(uintVal);
-        auto strideA1_arg                 = command->allocateArgument(uintVal);
-        auto strideB0_arg                 = command->allocateArgument(uintVal);
-        auto strideB1_arg                 = command->allocateArgument(uintVal);
-        auto SizesFree0_arg               = command->allocateArgument(uintVal);
-        auto SizesFree1_arg               = command->allocateArgument(uintVal);
-        auto SizesFree2_arg               = command->allocateArgument(uintVal);
-        auto SizesSum0_arg                = command->allocateArgument(uintVal);
-        auto OrigStaggerUIter_arg         = command->allocateArgument(intVal);
-        auto NumWorkGroups0_arg           = command->allocateArgument(uintVal);
-        auto NumWorkGroups1_arg           = command->allocateArgument(uintVal);
-        auto NumFullBlocks_arg            = command->allocateArgument(uintVal);
-        auto WgmRemainder1_arg            = command->allocateArgument(uintVal);
-        auto MagicNumberWgmRemainder1_arg = command->allocateArgument(uintVal);
-        auto OffsetD_arg                  = command->allocateArgument(uintVal);
-        auto OffsetC_arg                  = command->allocateArgument(uintVal);
-        auto OffsetA_arg                  = command->allocateArgument(uintVal);
-        auto OffsetB_arg                  = command->allocateArgument(uintVal);
-        auto padding_arg                  = command->allocateArgument(uintVal);
+        {
+            betaTag  = command->allocateTag();
+            beta_arg = command->allocateArgument(floatVal, betaTag, ArgumentType::Value);
+        }
+        auto strideD0Tag    = command->allocateTag();
+        auto strideD0_arg   = command->allocateArgument(uintVal, strideD0Tag, ArgumentType::Stride);
+        auto strideD1Tag    = command->allocateTag();
+        auto strideD1_arg   = command->allocateArgument(uintVal, strideD1Tag, ArgumentType::Stride);
+        auto strideC0Tag    = command->allocateTag();
+        auto strideC0_arg   = command->allocateArgument(uintVal, strideC0Tag, ArgumentType::Stride);
+        auto strideC1Tag    = command->allocateTag();
+        auto strideC1_arg   = command->allocateArgument(uintVal, strideC1Tag, ArgumentType::Stride);
+        auto strideA0Tag    = command->allocateTag();
+        auto strideA0_arg   = command->allocateArgument(uintVal, strideA0Tag, ArgumentType::Stride);
+        auto strideA1Tag    = command->allocateTag();
+        auto strideA1_arg   = command->allocateArgument(uintVal, strideA1Tag, ArgumentType::Stride);
+        auto strideB0Tag    = command->allocateTag();
+        auto strideB0_arg   = command->allocateArgument(uintVal, strideB0Tag, ArgumentType::Stride);
+        auto strideB1Tag    = command->allocateTag();
+        auto strideB1_arg   = command->allocateArgument(uintVal, strideB1Tag, ArgumentType::Stride);
+        auto sizesFree0Tag  = command->allocateTag();
+        auto SizesFree0_arg = command->allocateArgument(uintVal, sizesFree0Tag, ArgumentType::Size);
+        auto sizesFree1Tag  = command->allocateTag();
+        auto SizesFree1_arg = command->allocateArgument(uintVal, sizesFree1Tag, ArgumentType::Size);
+        auto sizesFree2Tag  = command->allocateTag();
+        auto SizesFree2_arg = command->allocateArgument(uintVal, sizesFree2Tag, ArgumentType::Size);
+        auto sizesSum0Tag   = command->allocateTag();
+        auto SizesSum0_arg  = command->allocateArgument(uintVal, sizesSum0Tag, ArgumentType::Size);
+        auto origStaggerUIterTag = command->allocateTag();
+        auto OrigStaggerUIter_arg
+            = command->allocateArgument(intVal, origStaggerUIterTag, ArgumentType::Value);
+        auto numWorkGroups0Tag = command->allocateTag();
+        auto NumWorkGroups0_arg
+            = command->allocateArgument(uintVal, numWorkGroups0Tag, ArgumentType::Value);
+        auto numWorkGroups1Tag = command->allocateTag();
+        auto NumWorkGroups1_arg
+            = command->allocateArgument(uintVal, numWorkGroups1Tag, ArgumentType::Value);
+        auto numFullBlocksTag = command->allocateTag();
+        auto NumFullBlocks_arg
+            = command->allocateArgument(uintVal, numFullBlocksTag, ArgumentType::Value);
+        auto wgmRemainder1Tag = command->allocateTag();
+        auto WgmRemainder1_arg
+            = command->allocateArgument(uintVal, wgmRemainder1Tag, ArgumentType::Value);
+        auto magicNumberWgmRemainder1Tag = command->allocateTag();
+        auto MagicNumberWgmRemainder1_arg
+            = command->allocateArgument(uintVal, magicNumberWgmRemainder1Tag, ArgumentType::Value);
+        auto offsetDTag  = command->allocateTag();
+        auto OffsetD_arg = command->allocateArgument(uintVal, offsetDTag, ArgumentType::Value);
+        auto offsetCTag  = command->allocateTag();
+        auto OffsetC_arg = command->allocateArgument(uintVal, offsetCTag, ArgumentType::Value);
+        auto offsetATag  = command->allocateTag();
+        auto OffsetA_arg = command->allocateArgument(uintVal, offsetATag, ArgumentType::Value);
+        auto offsetBTag  = command->allocateTag();
+        auto OffsetB_arg = command->allocateArgument(uintVal, offsetBTag, ArgumentType::Value);
+        auto paddingTag  = command->allocateTag();
+        auto padding_arg = command->allocateArgument(uintVal, paddingTag, ArgumentType::Value);
 
         auto sizeC_exp            = std::make_shared<Expression::Expression>(sizeC_arg);
         auto sizeA_exp            = std::make_shared<Expression::Expression>(sizeA_arg);
@@ -1325,58 +1448,58 @@ namespace rocRollerTest
 
         unsigned long long sizeC = hostC.size(), sizeA = hostA.size(), sizeB = hostB.size();
 
-        KernelArguments kargs(true);
-        kargs.reserve(1024, 128);
+        CommandArguments commandArgs = command->createArguments();
 
-        kargs.append("sizeC", sizeC);
-        kargs.append("sizeA", sizeA);
-        kargs.append("sizeB", sizeB);
+        commandArgs.setArgument(SizeATag, ArgumentType::Limit, sizeA);
+        commandArgs.setArgument(SizeBTag, ArgumentType::Limit, sizeB);
+        commandArgs.setArgument(SizeCTag, ArgumentType::Limit, sizeC);
 
         auto D = make_shared_device<__half>(sizeC, 0.0);
         auto C = make_shared_device(hostC);
         auto A = make_shared_device(hostA);
         auto B = make_shared_device(hostB);
 
-        kargs.append("D", D.get());
-        kargs.append("C", D.get());
-        kargs.append("A", A.get());
-        kargs.append("B", B.get());
+        commandArgs.setArgument(ATag, ArgumentType::Value, A.get());
+        commandArgs.setArgument(BTag, ArgumentType::Value, B.get());
+        commandArgs.setArgument(CTag, ArgumentType::Value, C.get());
+        commandArgs.setArgument(DTag, ArgumentType::Value, D.get());
 
-        kargs.append("alpha", alpha);
+        commandArgs.setArgument(alphaTag, ArgumentType::Value, alpha);
         if(hasBeta)
-            kargs.append("beta", beta);
+            commandArgs.setArgument(betaTag, ArgumentType::Value, beta);
 
-        kargs.append("strideD0", strideD0);
-        kargs.append("strideD1", strideD1);
+        commandArgs.setArgument(strideA0Tag, ArgumentType::Stride, strideA0);
+        commandArgs.setArgument(strideA1Tag, ArgumentType::Stride, strideA1);
 
-        kargs.append("strideC0", strideC0);
-        kargs.append("strideC1", strideC1);
+        commandArgs.setArgument(strideB0Tag, ArgumentType::Stride, strideB0);
+        commandArgs.setArgument(strideB1Tag, ArgumentType::Stride, strideB1);
 
-        kargs.append("strideA0", strideA0);
-        kargs.append("strideA1", strideA1);
+        commandArgs.setArgument(strideC0Tag, ArgumentType::Stride, strideC0);
+        commandArgs.setArgument(strideC1Tag, ArgumentType::Stride, strideC1);
 
-        kargs.append("strideB0", strideB0);
-        kargs.append("strideB1", strideB1);
+        commandArgs.setArgument(strideD0Tag, ArgumentType::Stride, strideD0);
+        commandArgs.setArgument(strideD1Tag, ArgumentType::Stride, strideD1);
 
-        kargs.append("SizesFree0", SizesFree0);
-        kargs.append("SizesFree1", SizesFree1);
-        kargs.append("SizesFree2", SizesFree2);
-        kargs.append("SizesSum0", SizesSum0);
+        commandArgs.setArgument(sizesFree0Tag, ArgumentType::Size, SizesFree0);
+        commandArgs.setArgument(sizesFree1Tag, ArgumentType::Size, SizesFree1);
+        commandArgs.setArgument(sizesFree2Tag, ArgumentType::Size, SizesFree2);
+        commandArgs.setArgument(sizesSum0Tag, ArgumentType::Size, SizesSum0);
 
-        kargs.append("OrigStaggerUIter", OrigStaggerUIter);
+        commandArgs.setArgument(origStaggerUIterTag, ArgumentType::Value, OrigStaggerUIter);
 
-        kargs.append("NumWorkGroups0", NumWorkGroups0);
-        kargs.append("NumWorkGroups1", NumWorkGroups1);
-        kargs.append("NumFullBlocks", NumFullBlocks);
+        commandArgs.setArgument(numWorkGroups0Tag, ArgumentType::Value, NumWorkGroups0);
+        commandArgs.setArgument(numWorkGroups1Tag, ArgumentType::Value, NumWorkGroups1);
+        commandArgs.setArgument(numFullBlocksTag, ArgumentType::Value, NumFullBlocks);
 
-        kargs.append("WgmRemainder1", WgmRemainder1);
-        kargs.append("MagicNumberWgmRemainder1", MagicNumberWgmRemainder1);
+        commandArgs.setArgument(wgmRemainder1Tag, ArgumentType::Value, WgmRemainder1);
+        commandArgs.setArgument(
+            magicNumberWgmRemainder1Tag, ArgumentType::Value, MagicNumberWgmRemainder1);
 
-        kargs.append("OffsetD", OffsetD);
-        kargs.append("OffsetC", OffsetC);
-        kargs.append("OffsetA", OffsetA);
-        kargs.append("OffsetB", OffsetB);
-        kargs.append("padding", padding);
+        commandArgs.setArgument(offsetDTag, ArgumentType::Value, OffsetD);
+        commandArgs.setArgument(offsetCTag, ArgumentType::Value, OffsetC);
+        commandArgs.setArgument(offsetBTag, ArgumentType::Value, OffsetB);
+        commandArgs.setArgument(offsetATag, ArgumentType::Value, OffsetA);
+        commandArgs.setArgument(paddingTag, ArgumentType::Value, padding);
 
         double total_time = 0;
         int    iters      = 10;
@@ -1388,7 +1511,7 @@ namespace rocRollerTest
             ASSERT_THAT(hipEventCreate(&begin), HasHipSuccess(0));
             ASSERT_THAT(hipEventCreate(&end), HasHipSuccess(0));
             ASSERT_THAT(hipEventRecord(begin, 0), HasHipSuccess(0));
-            commandKernel.launchKernel(kargs.runtimeArguments());
+            commandKernel.launchKernel(commandArgs.runtimeArguments());
             ASSERT_THAT(hipEventRecord(end, 0), HasHipSuccess(0));
             ASSERT_THAT(hipMemcpy(hostD.data(), D.get(), sizeC * sizeof(__half), hipMemcpyDefault),
                         HasHipSuccess(0));
@@ -1527,40 +1650,81 @@ namespace rocRollerTest
         VariableType ulongVal{DataType::UInt64, PointerType::Value};
         VariableType intVal{DataType::Int32, PointerType::Value};
 
-        auto               sizeC_arg = command->allocateArgument(ulongVal);
-        auto               sizeA_arg = command->allocateArgument(ulongVal);
-        auto               sizeB_arg = command->allocateArgument(ulongVal);
-        auto               D_arg     = command->allocateArgument(floatPtr);
-        auto               C_arg     = command->allocateArgument(floatPtr);
-        auto               A_arg     = command->allocateArgument(floatPtr);
-        auto               B_arg     = command->allocateArgument(floatPtr);
-        auto               alpha_arg = command->allocateArgument(floatVal);
-        CommandArgumentPtr beta_arg;
+        auto SizeCTag  = command->allocateTag();
+        auto sizeC_arg = command->allocateArgument(ulongVal, SizeCTag, ArgumentType::Limit);
+        auto SizeATag  = command->allocateTag();
+        auto sizeA_arg = command->allocateArgument(ulongVal, SizeATag, ArgumentType::Limit);
+        auto SizeBTag  = command->allocateTag();
+        auto sizeB_arg = command->allocateArgument(ulongVal, SizeBTag, ArgumentType::Limit);
+        auto DTag      = command->allocateTag();
+        auto D_arg     = command->allocateArgument(floatPtr, DTag, ArgumentType::Value);
+        auto CTag      = command->allocateTag();
+        auto C_arg     = command->allocateArgument(floatPtr, CTag, ArgumentType::Value);
+        auto ATag      = command->allocateTag();
+        auto A_arg     = command->allocateArgument(floatPtr, ATag, ArgumentType::Value);
+        auto BTag      = command->allocateTag();
+        auto B_arg     = command->allocateArgument(floatPtr, BTag, ArgumentType::Value);
+        auto alphaTag  = command->allocateTag();
+        auto alpha_arg = command->allocateArgument(floatVal, alphaTag, ArgumentType::Value);
+        CommandArgumentPtr                  beta_arg;
+        rocRoller::Operations::OperationTag betaTag;
         if(hasBeta)
-            beta_arg = command->allocateArgument(floatVal);
-        auto strideD0_arg                 = command->allocateArgument(uintVal);
-        auto strideD1_arg                 = command->allocateArgument(uintVal);
-        auto strideC0_arg                 = command->allocateArgument(uintVal);
-        auto strideC1_arg                 = command->allocateArgument(uintVal);
-        auto strideA0_arg                 = command->allocateArgument(uintVal);
-        auto strideA1_arg                 = command->allocateArgument(uintVal);
-        auto strideB0_arg                 = command->allocateArgument(uintVal);
-        auto strideB1_arg                 = command->allocateArgument(uintVal);
-        auto SizesFree0_arg               = command->allocateArgument(uintVal);
-        auto SizesFree1_arg               = command->allocateArgument(uintVal);
-        auto SizesFree2_arg               = command->allocateArgument(uintVal);
-        auto SizesSum0_arg                = command->allocateArgument(uintVal);
-        auto OrigStaggerUIter_arg         = command->allocateArgument(intVal);
-        auto NumWorkGroups0_arg           = command->allocateArgument(uintVal);
-        auto NumWorkGroups1_arg           = command->allocateArgument(uintVal);
-        auto NumFullBlocks_arg            = command->allocateArgument(uintVal);
-        auto WgmRemainder1_arg            = command->allocateArgument(uintVal);
-        auto MagicNumberWgmRemainder1_arg = command->allocateArgument(uintVal);
-        auto OffsetD_arg                  = command->allocateArgument(uintVal);
-        auto OffsetC_arg                  = command->allocateArgument(uintVal);
-        auto OffsetA_arg                  = command->allocateArgument(uintVal);
-        auto OffsetB_arg                  = command->allocateArgument(uintVal);
-        auto padding_arg                  = command->allocateArgument(uintVal);
+        {
+            betaTag  = command->allocateTag();
+            beta_arg = command->allocateArgument(floatVal, betaTag, ArgumentType::Value);
+        }
+        auto strideD0Tag    = command->allocateTag();
+        auto strideD0_arg   = command->allocateArgument(uintVal, strideD0Tag, ArgumentType::Stride);
+        auto strideD1Tag    = command->allocateTag();
+        auto strideD1_arg   = command->allocateArgument(uintVal, strideD1Tag, ArgumentType::Stride);
+        auto strideC0Tag    = command->allocateTag();
+        auto strideC0_arg   = command->allocateArgument(uintVal, strideC0Tag, ArgumentType::Stride);
+        auto strideC1Tag    = command->allocateTag();
+        auto strideC1_arg   = command->allocateArgument(uintVal, strideC1Tag, ArgumentType::Stride);
+        auto strideA0Tag    = command->allocateTag();
+        auto strideA0_arg   = command->allocateArgument(uintVal, strideA0Tag, ArgumentType::Stride);
+        auto strideA1Tag    = command->allocateTag();
+        auto strideA1_arg   = command->allocateArgument(uintVal, strideA1Tag, ArgumentType::Stride);
+        auto strideB0Tag    = command->allocateTag();
+        auto strideB0_arg   = command->allocateArgument(uintVal, strideB0Tag, ArgumentType::Stride);
+        auto strideB1Tag    = command->allocateTag();
+        auto strideB1_arg   = command->allocateArgument(uintVal, strideB1Tag, ArgumentType::Stride);
+        auto sizesFree0Tag  = command->allocateTag();
+        auto SizesFree0_arg = command->allocateArgument(uintVal, sizesFree0Tag, ArgumentType::Size);
+        auto sizesFree1Tag  = command->allocateTag();
+        auto SizesFree1_arg = command->allocateArgument(uintVal, sizesFree1Tag, ArgumentType::Size);
+        auto sizesFree2Tag  = command->allocateTag();
+        auto SizesFree2_arg = command->allocateArgument(uintVal, sizesFree2Tag, ArgumentType::Size);
+        auto sizesSum0Tag   = command->allocateTag();
+        auto SizesSum0_arg  = command->allocateArgument(uintVal, sizesSum0Tag, ArgumentType::Size);
+        auto origStaggerUIterTag = command->allocateTag();
+        auto OrigStaggerUIter_arg
+            = command->allocateArgument(intVal, origStaggerUIterTag, ArgumentType::Value);
+        auto numWorkGroups0Tag = command->allocateTag();
+        auto NumWorkGroups0_arg
+            = command->allocateArgument(uintVal, numWorkGroups0Tag, ArgumentType::Value);
+        auto numWorkGroups1Tag = command->allocateTag();
+        auto NumWorkGroups1_arg
+            = command->allocateArgument(uintVal, numWorkGroups1Tag, ArgumentType::Value);
+        auto numFullBlocksTag = command->allocateTag();
+        auto NumFullBlocks_arg
+            = command->allocateArgument(uintVal, numFullBlocksTag, ArgumentType::Value);
+        auto wgmRemainder1Tag = command->allocateTag();
+        auto WgmRemainder1_arg
+            = command->allocateArgument(uintVal, wgmRemainder1Tag, ArgumentType::Value);
+        auto magicNumberWgmRemainder1Tag = command->allocateTag();
+        auto MagicNumberWgmRemainder1_arg
+            = command->allocateArgument(uintVal, magicNumberWgmRemainder1Tag, ArgumentType::Value);
+        auto offsetDTag  = command->allocateTag();
+        auto OffsetD_arg = command->allocateArgument(uintVal, offsetDTag, ArgumentType::Value);
+        auto offsetCTag  = command->allocateTag();
+        auto OffsetC_arg = command->allocateArgument(uintVal, offsetCTag, ArgumentType::Value);
+        auto offsetATag  = command->allocateTag();
+        auto OffsetA_arg = command->allocateArgument(uintVal, offsetATag, ArgumentType::Value);
+        auto offsetBTag  = command->allocateTag();
+        auto OffsetB_arg = command->allocateArgument(uintVal, offsetBTag, ArgumentType::Value);
+        auto paddingTag  = command->allocateTag();
+        auto padding_arg = command->allocateArgument(uintVal, paddingTag, ArgumentType::Value);
 
         auto sizeC_exp            = std::make_shared<Expression::Expression>(sizeC_arg);
         auto sizeA_exp            = std::make_shared<Expression::Expression>(sizeA_arg);
@@ -1769,58 +1933,58 @@ namespace rocRollerTest
 
         unsigned long long sizeC = hostC.size(), sizeA = hostA.size(), sizeB = hostB.size();
 
-        KernelArguments kargs(true);
-        kargs.reserve(1024, 128);
+        CommandArguments commandArgs = command->createArguments();
 
-        kargs.append("sizeC", sizeC);
-        kargs.append("sizeA", sizeA);
-        kargs.append("sizeB", sizeB);
+        commandArgs.setArgument(SizeATag, ArgumentType::Limit, sizeA);
+        commandArgs.setArgument(SizeBTag, ArgumentType::Limit, sizeB);
+        commandArgs.setArgument(SizeCTag, ArgumentType::Limit, sizeC);
 
         auto D = make_shared_device<__half>(sizeC);
         auto C = make_shared_device(hostC);
         auto A = make_shared_device(hostA);
         auto B = make_shared_device(hostB);
 
-        kargs.append("D", D.get());
-        kargs.append("C", D.get());
-        kargs.append("A", A.get());
-        kargs.append("B", B.get());
+        commandArgs.setArgument(ATag, ArgumentType::Value, A.get());
+        commandArgs.setArgument(BTag, ArgumentType::Value, B.get());
+        commandArgs.setArgument(CTag, ArgumentType::Value, C.get());
+        commandArgs.setArgument(DTag, ArgumentType::Value, D.get());
 
-        kargs.append("alpha", alpha);
+        commandArgs.setArgument(alphaTag, ArgumentType::Value, alpha);
         if(hasBeta)
-            kargs.append("beta", beta);
+            commandArgs.setArgument(betaTag, ArgumentType::Value, beta);
 
-        kargs.append("strideD0", strideD0);
-        kargs.append("strideD1", strideD1);
+        commandArgs.setArgument(strideA0Tag, ArgumentType::Stride, strideA0);
+        commandArgs.setArgument(strideA1Tag, ArgumentType::Stride, strideA1);
 
-        kargs.append("strideC0", strideC0);
-        kargs.append("strideC1", strideC1);
+        commandArgs.setArgument(strideB0Tag, ArgumentType::Stride, strideB0);
+        commandArgs.setArgument(strideB1Tag, ArgumentType::Stride, strideB1);
 
-        kargs.append("strideA0", strideA0);
-        kargs.append("strideA1", strideA1);
+        commandArgs.setArgument(strideC0Tag, ArgumentType::Stride, strideC0);
+        commandArgs.setArgument(strideC1Tag, ArgumentType::Stride, strideC1);
 
-        kargs.append("strideB0", strideB0);
-        kargs.append("strideB1", strideB1);
+        commandArgs.setArgument(strideD0Tag, ArgumentType::Stride, strideD0);
+        commandArgs.setArgument(strideD1Tag, ArgumentType::Stride, strideD1);
 
-        kargs.append("SizesFree0", SizesFree0);
-        kargs.append("SizesFree1", SizesFree1);
-        kargs.append("SizesFree2", SizesFree2);
-        kargs.append("SizesSum0", SizesSum0);
+        commandArgs.setArgument(sizesFree0Tag, ArgumentType::Size, SizesFree0);
+        commandArgs.setArgument(sizesFree1Tag, ArgumentType::Size, SizesFree1);
+        commandArgs.setArgument(sizesFree2Tag, ArgumentType::Size, SizesFree2);
+        commandArgs.setArgument(sizesSum0Tag, ArgumentType::Size, SizesSum0);
 
-        kargs.append("OrigStaggerUIter", OrigStaggerUIter);
+        commandArgs.setArgument(origStaggerUIterTag, ArgumentType::Value, OrigStaggerUIter);
 
-        kargs.append("NumWorkGroups0", NumWorkGroups0);
-        kargs.append("NumWorkGroups1", NumWorkGroups1);
-        kargs.append("NumFullBlocks", NumFullBlocks);
+        commandArgs.setArgument(numWorkGroups0Tag, ArgumentType::Value, NumWorkGroups0);
+        commandArgs.setArgument(numWorkGroups1Tag, ArgumentType::Value, NumWorkGroups1);
+        commandArgs.setArgument(numFullBlocksTag, ArgumentType::Value, NumFullBlocks);
 
-        kargs.append("WgmRemainder1", WgmRemainder1);
-        kargs.append("MagicNumberWgmRemainder1", MagicNumberWgmRemainder1);
+        commandArgs.setArgument(wgmRemainder1Tag, ArgumentType::Value, WgmRemainder1);
+        commandArgs.setArgument(
+            magicNumberWgmRemainder1Tag, ArgumentType::Value, MagicNumberWgmRemainder1);
 
-        kargs.append("OffsetD", OffsetD);
-        kargs.append("OffsetC", OffsetC);
-        kargs.append("OffsetA", OffsetA);
-        kargs.append("OffsetB", OffsetB);
-        kargs.append("padding", padding);
+        commandArgs.setArgument(offsetDTag, ArgumentType::Value, OffsetD);
+        commandArgs.setArgument(offsetCTag, ArgumentType::Value, OffsetC);
+        commandArgs.setArgument(offsetBTag, ArgumentType::Value, OffsetB);
+        commandArgs.setArgument(offsetATag, ArgumentType::Value, OffsetA);
+        commandArgs.setArgument(paddingTag, ArgumentType::Value, padding);
 
         double total_time = 0;
         int    iters      = 10;
@@ -1832,7 +1996,7 @@ namespace rocRollerTest
             ASSERT_THAT(hipEventCreate(&begin), HasHipSuccess(0));
             ASSERT_THAT(hipEventCreate(&end), HasHipSuccess(0));
             ASSERT_THAT(hipEventRecord(begin, 0), HasHipSuccess(0));
-            commandKernel.launchKernel(kargs.runtimeArguments());
+            commandKernel.launchKernel(commandArgs.runtimeArguments());
             ASSERT_THAT(hipEventRecord(end, 0), HasHipSuccess(0));
             ASSERT_THAT(hipMemcpy(hostD.data(), D.get(), sizeC * sizeof(__half), hipMemcpyDefault),
                         HasHipSuccess(0));

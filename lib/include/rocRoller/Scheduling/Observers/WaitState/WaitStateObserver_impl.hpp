@@ -99,7 +99,11 @@ namespace rocRoller
             auto const& architecture = m_context.lock()->targetArchitecture();
             int         passes       = architecture.GetInstructionInfo(opCode).getLatency();
 
-            AssertFatal(latencyAndNops.contains(passes), "Unexpected number of passes");
+            AssertFatal(latencyAndNops.contains(passes),
+                        "Unexpected number of passes",
+                        ShowValue(architecture.target().toString()),
+                        ShowValue(opCode),
+                        ShowValue(passes));
 
             return latencyAndNops.at(passes);
         }

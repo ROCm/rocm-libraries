@@ -16,6 +16,8 @@ namespace rocRoller
             class DataParallelGEMMSolution : public GEMMSolution<A, B, C, D>
             {
                 Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
+                Operations::OperationTag m_tagTensorA, m_tagTensorB, m_tagTensorC, m_tagScalarAlpha,
+                    m_tagScalarBeta, m_tagTensorD;
 
             public:
                 DataParallelGEMMSolution(SolutionParameters const& solutionParams)
@@ -66,7 +68,10 @@ namespace rocRoller
                             == (hipError_t)HIP_SUCCESS);
 
                         result.benchmarkResults.checked = true;
-                        result.benchmarkResults.correct = this->validate(h_A, h_B, h_C, h_D);
+
+                        auto [correct, rnorm]           = this->validate(h_A, h_B, h_C, h_D);
+                        result.benchmarkResults.correct = correct;
+                        result.benchmarkResults.rnorm   = rnorm;
                     }
 
                     return result;
@@ -83,33 +88,31 @@ namespace rocRoller
                     bool no_beta = m_solutionParams.problemParams.beta == 0.0
                                    && m_solutionParams.problemParams.alpha == 1.0;
 
-                    Operations::OperationTag tagTensorA;
                     //TODO: Handle transposed matrices more elegantly
                     switch(m_solutionParams.problemParams.transA)
                     {
                     case TransposeType::T:
-                        tagTensorA = command->addOperation(Operations::Tensor(
+                        m_tagTensorA = command->addOperation(Operations::Tensor(
                             2, TypeInfo<A>::Var.dataType, {(size_t)0, (size_t)1})); // AT
                         break;
                     case TransposeType::N:
-                        tagTensorA = command->addOperation(
+                        m_tagTensorA = command->addOperation(
                             Operations::Tensor(2, TypeInfo<A>::Var.dataType, {(size_t)1})); // AN
                         break;
                     default:
                         Throw<FatalError>("Bad transpose option");
                     }
-                    m_tagA = command->addOperation(Operations::T_Load_Tiled(tagTensorA));
+                    m_tagA = command->addOperation(Operations::T_Load_Tiled(m_tagTensorA));
 
-                    Operations::OperationTag tagTensorB;
                     //TODO: Handle transposed matrices more elegantly
                     switch(m_solutionParams.problemParams.transB)
                     {
                     case TransposeType::T:
-                        tagTensorB = command->addOperation(Operations::Tensor(
+                        m_tagTensorB = command->addOperation(Operations::Tensor(
                             2, TypeInfo<B>::Var.dataType, {(size_t)0, (size_t)1})); // BT
                         break;
                     case TransposeType::N:
-                        tagTensorB
+                        m_tagTensorB
                             = command->addOperation(Operations::Tensor(2,
                                                                        TypeInfo<B>::Var.dataType,
                                                                        {
@@ -119,23 +122,23 @@ namespace rocRoller
                     default:
                         Throw<FatalError>("Bad transpose option");
                     }
-                    m_tagB = command->addOperation(Operations::T_Load_Tiled(tagTensorB));
+                    m_tagB = command->addOperation(Operations::T_Load_Tiled(m_tagTensorB));
 
                     if(!no_beta)
                     {
-                        auto tagTensorC = command->addOperation(
+                        m_tagTensorC = command->addOperation(
                             Operations::Tensor(2, TypeInfo<C>::Var.dataType, {(size_t)1})); // C
-                        m_tagC = command->addOperation(Operations::T_Load_Tiled(tagTensorC));
+                        m_tagC = command->addOperation(Operations::T_Load_Tiled(m_tagTensorC));
 
-                        auto tagScalarAlpha
+                        m_tagScalarAlpha
                             = command->addOperation(Operations::Scalar(DataType::Float)); // alpha
                         auto tagLoadAlpha
-                            = command->addOperation(Operations::T_Load_Scalar(tagScalarAlpha));
+                            = command->addOperation(Operations::T_Load_Scalar(m_tagScalarAlpha));
 
-                        auto tagScalarBeta
+                        m_tagScalarBeta
                             = command->addOperation(Operations::Scalar(DataType::Float)); // beta
                         auto tagLoadBeta
-                            = command->addOperation(Operations::T_Load_Scalar(tagScalarBeta));
+                            = command->addOperation(Operations::T_Load_Scalar(m_tagScalarBeta));
 
                         auto tagAB
                             = command->addOperation(Operations::T_Mul(m_tagA, m_tagB)); // A * B
@@ -157,16 +160,16 @@ namespace rocRoller
                         }
                         command->addOperation(std::move(execute));
 
-                        auto tagTensorD = command->addOperation(
+                        m_tagTensorD = command->addOperation(
                             Operations::Tensor(2, TypeInfo<D>::Var.dataType, {(size_t)1})); // D
-                        command->addOperation(Operations::T_Store_Tiled(m_tagD, tagTensorD));
+                        command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
                     }
                     else
                     {
                         m_tagD = command->addOperation(Operations::T_Mul(m_tagA, m_tagB)); // A * B
-                        auto tagTensorD = command->addOperation(
+                        m_tagTensorD = command->addOperation(
                             Operations::Tensor(2, TypeInfo<D>::Var.dataType, {(size_t)1})); // D
-                        command->addOperation(Operations::T_Store_Tiled(m_tagD, tagTensorD));
+                        command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
                     }
 
                     return command;
@@ -226,7 +229,6 @@ namespace rocRoller
 
                     if constexpr(std::is_same_v<A, float> && std::is_same_v<B, float>)
                     {
-                        // wave tile sizes
                         wave_m = 32;
                         wave_n = 32;
                         wave_k = 2;
@@ -234,10 +236,16 @@ namespace rocRoller
                     }
                     else if constexpr(std::is_same_v<A, Half> && std::is_same_v<B, Half>)
                     {
-                        // wave tile sizes
                         wave_m = 32;
                         wave_n = 32;
                         wave_k = 8;
+                        wave_b = 1;
+                    }
+                    else if constexpr(std::is_same_v<A, FP8_NANOO> && std::is_same_v<B, FP8_NANOO>)
+                    {
+                        wave_m = 16;
+                        wave_n = 16;
+                        wave_k = 32;
                         wave_b = 1;
                     }
                     else
@@ -254,27 +262,38 @@ namespace rocRoller
                     if(m_solutionParams.waveB > 0)
                         wave_b = m_solutionParams.waveB;
 
-                    uint wavetile_per_wavefront_m = wavefrontSize * m_solutionParams.macM / wave_m
-                                                    / m_solutionParams.workgroupSizeX;
-                    uint wavetile_per_wavefront_n
+                    AssertFatal(m_solutionParams.macM * m_solutionParams.macK
+                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementSize
+                                    > wave_m * wave_k,
+                                "Not enough elements (A).");
+                    AssertFatal(m_solutionParams.macN * m_solutionParams.macK
+                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementSize
+                                    > wave_n * wave_k,
+                                "Not enough elements (B).");
+
+                    uint wavetilePerWavefrontM = wavefrontSize * m_solutionParams.macM / wave_m
+                                                 / m_solutionParams.workgroupSizeX;
+                    uint wavetilePerWavefrontN
                         = m_solutionParams.macN / wave_n / m_solutionParams.workgroupSizeY;
 
-                    AssertFatal(m_solutionParams.macM % (wave_m * wavetile_per_wavefront_m) == 0,
+                    AssertFatal(wavetilePerWavefrontM > 0, "WaveTile size mismatch.");
+                    AssertFatal(wavetilePerWavefrontN > 0, "WaveTile size mismatch.");
+
+                    AssertFatal(m_solutionParams.macM % (wave_m * wavetilePerWavefrontM) == 0,
                                 "WaveTile size mismatch (M)",
                                 ShowValue(m_solutionParams.macM),
                                 ShowValue(wave_m),
-                                ShowValue(wavetile_per_wavefront_m));
-                    AssertFatal(m_solutionParams.macN % (wave_n * wavetile_per_wavefront_n) == 0,
+                                ShowValue(wavetilePerWavefrontM));
+                    AssertFatal(m_solutionParams.macN % (wave_n * wavetilePerWavefrontN) == 0,
                                 "WaveTile size mismatch (N)",
                                 ShowValue(m_solutionParams.macN),
                                 ShowValue(wave_n),
-                                ShowValue(wavetile_per_wavefront_n));
+                                ShowValue(wavetilePerWavefrontN));
 
                     auto params = std::make_shared<CommandParameters>();
                     params->setManualKernelDimension(2);
                     // TODO: Calculate these values internally based on workgroup sizes.
-                    params->setWaveTilesPerWavefront(wavetile_per_wavefront_m,
-                                                     wavetile_per_wavefront_n);
+                    params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {m_solutionParams.macM, m_solutionParams.macK},
@@ -326,10 +345,9 @@ namespace rocRoller
 
                     auto postParams = std::make_shared<CommandParameters>();
                     postParams->setManualWavefrontCount(
-                        {static_cast<uint>(m_solutionParams.macM / wave_m
-                                           / wavetile_per_wavefront_m),
+                        {static_cast<uint>(m_solutionParams.macM / wave_m / wavetilePerWavefrontM),
                          static_cast<uint>(m_solutionParams.macN / wave_n
-                                           / wavetile_per_wavefront_n)});
+                                           / wavetilePerWavefrontN)});
 
                     auto kernelName = m_solutionParams.generateKernelName();
 
@@ -341,91 +359,128 @@ namespace rocRoller
                                          kernelOptions);
                 }
 
-                KernelArguments makeArgs(std::shared_ptr<A> m_dA,
-                                         std::shared_ptr<B> m_dB,
-                                         std::shared_ptr<C> m_dC,
-                                         std::shared_ptr<D> m_dD)
+                CommandArguments makeArgs(std::shared_ptr<A> m_dA,
+                                          std::shared_ptr<B> m_dB,
+                                          std::shared_ptr<C> m_dC,
+                                          std::shared_ptr<D> m_dD)
                 {
-                    bool            logArgs = Log::getLogger()->should_log(spdlog::level::debug);
-                    KernelArguments runtimeArgs(logArgs);
+                    CommandArguments commandArgs = this->m_command->createArguments();
 
                     bool no_beta = m_solutionParams.problemParams.beta == 0.0
                                    && m_solutionParams.problemParams.alpha == 1.0;
 
-                    runtimeArgs.append("A", m_dA.get());
-                    runtimeArgs.append("d_a_limit",
-                                       (size_t)m_solutionParams.problemParams.m
-                                           * m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_tagTensorA, ArgumentType::Value, m_dA.get());
+                    commandArgs.setArgument(m_tagTensorB, ArgumentType::Value, m_dB.get());
+                    commandArgs.setArgument(m_tagTensorA,
+                                            ArgumentType::Limit,
+                                            (size_t)m_solutionParams.problemParams.m
+                                                * m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_tagTensorB,
+                                            ArgumentType::Limit,
+                                            (size_t)m_solutionParams.problemParams.k
+                                                * m_solutionParams.problemParams.n);
 
-                    runtimeArgs.append("d_a_size_0", (size_t)m_solutionParams.problemParams.m);
-                    runtimeArgs.append("d_a_size_1", (size_t)m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_tagTensorA,
+                                            ArgumentType::Size,
+                                            0,
+                                            (size_t)m_solutionParams.problemParams.m);
+                    commandArgs.setArgument(m_tagTensorA,
+                                            ArgumentType::Size,
+                                            1,
+                                            (size_t)m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_tagTensorB,
+                                            ArgumentType::Size,
+                                            0,
+                                            (size_t)m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(m_tagTensorB,
+                                            ArgumentType::Size,
+                                            1,
+                                            (size_t)m_solutionParams.problemParams.n);
 
                     //TODO: Handle transposed matrices more elegantly
                     if(m_solutionParams.problemParams.transA == TransposeType::T)
                     {
-                        runtimeArgs.append("d_a_stride_0",
-                                           (size_t)m_solutionParams.problemParams.k);
-                        runtimeArgs.append("d_a_stride_1", (size_t)1);
+                        commandArgs.setArgument(m_tagTensorA,
+                                                ArgumentType::Stride,
+                                                0,
+                                                (size_t)m_solutionParams.problemParams.k);
+                        commandArgs.setArgument(m_tagTensorA, ArgumentType::Stride, 1, (size_t)1);
                     }
                     else
                     {
-                        runtimeArgs.append("d_a_stride_0", (size_t)1);
-                        runtimeArgs.append("d_a_stride_1",
-                                           (size_t)m_solutionParams.problemParams.m);
+                        commandArgs.setArgument(m_tagTensorA, ArgumentType::Stride, 0, (size_t)1);
+                        commandArgs.setArgument(m_tagTensorA,
+                                                ArgumentType::Stride,
+                                                1,
+                                                (size_t)m_solutionParams.problemParams.m);
                     }
-
-                    runtimeArgs.append("B", m_dB.get());
-                    runtimeArgs.append("d_b_limit",
-                                       (size_t)m_solutionParams.problemParams.k
-                                           * m_solutionParams.problemParams.n);
-
-                    runtimeArgs.append("d_b_size_0", (size_t)m_solutionParams.problemParams.k);
-                    runtimeArgs.append("d_b_size_1", (size_t)m_solutionParams.problemParams.n);
 
                     //TODO: Handle transposed matrices more elegantly
                     if(m_solutionParams.problemParams.transB == TransposeType::T)
                     {
-                        runtimeArgs.append("d_b_stride_0",
-                                           (size_t)m_solutionParams.problemParams.n);
-                        runtimeArgs.append("d_b_stride_1", (size_t)1);
+                        commandArgs.setArgument(m_tagTensorB,
+                                                ArgumentType::Stride,
+                                                0,
+                                                (size_t)m_solutionParams.problemParams.n);
+                        commandArgs.setArgument(m_tagTensorB, ArgumentType::Stride, 1, (size_t)1);
                     }
                     else
                     {
-                        runtimeArgs.append("d_b_stride_0", (size_t)1);
-                        runtimeArgs.append("d_b_stride_1",
-                                           (size_t)m_solutionParams.problemParams.k);
+                        commandArgs.setArgument(m_tagTensorB, ArgumentType::Stride, 0, (size_t)1);
+                        commandArgs.setArgument(m_tagTensorB,
+                                                ArgumentType::Stride,
+                                                1,
+                                                (size_t)m_solutionParams.problemParams.k);
                     }
 
                     if(!no_beta)
                     {
-                        runtimeArgs.append("C", m_dC.get());
-                        runtimeArgs.append("d_c_limit",
-                                           (size_t)m_solutionParams.problemParams.m
-                                               * m_solutionParams.problemParams.n);
-                        runtimeArgs.append("d_c_size_0", (size_t)m_solutionParams.problemParams.m);
-                        runtimeArgs.append("d_c_size_1", (size_t)m_solutionParams.problemParams.n);
-                        runtimeArgs.append("d_c_stride_0", (size_t)1);
-                        runtimeArgs.append("d_c_stride_1",
-                                           (size_t)m_solutionParams.problemParams.m);
-
-                        runtimeArgs.append("alpha", m_solutionParams.problemParams.alpha);
-
-                        runtimeArgs.append("beta", m_solutionParams.problemParams.beta);
+                        commandArgs.setArgument(m_tagTensorC, ArgumentType::Value, m_dC.get());
+                        commandArgs.setArgument(m_tagTensorC,
+                                                ArgumentType::Limit,
+                                                (size_t)m_solutionParams.problemParams.m
+                                                    * m_solutionParams.problemParams.n);
+                        commandArgs.setArgument(m_tagTensorC,
+                                                ArgumentType::Size,
+                                                0,
+                                                (size_t)m_solutionParams.problemParams.m);
+                        commandArgs.setArgument(m_tagTensorC,
+                                                ArgumentType::Size,
+                                                1,
+                                                (size_t)m_solutionParams.problemParams.n);
+                        commandArgs.setArgument(m_tagTensorC, ArgumentType::Stride, 0, (size_t)1);
+                        commandArgs.setArgument(m_tagTensorC,
+                                                ArgumentType::Stride,
+                                                1,
+                                                (size_t)m_solutionParams.problemParams.m);
+                        commandArgs.setArgument(m_tagScalarAlpha,
+                                                ArgumentType::Value,
+                                                m_solutionParams.problemParams.alpha);
+                        commandArgs.setArgument(m_tagScalarBeta,
+                                                ArgumentType::Value,
+                                                m_solutionParams.problemParams.beta);
                     }
 
-                    runtimeArgs.append("D", m_dD.get());
-                    runtimeArgs.append("d_d_limit",
-                                       (size_t)m_solutionParams.problemParams.m
-                                           * m_solutionParams.problemParams.n);
-                    runtimeArgs.append("d_d_size_0", (size_t)m_solutionParams.problemParams.m);
-                    runtimeArgs.append("d_d_size_1", (size_t)m_solutionParams.problemParams.n);
-                    runtimeArgs.append("d_d_stride_0", (size_t)1);
-                    runtimeArgs.append("d_d_stride_1", (size_t)m_solutionParams.problemParams.m);
+                    commandArgs.setArgument(m_tagTensorD, ArgumentType::Value, m_dD.get());
+                    commandArgs.setArgument(m_tagTensorD,
+                                            ArgumentType::Limit,
+                                            (size_t)m_solutionParams.problemParams.m
+                                                * m_solutionParams.problemParams.n);
+                    commandArgs.setArgument(m_tagTensorD,
+                                            ArgumentType::Size,
+                                            0,
+                                            (size_t)m_solutionParams.problemParams.m);
+                    commandArgs.setArgument(m_tagTensorD,
+                                            ArgumentType::Size,
+                                            1,
+                                            (size_t)m_solutionParams.problemParams.n);
+                    commandArgs.setArgument(m_tagTensorD, ArgumentType::Stride, 0, (size_t)1);
+                    commandArgs.setArgument(m_tagTensorD,
+                                            ArgumentType::Stride,
+                                            1,
+                                            (size_t)m_solutionParams.problemParams.m);
 
-                    if(logArgs)
-                        Log::getLogger()->debug(runtimeArgs.toString());
-
-                    return runtimeArgs;
+                    return commandArgs;
                 }
             };
         }
