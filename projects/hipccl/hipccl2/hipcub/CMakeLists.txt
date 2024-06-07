@@ -24,7 +24,7 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 cmake_policy(VERSION 3.16...3.25)
 
 # Install prefix
-set(CMAKE_INSTALL_PREFIX "/opt/rocm-6.0.1" CACHE PATH "Install path prefix, prepended onto install directories")
+set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
 # hipCUB project
 project(hipcub LANGUAGES CXX)
@@ -33,7 +33,7 @@ project(hipcub LANGUAGES CXX)
 if(WIN32)
   set(ROCM_ROOT "$ENV{HIP_PATH}" CACHE PATH "Root directory of the ROCm installation")
 else()
-  set(ROCM_ROOT "/opt/rocm-6.0.1" CACHE PATH "Root directory of the ROCm installation")
+  set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
 
 
