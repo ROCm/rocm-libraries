@@ -171,7 +171,7 @@ void run_benchmark(benchmark::State& state,
 
 #define CREATE_BENCHMARK(T, p)                          \
     benchmark::RegisterBenchmark(                       \
-        (std::string("device_spmv_CsrMV<Datatpye:" #T)  \
+        (std::string("device_spmv_CsrMV<Datatype:" #T)  \
             + std::string(",Probability:" #p ">.")      \
         ).c_str(),                                      \
         &run_benchmark<T>, size, stream, p              \
