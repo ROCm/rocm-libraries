@@ -649,6 +649,9 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
 template <class _Tp>
 using unique_ptr_h = unique_ptr<_Tp, host_delete<_Tp>>;
 
+template <class _Tp>
+using unique_ptr_o = unique_ptr<_Tp, offload_delete<_Tp>>;
+
 template <class _Tp, class _Dp>
 __host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
 typename std::enable_if<std::is_swappable<_Dp>::value, void>::type
@@ -795,6 +798,7 @@ template <class _Tp>
 struct __unique_if {
     typedef unique_ptr<_Tp> __unique_single;
     typedef unique_ptr<_Tp, host_delete<_Tp>> __unique_single_host;
+    typedef unique_ptr<_Tp, offload_delete<_Tp>> __unique_single_offload;
 };
 
 template <class _Tp>
@@ -837,6 +841,22 @@ make_unique(_T2 &&__arg) {
     __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hipStreamPerThread));
 #pragma clang diagnostic pop
     return unique_ptr<_T1, host_delete<_T1>>(static_cast<_T1 *>(__buf));
+}
+
+template <class _Tp, class... _Args_t>
+__global__ void __offload_construct_kernel(_Tp *__ptr, _Args_t ...__args) {
+    new (__ptr) _Tp(__args...);
+}
+
+template <class _Tp, class... _Args_t>
+__host__ inline _LIBGPU_INLINE_VISIBILITY typename __unique_if<_Tp>::__unique_single_offload
+make_unique_o(_Args_t &&...__args) {
+    // Args will be copied by hipLaunchKernelGGL using memcpy
+    static_assert((std::is_trivially_copyable_v<_Args_t> && ...));
+    _Tp *__buf = static_cast<_Tp *>(gpu::malloc(sizeof(_Tp) == 0 ? 1 : sizeof(_Tp)));
+    hipLaunchKernelGGL((__offload_construct_kernel<_Tp, _Args_t...>), dim3(1), dim3(1), 0, internal::getEnqueingStream(), __buf, std::forward<_Args_t>(__args)...);
+    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(internal::getEnqueingStream()));
+    return unique_ptr<_Tp, offload_delete<_Tp>>(__buf);
 }
 
 template <class _Tp>
