@@ -375,6 +375,14 @@ int32_t main(int32_t argc, char* argv[])
     const size_t  size   = parser.get<size_t>("size");
     const int32_t trials = parser.get<int>("trials");
 
+    hipDeviceProp_t   devProp;
+    int               device_id = 0;
+    HIP_CHECK(hipGetDevice(&device_id));
+    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+
+    std::cout << "benchmark_device_adjacent_difference" << std::endl;
+    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
+
     // HIP
     hipStream_t stream = hipStreamDefault; // default
 
