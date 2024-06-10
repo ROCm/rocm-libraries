@@ -219,6 +219,8 @@ int main(int argc, char* argv[])
     int               device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+    
+    std::cout << "benchmark_device_adjacent_difference" << std::endl;
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     using custom_float2  = benchmark_utils::custom_type<float, float>;
