@@ -29,13 +29,7 @@ using namespace rocRoller;
 namespace MatrixMultiplyTest
 {
 
-    class MatrixMultiplyTestGPU : public CurrentGPUContextFixture
-    {
-    public:
-        Expression::FastArithmetic fastArith{m_context};
-    };
-
-    class FP8MatrixMultiplyTestGPU : public GPUContextFixture
+    class MatrixMultiplyTestGPU : public GPUContextFixture
     {
     };
 
@@ -45,13 +39,21 @@ namespace MatrixMultiplyTest
                                  int                             wave_n,
                                  int                             wave_k,
                                  int                             wave_b,
+                                 bool                            useLDSB,
                                  double                          acceptableError,
-                                 std::shared_ptr<CommandKernel>& commandKernel)
+                                 std::shared_ptr<CommandKernel>& commandKernel,
+                                 bool                            launch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         if constexpr(std::is_same_v<T, FP8_NANOO>)
         {
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+
+            // TODO Remove this when we can generate FP8 kernels on archs that don't support FP8
+            if(!launch)
+            {
+                GTEST_SKIP();
+            }
         }
 
         auto dataTypeAB = TypeInfo<T>::Var.dataType;
@@ -82,7 +84,7 @@ namespace MatrixMultiplyTest
         uint workgroup_size_x = 64;
         uint workgroup_size_y = 1;
 
-        auto bpe = DataTypeInfo::Get(dataTypeAB).elementSize;
+        auto bpe = CeilDivide(DataTypeInfo::Get(dataTypeAB).elementBits, 8u);
         AssertFatal(mac_m * mac_k * bpe > wave_m * wave_k, "Not enough elements.");
 
         auto NX = std::make_shared<Expression::Expression>(workgroup_size_x);
@@ -98,18 +100,25 @@ namespace MatrixMultiplyTest
         auto d_B = make_shared_device(B);
         auto d_D = make_shared_device<ACC>(M * N);
 
-        auto command = std::make_shared<Command>();
-        auto tagTensorA
-            = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeAB, {(size_t)1})); // A
-        auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
+        std::string transA = "N";
+        std::string transB = "N";
 
-        auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeAB)); // B
+        std::vector<size_t> unitStridesN = {1, 0};
+        std::vector<size_t> unitStridesT = {0, 1};
+
+        auto command    = std::make_shared<Command>();
+        auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(
+            2, dataTypeAB, transA == "N" ? unitStridesN : unitStridesT));
+        auto tagLoadA   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
+
+        auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(
+            2, dataTypeAB, transB == "N" ? unitStridesN : unitStridesT));
         auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
         auto tagStoreD
             = command->addOperation(rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // D = A * B
 
-        auto tagTensorD = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeD)); // D
+        auto tagTensorD = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeD));
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
         CommandArguments commandArgs = command->createArguments();
@@ -139,6 +148,9 @@ namespace MatrixMultiplyTest
         kernelOptions->packMultipleElementsInto1VGPR = true;
         kernelOptions->enableLongDwordInstructions   = true;
 
+        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = transA == "T";
+        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = transB == "T";
+
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
@@ -151,8 +163,11 @@ namespace MatrixMultiplyTest
                                                                 {wave_m, wave_n, wave_k, wave_b},
                                                                 MemoryType::WAVE_LDS);
 
-        auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
-            {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
+        auto macTileB = KernelGraph::CoordinateGraph::MacroTile({mac_k, mac_n},
+                                                                LayoutType::MATRIX_B,
+                                                                {wave_m, wave_n, wave_k, wave_b},
+                                                                useLDSB ? MemoryType::WAVE_LDS
+                                                                        : MemoryType::WAVE);
 
         params->setDimensionInfo(tagLoadA, macTileA);
         params->setDimensionInfo(tagLoadB, macTileB);
@@ -162,30 +177,39 @@ namespace MatrixMultiplyTest
 
         commandKernel = std::make_shared<CommandKernel>(
             command, "MatrixMultiplyMacroTile", params, postParams, kernelOptions);
-        commandKernel->launchKernel(commandArgs.runtimeArguments());
 
-        std::vector<ACC> D(M * N);
-        ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(ACC), hipMemcpyDefault),
-                    HasHipSuccess(0));
+        if(launch)
+        {
+            commandKernel->launchKernel(commandArgs.runtimeArguments());
 
-        std::vector<ACC> c_D(M * N, ACC{});
-        std::vector<ACC> c_C(M * N, ACC{});
-        CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false, false);
+            std::vector<ACC> D(M * N);
+            ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(ACC), hipMemcpyDefault),
+                        HasHipSuccess(0));
 
-        double rnorm = relativeNorm(D, c_D);
-        ASSERT_LT(rnorm, acceptableError);
+            std::vector<ACC> c_D(M * N, ACC{});
+            std::vector<ACC> c_C(M * N, ACC{});
+            CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, transA == "T", transB == "T");
+
+            double rnorm = relativeNorm(D, c_D);
+            ASSERT_LT(rnorm, acceptableError);
+        }
     }
 
-    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTile)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTile)
     {
         std::shared_ptr<CommandKernel> commandKernel;
-        matrixMultiplyMacroTile<float>(m_context, 32, 32, 2, 1, 2.e-6, commandKernel);
+        matrixMultiplyMacroTile<float>(
+            m_context, 32, 32, 2, 1, false, 2.e-6, commandKernel, isLocalDevice());
     }
 
-    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP16)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP16)
     {
         std::shared_ptr<CommandKernel> commandKernel;
-        matrixMultiplyMacroTile<Half, Half>(m_context, 32, 32, 8, 1, 2.e-6, commandKernel);
+        matrixMultiplyMacroTile<Half, Half>(
+            m_context, 32, 32, 8, 1, false, 2.e-6, commandKernel, isLocalDevice());
+
+        if(!commandKernel)
+            return;
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
 
@@ -227,13 +251,14 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(numLocalRead, 16);
     }
 
-    TEST_P(FP8MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP8_16x16x32)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP8_16x16x32)
     {
-        if(!isLocalDevice())
-            return;
-
         std::shared_ptr<CommandKernel> commandKernel;
-        matrixMultiplyMacroTile<FP8_NANOO, float>(m_context, 16, 16, 32, 1, 2.e-6, commandKernel);
+        matrixMultiplyMacroTile<FP8_NANOO, float>(
+            m_context, 16, 16, 32, 1, false, 2.e-6, commandKernel, isLocalDevice());
+
+        if(!commandKernel)
+            return;
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
 
@@ -280,13 +305,14 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(numMFMA, 2);
     }
 
-    TEST_P(FP8MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP8_32x32x16)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP8_32x32x16)
     {
-        if(!isLocalDevice())
-            return;
-
         std::shared_ptr<CommandKernel> commandKernel;
-        matrixMultiplyMacroTile<FP8_NANOO, float>(m_context, 32, 32, 16, 1, 2.e-6, commandKernel);
+        matrixMultiplyMacroTile<FP8_NANOO, float>(
+            m_context, 32, 32, 16, 1, false, 2.e-6, commandKernel, isLocalDevice());
+
+        if(!commandKernel)
+            return;
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
 
@@ -339,12 +365,19 @@ namespace MatrixMultiplyTest
                           int        wave_n,
                           int        wave_k,
                           int        wave_b,
-                          double     acceptableError)
+                          double     acceptableError,
+                          bool       launch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         if constexpr(std::is_same_v<T, FP8_NANOO>)
         {
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+
+            // TODO Remove this when we can generate FP8 kernels on archs that don't support FP8
+            if(!launch)
+            {
+                GTEST_SKIP();
+            }
         }
 
         auto dataTypeAB = TypeInfo<T>::Var.dataType;
@@ -366,7 +399,7 @@ namespace MatrixMultiplyTest
         uint workgroup_size_x = 256;
         uint workgroup_size_y = 1;
 
-        auto bpe = DataTypeInfo::Get(dataTypeAB).elementSize;
+        auto bpe = CeilDivide(DataTypeInfo::Get(dataTypeAB).elementBits, 8u);
         AssertFatal(mac_m * mac_k * bpe > wave_m * wave_k, "Not enough elements.");
 
         uint num_workgroup_x = M / mac_m;
@@ -389,11 +422,12 @@ namespace MatrixMultiplyTest
         auto dataType = TypeInfo<T>::Var.dataType;
 
         auto tagTensorA
-            = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeAB, {(size_t)1})); // A
+            = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeAB, {1, 0}));
         auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-        auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeAB)); // B
-        auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
+        auto tagTensorB
+            = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeAB, {1, 0})); // B
+        auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
         auto tagStoreD
             = command->addOperation(rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // D = A * B
@@ -443,41 +477,41 @@ namespace MatrixMultiplyTest
         postParams->setManualWavefrontCount({2u, 2u});
 
         CommandKernel commandKernel(command, "MatrixMultiplyAB", params, postParams);
-        commandKernel.launchKernel(commandArgs.runtimeArguments());
+        if(launch)
+        {
+            commandKernel.launchKernel(commandArgs.runtimeArguments());
 
-        std::vector<ACC> D(M * N);
-        ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(ACC), hipMemcpyDefault),
-                    HasHipSuccess(0));
+            std::vector<ACC> D(M * N);
+            ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(ACC), hipMemcpyDefault),
+                        HasHipSuccess(0));
 
-        std::vector<ACC> c_D(M * N, ACC{});
-        std::vector<ACC> c_C(M * N, ACC{});
-        CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false, false);
+            std::vector<ACC> c_D(M * N, ACC{});
+            std::vector<ACC> c_C(M * N, ACC{});
+            CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false, false);
 
-        double rnorm = relativeNorm(D, c_D);
-        ASSERT_LT(rnorm, acceptableError);
+            double rnorm = relativeNorm(D, c_D);
+            ASSERT_LT(rnorm, acceptableError);
+        }
     }
 
-    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
     {
-        matrixMultiplyAB<float>(m_context, 32, 32, 2, 1, 2.e-6);
+        matrixMultiplyAB<float>(m_context, 32, 32, 2, 1, 2.e-6, isLocalDevice());
     }
 
-    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP16)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP16)
     {
-        matrixMultiplyAB<Half>(m_context, 32, 32, 8, 1, 2.e-5);
+        matrixMultiplyAB<Half>(m_context, 32, 32, 8, 1, 2.e-5, isLocalDevice());
     }
 
-    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP8_16x16x32)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP8_16x16x32)
     {
-        matrixMultiplyAB<FP8_NANOO, float>(m_context, 16, 16, 32, 1, 2.e-5);
+        matrixMultiplyAB<FP8_NANOO, float>(m_context, 16, 16, 32, 1, 2.e-5, isLocalDevice());
     }
 
-    TEST_P(FP8MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP8_32x32x16)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP8_32x32x16)
     {
-        if(!isLocalDevice())
-            return;
-
-        matrixMultiplyAB<FP8_NANOO, float>(m_context, 32, 32, 16, 1, 2.e-5);
+        matrixMultiplyAB<FP8_NANOO, float>(m_context, 32, 32, 16, 1, 2.e-5, isLocalDevice());
     }
 
     template <typename T>
@@ -486,7 +520,8 @@ namespace MatrixMultiplyTest
                            int        wave_n,
                            int        wave_k,
                            int        wave_b,
-                           double     acceptableError)
+                           double     acceptableError,
+                           bool       launch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -600,31 +635,33 @@ namespace MatrixMultiplyTest
         params->setManualWorkitemCount({NX, NY, NZ});
 
         CommandKernel commandKernel(command, "ABC", params, postParams);
-        commandKernel.launchKernel(commandArgs.runtimeArguments());
+        if(launch)
+        {
+            commandKernel.launchKernel(commandArgs.runtimeArguments());
 
-        std::vector<T> D(M * N, 0.f);
-        ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
-                    HasHipSuccess(0));
+            std::vector<T> D(M * N, 0.f);
+            ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
+                        HasHipSuccess(0));
 
-        std::vector<T> c_D(M * N, 0.f);
-        CPUMM(c_D, C, A, B, M, N, K, 1.0, 1.0, false, false);
+            std::vector<T> c_D(M * N, 0.f);
+            CPUMM(c_D, C, A, B, M, N, K, 1.0, 1.0, false, false);
 
-        double rnorm = relativeNorm(D, c_D);
-        ASSERT_LT(rnorm, acceptableError);
+            double rnorm = relativeNorm(D, c_D);
+            ASSERT_LT(rnorm, acceptableError);
+        }
     }
 
-    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABC)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABC)
     {
-        matrixMultiplyABC<float>(m_context, 32, 32, 2, 1, 2.e-6);
+        matrixMultiplyABC<float>(m_context, 32, 32, 2, 1, 2.e-6, isLocalDevice());
     }
 
-    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABCFP16)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABCFP16)
     {
-        matrixMultiplyABC<Half>(m_context, 32, 32, 8, 1, 2.e-5);
+        matrixMultiplyABC<Half>(m_context, 32, 32, 8, 1, 2.e-5, isLocalDevice());
     }
 
-    INSTANTIATE_TEST_SUITE_P(FP8MatrixMultiplyTestGPU,
-                             FP8MatrixMultiplyTestGPU,
-                             ::testing::Combine(::testing::Values("gfx942:sramecc+")));
-
+    INSTANTIATE_TEST_SUITE_P(MatrixMultiplyTestGPU,
+                             MatrixMultiplyTestGPU,
+                             mfmaSupportedISATuples());
 }

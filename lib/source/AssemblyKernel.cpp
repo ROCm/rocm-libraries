@@ -274,7 +274,7 @@ namespace rocRoller
         }
         if(arg.size == -1)
         {
-            arg.size = typeInfo.elementSize;
+            arg.size = CeilDivide(typeInfo.elementBits, 8u);
         }
         m_argumentSize = std::max(m_argumentSize, arg.offset + arg.size);
 

@@ -263,11 +263,11 @@ namespace rocRoller
                         wave_b = m_solutionParams.waveB;
 
                     AssertFatal(m_solutionParams.macM * m_solutionParams.macK
-                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementSize
+                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementBytes
                                     > wave_m * wave_k,
                                 "Not enough elements (A).");
                     AssertFatal(m_solutionParams.macN * m_solutionParams.macK
-                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementSize
+                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementBytes
                                     > wave_n * wave_k,
                                 "Not enough elements (B).");
 

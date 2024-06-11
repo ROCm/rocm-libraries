@@ -252,7 +252,7 @@ namespace rocRoller
                 auto const& varTypeInfo    = DataTypeInfo::Get(varType);
                 auto const& dstVarTypeInfo = DataTypeInfo::Get(dstVarType);
 
-                AssertFatal(varTypeInfo.elementSize <= dstVarTypeInfo.elementSize
+                AssertFatal(varTypeInfo.elementBits <= dstVarTypeInfo.elementBits
                                 && varTypeInfo.isIntegral == dstVarTypeInfo.isIntegral,
                             ShowValue(varType),
                             ShowValue(dstVarType));

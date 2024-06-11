@@ -503,9 +503,8 @@ namespace rocRoller
         {
 
             // Generate enough store instructions to store numBytes
-            int  numWords      = numBytes / m_wordSize;
-            auto valuesPerWord = m_wordSize / data->variableType().getElementSize();
-            AssertFatal(data->registerCount() == numWords * valuesPerWord);
+            int              numWords       = numBytes / m_wordSize;
+            auto             valuesPerWord  = m_wordSize / data->variableType().getElementSize();
             std::vector<int> potentialWords = {4, 3, 2, 1};
             int              count          = 0;
 

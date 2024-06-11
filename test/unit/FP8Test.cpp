@@ -95,8 +95,10 @@ namespace rocRollerTest
             co_yield context->copier()->copy(result_ptr, s_result, "Move pointer.");
             co_yield context->copier()->copy(a_ptr, s_a, "Move pointer.");
 
-            auto bpi = DataTypeInfo::Get(a_ptr->variableType().dataType).elementSize;
-            auto bpo = DataTypeInfo::Get(result_ptr->variableType().dataType).elementSize;
+            auto bpi
+                = CeilDivide(DataTypeInfo::Get(a_ptr->variableType().dataType).elementBits, 8u);
+            auto bpo = CeilDivide(
+                DataTypeInfo::Get(result_ptr->variableType().dataType).elementBits, 8u);
 
             for(int i = 0; i < N; i++)
             {
@@ -277,8 +279,10 @@ namespace rocRollerTest
             co_yield m_context->copier()->copy(result_ptr, s_result, "Move pointer.");
             co_yield m_context->copier()->copy(a_ptr, s_a, "Move pointer.");
 
-            auto bpi = DataTypeInfo::Get(a_ptr->variableType().dataType).elementSize;
-            auto bpo = DataTypeInfo::Get(result_ptr->variableType().dataType).elementSize;
+            auto bpi
+                = CeilDivide(DataTypeInfo::Get(a_ptr->variableType().dataType).elementBits, 8u);
+            auto bpo = CeilDivide(
+                DataTypeInfo::Get(result_ptr->variableType().dataType).elementBits, 8u);
 
             auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
             co_yield bufDesc->setup();

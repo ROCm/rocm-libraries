@@ -20,26 +20,26 @@ namespace rocRoller
         AssertFatal(arg != nullptr);
         AssertFatal(dest != nullptr);
 
-        auto elementSize = std::max(DataTypeInfo::Get(dest->variableType()).elementSize,
-                                    DataTypeInfo::Get(arg->variableType()).elementSize);
+        auto elementBits = std::max(DataTypeInfo::Get(dest->variableType()).elementBits,
+                                    DataTypeInfo::Get(arg->variableType()).elementBits);
 
         if(dest->regType() == Register::Type::Scalar)
         {
-            if(elementSize <= 4)
+            if(elementBits <= 32u)
                 co_yield_(Instruction("s_not_b32", {dest}, {arg}, {}, ""));
-            else if(elementSize == 8)
+            else if(elementBits == 64u)
                 co_yield_(Instruction("s_not_b64", {dest}, {arg}, {}, ""));
             else
-                Throw<FatalError>("Unsupported element size for bitwiseNegate operation:: ",
-                                  ShowValue(elementSize * 8));
+                Throw<FatalError>("Unsupported elementBits for bitwiseNegate operation:: ",
+                                  ShowValue(elementBits));
         }
         else if(dest->regType() == Register::Type::Vector)
         {
-            if(elementSize <= 4)
+            if(elementBits <= 32u)
             {
                 co_yield_(Instruction("v_not_b32", {dest}, {arg}, {}, ""));
             }
-            else if(elementSize == 8)
+            else if(elementBits == 64u)
             {
                 co_yield_(
                     Instruction("v_not_b32", {dest->subset({0})}, {arg->subset({0})}, {}, ""));
@@ -48,8 +48,8 @@ namespace rocRoller
             }
             else
             {
-                Throw<FatalError>("Unsupported element size for bitwiseNegate operation:: ",
-                                  ShowValue(elementSize * 8));
+                Throw<FatalError>("Unsupported elementBits for bitwiseNegate operation:: ",
+                                  ShowValue(elementBits));
             }
         }
         else

@@ -28,7 +28,7 @@ namespace rocRoller
         auto const& dataTypeInfoRhs  = DataTypeInfo::Get(rhs->variableType());
         auto const& dataTypeInfoDest = DataTypeInfo::Get(dest->variableType());
 
-        if(dataTypeInfoLhs.elementSize == 4 && dataTypeInfoRhs.elementSize == 4)
+        if(dataTypeInfoLhs.elementBits == 32u && dataTypeInfoRhs.elementBits == 32u)
         {
             if(dest->regType() == Register::Type::Scalar)
             {
@@ -53,7 +53,7 @@ namespace rocRoller
                 }
             }
         }
-        else if(dataTypeInfoDest.elementSize == 8)
+        else if(dataTypeInfoDest.elementBits == 64u)
         {
             std::string mulHiInst
                 = dest->regType() == Register::Type::Vector ? "v_mul_hi_u32" : "s_mul_hi_u32";

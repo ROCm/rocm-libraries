@@ -128,7 +128,7 @@ namespace rocRoller
                                                   concatenate(name, "_", i)));
             args.push_back(m_commandArgs[m_commandArgs.size() - 1]);
             m_argOffsetMap[std::make_tuple(tag, argType, i)] = m_runtimeArgsOffset;
-            m_runtimeArgsOffset += DataTypeInfo::Get(dataType).elementSize;
+            m_runtimeArgsOffset += CeilDivide(DataTypeInfo::Get(dataType).elementBits, 8u);
         }
 
         return args;

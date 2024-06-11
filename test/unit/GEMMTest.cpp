@@ -63,7 +63,7 @@ namespace GEMMDriverTest
                             "MacroTile size mismatch (K unroll)");
             }
 
-            auto bpe = DataTypeInfo::Get(dataTypeAB).elementSize;
+            auto bpe = DataTypeInfo::Get(dataTypeAB).elementBytes;
             AssertFatal(gemm.macM * gemm.macK * bpe > gemm.waveM * gemm.waveK,
                         "Not enough elements (A).");
             AssertFatal(gemm.macN * gemm.macK * bpe > gemm.waveN * gemm.waveK,

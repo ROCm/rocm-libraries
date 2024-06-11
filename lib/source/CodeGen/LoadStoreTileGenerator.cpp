@@ -132,10 +132,10 @@ namespace rocRoller
                 if(!maybeStrideTag)
                     continue;
 
-                auto [strideExpr, _dtype]
+                auto [strideExpr, strideAttrs]
                     = m_context->registerTagManager()->getExpression(*maybeStrideTag);
 
-                rocRoller::Log::getLogger()->debug(
+                Log::debug(
                     "  unroll coord {} value: {}", unroll, toString(coords.getCoordinate(unroll)));
 
                 result = result + coords.getCoordinate(unroll) * strideExpr;
@@ -209,19 +209,24 @@ namespace rocRoller
         }
 
         Generator<Instruction> LoadStoreTileGenerator::generateStride(Register::ValuePtr& stride,
-                                                                      int                 tag,
-                                                                      int                 dimension)
+                                                                      bool& unitStride,
+                                                                      int   tag,
+                                                                      int   dimension)
         {
+            unitStride = false;
+
             auto strideTag = m_graph->mapper.get<Stride>(tag, dimension);
             if(strideTag >= 0)
             {
-                auto [strideExpr, strideDataType]
+                auto [strideExpr, strideAttributes]
                     = m_context->registerTagManager()->getExpression(strideTag);
+
+                unitStride = strideAttributes.unitStride;
 
                 if(!Expression::evaluationTimes(strideExpr)[EvaluationTime::Translate])
                 {
                     stride = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, strideDataType, 1);
+                        m_context, Register::Type::Vector, strideAttributes.dataType, 1);
                 }
                 else
                 {
@@ -251,16 +256,15 @@ namespace rocRoller
             auto buffer = m_graph->mapper.get(
                 tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
 
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::ComputeIndex({}): "
-                "target {} increment {} base {} offset {} stride {} buffer {}",
-                tag,
-                target,
-                increment,
-                base,
-                offset,
-                stride,
-                buffer);
+            Log::debug("KernelGraph::LoadStoreTileGenerator::ComputeIndex({}): "
+                       "target {} increment {} base {} offset {} stride {} buffer {}",
+                       tag,
+                       target,
+                       increment,
+                       base,
+                       offset,
+                       stride,
+                       buffer);
 
             // TODO: Design a better way of binding storage to coordinates
             auto maybeLDS = m_graph->coordinates.get<LDS>(target);
@@ -277,8 +281,20 @@ namespace rocRoller
                     target = *maybeParentLDS;
             }
 
-            auto scope    = m_context->getScopeManager();
-            uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
+            auto scope = m_context->getScopeManager();
+
+            auto toBytes = [&](ExpressionPtr expr) -> ExpressionPtr {
+                uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
+
+                // TODO: This would be a good place to add a GPU
+                // assert.  If numBits is not a multiple of 8, assert
+                // that (expr * numBits) is a multiple of 8.
+                Log::debug("  toBytes: {}: numBits {}", toString(ci.valueType), numBits);
+
+                if(numBits % 8u == 0)
+                    return expr * L(numBits / 8u);
+                return (expr * L(numBits)) / L(8u);
+            };
 
             // Set the zero-coordinates to zero
             auto fullStop  = [&](int tag) { return tag == increment; };
@@ -309,9 +325,9 @@ namespace rocRoller
                 auto indexExpr
                     = ci.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
 
-                rocRoller::Log::getLogger()->debug("  Offset({}): {}", offset, toString(indexExpr));
+                Log::debug("  Offset({}): {}", offset, toString(indexExpr));
 
-                co_yield generate(offsetReg, indexExpr * L(numBytes));
+                co_yield generate(offsetReg, toBytes(indexExpr));
             }
             else
             {
@@ -323,12 +339,19 @@ namespace rocRoller
             {
                 auto indexExpr = ci.forward ? coords.forwardStride(increment, L(1), {target})[0]
                                             : coords.reverseStride(increment, L(1), {target})[0];
-                rocRoller::Log::getLogger()->debug("  Stride({}): {}", stride, toString(indexExpr));
+                Log::debug("  Stride({}): {}", stride, toString(indexExpr));
 
                 // We have to manually invoke m_fastArith here since it can't traverse into the
                 // RegisterTagManager.
                 // TODO: Revisit storing expressions in the RegisterTagManager.
-                tagger->addExpression(stride, m_fastArith(indexExpr * L(numBytes)), ci.strideType);
+                bool unitStride = false;
+                if(Expression::evaluationTimes(indexExpr)[EvaluationTime::Translate])
+                {
+                    if(getUnsignedInt(evaluate(indexExpr)) == 1u)
+                        unitStride = true;
+                }
+                tagger->addExpression(
+                    stride, m_fastArith(toBytes(indexExpr)), {ci.strideType, unitStride});
                 scope->addRegister(stride);
             }
 
@@ -364,7 +387,7 @@ namespace rocRoller
 
                         co_yield bufDesc.setDefaultOpts();
                         Register::ValuePtr limitValue;
-                        co_yield generate(limitValue, user->size * L(numBytes));
+                        co_yield generate(limitValue, toBytes(user->size));
                         // TODO: Handle sizes larger than 32 bits
                         auto limit = (limitValue->regType() == Register::Type::Literal)
                                          ? limitValue
@@ -387,24 +410,36 @@ namespace rocRoller
         Generator<Instruction>
             LoadStoreTileGenerator::moveTileLiteralStrides(LoadStoreTileInfo& info)
         {
+            Log::debug("KernelGraph::LoadStoreTileGenerator::moveTileLiteralStrides<{}>",
+                       toString(Dir));
+
+            auto unsegmentedDataType = DataTypeInfo::Get(info.data->variableType().dataType);
+
             // If all of the strides are literals, we can load everything using offsets
             // without using a runtime counter
             auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
             auto rowStride   = getUnsignedInt(info.rowStrideReg->getLiteralValue());
             auto colStride   = getUnsignedInt(info.colStrideReg->getLiteralValue());
 
-            if(colStride == info.elementSize)
+            if(info.unitStride)
             {
+                // Segmented
+                auto bitsPerMove  = info.n * info.elementBits;
+                auto bytesPerMove = bitsPerMove / 8u;
+
+                // Unsegmented
+                auto elementsPerMove = bitsPerMove / unsegmentedDataType.elementBits;
+
                 for(uint64_t i = 0; i < info.m; ++i)
                 {
-                    auto start = (i * info.n) / info.packedAmount;
-                    auto stop  = (i * info.n + info.n) / info.packedAmount;
+                    auto start = i * elementsPerMove;
+                    auto stop  = (i + 1) * elementsPerMove;
                     co_yield m_context->mem()->moveData<Dir>(
                         info.kind,
                         info.rowOffsetReg,
                         info.data->element(Generated(iota(start, stop))),
                         Register::Value::Literal(offsetValue),
-                        info.elementSize * info.n,
+                        bytesPerMove,
                         "",
                         false,
                         info.bufDesc,
@@ -424,7 +459,7 @@ namespace rocRoller
                             info.data->element(
                                 {static_cast<int>((i * info.n + j) / info.packedAmount)}),
                             Register::Value::Literal(offsetValue + j * colStride),
-                            info.elementSize,
+                            CeilDivide(info.elementBits, 8u),
                             "",
                             j % info.packedAmount == 1,
                             info.bufDesc);
@@ -445,6 +480,9 @@ namespace rocRoller
         template <MemoryInstructions::MemoryDirection Dir>
         Generator<Instruction> LoadStoreTileGenerator::moveTileColStrideOne(LoadStoreTileInfo& info)
         {
+            Log::debug("KernelGraph::LoadStoreTileGenerator::moveTileColStrideOne<{}>",
+                       toString(Dir));
+
             for(uint64_t i = 0; i < info.m; ++i)
             {
                 auto start = (i * info.n) / info.packedAmount;
@@ -454,7 +492,7 @@ namespace rocRoller
                     info.rowOffsetReg->subset({0}),
                     info.data->element(Generated(iota(start, stop))),
                     info.offset,
-                    info.elementSize * info.n,
+                    CeilDivide(info.elementBits * info.n, (size_t)8),
                     "",
                     false,
                     info.bufDesc,
@@ -480,6 +518,9 @@ namespace rocRoller
         Generator<Instruction>
             LoadStoreTileGenerator::moveTileRuntimeStrides(LoadStoreTileInfo& info)
         {
+            Log::debug("KernelGraph::LoadStoreTileGenerator::moveTileRuntimeStrides<{}>",
+                       toString(Dir));
+
             auto colOffsetReg = info.rowOffsetReg->placeholder();
 
             for(uint64_t i = 0; i < info.m; ++i)
@@ -494,7 +535,7 @@ namespace rocRoller
                         info.data->element(
                             {static_cast<int>((i * info.n + j) / info.packedAmount)}),
                         info.offset,
-                        info.elementSize,
+                        CeilDivide(info.elementBits, 8u),
                         "",
                         j % info.packedAmount == 1,
                         info.bufDesc,
@@ -518,18 +559,18 @@ namespace rocRoller
         }
 
         /**
-             * @brief Load or store a tile
-             *
-             * @param kind The kind of memory instruction to use
-             * @param m Number of rows in the tile
-             * @param n Number of columns in the tile
-             * @param dataType The type of the data being loaded
-             * @param tag The tag of the control graph node generating the load or store
-             * @param vgpr The registers to store the data in (null is loading)
-             * @param offset Offset from the starting index
-             * @param coords Transformer object
-             * @return Generator<Instruction>
-             */
+         * @brief Load or store a tile
+         *
+         * @param kind The kind of memory instruction to use
+         * @param m Number of rows in the tile
+         * @param n Number of columns in the tile
+         * @param dataType The type of the data being loaded
+         * @param tag The tag of the control graph node generating the load or store
+         * @param vgpr The registers to store the data in (null is loading)
+         * @param offset Offset from the starting index
+         * @param coords Transformer object
+         * @return Generator<Instruction>
+         */
         template <MemoryInstructions::MemoryDirection Dir>
         Generator<Instruction> LoadStoreTileGenerator::moveTile(MemoryInstructions::MemoryKind kind,
                                                                 uint64_t                       m,
@@ -563,24 +604,24 @@ namespace rocRoller
                 info.bufDesc = getBufferDesc(tag);
             }
 
+            info.elementBits = (uint)DataTypeInfo::Get(dataType).elementBits;
+
+            bool _ignore;
             if(m > 1)
-                co_yield generateStride(info.rowStrideReg, tag, 0);
+                co_yield generateStride(info.rowStrideReg, _ignore, tag, 0);
             else
                 info.rowStrideReg = Register::Value::Literal(0u);
-            co_yield generateStride(info.colStrideReg, tag, 1);
+            co_yield generateStride(info.colStrideReg, info.unitStride, tag, 1);
 
             AssertFatal(info.rowStrideReg, "Invalid row stride register.");
             AssertFatal(info.colStrideReg, "Invalid col stride register.");
 
-            info.elementSize = (uint)DataTypeInfo::Get(dataType).elementSize;
-
             bool colStrideIsLiteral = (info.colStrideReg->regType() == Register::Type::Literal);
+
             bool allStridesAreLiteral
                 = (info.rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
                    && info.offset->regType() == Register::Type::Literal);
-            bool colStrideIsOne
-                = colStrideIsLiteral
-                  && (getUnsignedInt(info.colStrideReg->getLiteralValue()) == info.elementSize);
+            bool colStrideIsOne = colStrideIsLiteral && info.unitStride;
 
             if(Dir == MemoryInstructions::MemoryDirection::Load)
             {
@@ -592,18 +633,18 @@ namespace rocRoller
 
                 auto unsegmentedVariableType
                     = DataTypeInfo::Get(dataType).unsegmentedVariableType();
-                auto segmentedElementsPerRegister
-                    = unsegmentedVariableType.has_value() ? 4 / info.elementSize : 0;
+                auto bitsPerRegister = 32u;
 
                 Register::ValuePtr tmpl;
-                if(unsegmentedVariableType && (n % segmentedElementsPerRegister == 0)
+                if(unsegmentedVariableType && ((n * info.elementBits) % bitsPerRegister == 0)
                    && colStrideIsOne)
                 {
                     tmpl = Register::Value::Placeholder(
                         m_context,
                         Register::Type::Vector,
-                        unsegmentedVariableType.value(),
-                        m * n / segmentedElementsPerRegister,
+                        *unsegmentedVariableType,
+                        m * n * info.elementBits
+                            / DataTypeInfo::Get(*unsegmentedVariableType).elementBits,
                         Register::AllocationOptions::FullyContiguous());
                 }
                 else
@@ -647,10 +688,10 @@ namespace rocRoller
                     }
                 }
 
-                rocRoller::Log::getLogger()->debug("  tag {} tile coord {} registers {}",
-                                                   tag,
-                                                   macTileTag,
-                                                   info.data->description());
+                Log::debug("  tag {} tile coord {} registers {}",
+                           tag,
+                           macTileTag,
+                           info.data->description());
             }
             else
             {

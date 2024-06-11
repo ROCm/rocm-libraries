@@ -22,7 +22,7 @@ namespace rocRoller
 
     namespace Register
     {
-        size_t constexpr bytesPerRegister = 4;
+        uint constexpr bitsPerRegister = 32;
 
         inline std::string RegisterId::toString() const
         {
@@ -200,9 +200,12 @@ namespace rocRoller
             AssertFatal(ctx != nullptr);
             AssertFatal(count > 0, "Invalid register count ", ShowValue(count));
 
-            auto const info   = DataTypeInfo::Get(variableType);
-            m_allocationCoord = std::vector<int>(
-                count * std::max(static_cast<size_t>(1), info.elementSize / bytesPerRegister));
+            auto const info = DataTypeInfo::Get(variableType);
+
+            uint numRegisters = count;
+            if(info.elementBits > bitsPerRegister)
+                numRegisters = CeilDivide(count * info.elementBits, bitsPerRegister);
+            m_allocationCoord = std::vector<int>(numRegisters);
             std::iota(m_allocationCoord.begin(), m_allocationCoord.end(), 0);
 
             m_allocation = Allocation::SameAs(*this, m_name, options);
@@ -306,7 +309,8 @@ namespace rocRoller
             v->m_varType         = variableType;
             auto       allocator = ctx->ldsAllocator();
             auto const info      = DataTypeInfo::Get(variableType);
-            v->m_ldsAllocation   = allocator->allocate(info.elementSize * count, alignment);
+            v->m_ldsAllocation
+                = allocator->allocate(CeilDivide(info.elementBits * count, 8u), alignment);
 
             return v;
         }
@@ -674,10 +678,10 @@ namespace rocRoller
 
         inline size_t Value::valueCount() const
         {
-            if(DataTypeInfo::Get(m_varType).elementSize < bytesPerRegister)
+            if(DataTypeInfo::Get(m_varType).elementBits < bitsPerRegister)
                 return m_allocationCoord.size();
-            return m_allocationCoord.size() * bytesPerRegister
-                   / DataTypeInfo::Get(m_varType).elementSize;
+            return m_allocationCoord.size() * bitsPerRegister
+                   / DataTypeInfo::Get(m_varType).elementBits;
         }
 
         inline std::string Value::name() const
@@ -735,14 +739,14 @@ namespace rocRoller
         inline ValuePtr Value::element(T const& indices) const
         {
             AssertFatal(!m_allocationCoord.empty(), ShowValue(m_allocationCoord.size()));
-            auto const   info = DataTypeInfo::Get(m_varType);
-            size_t const elementsPerRegister
-                = std::max(info.elementSize / bytesPerRegister, (size_t)1);
+            auto const info = DataTypeInfo::Get(m_varType);
+
+            auto const registersPerElement = CeilDivide(info.elementBits, bitsPerRegister);
 
             std::vector<int> coords;
             for(auto i : indices)
-                for(size_t j = 0; j < elementsPerRegister; ++j)
-                    coords.push_back(m_allocationCoord.at(i * elementsPerRegister + j));
+                for(auto j = 0; j < registersPerElement; ++j)
+                    coords.push_back(m_allocationCoord.at(i * registersPerElement + j));
             return std::make_shared<Value>(m_allocation, m_regType, m_varType, coords);
         }
 

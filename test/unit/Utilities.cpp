@@ -35,7 +35,7 @@ namespace rocRoller
     {
         D = C;
         cblas_sgemm(CblasColMajor,
-                    CblasNoTrans,
+                    transA ? CblasTrans : CblasNoTrans,
                     transB ? CblasTrans : CblasNoTrans,
                     M,
                     N,

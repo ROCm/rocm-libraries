@@ -6,6 +6,7 @@
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Operations/Operations.hpp>
+#include <rocRoller/Utilities/Logging.hpp>
 
 namespace rocRoller
 {
@@ -862,16 +863,25 @@ namespace rocRoller
             auto useSwappedAccess
                 = context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
 
-            // Load multiple smaller-precision (< 32-bit) elements into one VGPR
-            auto packFactor = bytesPerRegister / DataTypeInfo::Get(varType).elementSize;
+            // Load multiple smaller-precision (< 32-bit) elements into contiguous VGPRs
             bool packed     = false;
+            uint packFactor = bitsPerRegister / DataTypeInfo::Get(varType).elementBits;
+
+            auto unsegmentedVariableType = DataTypeInfo::Get(varType).unsegmentedVariableType();
+            if(unsegmentedVariableType)
+            {
+                auto elementBits = DataTypeInfo::Get(varType).elementBits;
+                auto unsegmentedElementBits
+                    = DataTypeInfo::Get(*unsegmentedVariableType).elementBits;
+                packFactor = unsegmentedElementBits / elementBits;
+            }
+
             if(context->kernelOptions().packMultipleElementsInto1VGPR && packFactor > 1
                && thrTileM % packFactor == 0)
             {
-                thrTileM = thrTileM / packFactor;
+                thrTileM /= packFactor;
                 thrTileN = packFactor;
-
-                packed = true;
+                packed   = true;
             }
 
             // Enable the use of longer word instructions if possible
@@ -890,6 +900,16 @@ namespace rocRoller
 
             auto internalTile       = MacroTile(sizes, MemoryType::VGPR, {thrTileM, thrTileN});
             internalTile.layoutType = macTile.layoutType;
+
+            Log::debug("  createInternalTile: {}x{} {} {}; subTileSizes {}x{}; packed {} ({})",
+                       sizes[0],
+                       sizes[1],
+                       toString(macTile.layoutType),
+                       toString(varType.dataType),
+                       thrTileM,
+                       thrTileN,
+                       packed,
+                       packFactor);
 
             return graph.coordinates.addElement(internalTile);
         }

@@ -243,7 +243,7 @@ namespace rocRoller
         PointerType pointerType = PointerType::Value;
 
         /**
-         * @brief Gets element size in bytes
+         * @brief Gets element size in bytes.
          */
         size_t getElementSize() const;
 
@@ -336,7 +336,8 @@ namespace rocRoller
         std::string  name;
         std::string  abbrev;
 
-        unsigned int elementSize;
+        unsigned int elementBytes;
+        unsigned int elementBits;
         unsigned int registerCount;
         size_t       packing;
         size_t       segmentSize;
@@ -374,6 +375,7 @@ namespace rocRoller
               PointerType T_PEnum,
               int         T_Packing,
               int         T_RegCount,
+              int         T_Bits,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
@@ -385,11 +387,12 @@ namespace rocRoller
         constexpr static VariableType SegmentVariableType = VariableType(T_SegmentType, T_PEnum);
 
         /// Bytes of one element.  May contain multiple segments.
-        constexpr static size_t ElementSize = sizeof(T);
+        constexpr static size_t ElementBytes = sizeof(T);
+        constexpr static size_t ElementBits  = T_Bits;
         /// Segments per element.
         constexpr static size_t Packing = T_Packing;
         /// Bytes per segment.
-        constexpr static size_t SegmentSize   = ElementSize / Packing;
+        constexpr static size_t SegmentSize   = ElementBytes / Packing;
         constexpr static size_t Alignment     = alignof(T);
         constexpr static size_t RegisterCount = T_RegCount;
 
@@ -416,6 +419,7 @@ namespace rocRoller
               PointerType T_PEnum,
               int         T_Packing,
               int         T_RegCount,
+              int         T_Bits,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
@@ -425,15 +429,18 @@ namespace rocRoller
                                         T_PEnum,
                                         T_Packing,
                                         T_RegCount,
+                                        T_Bits,
                                         T_IsComplex,
                                         T_IsIntegral,
                                         T_IsSigned>::Var;
+
     template <typename T,
               DataType    T_DEnum,
               DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               int         T_RegCount,
+              int         T_Bits,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
@@ -443,15 +450,18 @@ namespace rocRoller
                                         T_PEnum,
                                         T_Packing,
                                         T_RegCount,
+                                        T_Bits,
                                         T_IsComplex,
                                         T_IsIntegral,
                                         T_IsSigned>::SegmentVariableType;
+
     template <typename T,
               DataType    T_DEnum,
               DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               int         T_RegCount,
+              int         T_Bits,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
@@ -461,15 +471,18 @@ namespace rocRoller
                                   T_PEnum,
                                   T_Packing,
                                   T_RegCount,
+                                  T_Bits,
                                   T_IsComplex,
                                   T_IsIntegral,
-                                  T_IsSigned>::ElementSize;
+                                  T_IsSigned>::ElementBytes;
+
     template <typename T,
               DataType    T_DEnum,
               DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               int         T_RegCount,
+              int         T_Bits,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
@@ -479,6 +492,28 @@ namespace rocRoller
                                   T_PEnum,
                                   T_Packing,
                                   T_RegCount,
+                                  T_Bits,
+                                  T_IsComplex,
+                                  T_IsIntegral,
+                                  T_IsSigned>::ElementBits;
+
+    template <typename T,
+              DataType    T_DEnum,
+              DataType    T_SegmentType,
+              PointerType T_PEnum,
+              int         T_Packing,
+              int         T_RegCount,
+              int         T_Bits,
+              bool        T_IsComplex,
+              bool        T_IsIntegral,
+              bool        T_IsSigned>
+    constexpr size_t BaseTypeInfo<T,
+                                  T_DEnum,
+                                  T_SegmentType,
+                                  T_PEnum,
+                                  T_Packing,
+                                  T_RegCount,
+                                  T_Bits,
                                   T_IsComplex,
                                   T_IsIntegral,
                                   T_IsSigned>::Packing;
@@ -489,6 +524,7 @@ namespace rocRoller
               PointerType T_PEnum,
               int         T_Packing,
               int         T_RegCount,
+              int         T_Bits,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
@@ -498,6 +534,7 @@ namespace rocRoller
                                   T_PEnum,
                                   T_Packing,
                                   T_RegCount,
+                                  T_Bits,
                                   T_IsComplex,
                                   T_IsIntegral,
                                   T_IsSigned>::RegisterCount;
@@ -508,6 +545,7 @@ namespace rocRoller
               PointerType T_PEnum,
               int         T_Packing,
               int         T_RegCount,
+              int         T_Bits,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
@@ -517,6 +555,7 @@ namespace rocRoller
                                   T_PEnum,
                                   T_Packing,
                                   T_RegCount,
+                                  T_Bits,
                                   T_IsComplex,
                                   T_IsIntegral,
                                   T_IsSigned>::SegmentSize;
@@ -527,6 +566,7 @@ namespace rocRoller
               PointerType T_PEnum,
               int         T_Packing,
               int         T_RegCount,
+              int         T_Bits,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
@@ -536,15 +576,18 @@ namespace rocRoller
                                 T_PEnum,
                                 T_Packing,
                                 T_RegCount,
+                                T_Bits,
                                 T_IsComplex,
                                 T_IsIntegral,
                                 T_IsSigned>::IsComplex;
+
     template <typename T,
               DataType    T_DEnum,
               DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               int         T_RegCount,
+              int         T_Bits,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
@@ -554,6 +597,7 @@ namespace rocRoller
                                 T_PEnum,
                                 T_Packing,
                                 T_RegCount,
+                                T_Bits,
                                 T_IsComplex,
                                 T_IsIntegral,
                                 T_IsSigned>::IsIntegral;
@@ -566,6 +610,7 @@ namespace rocRoller
                                                  PointerType::Value,        \
                                                  1,                         \
                                                  1,                         \
+                                                 sizeof(dtype) * 8,         \
                                                  false,                     \
                                                  std::is_integral_v<dtype>, \
                                                  std::is_signed_v<dtype>>   \
@@ -591,6 +636,7 @@ namespace rocRoller
                                                     PointerType::Value,
                                                     1,
                                                     2,
+                                                    64,
                                                     false,
                                                     true,
                                                     false>
@@ -604,6 +650,7 @@ namespace rocRoller
                                                    PointerType::Value,
                                                    1,
                                                    2,
+                                                   64,
                                                    false,
                                                    true,
                                                    true>
@@ -617,6 +664,7 @@ namespace rocRoller
                                                   PointerType::Value,
                                                   1,
                                                   2,
+                                                  64,
                                                   false,
                                                   false,
                                                   true>
@@ -630,6 +678,7 @@ namespace rocRoller
                                                                PointerType::Value,
                                                                1,
                                                                2,
+                                                               64,
                                                                true,
                                                                false,
                                                                true>
@@ -643,6 +692,7 @@ namespace rocRoller
                                                                 PointerType::Value,
                                                                 1,
                                                                 4,
+                                                                128,
                                                                 true,
                                                                 false,
                                                                 true>
@@ -656,6 +706,7 @@ namespace rocRoller
                                                   PointerType::Value,
                                                   4,
                                                   1,
+                                                  32,
                                                   false,
                                                   true,
                                                   true>
@@ -669,6 +720,7 @@ namespace rocRoller
                                                 PointerType::Value,
                                                 1,
                                                 1,
+                                                16,
                                                 false,
                                                 false,
                                                 true>
@@ -686,6 +738,7 @@ namespace rocRoller
                                                   PointerType::Value,
                                                   2,
                                                   1,
+                                                  32,
                                                   false,
                                                   false,
                                                   true>
@@ -699,6 +752,7 @@ namespace rocRoller
                                                      PointerType::Value,
                                                      1,
                                                      1,
+                                                     8,
                                                      false,
                                                      false,
                                                      true>
@@ -716,6 +770,7 @@ namespace rocRoller
                                                        PointerType::Value,
                                                        4,
                                                        1,
+                                                       32,
                                                        false,
                                                        false,
                                                        true>
@@ -729,6 +784,7 @@ namespace rocRoller
                                                     PointerType::Value,
                                                     1,
                                                     1,
+                                                    16,
                                                     false,
                                                     false,
                                                     true>
@@ -746,6 +802,7 @@ namespace rocRoller
                                                  PointerType::Value,
                                                  1,
                                                  1,
+                                                 32,
                                                  false,
                                                  true,
                                                  false>
@@ -757,6 +814,7 @@ namespace rocRoller
                                                 DataType::Bool,
                                                 DataType::Bool,
                                                 PointerType::Value,
+                                                1,
                                                 1,
                                                 1,
                                                 false,
@@ -776,6 +834,7 @@ namespace rocRoller
                                                   PointerType::Value,
                                                   1,
                                                   1,
+                                                  32,
                                                   false,
                                                   false,
                                                   false>
@@ -793,6 +852,7 @@ namespace rocRoller
                                                   PointerType::Value,
                                                   1,
                                                   2,
+                                                  64,
                                                   false,
                                                   false,
                                                   false>
@@ -810,6 +870,7 @@ namespace rocRoller
                                                         PointerType::PointerLocal,
                                                         1,
                                                         1,
+                                                        32,
                                                         false,
                                                         true,
                                                         false>
@@ -827,6 +888,7 @@ namespace rocRoller
                                                          PointerType::PointerGlobal,
                                                          1,
                                                          2,
+                                                         64,
                                                          false,
                                                          true,
                                                          false>
@@ -848,6 +910,7 @@ namespace rocRoller
                                                   PointerType::Buffer,
                                                   1,
                                                   4,
+                                                  128,
                                                   false,
                                                   true,
                                                   false>

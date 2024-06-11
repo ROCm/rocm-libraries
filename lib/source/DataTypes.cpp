@@ -320,7 +320,8 @@ namespace rocRoller
         switch(pointerType)
         {
         case PointerType::Value:
-            return DataTypeInfo::Get(dataType).elementSize;
+            // TODO Audit bytes/bits
+            return DataTypeInfo::Get(dataType).elementBytes;
         case PointerType::PointerLocal:
             return 4;
         case PointerType::PointerGlobal:
@@ -385,12 +386,14 @@ namespace rocRoller
            && lhsInfo.packing > rhsInfo.packing)
             return rhs;
 
-        if(lhsInfo.elementSize > rhsInfo.elementSize)
+        if(lhsInfo.elementBits > rhsInfo.elementBits)
             return lhs;
 
-        if(lhsInfo.elementSize < rhsInfo.elementSize)
+        if(lhsInfo.elementBits < rhsInfo.elementBits)
             return rhs;
 
+        // TODO Audit bytes/bits
+        // Since we promote based on bits (see above), are the proceeding two checks necessary?
         if(lhsInfo.packing < rhsInfo.packing)
             return lhs;
 
@@ -416,7 +419,8 @@ namespace rocRoller
         info.abbrev              = T_Info::Abbrev();
 
         info.packing       = T_Info::Packing;
-        info.elementSize   = T_Info::ElementSize;
+        info.elementBytes  = T_Info::ElementBytes;
+        info.elementBits   = T_Info::ElementBits;
         info.segmentSize   = T_Info::SegmentSize;
         info.alignment     = T_Info::Alignment;
         info.registerCount = T_Info::RegisterCount;
