@@ -22,7 +22,7 @@ namespace rocRoller
         enum
         {
             MaxDstRegisters = 2,
-            MaxSrcRegisters = 4,
+            MaxSrcRegisters = 5,
             MaxModifiers    = 10,
             MaxAllocations  = 4
         };

@@ -62,7 +62,6 @@ namespace rocRoller
     }
 
     template <typename Option>
-
     inline void Settings::set(Option const& opt, char const* val)
     {
         set(opt, std::string(val));
@@ -77,8 +76,13 @@ namespace rocRoller
         }
         else
         {
-            Throw<FatalError>("Trying to set " + opt.name
-                              + " with incorrect type. Not setting value.");
+            Throw<FatalError>("Trying to set ",
+                              opt.name,
+                              " with incorrect type ",
+                              typeid(T).name(),
+                              "(value: ",
+                              val,
+                              "). Not setting value.");
         }
     }
 

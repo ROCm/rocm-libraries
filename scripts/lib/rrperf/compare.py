@@ -203,11 +203,13 @@ def summary_as_df(summary, ResultType):
                     "medianA": comparison.median[0],
                     "medianB": comparison.median[1],
                     "pval": comparison.moods_pval,
-                    "reldiff": 100
-                    * (comparison.median[1] - comparison.median[0])
-                    / comparison.median[0]
-                    if comparison.median[0] != 0
-                    else 0.0,
+                    "reldiff": (
+                        100
+                        * (comparison.median[1] - comparison.median[0])
+                        / comparison.median[0]
+                        if comparison.median[0] != 0
+                        else 0.0
+                    ),
                 }
             )
             rows.append(row)
