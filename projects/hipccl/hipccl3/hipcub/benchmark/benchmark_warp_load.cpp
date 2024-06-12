@@ -127,12 +127,16 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, IT, WS, ALG) \
-benchmark::RegisterBenchmark( \
-    "warp_load<Datatype:" #T ",Block Size:" #BS ",Items Per Thread:" #IT ",Warp Size:" #WS ",Warp Load Algorithm:" #ALG ">.", \
-    &run_benchmark<T, BS, IT, WS, ALG>, \
-    stream, size \
-)
+#define CREATE_BENCHMARK(T, BS, IT, WS, ALG)        \
+    benchmark::RegisterBenchmark(                   \
+        "warp_load<Datatype:" #T                    \
+        ",Block Size:" #BS                          \
+        ",Items Per Thread:" #IT                    \
+        ",Warp Size:" #WS                           \
+        ",Warp Load Algorithm:" #ALG ">.",          \
+        &run_benchmark<T, BS, IT, WS, ALG>,         \
+        stream, size                                \
+    )
 
 int main(int argc, char *argv[])
 {

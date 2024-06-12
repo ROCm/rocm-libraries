@@ -506,16 +506,24 @@ struct num_limits<__half>
     };
 };
 
-#define CREATE_EVEN_BENCHMARK(VECTOR, T, BINS, SCALE)                                          \
-    if(num_limits<T>::max() > BINS * SCALE)                                                    \
-    {                                                                                          \
-        VECTOR.push_back(benchmark::RegisterBenchmark(                                         \
-            (std::string("histogram_even") + "<Datatype:" #T ">" + "(Entropy Percent:"         \
-             + std::to_string(get_entropy_percents(entropy_reduction)) + "%,Bin Count:"        \
-             + std::to_string(BINS) + " bins)")                                                \
-                .c_str(),                                                                      \
-            [=](benchmark::State& state)                                                       \
-            { run_even_benchmark<T>(state, BINS, SCALE, entropy_reduction, stream, size); })); \
+#define CREATE_EVEN_BENCHMARK(VECTOR, T, BINS, SCALE)                                           \
+    if(num_limits<T>::max() > BINS * SCALE){                                                    \
+        VECTOR.push_back(                                                                       \
+            benchmark::RegisterBenchmark(                                                       \
+                std::string("device_histogram_even"                                             \
+                    "<Datatype:" #T                                                             \
+                    ">."                                                                        \
+                    "(Entropy Percent:"                                                         \
+                    + std::to_string(get_entropy_percents(entropy_reduction))                   \
+                    + "%,Bin Count:"                                                            \
+                    + std::to_string(BINS)                                                      \
+                    + " bins)"                                                                  \
+                ).c_str(),                                                                      \
+                [=](benchmark::State& state){                                                   \
+                    run_even_benchmark<T>(state, BINS, SCALE, entropy_reduction, stream, size); \
+                }                                                                               \
+            )                                                                                   \
+        );                                                                                      \
     }
 
 #define BENCHMARK_TYPE(VECTOR, T)                 \
@@ -545,18 +553,24 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
     };
 }
 
-#define CREATE_MULTI_EVEN_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS, SCALE) \
-benchmark::RegisterBenchmark( \
-    (std::string("multi_histogram_even") + "<Channels:" #CHANNELS ",Active Channels:" #ACTIVE_CHANNELS ",Datatype:" #T ">" + \
-        "(Entropy Percent:" + std::to_string(get_entropy_percents(entropy_reduction)) + "%,Bin Count:" + \
-        std::to_string(BINS) + " bins)" \
-    ).c_str(), \
-    [=](benchmark::State& state) { \
-        run_multi_even_benchmark<T, CHANNELS, ACTIVE_CHANNELS>( \
-            state, BINS, SCALE, entropy_reduction, stream, size \
-        ); \
-    } \
-)
+#define CREATE_MULTI_EVEN_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS, SCALE)  \
+    benchmark::RegisterBenchmark(                                               \
+        std::string("device_multi_histogram_even"                               \
+            "<Channels:" #CHANNELS                                              \
+            ",Active Channels:" #ACTIVE_CHANNELS                                \
+            ",Datatype:" #T ">."                                                \
+            "(Entropy Percent:"                                                 \
+            + std::to_string(get_entropy_percents(entropy_reduction))           \
+            + "%,Bin Count:" +                                                  \
+            std::to_string(BINS)                                                \
+            + " bins)"                                                          \
+        ).c_str(),                                                              \
+        [=](benchmark::State& state){                                           \
+            run_multi_even_benchmark<T, CHANNELS, ACTIVE_CHANNELS>(             \
+                state, BINS, SCALE, entropy_reduction, stream, size             \
+            );                                                                  \
+        }                                                                       \
+    )
 
 void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                                hipStream_t stream,
@@ -580,13 +594,18 @@ void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
     };
 }
 
-#define CREATE_RANGE_BENCHMARK(T, BINS) \
-benchmark::RegisterBenchmark( \
-    (std::string("histogram_range") + "<Datatype:" #T ">" + \
-        "(Bin Count:" + std::to_string(BINS) + " bins)" \
-    ).c_str(), \
-    [=](benchmark::State& state) { run_range_benchmark<T>(state, BINS, stream, size); } \
-)
+#define CREATE_RANGE_BENCHMARK(T, BINS)                         \
+    benchmark::RegisterBenchmark(                               \
+        std::string("device_histogram_range"                    \
+            "<Datatype:" #T ">."                                \
+            "(Bin Count:"                                       \
+            + std::to_string(BINS)                              \
+            + " bins)"                                          \
+        ).c_str(),                                              \
+        [=](benchmark::State& state){                           \
+            run_range_benchmark<T>(state, BINS, stream, size);  \
+        }                                                       \
+    )
 
 #define BENCHMARK_RANGE_TYPE(T)                                            \
     CREATE_RANGE_BENCHMARK(T, 10), CREATE_RANGE_BENCHMARK(T, 100),         \
@@ -602,17 +621,22 @@ void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmar
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-#define CREATE_MULTI_RANGE_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS) \
-benchmark::RegisterBenchmark( \
-    (std::string("multi_histogram_range") + "<Channels:"#CHANNELS ",Active Channels:" #ACTIVE_CHANNELS ",Datatype:" #T ">" + \
-        "(Bin Count:" + std::to_string(BINS) + " bins)" \
-    ).c_str(), \
-    [=](benchmark::State& state) { \
-        run_multi_range_benchmark<T, CHANNELS, ACTIVE_CHANNELS>( \
-            state, BINS, stream, size \
-        ); \
-    } \
-)
+#define CREATE_MULTI_RANGE_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS)    \
+    benchmark::RegisterBenchmark(                                           \
+        std::string("device_multi_histogram_range"                          \
+            "<Channels:"#CHANNELS                                           \
+            ",Active Channels:" #ACTIVE_CHANNELS                            \
+            ",Datatype:" #T                                                 \
+            ">.(Bin Count:"                                                 \
+            + std::to_string(BINS)                                          \
+            + " bins)"                                                      \
+        ).c_str(),                                                          \
+        [=](benchmark::State& state){                                       \
+            run_multi_range_benchmark<T, CHANNELS, ACTIVE_CHANNELS>(        \
+                state, BINS, stream, size                                   \
+            );                                                              \
+        }                                                                   \
+    )
 
 void add_multi_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                                 hipStream_t stream,

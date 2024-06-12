@@ -448,16 +448,20 @@ void run_segmented_benchmark(benchmark::State& state, const benchmark_kinds benc
     HIP_CHECK(hipFree(d_segment_sizes));
 }
 
-#define CREATE_BENCHMARK(T, BS, WS, IPT)                                                           \
-do {                                                                                               \
-    const auto benchmark_name =                                                                    \
-        std::string{"warp_merge_sort<Datatype:" #T ",Block Size:" #BS ",Warp Size:" #WS ",Items Per Thread:" #IPT ">.SubAlgorithm Name:"} + name;                \
-    if(WS <= device_warp_size) {                                                                   \
-        benchmarks.push_back(benchmark::RegisterBenchmark(benchmark_name.c_str(),                  \
-            segmented ? &run_benchmark<T, BS, WS, IPT> : &run_segmented_benchmark<T, BS, WS, IPT>, \
-            benchmark_kind, stream, size));                                                        \
-    }                                                                                              \
-} while(false)
+#define CREATE_BENCHMARK(T, BS, WS, IPT)                                                            \
+    if(WS <= device_warp_size) {                                                                    \
+        benchmarks.push_back(benchmark::RegisterBenchmark(                                          \
+                std::string("warp_merge_sort<Datatype:" #T                                          \
+                ",Block Size:" #BS                                                                  \
+                ",Warp Size:" #WS                                                                   \
+                ",Items Per Thread:" #IPT                                                           \
+                ">.SubAlgorithm Name:"                                                              \
+                + name                                                                              \
+            ).c_str(),                                                                              \
+            segmented ? &run_benchmark<T, BS, WS, IPT> : &run_segmented_benchmark<T, BS, WS, IPT>,  \
+            benchmark_kind, stream, size));                                                         \
+    }                                                                                               \
+    
 
 #define BENCHMARK_TYPE_WS(type, block, warp) \
     CREATE_BENCHMARK(type, block, warp, 1);  \

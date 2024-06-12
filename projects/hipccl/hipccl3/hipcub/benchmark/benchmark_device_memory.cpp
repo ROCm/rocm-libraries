@@ -401,30 +401,33 @@ void run_benchmark_memcpy(benchmark::State& state, size_t size, const hipStream_
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK_IPT(METHOD, OPERATION, T, SIZE, BS, IPT)                               \
-    benchmarks.push_back(                                                                       \
-         benchmark::RegisterBenchmark(                                                          \
-            (std::string("device_memory<Method:" #METHOD                                        \
-                ",Operation:" #OPERATION                                                        \
-                ",Datatype:" #T                                                                 \
-                ",Size:" #SIZE                                                                  \
-                ",Block Size:" #BS                                                              \
-                ",Items Per Thread:" #IPT ">.")                                                 \
-            ).c_str(),                                                                          \
-            [=](benchmark::State& state){                                                       \
-                run_benchmark<T, BS, IPT, METHOD, OPERATION>(state, SIZE, stream);              \
-            }                                                                                   \
-        )                                                                                       \
-    );                                                                                          \
+#define CREATE_BENCHMARK_IPT(METHOD, OPERATION, T, SIZE, BS, IPT)                   \
+    benchmarks.push_back(                                                           \
+         benchmark::RegisterBenchmark(                                              \
+            std::string("device_memory<Method:" #METHOD                             \
+                ",Operation:" #OPERATION                                            \
+                ",Datatype:" #T                                                     \
+                ",Size:" #SIZE                                                      \
+                ",Block Size:" #BS                                                  \
+                ",Items Per Thread:" #IPT ">."                                      \
+            ).c_str(),                                                              \
+            [=](benchmark::State& state){                                           \
+                run_benchmark<T, BS, IPT, METHOD, OPERATION>(state, SIZE, stream);  \
+            }                                                                       \
+        )                                                                           \
+    );                                                                              \
 
-#define CREATE_BENCHMARK_MEMCPY(T, SIZE)                                                        \
-    benchmarks.push_back(                                                                       \
-        benchmark::RegisterBenchmark(                                                           \
-            (std::string("device_memory_memcpy<Dataype:" #T ",Size:" #SIZE ">.")                \
-            ).c_str(),                                                                          \
-            [=](benchmark::State& state) { run_benchmark_memcpy<T>(state, SIZE, stream); }      \
-        )                                                                                       \
-    );                                                                                          \
+#define CREATE_BENCHMARK_MEMCPY(T, SIZE)                        \
+    benchmarks.push_back(                                       \
+        benchmark::RegisterBenchmark(                           \
+            std::string("device_memory_memcpy<Dataype:" #T      \
+                ",Size:" #SIZE ">."                             \
+            ).c_str(),                                          \
+            [=](benchmark::State& state){                       \
+                run_benchmark_memcpy<T>(state, SIZE, stream);   \
+                }                                               \
+        )                                                       \
+    );                                                          \
 
 // clang-format off
 #define CREATE_BENCHMARK_BLOCK_SIZE(MEM_OP, OP, TYPE, SIZE, BLOCK_SIZE) \

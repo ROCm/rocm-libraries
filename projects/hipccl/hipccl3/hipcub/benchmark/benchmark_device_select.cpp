@@ -502,7 +502,7 @@ void run_unique_by_key_benchmark(benchmark::State& state,
 benchmark::RegisterBenchmark(                                       \
     ("device_select_flagged<Datatype:" #T                           \
     ",Flag Type:" #F ",Output Datatype:"#T                          \
-    ",Selected Output Datatype:unsigned int>(Probability:" #p")"),  \
+    ",Selected Output Datatype:unsigned int>.(Probability:" #p")"), \
     &run_flagged_benchmark<T, F>, size, stream, p                   \
 )
 
@@ -510,7 +510,7 @@ benchmark::RegisterBenchmark(                                       \
 benchmark::RegisterBenchmark(                                       \
     ("device_select_if<Datatype:" #T                                \
     ",Output Datatype:"#T                                           \
-    ",Selected Output Datatype:unsigned int>(Probability:" #p")"),  \
+    ",Selected Output Datatype:unsigned int>.(Probability:" #p")"), \
     &run_selectop_benchmark<T>, size, stream, p                     \
 )
 
@@ -518,7 +518,7 @@ benchmark::RegisterBenchmark(                                       \
 benchmark::RegisterBenchmark(                                       \
     ("device_select_unique<Datatype:" #T                            \
     ",Output Datatype:"#T                                           \
-    ",Selected Output Datatype:unsigned int>(Probability:" #p")"),  \
+    ",Selected Output Datatype:unsigned int>.(Probability:" #p")"), \
     &run_unique_benchmark<T>, size, stream, p                       \
 )
 
@@ -526,7 +526,7 @@ benchmark::RegisterBenchmark(                                       \
 benchmark::RegisterBenchmark(                                       \
     ("device_select_unique_by_key<Key Datatype:" #K                 \
     ",Value Type:"#V                                                \
-    ",Selected Output Datatype:unsigned int>(Probability:" #p")"),  \
+    ",Selected Output Datatype:unsigned int>.(Probability:" #p")"), \
     &run_unique_by_key_benchmark<K, V>, size, stream, p             \
 )
 

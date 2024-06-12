@@ -303,17 +303,27 @@ void run_benchmark_by_key(benchmark::State& state,
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
-#define CREATE_BENCHMARK(EXCL, T, SCAN_OP)                                                  \
-benchmark::RegisterBenchmark(                                                               \
-    (std::string(EXCL ? "device_exclusive_scan" : "device_inclusive_scan") +                \
-    ("<Datatype:" #T ",Op:" #SCAN_OP ">")).c_str(),                                         \
-    &run_benchmark<EXCL, T, SCAN_OP>, size, stream, SCAN_OP()                               \
-),                                                                                          \
-benchmark::RegisterBenchmark(                                                               \
-    (std::string(EXCL ? "device_exclusive_scan_by_key" : "device_inclusive_scan_by_key") +  \
-    ("<Datatype:" #T ",Op:" #SCAN_OP ">")).c_str(),                                         \
-    &run_benchmark_by_key<EXCL, T, SCAN_OP>, size, stream, SCAN_OP()                        \
-)
+#define CREATE_BENCHMARK(EXCL, T, SCAN_OP)                                                              \
+    benchmark::RegisterBenchmark(                                                                       \
+        std::string(std::string(EXCL ? "device_exclusive_scan" : "device_inclusive_scan")               \
+            +"<Datatype:" #T                                                                            \
+            ",Op:" #SCAN_OP                                                                             \
+            ">."                                                                                        \
+        ).c_str(),                                                                                      \
+        &run_benchmark<EXCL, T, SCAN_OP>,                                                               \
+        size,                                                                                           \
+        stream,                                                                                         \
+        SCAN_OP()                                                                                       \
+    ),                                                                                                  \
+    benchmark::RegisterBenchmark(                                                                       \
+        std::string(std::string(EXCL ? "device_exclusive_scan_by_key" : "device_inclusive_scan_by_key") \
+            + "<Datatype:" #T                                                                           \
+            ",Op:" #SCAN_OP ">."                                                                        \
+        ).c_str(),                                                                                      \
+        &run_benchmark_by_key<EXCL, T, SCAN_OP>,                                                        \
+        size, stream,                                                                                   \
+        SCAN_OP()                                                                                       \
+    )
 
 #define CREATE_BENCHMARKS(SCAN_OP) \
     CREATE_BENCHMARK(false, int, SCAN_OP), \

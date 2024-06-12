@@ -374,22 +374,30 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 
 #define CREATE_SORT_KEYS_BENCHMARK(Key, SEGMENTS)                               \
 benchmark::RegisterBenchmark(                                                   \
-    (std::string("device_segmented_radix_sort_keys")                            \
-     + "<Key Datatype:" #Key                                                    \
-     ",Ascending:true>" +                                                       \
-     "(Segments:~" + std::to_string(SEGMENTS) + " segments)"                    \
+    std::string("device_segmented_radix_sort_keys"                              \
+        "<Key Datatype:" #Key                                                   \
+        ",Ascending:true>."                                                     \
+        "(Segments:~"                                                           \
+        + std::to_string(SEGMENTS)                                              \
+        + " segments)"                                                          \
     ).c_str(),                                                                  \
     [=](benchmark::State& state){                                               \
-        run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, Ascending); \
+        run_sort_keys_benchmark<Key>(state,                                     \
+        SEGMENTS,                                                               \
+        stream,                                                                 \
+        size,                                                                   \
+        Ascending);                                                             \
     }                                                                           \
 )
 
 #define CREATE_SORT_KEYS_DESCENDING_BENCHMARK(Key, SEGMENTS)                        \
 benchmark::RegisterBenchmark(                                                       \
-    (std::string("device_segmented_radix_sort_keys")                                \
-     + "<Key Datatype:" #Key                                                        \
-     ",Ascending:false>" +                                                          \
-     "(Segments:~" + std::to_string(SEGMENTS) + " segments)"                        \
+    std::string("device_segmented_radix_sort_keys"                                  \
+        "<Key Datatype:" #Key                                                       \
+        ",Ascending:false>."                                                        \
+        "(Segments:~"                                                               \
+        + std::to_string(SEGMENTS)                                                  \
+        + " segments)"                                                              \
     ).c_str(),                                                                      \
     [=](benchmark::State& state){                                                   \
         run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, Descending);    \
@@ -426,11 +434,13 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
 
 #define CREATE_SORT_PAIRS_BENCHMARK(Key, Value, SEGMENTS)                               \
 benchmark::RegisterBenchmark(                                                           \
-    (std::string("device_segmented_radix_sort_pairs")                                   \
-     + "<Key Datatype:" #Key                                                            \
-     ",Value Datatype:" #Value                                                          \
-     ",Ascending:true>" +                                                               \
-     "(Segments:~" + std::to_string(SEGMENTS) + " segments)"                            \
+    std::string("device_segmented_radix_sort_pairs"                                     \
+        "<Key Datatype:" #Key                                                           \
+        ",Value Datatype:" #Value                                                       \
+        ",Ascending:true>."                                                             \
+        "(Segments:~"                                                                   \
+        + std::to_string(SEGMENTS)                                                      \
+        + " segments)"                                                                  \
     ).c_str(),                                                                          \
     [=](benchmark::State& state){                                                       \
         run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, Ascending); \
@@ -439,11 +449,13 @@ benchmark::RegisterBenchmark(                                                   
 
 #define CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(Key, Value, SEGMENTS)                    \
 benchmark::RegisterBenchmark(                                                           \
-    (std::string("device_segmented_radix_sort_pairs")                                   \
-     + "<Key Datatype:" #Key                                                            \
-     ",Value Datatype:" #Value                                                          \
-     ",Ascending:false>" +                                                              \
-     "(Segments:~" + std::to_string(SEGMENTS) + " segments)"                            \
+    std::string("device_segmented_radix_sort_pairs"                                     \
+        "<Key Datatype:" #Key                                                           \
+        ",Value Datatype:" #Value                                                       \
+        ",Ascending:false>."                                                            \
+        "(Segments:~"                                                                   \
+        + std::to_string(SEGMENTS)                                                      \
+        + " segments)"                                                                  \
     ).c_str(),                                                                          \
     [=](benchmark::State& state){                                                       \
         run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, Descending);\

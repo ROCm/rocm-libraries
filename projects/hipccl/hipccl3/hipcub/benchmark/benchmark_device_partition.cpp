@@ -352,23 +352,42 @@ void run_threeway(benchmark::State& state,
     HIP_CHECK(hipFree(d_num_selected_output));
 }
 
-#define CREATE_BENCHMARK_FLAGGED(T, T_FLAG, SPLIT_T)               \
-benchmark::RegisterBenchmark(                                      \
-    "parition_flagged<Dataype:" #T ",Flag Type:" #T_FLAG ">(Split Threshold:" #SPLIT_T "%)",        \
-    &run_flagged<T, T_FLAG>, stream, static_cast<T>(SPLIT_T), size \
-)
+#define CREATE_BENCHMARK_FLAGGED(T, T_FLAG, SPLIT_T)        \
+    benchmark::RegisterBenchmark(                           \
+        std::string("device_parition_flagged<Dataype:" #T   \
+            ",Flag Type:" #T_FLAG                           \
+            ">.(Split Threshold:" #SPLIT_T                  \
+            "%)"                                            \
+        ).c_str(),                                          \
+        &run_flagged<T, T_FLAG>,                            \
+        stream,                                             \
+        static_cast<T>(SPLIT_T), size                       \
+    )
 
-#define CREATE_BENCHMARK_PREDICATE(T, SPLIT_T)               \
-benchmark::RegisterBenchmark(                                \
-    "parition_predicate<Datatype:" #T ">(Split Threshold:" #SPLIT_T "%)",             \
-    &run_predicate<T>, stream, static_cast<T>(SPLIT_T), size \
-)
+#define CREATE_BENCHMARK_PREDICATE(T, SPLIT_T)                  \
+    benchmark::RegisterBenchmark(                               \
+        std::string("device_parition_predicate<Datatype:" #T    \
+            ">.(Split Threshold:" #SPLIT_T                      \
+            "%)"                                                \
+        ).c_str(),                                              \
+        &run_predicate<T>,                                      \
+        stream,                                                 \
+        static_cast<T>(SPLIT_T), size                           \
+    )
 
-#define CREATE_BENCHMARK_THREEWAY(T, SMALL_T, LARGE_T)                               \
-benchmark::RegisterBenchmark(                                                        \
-    "parition_three_way<Datatype:" #T ">(Small Threshold:" #SMALL_T "%,Large Threshold:" #LARGE_T "%)",                       \
-    &run_threeway<T>, stream, static_cast<T>(SMALL_T), static_cast<T>(LARGE_T), size \
-)
+#define CREATE_BENCHMARK_THREEWAY(T, SMALL_T, LARGE_T)  \
+    benchmark::RegisterBenchmark(                       \
+        std::string("device_parition_three_way"         \
+            "<Datatype:" #T                             \
+            ">.(Small Threshold:" #SMALL_T              \
+            "%,Large Threshold:" #LARGE_T               \
+            "%)"                                        \
+        ).c_str(),                                      \
+        &run_threeway<T>,                               \
+        stream,                                         \
+        static_cast<T>(SMALL_T),                        \
+        static_cast<T>(LARGE_T), size                   \
+    )
 
 #define BENCHMARK_FLAGGED_TYPE(type, flag_type)    \
     CREATE_BENCHMARK_FLAGGED(type, flag_type, 33), \

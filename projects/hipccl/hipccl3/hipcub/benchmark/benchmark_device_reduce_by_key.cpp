@@ -161,15 +161,19 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
     HIP_CHECK(hipFree(d_unique_count_output));
 }
 
-#define CREATE_BENCHMARK(Key, Value, REDUCE_OP)                             \
-benchmark::RegisterBenchmark(                                               \
-    (std::string("reduce_by_key") + "<Key Datatype:" #Key                   \
-        ",Value Datatype:" #Value                                           \
-        ",ReduceOp:" #REDUCE_OP ">" +                                       \
-        "(Random Number Range:[1, " + std::to_string(max_length) + "])"     \
-    ).c_str(),                                                              \
-    &run_benchmark<Key, Value, REDUCE_OP>,                                  \
-    max_length, stream, size, REDUCE_OP()                                   \
+#define CREATE_BENCHMARK(Key, Value, REDUCE_OP) \
+benchmark::RegisterBenchmark(                   \
+    std::string("device_reduce_by_key"          \
+        "<Key Datatype:" #Key                   \
+        ",Value Datatype:" #Value               \
+        ",ReduceOp:" #REDUCE_OP                 \
+        ">."                                    \
+        "(Random Number Range:[1, "             \
+        + std::to_string(max_length)            \
+        + "])"                                  \
+    ).c_str(),                                  \
+    &run_benchmark<Key, Value, REDUCE_OP>,      \
+    max_length, stream, size, REDUCE_OP()       \
 )
 
 #define CREATE_BENCHMARKS(REDUCE_OP) \
