@@ -184,11 +184,17 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(IT, OT, MINRL, MAXRL, BS, RPT, DIPT) \
-    benchmark::RegisterBenchmark( \
-        "block_run_length_decode<Item Type:"#IT",Offset Type:"#OT",Min RunLength:"#MINRL",Max RunLength:"#MAXRL",BlockSize: "#BS",Runs Per Thread:"#RPT",Decoded Items Per Thread:"#DIPT">", \
-        &run_benchmark<IT, OT, MINRL, MAXRL, BS, RPT, DIPT>, \
-        stream, size \
+#define CREATE_BENCHMARK(IT, OT, MINRL, MAXRL, BS, RPT, DIPT)       \
+    benchmark::RegisterBenchmark(                                   \
+        std::string("block_run_length_decode<Item Type:"#IT         \
+        ",Offset Type:"#OT                                          \
+        ",Min RunLength:"#MINRL                                     \
+        ",Max RunLength:"#MAXRL                                     \
+        ",BlockSize: "#BS                                           \
+        ",Runs Per Thread:"#RPT                                     \
+        ",Decoded Items Per Thread:"#DIPT">").c_str(),              \
+        &run_benchmark<IT, OT, MINRL, MAXRL, BS, RPT, DIPT>,        \
+        stream, size                                                \
     )
 
 int main(int argc, char *argv[])
