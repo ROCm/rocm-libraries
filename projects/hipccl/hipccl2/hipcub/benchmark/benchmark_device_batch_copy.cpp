@@ -332,17 +332,16 @@ void run_benchmark(benchmark::State& state,
         "{lvl:device,item_size:" #item_size ",item_alignment:" #item_alignment                   \
         ",size_type:" #size_type ",algo:batch_memcpy,num_tlev:" #num_tlev ",num_wlev:" #num_wlev \
         ",num_blev:" #num_blev ",cfg:default_config}",                                           \
-        [=](benchmark::State& state)                                                             \
-        {                                                                                        \
+        [=](benchmark::State& state){                                                            \
             run_benchmark<benchmark_utils::custom_aligned_type<item_size, item_alignment>,       \
                           size_type>(state, stream, num_tlev, num_wlev, num_blev);               \
         })
 
-#define BENCHMARK_TYPE(item_size, item_alignment)                            \
-    CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0),     \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0), \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000),   \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)
+#define BENCHMARK_TYPE(item_size, item_alignment)                           \
+    CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0),    \
+    CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0),    \
+    CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000),      \
+    CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)
 
 int32_t main(int32_t argc, char* argv[])
 {
