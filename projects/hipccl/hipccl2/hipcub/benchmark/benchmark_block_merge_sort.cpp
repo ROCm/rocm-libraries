@@ -177,11 +177,16 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT) \
-benchmark::RegisterBenchmark( \
-    (std::string("block_merge_sort<Datatype:" #T ",Block Size:" #BS ",Items Per Thread:" #IPT ">.SubAlgorithm Name:") + name).c_str(), \
-    &run_benchmark<T, BS, IPT>, \
-    benchmark_kind, stream, size \
+#define CREATE_BENCHMARK(T, BS, IPT)            \
+benchmark::RegisterBenchmark(                   \
+    std::string("block_merge_sort<Datatype:" #T \
+        ",Block Size:" #BS                      \
+        ",Items Per Thread:" #IPT               \
+        ">.SubAlgorithm Name:"                  \
+        + name                                  \
+    ).c_str(),                                  \
+    &run_benchmark<T, BS, IPT>,                 \
+    benchmark_kind, stream, size                \
 )
 
 #define BENCHMARK_TYPE(type, block) \

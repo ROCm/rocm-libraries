@@ -192,7 +192,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         ",Max RunLength:"#MAXRL                                     \
         ",BlockSize: "#BS                                           \
         ",Runs Per Thread:"#RPT                                     \
-        ",Decoded Items Per Thread:"#DIPT">").c_str(),              \
+        ",Decoded Items Per Thread:"#DIPT">."                       \
+        ).c_str(),                                                  \
         &run_benchmark<IT, OT, MINRL, MAXRL, BS, RPT, DIPT>,        \
         stream, size                                                \
     )

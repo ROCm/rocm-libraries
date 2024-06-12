@@ -293,11 +293,16 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT) \
-benchmark::RegisterBenchmark( \
-    (std::string("block_exchange<Datatype:" #T ",Block Size:" #BS ",Items Per Thread:" #IPT ">.SubAlgorithm Name:") + name).c_str(), \
-    &run_benchmark<Benchmark, T, BS, IPT>, \
-    stream, size \
+#define CREATE_BENCHMARK(T, BS, IPT)            \
+benchmark::RegisterBenchmark(                   \
+    std::string("block_exchange<Datatype:" #T   \
+        ",Block Size:" #BS                      \
+        ",Items Per Thread:" #IPT               \
+        ">.SubAlgorithm Name:"                  \
+        + name                                  \
+    ).c_str(),                                  \
+    &run_benchmark<Benchmark, T, BS, IPT>,      \
+    stream, size                                \
 )
 
 #define BENCHMARK_TYPE(type, block) \

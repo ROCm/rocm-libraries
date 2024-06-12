@@ -238,11 +238,16 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE) \
-benchmark::RegisterBenchmark( \
-    (std::string("block_discontinuity<Datatype:" #T ",Block Size:" #BS ">.SubAlgorithm Name:") + name + ("<Items Per Thread:" #IPT ",With Tile:" #WITH_TILE ">")).c_str(), \
-    &run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>, \
-    stream, size \
+#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)         \
+benchmark::RegisterBenchmark(                           \
+    std::string("block_discontinuity<Datatype:" #T      \
+        ",Block Size:" #BS ">.SubAlgorithm Name:"       \
+        + name                                          \
+        + "<Items Per Thread:" #IPT                     \
+        ",With Tile:" #WITH_TILE ">."                   \
+    ).c_str(),                                          \
+    &run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>,   \
+    stream, size                                        \
 )
 
 #define BENCHMARK_TYPE(type, block, bool) \
