@@ -160,7 +160,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
                     ",Block Size:"#BS                               \
                     ",Items Per Thread:"#IPT                        \
                     ",SubAlgorithm Name:" + algorithm_name          \
-                    + ">.Method Name:") + method_name).c_str(),     \
+                    + ">.Method Name:") + method_name               \
+        ).c_str(),                                                  \
         &run_benchmark<Benchmark, T, BS, IPT>,                      \
         stream, size                                                \
     )

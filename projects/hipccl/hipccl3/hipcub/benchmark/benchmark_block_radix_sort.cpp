@@ -245,15 +245,19 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT)                                                             \
-    benchmark::RegisterBenchmark((std::string("block_radix_sort<Datatype:" #T ",Block Size:" #BS \
-                                              ",Items Per Thread:" #IPT ">.SubAlgorithm Name:")  \
-                                  + name)                                                        \
-                                     .c_str(),                                                   \
-                                 &run_benchmark<Helper, T, BS, IPT>,                             \
-                                 benchmark_kind,                                                 \
-                                 stream,                                                         \
-                                 size)
+#define CREATE_BENCHMARK(T, BS, IPT)                \
+    benchmark::RegisterBenchmark(                   \
+        std::string("block_radix_sort<Datatype:" #T \
+            ",Block Size:" #BS                      \
+            ",Items Per Thread:" #IPT               \
+            ">.SubAlgorithm Name:"                  \
+            + name                                  \
+        ).c_str(),                                  \
+        &run_benchmark<Helper, T, BS, IPT>,         \
+        benchmark_kind,                             \
+        stream,                                     \
+        size                                        \
+    )
 
 // clang-format off
 #define BENCHMARK_TYPE(type, block)   \

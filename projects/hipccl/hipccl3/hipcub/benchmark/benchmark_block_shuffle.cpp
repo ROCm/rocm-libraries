@@ -214,24 +214,32 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK_IPT(BS, IPT)                                                       \
-    benchmark::RegisterBenchmark(                                                           \
-        (std::string("block_shuffle<Datatype:") + type_name                                 \
-         + std::string(",Block Size:" #BS ",Items Per Thread:" #IPT ">.SubAlgorithm Name:") \
-         + name)                                                                            \
-            .c_str(),                                                                       \
-        &run_benchmark<Benchmark, T, BS, IPT>,                                              \
-        stream,                                                                             \
-        size)
+#define CREATE_BENCHMARK_IPT(BS, IPT)           \
+    benchmark::RegisterBenchmark(               \
+        ("block_shuffle<Datatype:"              \
+         + type_name                            \
+         + ",Block Size:" #BS                   \
+         ",Items Per Thread:"                   \
+         #IPT                                   \
+         ">.SubAlgorithm Name:"                 \
+         + name                                 \
+         ).c_str(),                             \
+        &run_benchmark<Benchmark, T, BS, IPT>,  \
+        stream,                                 \
+        size                                    \
+    )
 
-#define CREATE_BENCHMARK(BS)                                                \
-    benchmark::RegisterBenchmark(                                           \
-        (std::string("block_shuffle<Datatype:") + type_name                 \
-         + std::string(",Block Size:" #BS ">.SubAlgorithm Name:") + name    \
-         ) .c_str(),                                                        \
-        &run_benchmark<Benchmark, T, BS>,                                   \
-        stream,                                                             \
-        size                                                                \
+#define CREATE_BENCHMARK(BS)                \
+    benchmark::RegisterBenchmark(           \
+        ("block_shuffle<Datatype:"          \
+         + type_name                        \
+         + ",Block Size:" #BS               \
+         ">.SubAlgorithm Name:"             \
+          + name                            \
+         ).c_str(),                         \
+        &run_benchmark<Benchmark, T, BS>,   \
+        stream,                             \
+        size                                \
     )   
 
 template<class Benchmark, class T, std::enable_if_t<Benchmark::uses_ipt, bool> = true>
