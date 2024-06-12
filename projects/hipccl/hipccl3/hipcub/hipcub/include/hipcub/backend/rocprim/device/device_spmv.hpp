@@ -136,7 +136,7 @@ HIPCUB_RUNTIME_FUNCTION static hipError_t CsrMV(void*       d_temp_storage,
         return hipError_t(0);
     } else
     {
-        size_t block_size = min(static_cast<int>(num_cols), DeviceSpmv::CsrMVKernel_MaxThreads);
+        size_t block_size = min(num_cols, static_cast<int>(DeviceSpmv::CsrMVKernel_MaxThreads));
         size_t grid_size  = num_rows;
 
         std::chrono::high_resolution_clock::time_point start;
