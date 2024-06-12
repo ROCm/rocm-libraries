@@ -106,18 +106,22 @@ namespace rocRoller
         }
     }
 
-    void CPUMM(std::vector<float>&           D,
-               const std::vector<float>&     C,
-               const std::vector<FP8_NANOO>& A,
-               const std::vector<FP8_NANOO>& B,
-               int                           M,
-               int                           N,
-               int                           K,
-               float                         alpha,
-               float                         beta,
-               bool                          transA,
-               bool                          transB)
+    template <typename F8Type>
+    void CPUMM_F8(std::vector<float>&        D,
+                  const std::vector<float>&  C,
+                  const std::vector<F8Type>& A,
+                  const std::vector<F8Type>& B,
+                  int                        M,
+                  int                        N,
+                  int                        K,
+                  float                      alpha,
+                  float                      beta,
+                  bool                       transA,
+                  bool                       transB)
     {
+        static_assert(
+            std::is_same_v<F8Type, rocRoller::FP8> || std::is_same_v<F8Type, rocRoller::BF8>);
+
         std::vector<float> floatA(A.size());
         std::vector<float> floatB(B.size());
         std::vector<float> floatD(C.size());
@@ -162,4 +166,33 @@ namespace rocRoller
         }
     }
 
+    void CPUMM(std::vector<float>&       D,
+               const std::vector<float>& C,
+               const std::vector<BF8>&   A,
+               const std::vector<BF8>&   B,
+               int                       M,
+               int                       N,
+               int                       K,
+               float                     alpha,
+               float                     beta,
+               bool                      transA,
+               bool                      transB)
+    {
+        CPUMM_F8(D, C, A, B, M, N, K, alpha, beta, transA, transB);
+    }
+
+    void CPUMM(std::vector<float>&       D,
+               const std::vector<float>& C,
+               const std::vector<FP8>&   A,
+               const std::vector<FP8>&   B,
+               int                       M,
+               int                       N,
+               int                       K,
+               float                     alpha,
+               float                     beta,
+               bool                      transA,
+               bool                      transB)
+    {
+        CPUMM_F8(D, C, A, B, M, N, K, alpha, beta, transA, transB);
+    }
 }

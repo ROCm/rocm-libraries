@@ -1016,7 +1016,7 @@ namespace GPUArchitectureGenerator
                 // V_MFMA_F32_{*}_FP8_BF8
                 rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x32_fp8_bf8", 0, {}, 4),
                 rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x16_fp8_bf8", 0, {}, 8),
-                // V_MFMA_F32_{*}_BF8_BF8
+                // V_MFMA_F32_{*}_FP8_FP8
                 rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x32_fp8_fp8", 0, {}, 4),
                 rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x16_fp8_fp8", 0, {}, 8),
             }}};

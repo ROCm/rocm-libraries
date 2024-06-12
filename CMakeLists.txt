@@ -230,6 +230,7 @@ set(rocroller_src
  lib/source/CommonSubexpressionElim.cpp
  lib/source/Context.cpp
  lib/source/DataTypes.cpp
+ lib/source/DataTypes_F8_Utils.cpp
  lib/source/Error.cpp
  lib/source/ExecutableKernel.cpp
  lib/source/Expression.cpp
@@ -504,7 +505,7 @@ set(
   test/unit/GEMMFusion.cpp
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
-  test/unit/FP8Test.cpp
+  test/unit/F8Test.cpp
   test/unit/HazardObserverTest.cpp
   test/unit/HypergraphTest.cpp
   test/unit/InstructionTest.cpp

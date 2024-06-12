@@ -159,7 +159,15 @@ namespace rocRoller
         };
 
         template <>
-        inline void EmitterOutput::output(FP8_NANOO& obj)
+        inline void EmitterOutput::output(FP8& obj)
+        {
+            std::stringstream ss;
+            ss << obj;
+            *emitter << ss.str();
+        }
+
+        template <>
+        inline void EmitterOutput::output(BF8& obj)
         {
             std::stringstream ss;
             ss << obj;
@@ -388,16 +396,16 @@ namespace rocRoller
 namespace YAML
 {
     template <>
-    struct convert<rocRoller::FP8_NANOO>
+    struct convert<rocRoller::FP8>
     {
-        static Node encode(const rocRoller::FP8_NANOO& rhs)
+        static Node encode(const rocRoller::FP8& rhs)
         {
             Node node;
             node.push_back(rhs.data);
             return node;
         }
 
-        static bool decode(const Node& node, rocRoller::FP8_NANOO& rhs)
+        static bool decode(const Node& node, rocRoller::FP8& rhs)
         {
             if(!node.IsSequence() || node.size() != 1)
             {
@@ -408,4 +416,27 @@ namespace YAML
             return true;
         }
     };
+
+    template <>
+    struct convert<rocRoller::BF8>
+    {
+        static Node encode(const rocRoller::BF8& rhs)
+        {
+            Node node;
+            node.push_back(rhs.data);
+            return node;
+        }
+
+        static bool decode(const Node& node, rocRoller::BF8& rhs)
+        {
+            if(!node.IsSequence() || node.size() != 1)
+            {
+                return false;
+            }
+
+            rhs.data = node[0].as<decltype(rhs.data)>();
+            return true;
+        }
+    };
+
 } // namespace YAML

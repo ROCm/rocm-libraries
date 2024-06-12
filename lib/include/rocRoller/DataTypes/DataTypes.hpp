@@ -34,8 +34,9 @@
 #include <stdexcept>
 #include <string>
 
+#include "DataTypes_BF8.hpp"
 #include "DataTypes_BFloat16.hpp"
-#include "DataTypes_FP8_NANOO.hpp"
+#include "DataTypes_FP8.hpp"
 #include "DataTypes_Half.hpp"
 #include "DataTypes_Int8.hpp"
 #include "DataTypes_Int8x4.hpp"
@@ -83,8 +84,10 @@ namespace rocRoller
         ComplexDouble, //< Two 64bit floating point; real and imaginary
         Half, //< 16bit floating point (IEEE format)
         Halfx2, //< Two 16bit floating point; packed into 32bits
-        FP8_NANOO, //< 8bit floating point in NANOO format
-        FP8x4_NANOO, //< Four 8bit floating point in NANOO format; packed into 32bits
+        FP8, //< 8bit floating point (E4M3)
+        FP8x4, //< Four 8bit floating point (E4M3); packed into 32bits
+        BF8, //< 8bit floating point (E5M2)
+        BF8x4, //< Four 8bit floating point (E5M2); packed into 32bits
         Int8x4, //< Four 8bit signed integers; packed into 32bits
         Int8, //< 8bit signed integer
         Int16, //< 16bit signed integer
@@ -746,34 +749,66 @@ namespace rocRoller
     };
 
     template <>
-    struct TypeInfo<FP8_NANOO> : public BaseTypeInfo<FP8_NANOO,
-                                                     DataType::FP8_NANOO,
-                                                     DataType::FP8_NANOO,
-                                                     PointerType::Value,
-                                                     1,
-                                                     1,
-                                                     8,
-                                                     false,
-                                                     false,
-                                                     true>
+    struct TypeInfo<FP8> : public BaseTypeInfo<FP8,
+                                               DataType::FP8,
+                                               DataType::FP8,
+                                               PointerType::Value,
+                                               1,
+                                               1,
+                                               8,
+                                               false,
+                                               false,
+                                               true>
     {
     };
 
-    struct FP8x4_NANOO : public DistinctType<uint32_t, FP8x4_NANOO>
+    struct FP8x4 : public DistinctType<uint32_t, FP8x4>
     {
     };
 
     template <>
-    struct TypeInfo<FP8x4_NANOO> : public BaseTypeInfo<FP8x4_NANOO,
-                                                       DataType::FP8x4_NANOO,
-                                                       DataType::FP8_NANOO,
-                                                       PointerType::Value,
-                                                       4,
-                                                       1,
-                                                       32,
-                                                       false,
-                                                       false,
-                                                       true>
+    struct TypeInfo<FP8x4> : public BaseTypeInfo<FP8x4,
+                                                 DataType::FP8x4,
+                                                 DataType::FP8,
+                                                 PointerType::Value,
+                                                 4,
+                                                 1,
+                                                 32,
+                                                 false,
+                                                 false,
+                                                 true>
+    {
+    };
+
+    template <>
+    struct TypeInfo<BF8> : public BaseTypeInfo<BF8,
+                                               DataType::BF8,
+                                               DataType::BF8,
+                                               PointerType::Value,
+                                               1,
+                                               1,
+                                               8,
+                                               false,
+                                               false,
+                                               true>
+    {
+    };
+
+    struct BF8x4 : public DistinctType<uint32_t, BF8x4>
+    {
+    };
+
+    template <>
+    struct TypeInfo<BF8x4> : public BaseTypeInfo<BF8x4,
+                                                 DataType::BF8x4,
+                                                 DataType::BF8,
+                                                 PointerType::Value,
+                                                 4,
+                                                 1,
+                                                 32,
+                                                 false,
+                                                 false,
+                                                 true>
     {
     };
 
@@ -934,8 +969,10 @@ namespace rocRoller
     DeclareEnumTypeInfo(ComplexDouble, std::complex<double>);
     DeclareEnumTypeInfo(Half, Half);
     DeclareEnumTypeInfo(Halfx2, Halfx2);
-    DeclareEnumTypeInfo(FP8_NANOO, FP8_NANOO);
-    DeclareEnumTypeInfo(FP8x4_NANOO, FP8x4_NANOO);
+    DeclareEnumTypeInfo(FP8, FP8);
+    DeclareEnumTypeInfo(FP8x4, FP8x4);
+    DeclareEnumTypeInfo(BF8, BF8);
+    DeclareEnumTypeInfo(BF8x4, BF8x4);
     DeclareEnumTypeInfo(Int8x4, Int8x4);
     DeclareEnumTypeInfo(Int32, int32_t);
     DeclareEnumTypeInfo(Int64, int64_t);

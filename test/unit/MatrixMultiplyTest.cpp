@@ -29,7 +29,7 @@ using namespace rocRoller;
 namespace MatrixMultiplyTest
 {
 
-    class MatrixMultiplyTestGPU : public GPUContextFixture
+    class MatrixMultiplyTestGPU : public GPUContextFixtureParam<rocRoller::DataType>
     {
     };
 
@@ -45,7 +45,7 @@ namespace MatrixMultiplyTest
                                  bool                            launch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-        if constexpr(std::is_same_v<T, FP8_NANOO>)
+        if constexpr(std::is_same_v<T, FP8> || std::is_same_v<T, BF8>)
         {
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
 
@@ -68,7 +68,7 @@ namespace MatrixMultiplyTest
         int N = mac_n;
         int K = 32;
 
-        if constexpr(std::is_same_v<T, FP8_NANOO>)
+        if constexpr(std::is_same_v<T, FP8> || std::is_same_v<T, BF8>)
         {
             mac_k = 2 * wave_k;
             K     = 64;
@@ -254,21 +254,29 @@ namespace MatrixMultiplyTest
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP8_16x16x32)
     {
         std::shared_ptr<CommandKernel> commandKernel;
-        matrixMultiplyMacroTile<FP8_NANOO, float>(
-            m_context, 16, 16, 32, 1, false, 2.e-6, commandKernel, isLocalDevice());
+
+        bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
+        if(isFP8)
+            matrixMultiplyMacroTile<FP8, float>(
+                m_context, 16, 16, 32, 1, false, 2.e-6, commandKernel, isLocalDevice());
+        else
+            matrixMultiplyMacroTile<BF8, float>(
+                m_context, 16, 16, 32, 1, false, 2.e-6, commandKernel, isLocalDevice());
 
         if(!commandKernel)
             return;
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
 
-        int expectedLocalWriteOffset = 0;
-        int numLocalRead             = 0;
-        int expectedLocalReadOffset  = 0;
-        int numMFMA                  = 0;
+        int               expectedLocalWriteOffset = 0;
+        int               numLocalRead             = 0;
+        int               expectedLocalReadOffset  = 0;
+        int               numMFMA                  = 0;
+        std::string const mfma_pattern
+            = isFP8 ? "v_mfma_f32_16x16x32_fp8_fp8" : "v_mfma_f32_16x16x32_bf8_bf8";
         for(auto const& instruction : instructions)
         {
-            if(instruction.starts_with("v_mfma_f32_16x16x32_fp8_fp8"))
+            if(instruction.starts_with(mfma_pattern))
                 numMFMA++;
 
             // Count the number of ds_write_b128 instructions and make sure they have
@@ -308,21 +316,29 @@ namespace MatrixMultiplyTest
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP8_32x32x16)
     {
         std::shared_ptr<CommandKernel> commandKernel;
-        matrixMultiplyMacroTile<FP8_NANOO, float>(
-            m_context, 32, 32, 16, 1, false, 2.e-6, commandKernel, isLocalDevice());
+
+        bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
+        if(isFP8)
+            matrixMultiplyMacroTile<FP8, float>(
+                m_context, 32, 32, 16, 1, false, 2.e-6, commandKernel, isLocalDevice());
+        else
+            matrixMultiplyMacroTile<BF8, float>(
+                m_context, 32, 32, 16, 1, false, 2.e-6, commandKernel, isLocalDevice());
 
         if(!commandKernel)
             return;
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
 
-        int expectedLocalWriteOffset = 0;
-        int numLocalRead             = 0;
-        int expectedLocalReadOffset  = 0;
-        int numMFMA                  = 0;
+        int               expectedLocalWriteOffset = 0;
+        int               numLocalRead             = 0;
+        int               expectedLocalReadOffset  = 0;
+        int               numMFMA                  = 0;
+        std::string const mfma_pattern
+            = isFP8 ? "v_mfma_f32_32x32x16_fp8_fp8" : "v_mfma_f32_32x32x16_bf8_bf8";
         for(auto const& instruction : instructions)
         {
-            if(instruction.starts_with("v_mfma_f32_32x32x16_fp8_fp8"))
+            if(instruction.starts_with(mfma_pattern))
                 numMFMA++;
 
             // Count the number of ds_write_b128 instructions and make sure they have
@@ -369,7 +385,7 @@ namespace MatrixMultiplyTest
                           bool       launch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-        if constexpr(std::is_same_v<T, FP8_NANOO>)
+        if constexpr(std::is_same_v<T, FP8> || std::is_same_v<T, BF8>)
         {
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
 
@@ -506,12 +522,20 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP8_16x16x32)
     {
-        matrixMultiplyAB<FP8_NANOO, float>(m_context, 16, 16, 32, 1, 2.e-5, isLocalDevice());
+        matrixMultiplyAB<FP8, float>(m_context, 16, 16, 32, 1, 2.e-5, isLocalDevice());
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP8_32x32x16)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABBF8_16x16x32)
     {
-        matrixMultiplyAB<FP8_NANOO, float>(m_context, 32, 32, 16, 1, 2.e-5, isLocalDevice());
+        matrixMultiplyAB<BF8, float>(m_context, 16, 16, 32, 1, 2.e-5, isLocalDevice());
+    }
+
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABF8_32x32x16)
+    {
+        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
+            matrixMultiplyAB<FP8, float>(m_context, 32, 32, 16, 1, 2.e-5, isLocalDevice());
+        else
+            matrixMultiplyAB<BF8, float>(m_context, 32, 32, 16, 1, 2.e-5, isLocalDevice());
     }
 
     template <typename T>
@@ -663,5 +687,7 @@ namespace MatrixMultiplyTest
 
     INSTANTIATE_TEST_SUITE_P(MatrixMultiplyTestGPU,
                              MatrixMultiplyTestGPU,
-                             mfmaSupportedISATuples());
+                             ::testing::Combine(mfmaSupportedISAValues(),
+                                                ::testing::Values(rocRoller::DataType::FP8,
+                                                                  rocRoller::DataType::BF8)));
 }

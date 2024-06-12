@@ -21,7 +21,8 @@ namespace rocRoller
         float,
         double,
         Half,
-        FP8_NANOO,
+        FP8,
+        BF8,
         bool,
         // int16_t*,
         int32_t*,
@@ -33,7 +34,8 @@ namespace rocRoller
         float*,
         double*,
         Half*,
-        FP8_NANOO*>;
+        FP8*,
+        BF8*>;
 
     template <typename T>
     concept CCommandArgumentValue = requires(T& val)

@@ -95,8 +95,10 @@ namespace rocRoller
             return getValue<Half>(args);
         // case DataType::Int8x4:
         //     return getValue<Int8x4>(args);
-        case DataType::FP8_NANOO:
-            return getValue<FP8_NANOO>(args);
+        case DataType::FP8:
+            return getValue<FP8>(args);
+        case DataType::BF8:
+            return getValue<BF8>(args);
         case DataType::Int32:
             return getValue<int32_t>(args);
         case DataType::Int64:

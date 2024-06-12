@@ -180,9 +180,9 @@ int main(int argc, const char* argv[])
     po.addArg("alpha", Arg({"a", "alpha"}, "Alpha scalar."));
     po.addArg("beta", Arg({"b", "beta"}, "Beta scalar."));
     po.addArg("type_A",
-              Arg({"type_A"}, "Datatype of A matrix [float | half | fp8].  Default: float."));
+              Arg({"type_A"}, "Datatype of A matrix [float | half | fp8 | bf8].  Default: float."));
     po.addArg("type_B",
-              Arg({"type_B"}, "Datatype of B matrix [float | half | fp8].  Default: float."));
+              Arg({"type_B"}, "Datatype of B matrix [float | half | fp8 | bf8].  Default: float."));
     po.addArg("type_C", Arg({"type_C"}, "Datatype of C matrix [float | half].  Default: float."));
     po.addArg("type_D", Arg({"type_D"}, "Datatype of D matrix [float | half].  Default: float."));
     po.addArg("type_acc", Arg({"type_acc"}, "Datatype of accumulation [float]"));
@@ -384,8 +384,12 @@ int main(int argc, const char* argv[])
     else if(problem.typeA == "fp8" && problem.typeB == "fp8" && problem.typeC == "float"
             && problem.typeD == "float")
     {
-        result = GEMM<FP8_NANOO, FP8_NANOO, float, float>(
-            solution, runParams, checkResult, doVisualize);
+        result = GEMM<FP8, FP8, float, float>(solution, runParams, checkResult, doVisualize);
+    }
+    else if(problem.typeA == "bf8" && problem.typeB == "bf8" && problem.typeC == "float"
+            && problem.typeD == "float")
+    {
+        result = GEMM<BF8, BF8, float, float>(solution, runParams, checkResult, doVisualize);
     }
     else
     {
