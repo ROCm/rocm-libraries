@@ -194,13 +194,17 @@ struct Benchmark<T, hipcub::ArgMin> {
     }
 };
 
-#define CREATE_BENCHMARK(T, SEGMENTS, REDUCE_OP) \
-benchmark::RegisterBenchmark( \
-    (std::string("segmented_reduce") + "<Datatype:" #T ", ReduceOp:" #REDUCE_OP ">" + \
-        "(Number of segments:~" + std::to_string(SEGMENTS) + " segments)" \
-    ).c_str(), \
-    &Benchmark<T, REDUCE_OP>::run, \
-    SEGMENTS, stream, size \
+#define CREATE_BENCHMARK(T, SEGMENTS, REDUCE_OP)    \
+benchmark::RegisterBenchmark(                       \
+    (std::string("device_segmented_reduce")         \
+     + "<Datatype:" #T                              \
+     ",ReduceOp:" #REDUCE_OP ">" +                  \
+     "(Number of segments:~"                        \
+     + std::to_string(SEGMENTS)                     \
+     + " segments)"                                 \
+    ).c_str(),                                      \
+    &Benchmark<T, REDUCE_OP>::run,                  \
+    SEGMENTS, stream, size                          \
 )
 
 #define BENCHMARK_TYPE(type, REDUCE_OP) \
