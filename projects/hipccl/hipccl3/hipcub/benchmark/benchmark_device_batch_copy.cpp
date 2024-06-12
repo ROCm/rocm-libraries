@@ -327,18 +327,21 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
-#define CREATE_BENCHMARK(IS, IA, T, num_tlev, num_wlev, num_blev)     \
-    benchmark::RegisterBenchmark(                                                                \
-        // "{lvl:device,IS:" #IS ",IA:" #IA                   
-        // ",T:" #T ",algo:batch_memcpy,num_tlev:" #num_tlev ",num_wlev:" #num_wlev
-        // ",num_blev:" #num_blev ",cfg:default_config}",                                          
-        std::string("device_batch_copy"
-            "<"
-        ).c_str()
-        [=](benchmark::State& state){                                                            \
-            run_benchmark<benchmark_utils::custom_aligned_type<IS, IA>,       \
-                          T>(state, stream, num_tlev, num_wlev, num_blev);               \
-        })
+#define CREATE_BENCHMARK(IS, IA, T, num_tlev, num_wlev, num_blev)           \
+    benchmark::RegisterBenchmark(                                           \
+        std::string("device_batch_copy"                                     \
+            "<Datatype:" #T                                                 \
+            ",Item Size:" #IS                                               \
+            ",Item Alignment:" #IA                                          \
+            ",Number of Tlev:" #num_tlev                                    \
+            ",Number of Wlev:" #num_wlev                                    \
+            ",Number of Blev:" #num_blev ">."                               \
+        ).c_str(),                                                          \
+        [=](benchmark::State& state){                                       \
+            run_benchmark<benchmark_utils::custom_aligned_type<IS, IA>,     \
+                          T>(state, stream, num_tlev, num_wlev, num_blev);  \
+        }                                                                   \
+    )
 
 #define BENCHMARK_TYPE(item_size, item_alignment)                           \
     CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0),    \
