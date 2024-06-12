@@ -181,12 +181,17 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_flags));
 }
 
-#define CREATE_BENCHMARK(T, WS, BS) \
-benchmark::RegisterBenchmark( \
-    (std::string("warp_reduce<Datatype:" #T ",Warp Size:" #WS ",Block Size:" #BS ">.SubAlgorithm Name:") + name).c_str(), \
-    &run_benchmark<Segmented, T, WS, BS>, \
-    stream, size \
-)
+#define CREATE_BENCHMARK(T, WS, BS)         \
+    benchmark::RegisterBenchmark(               \
+        std::string("warp_reduce<Datatype:" #T  \
+            ",Warp Size:" #WS                   \
+            ",Block Size:" #BS                  \
+            ">.SubAlgorithm Name:"              \
+            + name                              \
+        ).c_str(),                              \
+        &run_benchmark<Segmented, T, WS, BS>,   \
+        stream, size                            \
+    )
 
 
 // If warp size limit is 16

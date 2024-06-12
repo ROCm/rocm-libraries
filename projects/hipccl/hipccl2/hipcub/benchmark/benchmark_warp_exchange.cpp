@@ -245,7 +245,7 @@ struct BlockedToStripedOp
             ",Block Size:" #BS                                             \
             ",Items Per Thread:" #IT                                       \
             ",Warp Size:" #WS                                              \
-            ",Algorithm:" #ALG ">"                                         \
+            ",Algorithm:" #ALG ">."                                        \
         ).c_str(),                                                         \
         &run_benchmark<T, BS, IT, WS, ::hipcub::ALG, StripedToBlockedOp>,  \
         stream,                                                            \
@@ -258,7 +258,7 @@ struct BlockedToStripedOp
             ",Block Size:" #BS                                              \
             ",Items Per Thread:" #IT                                        \
             ",Warp Size:" #WS                                               \
-            ",Algorithm:" #ALG ">"                                          \
+            ",Algorithm:" #ALG ">."                                         \
         ).c_str(),                                                          \
          &run_benchmark<T, BS, IT, WS, ::hipcub::ALG, BlockedToStripedOp>,  \
          stream,                                                            \
@@ -271,7 +271,7 @@ benchmark::RegisterBenchmark(                                           \
         ",Offset Type:" #OFFSET_T                                       \
         ",Block Size:" #BS                                              \
         ",Items Per Thread:" #IT                                        \
-        ",Warp Size:" #WS ">"                                           \
+        ",Warp Size:" #WS ">."                                          \
     ).c_str(),                                                          \
     &run_benchmark_scatter_to_striped<T, OFFSET_T, BS, IT, WS>,         \
     stream, size                                                        \

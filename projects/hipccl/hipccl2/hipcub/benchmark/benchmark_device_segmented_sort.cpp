@@ -371,10 +371,10 @@ void run_sort_pairs_benchmark(benchmark::State &state,
 
 #define CREATE_SORT_KEYS_BENCHMARK(Key, SEGMENTS)                                       \
     benchmark::RegisterBenchmark(                                                       \
-        (std::string("device_segmented_sort_keys")                                      \
-         + "<Key Datatype:" #Key                                                        \
+        std::string("device_segmented_sort_keys"                                        \
+         "<Key Datatype:" #Key                                                          \
          ",Ascending:true"                                                              \
-         ",Stable:false>" +                                                             \
+         ",Stable:false>."                                                              \
          "(Number of segments:~"                                                        \
          + std::to_string(SEGMENTS)                                                     \
          + " segments)"                                                                 \
@@ -384,10 +384,10 @@ void run_sort_pairs_benchmark(benchmark::State &state,
         }                                                                               \
     ),                                                                                  \
     benchmark::RegisterBenchmark(                                                       \
-        (std::string("device_segmented_sort_keys")                                      \
-         + "<Key Datatype:" #Key                                                        \
+        std::string("device_segmented_sort_keys"                                        \
+         "<Key Datatype:" #Key                                                          \
          ",Ascending:false"                                                             \
-         ",Stable:false>" +                                                             \
+         ",Stable:false>."                                                              \
          "(Number of segments:~"                                                        \
          + std::to_string(SEGMENTS)                                                     \
          + " segments)"                                                                 \
@@ -397,10 +397,10 @@ void run_sort_pairs_benchmark(benchmark::State &state,
         }                                                                               \
     ),                                                                                  \
     benchmark::RegisterBenchmark(                                                       \
-        (std::string("device_segmented_sort_keys")                                      \
-         + "<Key Datatype:" #Key                                                        \
+        std::string("device_segmented_sort_keys"                                        \
+         "<Key Datatype:" #Key                                                          \
          ",Ascending:true"                                                              \
-         ",Stable:true>" +                                                              \
+         ",Stable:true>."                                                               \
          "(Number of segments:~"                                                        \
          + std::to_string(SEGMENTS)                                                     \
          + " segments)"                                                                 \
@@ -410,10 +410,10 @@ void run_sort_pairs_benchmark(benchmark::State &state,
         }                                                                               \
     ),                                                                                  \
     benchmark::RegisterBenchmark(                                                       \
-        (std::string("device_segmented_sort_keys")                                      \
-         + "<Key Datatype:" #Key                                                        \
+        std::string("device_segmented_sort_keys"                                        \
+         "<Key Datatype:" #Key                                                          \
          ",Ascending:false"                                                             \
-         ",Stable:true>" +                                                              \
+         ",Stable:true>."                                                               \
          "(Number of segments:~"                                                        \
          + std::to_string(SEGMENTS)                                                     \
          + " segments)"                                                                 \
@@ -450,7 +450,7 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark *> &ben
          + "<Key Datatype:" #Key                                                                \
          ",Value Datatype:" #Value                                                              \
          ",Ascending:true"                                                                      \
-         ",Stable:false>" +                                                                     \
+         ",Stable:false>." +                                                                    \
          "(Number of segments:~"                                                                \
          + std::to_string(SEGMENTS)                                                             \
          + " segments)"                                                                         \
@@ -464,7 +464,7 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark *> &ben
          + "<Key Datatype:" #Key                                                                \
          ",Value Datatype:" #Value                                                              \
          ",Ascending:false"                                                                     \
-         ",Stable:false>" +                                                                     \
+         ",Stable:false>." +                                                                    \
          "(Number of segments:~"                                                                \
          + std::to_string(SEGMENTS)                                                             \
          + " segments)"                                                                         \
@@ -478,7 +478,7 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark *> &ben
          + "<Key Datatype:" #Key                                                                \
          ",Value Datatype:" #Value                                                              \
          ",Ascending:true"                                                                      \
-         ",Stable:true>" +                                                                      \
+         ",Stable:true>." +                                                                     \
          "(Number of segments:~"                                                                \
          + std::to_string(SEGMENTS)                                                             \
          + " segments)"                                                                         \
@@ -492,7 +492,7 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark *> &ben
          + "<Key Datatype:" #Key                                                                \
          ",Value Datatype:" #Value                                                              \
          ",Ascending:false"                                                                     \
-         ",Stable:true>" +                                                                      \
+         ",Stable:true>." +                                                                     \
          "(Number of segments:~"                                                                \
          + std::to_string(SEGMENTS)                                                             \
          + " segments)"                                                                         \

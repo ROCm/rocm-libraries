@@ -245,13 +245,16 @@ void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, 
     HIP_CHECK(hipFree(d_runs_count_output));
 }
 
-#define CREATE_ENCODE_BENCHMARK(T)                                          \
-    benchmark::RegisterBenchmark(                                           \
-        (std::string("run_length_encode") + "<Datatype:" #T ">" +           \
-         "(Random Number Range:[1, " + std::to_string(max_length) + "])"    \
-        ).c_str(),                                                          \
-        &run_encode_benchmark<T>,                                           \
-        max_length, stream, size                                            \
+#define CREATE_ENCODE_BENCHMARK(T)              \
+    benchmark::RegisterBenchmark(               \
+        std::string("device_run_length_encode"  \
+            "<Datatype:" #T ">."                \
+            "(Random Number Range:[1, "         \
+            + std::to_string(max_length)        \
+            + "])"                              \
+        ).c_str(),                              \
+        &run_encode_benchmark<T>,               \
+        max_length, stream, size                \
     )
 
 void add_encode_benchmarks(size_t max_length,
