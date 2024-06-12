@@ -224,13 +224,15 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         stream,                                                                             \
         size)
 
-#define CREATE_BENCHMARK(BS)                                                                       \
-    benchmark::RegisterBenchmark((std::string("block_shuffle<Datatype:") + type_name               \
-                                  + std::string(",Block Size:" #BS ">.SubAlgorithm Name:") + name) \
-                                     .c_str(),                                                     \
-                                 &run_benchmark<Benchmark, T, BS>,                                 \
-                                 stream,                                                           \
-                                 size)
+#define CREATE_BENCHMARK(BS)                                                \
+    benchmark::RegisterBenchmark(                                           \
+        (std::string("block_shuffle<Datatype:") + type_name                 \
+         + std::string(",Block Size:" #BS ">.SubAlgorithm Name:") + name    \
+         ) .c_str(),                                                        \
+        &run_benchmark<Benchmark, T, BS>,                                   \
+        stream,                                                             \
+        size                                                                \
+    )   
 
 template<class Benchmark, class T, std::enable_if_t<Benchmark::uses_ipt, bool> = true>
 void add_benchmarks_type(const std::string&                            name,
