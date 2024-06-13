@@ -248,8 +248,8 @@ void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, 
 #define CREATE_ENCODE_BENCHMARK(T)              \
     benchmark::RegisterBenchmark(               \
         std::string("device_run_length_encode"  \
-            "<Datatype:" #T ">."                \
-            "(Random Number Range:[1, "         \
+            "<data_type:" #T ">."               \
+            "(random_number_range:[1, "         \
             + std::to_string(max_length)        \
             + "])"                              \
         ).c_str(),                              \
@@ -280,14 +280,17 @@ void add_encode_benchmarks(size_t max_length,
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-#define CREATE_NON_TRIVIAL_RUNS_BENCHMARK(T) \
-benchmark::RegisterBenchmark( \
-    (std::string("run_length_encode_non_trivial_runs") + "<Datatype:" #T ">" + \
-        "(Random Number Range:[1, " + std::to_string(max_length) + "])" \
-    ).c_str(), \
-    &run_non_trivial_runs_benchmark<T>, \
-    max_length, stream, size \
-)
+#define CREATE_NON_TRIVIAL_RUNS_BENCHMARK(T)                \
+    benchmark::RegisterBenchmark(                           \
+        std::string("run_length_encode_non_trivial_runs"    \
+            "<data_type:" #T ">"                            \
+            "(random_number_range:[1, "                     \
+            + std::to_string(max_length)                    \
+            + "])"                                          \
+        ).c_str(),                                          \
+        &run_non_trivial_runs_benchmark<T>,                 \
+        max_length, stream, size                            \
+    )
 
 void add_non_trivial_runs_benchmarks(size_t max_length,
                                      std::vector<benchmark::internal::Benchmark*>& benchmarks,

@@ -159,10 +159,10 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 #define CREATE_BENCHMARK(T, KIND, BS, IPT)              \
     benchmark::RegisterBenchmark(                       \
-        std::string("block_radix_rank<Datatype:" #T     \
-            ",Kind:" #KIND                              \
-            ",Block Size:" #BS                          \
-            ",Items Per Thread:" #IPT                   \
+        std::string("block_radix_rank<data_type:" #T    \
+            ",kind:" #KIND                              \
+            ",block_size:" #BS                          \
+            ",items_per_thread:" #IPT                   \
             ">."                                        \
              + name                                     \
         ).c_str(),                                      \

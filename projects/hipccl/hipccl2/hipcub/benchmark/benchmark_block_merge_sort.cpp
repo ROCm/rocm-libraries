@@ -179,10 +179,10 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
 
 #define CREATE_BENCHMARK(T, BS, IPT)            \
 benchmark::RegisterBenchmark(                   \
-    std::string("block_merge_sort<Datatype:" #T \
-        ",Block Size:" #BS                      \
-        ",Items Per Thread:" #IPT               \
-        ">.SubAlgorithm Name:"                  \
+    std::string("block_merge_sort<data_type:" #T\
+        ",block_size:" #BS                      \
+        ",items_per_thread:" #IPT               \
+        ">.sub_algorithm_name:"                 \
         + name                                  \
     ).c_str(),                                  \
     &run_benchmark<T, BS, IPT>,                 \

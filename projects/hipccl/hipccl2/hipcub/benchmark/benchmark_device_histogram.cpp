@@ -511,11 +511,11 @@ struct num_limits<__half>
         VECTOR.push_back(                                                                       \
             benchmark::RegisterBenchmark(                                                       \
                 std::string("device_histogram_even"                                             \
-                    "<Datatype:" #T                                                             \
+                    "<data_type:" #T                                                             \
                     ">."                                                                        \
-                    "(Entropy Percent:"                                                         \
+                    "(entropy_percent:"                                                         \
                     + std::to_string(get_entropy_percents(entropy_reduction))                   \
-                    + "%,Bin Count:"                                                            \
+                    + "%,bin_count:"                                                            \
                     + std::to_string(BINS)                                                      \
                     + " bins)"                                                                  \
                 ).c_str(),                                                                      \
@@ -556,12 +556,12 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
 #define CREATE_MULTI_EVEN_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS, SCALE)  \
     benchmark::RegisterBenchmark(                                               \
         std::string("device_multi_histogram_even"                               \
-            "<Channels:" #CHANNELS                                              \
-            ",Active Channels:" #ACTIVE_CHANNELS                                \
-            ",Datatype:" #T ">."                                                \
-            "(Entropy Percent:"                                                 \
+            "<channels:" #CHANNELS                                              \
+            ",active_channels:" #ACTIVE_CHANNELS                                \
+            ",data_type:" #T ">."                                                \
+            "(entropy_percent:"                                                 \
             + std::to_string(get_entropy_percents(entropy_reduction))           \
-            + "%,Bin Count:" +                                                  \
+            + "%,bin_count:" +                                                  \
             std::to_string(BINS)                                                \
             + " bins)"                                                          \
         ).c_str(),                                                              \
@@ -597,8 +597,8 @@ void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
 #define CREATE_RANGE_BENCHMARK(T, BINS)                         \
     benchmark::RegisterBenchmark(                               \
         std::string("device_histogram_range"                    \
-            "<Datatype:" #T ">."                                \
-            "(Bin Count:"                                       \
+            "<data_type:" #T ">."                                \
+            "(bin_count:"                                       \
             + std::to_string(BINS)                              \
             + " bins)"                                          \
         ).c_str(),                                              \
@@ -624,10 +624,10 @@ void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmar
 #define CREATE_MULTI_RANGE_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS)    \
     benchmark::RegisterBenchmark(                                           \
         std::string("device_multi_histogram_range"                          \
-            "<Channels:"#CHANNELS                                           \
-            ",Active Channels:" #ACTIVE_CHANNELS                            \
-            ",Datatype:" #T                                                 \
-            ">.(Bin Count:"                                                 \
+            "<channels:"#CHANNELS                                           \
+            ",active_channels:" #ACTIVE_CHANNELS                            \
+            ",data_type:" #T                                                 \
+            ">.(bin_count:"                                                 \
             + std::to_string(BINS)                                          \
             + " bins)"                                                      \
         ).c_str(),                                                          \

@@ -404,12 +404,12 @@ void run_benchmark_memcpy(benchmark::State& state, size_t size, const hipStream_
 #define CREATE_BENCHMARK_IPT(METHOD, OPERATION, T, SIZE, BS, IPT)                   \
     benchmarks.push_back(                                                           \
          benchmark::RegisterBenchmark(                                              \
-            std::string("device_memory<Method:" #METHOD                             \
-                ",Operation:" #OPERATION                                            \
-                ",Datatype:" #T                                                     \
-                ",Size:" #SIZE                                                      \
-                ",Block Size:" #BS                                                  \
-                ",Items Per Thread:" #IPT ">."                                      \
+            std::string("device_memory<method:" #METHOD                             \
+                ",operation:" #OPERATION                                            \
+                ",data_type:" #T                                                     \
+                ",size:" #SIZE                                                      \
+                ",block_size:" #BS                                                  \
+                ",items_per_thread:" #IPT ">."                                      \
             ).c_str(),                                                              \
             [=](benchmark::State& state){                                           \
                 run_benchmark<T, BS, IPT, METHOD, OPERATION>(state, SIZE, stream);  \

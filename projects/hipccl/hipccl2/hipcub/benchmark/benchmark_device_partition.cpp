@@ -354,9 +354,9 @@ void run_threeway(benchmark::State& state,
 
 #define CREATE_BENCHMARK_FLAGGED(T, T_FLAG, SPLIT_T)        \
     benchmark::RegisterBenchmark(                           \
-        std::string("device_parition_flagged<Dataype:" #T   \
-            ",Flag Type:" #T_FLAG                           \
-            ">.(Split Threshold:" #SPLIT_T                  \
+        std::string("device_parition_flagged<data_type:" #T   \
+            ",flag_type:" #T_FLAG                           \
+            ">.(split_threshold:" #SPLIT_T                  \
             "%)"                                            \
         ).c_str(),                                          \
         &run_flagged<T, T_FLAG>,                            \
@@ -366,8 +366,8 @@ void run_threeway(benchmark::State& state,
 
 #define CREATE_BENCHMARK_PREDICATE(T, SPLIT_T)                  \
     benchmark::RegisterBenchmark(                               \
-        std::string("device_parition_predicate<Datatype:" #T    \
-            ">.(Split Threshold:" #SPLIT_T                      \
+        std::string("device_parition_predicate<data_type:" #T    \
+            ">.(split_threshold:" #SPLIT_T                      \
             "%)"                                                \
         ).c_str(),                                              \
         &run_predicate<T>,                                      \
@@ -378,9 +378,9 @@ void run_threeway(benchmark::State& state,
 #define CREATE_BENCHMARK_THREEWAY(T, SMALL_T, LARGE_T)  \
     benchmark::RegisterBenchmark(                       \
         std::string("device_parition_three_way"         \
-            "<Datatype:" #T                             \
-            ">.(Small Threshold:" #SMALL_T              \
-            "%,Large Threshold:" #LARGE_T               \
+            "<data_type:" #T                             \
+            ">.(small_threshold:" #SMALL_T              \
+            "%,large_threshold:" #LARGE_T               \
             "%)"                                        \
         ).c_str(),                                      \
         &run_threeway<T>,                               \

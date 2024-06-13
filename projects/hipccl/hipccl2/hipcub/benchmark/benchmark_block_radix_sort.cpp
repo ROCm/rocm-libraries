@@ -247,10 +247,10 @@ void run_benchmark(benchmark::State& state,
 
 #define CREATE_BENCHMARK(T, BS, IPT)                \
     benchmark::RegisterBenchmark(                   \
-        std::string("block_radix_sort<Datatype:" #T \
-            ",Block Size:" #BS                      \
-            ",Items Per Thread:" #IPT               \
-            ">.SubAlgorithm Name:"                  \
+        std::string("block_radix_sort<data_type:" #T\
+            ",block_size:" #BS                      \
+            ",items_per_thread:" #IPT               \
+            ">.sub_algorithm_name:"                 \
             + name                                  \
         ).c_str(),                                  \
         &run_benchmark<Helper, T, BS, IPT>,         \

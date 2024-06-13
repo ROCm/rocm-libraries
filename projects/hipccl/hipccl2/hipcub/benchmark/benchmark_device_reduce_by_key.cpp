@@ -164,11 +164,11 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
 #define CREATE_BENCHMARK(Key, Value, REDUCE_OP) \
 benchmark::RegisterBenchmark(                   \
     std::string("device_reduce_by_key"          \
-        "<Key Datatype:" #Key                   \
-        ",Value Datatype:" #Value               \
-        ",ReduceOp:" #REDUCE_OP                 \
+        "<key_data_type:" #Key                   \
+        ",value_data_type:" #Value               \
+        ",reduce_op:" #REDUCE_OP                 \
         ">."                                    \
-        "(Random Number Range:[1, "             \
+        "(random_number_range:[1, "             \
         + std::to_string(max_length)            \
         + "])"                                  \
     ).c_str(),                                  \
