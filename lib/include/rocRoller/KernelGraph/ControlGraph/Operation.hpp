@@ -157,9 +157,9 @@ namespace rocRoller
         */
         struct AssertOp
         {
-            Expression::ExpressionPtr condition;
-
             std::string assertName;
+
+            Expression::ExpressionPtr condition;
 
             std::string name() const;
             std::string toString() const;

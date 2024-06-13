@@ -57,7 +57,11 @@ namespace rocRoller
         static Instruction Label(std::string const& name);
         static Instruction Label(std::string&& name);
 
+        static Instruction Label(std::string const& name, std::string const& comment);
+        static Instruction Label(std::string&& name, std::string const& comment);
+
         static Instruction Label(Register::ValuePtr label);
+        static Instruction Label(Register::ValuePtr label, std::string const& comment);
 
         static Instruction Wait(WaitCount const& wait);
         static Instruction Wait(WaitCount&& wait);

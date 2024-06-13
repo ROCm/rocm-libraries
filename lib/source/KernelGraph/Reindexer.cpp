@@ -137,7 +137,7 @@ namespace rocRoller
 
             void visitOperation(KernelGraph& graph, int tag, AssertOp const& op)
             {
-                auto newOp = AssertOp{reindexExpression(op.condition, m_reindexer), op.assertName};
+                auto newOp = AssertOp{op.assertName, reindexExpression(op.condition, m_reindexer)};
                 graph.control.setElement(tag, newOp);
             }
 

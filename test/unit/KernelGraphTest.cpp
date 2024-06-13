@@ -2736,7 +2736,7 @@ namespace KernelGraphTest
 
         auto exprA = std::make_shared<Expression::Expression>(
             Expression::DataFlowTag{vgprA, Register::Type::Scalar, DataType::Int32});
-        auto assertOp = kgraph.control.addElement(AssertOp{exprA > unit, "assert"});
+        auto assertOp = kgraph.control.addElement(AssertOp{"assert", exprA > unit});
         kgraph.control.addElement(Sequence(), {loadA}, {assertOp});
 
         auto loadB = kgraph.control.addElement(LoadVGPR(DataType::Int32, true));

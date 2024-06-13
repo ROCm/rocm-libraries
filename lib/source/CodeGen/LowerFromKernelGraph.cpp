@@ -317,32 +317,47 @@ namespace rocRoller
 
                 if(assertOpKind == AssertOpKind::NoOp)
                 {
-                    co_yield Instruction::Nop("AssertOpKind == NoOp");
+                    co_yield Instruction::Comment(
+                        concatenate("AssertOpKind == NoOp ", op.assertName));
                 }
                 else
                 {
-                    auto passedLabel = m_context->labelAllocator()->label("AssertPassed");
+                    if(op.condition == nullptr) // Unconditional Assert
+                    {
+                        co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
+                    }
+                    else
+                    {
+                        co_yield Instruction::Lock(Scheduling::Dependency::Branch,
+                                                   concatenate("Lock for Assert ", op.assertName));
+                        auto passedLabel = m_context->labelAllocator()->label("AssertPassed");
 
-                    co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Assert");
+                        auto expr            = m_fastArith(op.condition);
+                        auto conditionResult = m_context->brancher()->resultRegister(expr);
 
-                    auto expr            = m_fastArith(op.condition);
-                    auto conditionResult = m_context->brancher()->resultRegister(expr);
+                        co_yield Expression::generate(conditionResult, expr, m_context);
 
-                    co_yield Expression::generate(conditionResult, expr, m_context);
+                        co_yield m_context->brancher()->branchIfNonZero(
+                            passedLabel,
+                            conditionResult,
+                            concatenate("Assert ",
+                                        op.assertName,
+                                        ": Passed, jump to ",
+                                        passedLabel->toString()));
 
-                    co_yield m_context->brancher()->branchIfNonZero(
-                        passedLabel,
-                        conditionResult,
-                        concatenate("Assert: Passed, jump to ", passedLabel->toString()));
+                        auto failedLabel = m_context->labelAllocator()->label("AssertFailed");
+                        co_yield Instruction::Label(failedLabel,
+                                                    concatenate("For ", op.assertName));
+                        co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
 
-                    auto failedLabel = m_context->labelAllocator()->label("AssertFailed");
-                    co_yield Instruction::Label(failedLabel);
-                    co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
+                        co_yield Instruction::Wait(WaitCount::Zero(
+                            "DEBUG: Wait after branch", m_context->targetArchitecture()));
 
-                    co_yield Instruction::Wait(WaitCount::Zero("DEBUG: Wait after branch",
-                                                               m_context->targetArchitecture()));
-                    co_yield Instruction::Label(passedLabel);
-                    co_yield Instruction::Unlock("Unlock Assert");
+                        co_yield Instruction::Label(passedLabel,
+                                                    concatenate("For ", op.assertName));
+                        co_yield Instruction::Unlock(
+                            concatenate("Unlock for Assert ", op.assertName));
+                    }
                 }
             }
 
