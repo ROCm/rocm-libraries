@@ -240,11 +240,11 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 #define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)         \
 benchmark::RegisterBenchmark(                           \
-    std::string("block_discontinuity<Datatype:" #T      \
-        ",Block Size:" #BS ">.SubAlgorithm Name:"       \
+    std::string("block_discontinuity<data_type:" #T     \
+        ",block_size:" #BS ">.sub_algorithm_name:"      \
         + name                                          \
-        + "<Items Per Thread:" #IPT                     \
-        ",With Tile:" #WITH_TILE ">."                   \
+        + "<items_per_thread:" #IPT                     \
+        ",with_tile:" #WITH_TILE ">."                   \
     ).c_str(),                                          \
     &run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>,   \
     stream, size                                        \

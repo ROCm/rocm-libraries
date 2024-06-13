@@ -234,7 +234,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     benchmarks.push_back(                                           \
         benchmark::RegisterBenchmark(                               \
             std::string("device_merge_sort_sort_keys"               \
-                "<Key DataType:" #T ">."                            \
+                "<key_data_type:" #T ">."                            \
             ).c_str(),                                              \
             [=](benchmark::State& state){                           \
                 run_sort_keys_benchmark<T>(state, stream, size);    \
@@ -246,8 +246,8 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     benchmarks.push_back(                                                   \
         benchmark::RegisterBenchmark(                                       \
                 std::string("device_merge_sort_sort_pairs<"                 \
-                ",Key Datatype:" #T                                         \
-                ",Value Datatype:" #V ">."                                  \
+                ",key_data_type:" #T                                         \
+                ",value_data_type:" #V ">."                                  \
                 ).c_str(),                                                  \
                 [=](benchmark::State& state){                               \
                     run_sort_pairs_benchmark<T, V>(state, stream, size);    \

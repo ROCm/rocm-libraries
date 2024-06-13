@@ -295,10 +295,10 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 #define CREATE_BENCHMARK(T, BS, IPT)            \
 benchmark::RegisterBenchmark(                   \
-    std::string("block_exchange<Datatype:" #T   \
-        ",Block Size:" #BS                      \
-        ",Items Per Thread:" #IPT               \
-        ">.SubAlgorithm Name:"                  \
+    std::string("block_exchange<data_type:" #T  \
+        ",block_size:" #BS                      \
+        ",items_per_thread:" #IPT               \
+        ">.sub_algorithm_name:"                 \
         + name                                  \
     ).c_str(),                                  \
     &run_benchmark<Benchmark, T, BS, IPT>,      \

@@ -372,10 +372,10 @@ void run_sort_pairs_benchmark(benchmark::State &state,
 #define CREATE_SORT_KEYS_BENCHMARK(Key, SEGMENTS)                                       \
     benchmark::RegisterBenchmark(                                                       \
         std::string("device_segmented_sort_keys"                                        \
-         "<Key Datatype:" #Key                                                          \
-         ",Ascending:true"                                                              \
-         ",Stable:false>."                                                              \
-         "(Number of segments:~"                                                        \
+         "<key_data_type:" #Key                                                          \
+         ",ascending:true"                                                              \
+         ",stable:false>."                                                              \
+         "(number_of_segments:~"                                                        \
          + std::to_string(SEGMENTS)                                                     \
          + " segments)"                                                                 \
          ).c_str(),                                                                     \
@@ -385,10 +385,10 @@ void run_sort_pairs_benchmark(benchmark::State &state,
     ),                                                                                  \
     benchmark::RegisterBenchmark(                                                       \
         std::string("device_segmented_sort_keys"                                        \
-         "<Key Datatype:" #Key                                                          \
-         ",Ascending:false"                                                             \
-         ",Stable:false>."                                                              \
-         "(Number of segments:~"                                                        \
+         "<key_data_type:" #Key                                                          \
+         ",ascending:false"                                                             \
+         ",stable:false>."                                                              \
+         "(number_of_segments:~"                                                        \
          + std::to_string(SEGMENTS)                                                     \
          + " segments)"                                                                 \
          ).c_str(),                                                                     \
@@ -398,10 +398,10 @@ void run_sort_pairs_benchmark(benchmark::State &state,
     ),                                                                                  \
     benchmark::RegisterBenchmark(                                                       \
         std::string("device_segmented_sort_keys"                                        \
-         "<Key Datatype:" #Key                                                          \
-         ",Ascending:true"                                                              \
-         ",Stable:true>."                                                               \
-         "(Number of segments:~"                                                        \
+         "<key_data_type:" #Key                                                          \
+         ",ascending:true"                                                              \
+         ",stable:true>."                                                               \
+         "(number_of_segments:~"                                                        \
          + std::to_string(SEGMENTS)                                                     \
          + " segments)"                                                                 \
          ).c_str(),                                                                     \
@@ -411,10 +411,10 @@ void run_sort_pairs_benchmark(benchmark::State &state,
     ),                                                                                  \
     benchmark::RegisterBenchmark(                                                       \
         std::string("device_segmented_sort_keys"                                        \
-         "<Key Datatype:" #Key                                                          \
-         ",Ascending:false"                                                             \
-         ",Stable:true>."                                                               \
-         "(Number of segments:~"                                                        \
+         "<key_data_type:" #Key                                                          \
+         ",ascending:false"                                                             \
+         ",stable:true>."                                                               \
+         "(number_of_segments:~"                                                        \
          + std::to_string(SEGMENTS)                                                     \
          + " segments)"                                                                 \
          ).c_str(),                                                                     \
@@ -447,11 +447,11 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark *> &ben
 #define CREATE_SORT_PAIRS_BENCHMARK(Key, Value, SEGMENTS)                                       \
     benchmark::RegisterBenchmark(                                                               \
         (std::string("device_segmented_sort_pairs")                                             \
-         + "<Key Datatype:" #Key                                                                \
-         ",Value Datatype:" #Value                                                              \
-         ",Ascending:true"                                                                      \
-         ",Stable:false>." +                                                                    \
-         "(Number of segments:~"                                                                \
+         + "<key_data_type:" #Key                                                                \
+         ",value_data_type:" #Value                                                              \
+         ",ascending:true"                                                                      \
+         ",stable:false>." +                                                                    \
+         "(number_of_segments:~"                                                                \
          + std::to_string(SEGMENTS)                                                             \
          + " segments)"                                                                         \
          ).c_str(),                                                                             \
@@ -461,11 +461,11 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark *> &ben
     ),                                                                                          \
     benchmark::RegisterBenchmark(                                                               \
         (std::string("device_segmented_sort_pairs")                                             \
-         + "<Key Datatype:" #Key                                                                \
-         ",Value Datatype:" #Value                                                              \
-         ",Ascending:false"                                                                     \
-         ",Stable:false>." +                                                                    \
-         "(Number of segments:~"                                                                \
+         + "<key_data_type:" #Key                                                                \
+         ",value_data_type:" #Value                                                              \
+         ",ascending:false"                                                                     \
+         ",stable:false>." +                                                                    \
+         "(number_of_segments:~"                                                                \
          + std::to_string(SEGMENTS)                                                             \
          + " segments)"                                                                         \
          ).c_str(),                                                                             \
@@ -475,11 +475,11 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark *> &ben
     ),                                                                                          \
     benchmark::RegisterBenchmark(                                                               \
         (std::string("device_segmented_sort_pairs")                                             \
-         + "<Key Datatype:" #Key                                                                \
-         ",Value Datatype:" #Value                                                              \
-         ",Ascending:true"                                                                      \
-         ",Stable:true>." +                                                                     \
-         "(Number of segments:~"                                                                \
+         + "<key_data_type:" #Key                                                                \
+         ",value_data_type:" #Value                                                              \
+         ",ascending:true"                                                                      \
+         ",stable:true>." +                                                                     \
+         "(number_of_segments:~"                                                                \
          + std::to_string(SEGMENTS)                                                             \
          + " segments)"                                                                         \
          ).c_str(),                                                                             \
@@ -489,11 +489,11 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark *> &ben
     ),                                                                                          \
     benchmark::RegisterBenchmark(                                                               \
         (std::string("device_segmented_sort_pairs")                                             \
-         + "<Key Datatype:" #Key                                                                \
-         ",Value Datatype:" #Value                                                              \
-         ",Ascending:false"                                                                     \
-         ",Stable:true>." +                                                                     \
-         "(Number of segments:~"                                                                \
+         + "<key_data_type:" #Key                                                                \
+         ",value_data_type:" #Value                                                              \
+         ",ascending:false"                                                                     \
+         ",stable:true>." +                                                                     \
+         "(number_of_segments:~"                                                                \
          + std::to_string(SEGMENTS)                                                             \
          + " segments)"                                                                         \
          ).c_str(),                                                                             \

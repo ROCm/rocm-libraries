@@ -399,7 +399,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     benchmarks.push_back(                                                               \
         benchmark::RegisterBenchmark(                                                   \
             std::string("device_radix_sort_keys_ascending"                              \
-                "<Key Datatype:" #Key                                                   \
+                "<key_data_type:" #Key                                                   \
                 ">."                                                                    \
             ).c_str(),                                                                  \
             [=](benchmark::State& state) {                                              \
@@ -410,7 +410,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     benchmarks.push_back(                                                               \
         benchmark::RegisterBenchmark(                                                   \
             std::string("device_radix_sort_keys_descending"                             \
-                "<Key Datatype:" #Key                                                   \
+                "<key_data_type:" #Key                                                   \
                 ">."                                                                    \
             ).c_str(),                                                                  \
             [=](benchmark::State& state){                                               \
@@ -426,8 +426,8 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     benchmarks.push_back(                                                                       \
         benchmark::RegisterBenchmark(                                                           \
             std::string("device_radix_sort_pairs_ascending"                                     \
-                "<Key Datatype:" #Key                                                           \
-                ",Value Datatype:" #Value                                                       \
+                "<key_data_type:" #Key                                                           \
+                ",value_data_type:" #Value                                                       \
                 ">."                                                                            \
             ).c_str(),                                                                          \
             [=](benchmark::State& state){                                                       \
@@ -438,8 +438,8 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     benchmarks.push_back(                                                                       \
         benchmark::RegisterBenchmark(                                                           \
             std::string("device_radix_sort_pairs_descending"                                    \
-            "<Key Datatype:" #Key                                                               \
-            ",Value Datatype:" #Value                                                           \
+            "<key_data_type:" #Key                                                               \
+            ",value_data_type:" #Value                                                           \
             ">."                                                                                \
             ).c_str(),                                                                          \
             [=](benchmark::State& state){                                                       \

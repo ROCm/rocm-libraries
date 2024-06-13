@@ -501,32 +501,32 @@ void run_unique_by_key_benchmark(benchmark::State& state,
 #define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p)                    \
 benchmark::RegisterBenchmark(                                       \
     ("device_select_flagged<Datatype:" #T                           \
-    ",Flag Type:" #F ",Output Datatype:"#T                          \
-    ",Selected Output Datatype:unsigned int>.(Probability:" #p")"), \
+    ",flag_type:" #F ",output_datatype:"#T                          \
+    ",selected_output_datatype:unsigned int>.(probability:" #p")"), \
     &run_flagged_benchmark<T, F>, size, stream, p                   \
 )
 
 #define CREATE_SELECT_IF_BENCHMARK(T, p)                            \
 benchmark::RegisterBenchmark(                                       \
     ("device_select_if<Datatype:" #T                                \
-    ",Output Datatype:"#T                                           \
-    ",Selected Output Datatype:unsigned int>.(Probability:" #p")"), \
+    ",output_datatype:"#T                                           \
+    ",selected_output_datatype:unsigned int>.(probability:" #p")"), \
     &run_selectop_benchmark<T>, size, stream, p                     \
 )
 
 #define CREATE_UNIQUE_BENCHMARK(T, p)                               \
 benchmark::RegisterBenchmark(                                       \
     ("device_select_unique<Datatype:" #T                            \
-    ",Output Datatype:"#T                                           \
-    ",Selected Output Datatype:unsigned int>.(Probability:" #p")"), \
+    ",output_datatype:"#T                                           \
+    ",selected_output_datatype:unsigned int>.(probability:" #p")"), \
     &run_unique_benchmark<T>, size, stream, p                       \
 )
 
 #define CREATE_UNIQUE_BY_KEY_BENCHMARK(K, V, p)                     \
 benchmark::RegisterBenchmark(                                       \
     ("device_select_unique_by_key<Key Datatype:" #K                 \
-    ",Value Datatype:"#V                                            \
-    ",Selected Output Datatype:unsigned int>.(Probability:" #p")"), \
+    ",value_datatype:"#V                                            \
+    ",selected_output_datatype:unsigned int>.(probability:" #p")"), \
     &run_unique_by_key_benchmark<K, V>, size, stream, p             \
 )
 

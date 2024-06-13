@@ -183,8 +183,8 @@ using namespace std::string_literals;
 #define CREATE_BENCHMARK(T, left, copy)                         \
     benchmark::RegisterBenchmark(                               \
         std::string("device_adjacent_difference"                \
-            "<Datatype:" #T ">."                                \
-            "SubAlgorithm Name:Subtract"                        \
+            "<data_type:" #T ">."                                \
+            "sub_algorithm_name:Subtract"                        \
             + std::string(left ? "Left" : "Right")              \
             + std::string(copy ? "Copy" : "")                   \
         ).c_str(),                                              \

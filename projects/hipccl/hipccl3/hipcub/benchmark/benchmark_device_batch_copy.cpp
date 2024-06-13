@@ -330,12 +330,12 @@ void run_benchmark(benchmark::State& state,
 #define CREATE_BENCHMARK(IS, IA, T, num_tlev, num_wlev, num_blev)           \
     benchmark::RegisterBenchmark(                                           \
         std::string("device_batch_copy"                                     \
-            "<Datatype:" #T                                                 \
-            ",Item Size:" #IS                                               \
-            ",Item Alignment:" #IA                                          \
-            ",Number of Tlev:" #num_tlev                                    \
-            ",Number of Wlev:" #num_wlev                                    \
-            ",Number of Blev:" #num_blev ">."                               \
+            "<data_type:" #T                                                 \
+            ",item_size:" #IS                                               \
+            ",item_alignment:" #IA                                          \
+            ",number_of_tlev:" #num_tlev                                    \
+            ",number_of_wlev:" #num_wlev                                    \
+            ",number_of_blev:" #num_blev ">."                               \
         ).c_str(),                                                          \
         [=](benchmark::State& state){                                       \
             run_benchmark<benchmark_utils::custom_aligned_type<IS, IA>,     \

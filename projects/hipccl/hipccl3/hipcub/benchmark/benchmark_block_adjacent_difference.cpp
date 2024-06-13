@@ -338,17 +338,17 @@ auto run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-# define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                                \
-    benchmark::RegisterBenchmark(                                               \
-        std::string("block_adjacent_difference<Datatype:" #T                    \
-            ",Block Size:" #BS                                                  \
-            ">.SubAlgorithm Name:") + name                                      \
-            + std::string("<Items Per Thread:" #IPT                             \
-            ",With Tile:" #WITH_TILE ">"                                        \
-        ).c_str(),                                                              \
-        &run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>,                       \
-        stream,                                                                 \
-        size                                                                    \
+# define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                \
+    benchmark::RegisterBenchmark(                               \
+        std::string("block_adjacent_difference<data_type:" #T   \
+            ",block_size:" #BS                                  \
+            ">.sub_algorithm_name:") + name                     \
+            + std::string("<items_per_thread:" #IPT             \
+            ",with_tile:" #WITH_TILE ">"                        \
+        ).c_str(),                                              \
+        &run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>,       \
+        stream,                                                 \
+        size                                                    \
     )                                                                           
 
 

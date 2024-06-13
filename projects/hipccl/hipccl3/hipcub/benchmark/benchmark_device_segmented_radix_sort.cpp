@@ -375,9 +375,9 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 #define CREATE_SORT_KEYS_BENCHMARK(Key, SEGMENTS)                               \
 benchmark::RegisterBenchmark(                                                   \
     std::string("device_segmented_radix_sort_keys"                              \
-        "<Key Datatype:" #Key                                                   \
-        ",Ascending:true>."                                                     \
-        "(Segments:~"                                                           \
+        "<key_data_type:" #Key                                                   \
+        ",ascending:true>."                                                     \
+        "(segments:~"                                                           \
         + std::to_string(SEGMENTS)                                              \
         + " segments)"                                                          \
     ).c_str(),                                                                  \
@@ -393,9 +393,9 @@ benchmark::RegisterBenchmark(                                                   
 #define CREATE_SORT_KEYS_DESCENDING_BENCHMARK(Key, SEGMENTS)                        \
 benchmark::RegisterBenchmark(                                                       \
     std::string("device_segmented_radix_sort_keys"                                  \
-        "<Key Datatype:" #Key                                                       \
-        ",Ascending:false>."                                                        \
-        "(Segments:~"                                                               \
+        "<key_data_type:" #Key                                                       \
+        ",ascending:false>."                                                        \
+        "(segments:~"                                                               \
         + std::to_string(SEGMENTS)                                                  \
         + " segments)"                                                              \
     ).c_str(),                                                                      \
@@ -435,10 +435,10 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
 #define CREATE_SORT_PAIRS_BENCHMARK(Key, Value, SEGMENTS)                               \
 benchmark::RegisterBenchmark(                                                           \
     std::string("device_segmented_radix_sort_pairs"                                     \
-        "<Key Datatype:" #Key                                                           \
+        "<key_data_type:" #Key                                                           \
         ",Value Datatype:" #Value                                                       \
-        ",Ascending:true>."                                                             \
-        "(Segments:~"                                                                   \
+        ",ascending:true>."                                                             \
+        "(segments:~"                                                                   \
         + std::to_string(SEGMENTS)                                                      \
         + " segments)"                                                                  \
     ).c_str(),                                                                          \
@@ -450,10 +450,10 @@ benchmark::RegisterBenchmark(                                                   
 #define CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(Key, Value, SEGMENTS)                    \
 benchmark::RegisterBenchmark(                                                           \
     std::string("device_segmented_radix_sort_pairs"                                     \
-        "<Key Datatype:" #Key                                                           \
+        "<key_data_type:" #Key                                                           \
         ",Value Datatype:" #Value                                                       \
-        ",Ascending:false>."                                                            \
-        "(Segments:~"                                                                   \
+        ",ascending:false>."                                                            \
+        "(segments:~"                                                                   \
         + std::to_string(SEGMENTS)                                                      \
         + " segments)"                                                                  \
     ).c_str(),                                                                          \

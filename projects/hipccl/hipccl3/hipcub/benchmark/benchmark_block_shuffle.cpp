@@ -216,12 +216,12 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 #define CREATE_BENCHMARK_IPT(BS, IPT)           \
     benchmark::RegisterBenchmark(               \
-        ("block_shuffle<Datatype:"              \
+        ("block_shuffle<data_type:"             \
          + type_name                            \
-         + ",Block Size:" #BS                   \
-         ",Items Per Thread:"                   \
+         + ",block_size:" #BS                   \
+         ",items_per_thread:"                   \
          #IPT                                   \
-         ">.SubAlgorithm Name:"                 \
+         ">.sub_algorithm_name:"                \
          + name                                 \
          ).c_str(),                             \
         &run_benchmark<Benchmark, T, BS, IPT>,  \
@@ -231,10 +231,10 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 #define CREATE_BENCHMARK(BS)                \
     benchmark::RegisterBenchmark(           \
-        ("block_shuffle<Datatype:"          \
+        ("block_shuffle<data_type:"         \
          + type_name                        \
-         + ",Block Size:" #BS               \
-         ">.SubAlgorithm Name:"             \
+         + ",block_size:" #BS               \
+         ">.sub_algorithm_name:"            \
           + name                            \
          ).c_str(),                         \
         &run_benchmark<Benchmark, T, BS>,   \
