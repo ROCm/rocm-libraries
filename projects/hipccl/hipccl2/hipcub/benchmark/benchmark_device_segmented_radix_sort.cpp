@@ -436,7 +436,7 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
 benchmark::RegisterBenchmark(                                                           \
     std::string("device_segmented_radix_sort_pairs"                                     \
         "<key_data_type:" #Key                                                           \
-        ",Value Datatype:" #Value                                                       \
+        ",value_data_type:" #Value                                                       \
         ",ascending:true>."                                                             \
         "(segments:~"                                                                   \
         + std::to_string(SEGMENTS)                                                      \
@@ -451,7 +451,7 @@ benchmark::RegisterBenchmark(                                                   
 benchmark::RegisterBenchmark(                                                           \
     std::string("device_segmented_radix_sort_pairs"                                     \
         "<key_data_type:" #Key                                                           \
-        ",Value Datatype:" #Value                                                       \
+        ",value_data_type:" #Value                                                       \
         ",ascending:false>."                                                            \
         "(segments:~"                                                                   \
         + std::to_string(SEGMENTS)                                                      \
