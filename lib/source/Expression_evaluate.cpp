@@ -591,50 +591,90 @@ namespace rocRoller
         };
 
         template <>
-        struct OperationEvaluatorVisitor<AddShiftL> : public TernaryEvaluatorVisitor<AddShiftL>
+        struct OperationEvaluatorVisitor<AddShiftL>
         {
-            template <typename T>
-            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, T>
-                evaluate(T const& lhs, T const& r1hs, T const& r2hs) const
+            CommandArgumentValue call(CommandArgumentValue const& lhs,
+                                      CommandArgumentValue const& r1hs,
+                                      CommandArgumentValue const& r2hs) const
             {
-                auto shift = static_cast<typename std::make_unsigned<T>::type>(r2hs);
-                return (lhs + r1hs) << r2hs;
+                auto adder   = OperationEvaluatorVisitor<Add>();
+                auto sum     = adder.call(lhs, r1hs);
+                auto shifter = OperationEvaluatorVisitor<ShiftL>();
+                return shifter.call(sum, r2hs);
             }
         };
 
         template <>
-        struct OperationEvaluatorVisitor<ShiftLAdd> : public TernaryEvaluatorVisitor<ShiftLAdd>
+        struct OperationEvaluatorVisitor<ShiftLAdd>
         {
-            template <typename T>
-            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, T>
-                evaluate(T const& lhs, T const& r1hs, T const& r2hs) const
+            CommandArgumentValue call(CommandArgumentValue const& lhs,
+                                      CommandArgumentValue const& r1hs,
+                                      CommandArgumentValue const& r2hs) const
             {
-                auto shift = static_cast<typename std::make_unsigned<T>::type>(r1hs);
-                return (lhs << shift) + r2hs;
+                auto adder   = OperationEvaluatorVisitor<Add>();
+                auto shifter = OperationEvaluatorVisitor<ShiftL>();
+
+                auto temp = shifter.call(lhs, r1hs);
+                return adder.call(temp, r2hs);
             }
         };
 
         template <>
-        struct OperationEvaluatorVisitor<MultiplyAdd> : public TernaryEvaluatorVisitor<MultiplyAdd>
+        struct OperationEvaluatorVisitor<MultiplyAdd>
+        {
+            CommandArgumentValue call(CommandArgumentValue const& lhs,
+                                      CommandArgumentValue const& r1hs,
+                                      CommandArgumentValue const& r2hs) const
+            {
+                auto adder      = OperationEvaluatorVisitor<Add>();
+                auto multiplier = OperationEvaluatorVisitor<Multiply>();
+
+                auto product = multiplier.call(lhs, r1hs);
+                return adder.call(product, r2hs);
+            }
+        };
+
+        struct ToBoolVisitor
         {
             template <typename T>
-            std::enable_if_t<(std::is_integral_v<T> && !std::is_same_v<T, bool>)
-                                 || std::is_floating_point_v<T>,
-                             T>
-                evaluate(T const& lhs, T const& r1hs, T const& r2hs) const
+            bool operator()(T const& val)
             {
-                return lhs * r1hs + r2hs;
+                if constexpr(std::is_integral_v<T>)
+                {
+                    return val != 0;
+                }
+
+                Throw<FatalError>("Invalid bool type: ", typeid(T).name());
+                return 0;
+            }
+
+            bool call(CommandArgumentValue const& val)
+            {
+                return std::visit(*this, val);
             }
         };
 
         template <>
-        struct OperationEvaluatorVisitor<Conditional> : public TernaryEvaluatorVisitor<Conditional>
+        struct OperationEvaluatorVisitor<Conditional>
         {
-            template <typename LHS_Type, typename RHS_Type>
-            std::enable_if_t<std::is_integral_v<LHS_Type>, RHS_Type>
-                evaluate(LHS_Type const& lhs, RHS_Type const& r1hs, RHS_Type const& r2hs) const
+
+            CommandArgumentValue call(CommandArgumentValue const& lhs,
+                                      CommandArgumentValue const& r1hs,
+                                      CommandArgumentValue const& r2hs) const
             {
-                return lhs ? r1hs : r2hs;
+                AssertFatal(r1hs.index() == r2hs.index(),
+                            "Types of each conditional option must match!",
+                            ShowValue(r1hs),
+                            ShowValue(r2hs));
+
+                if(ToBoolVisitor().call(lhs))
+                {
+                    return r1hs;
+                }
+                else
+                {
+                    return r2hs;
+                }
             }
         };
 
