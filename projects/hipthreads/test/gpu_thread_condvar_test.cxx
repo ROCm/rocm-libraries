@@ -32,8 +32,8 @@ __device__ void gmain() {
 }
 
 int main() {
-    gpu::start();
+    gpu::thread::start();
     gpu::thread([] __device__(){gmain();}).join();
-    gpu::finish();
+    gpu::thread::finish();
     return 0;
 }

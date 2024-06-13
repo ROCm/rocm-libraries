@@ -104,6 +104,8 @@ class thread {
     __host__ __device__ static constexpr unsigned int max_width() noexcept { return MAX_THREAD_WIDTH; }
     __device__ static constexpr unsigned int hardware_concurrency() noexcept { return NUM_VCORES; }
     __host__ static inline unsigned int hardware_concurrency() noexcept;
+    __host__ static inline void start();
+    __host__ static inline void finish(bool blocking = true);
   private:
     template <class Callable_t>
     __host__ void sendWorkNodeViaKernel(std::unique_ptr<WorkNode<Callable_t>> worknode_h);
@@ -578,8 +580,7 @@ static inline __device__ unsigned int get_lane_id() noexcept {
 
 } // namespace this_thread
 
-static inline __host__ void start() {
-    using namespace internal;
+inline __host__ void thread::start() {
     if (started) {
         throw std::logic_error("gpu::start() called twice");
     }
@@ -589,8 +590,7 @@ static inline __host__ void start() {
     hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(MAX_THREAD_WIDTH), 0, mainStream);
 }
 
-static inline __host__ void finish(bool blocking = true) {
-    using namespace internal;
+inline __host__ void thread::finish(bool blocking) {
     if (!started) {
         throw std::logic_error("called gpu::finish() before calling gpu::start()");
     }
