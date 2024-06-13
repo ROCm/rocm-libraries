@@ -156,10 +156,13 @@ namespace rocRoller
         static_assert(
             std::same_as<
                 T,
-                float> || std::same_as<T, double> || std::same_as<T, Half> || std::same_as<T, FP8> || std::same_as<T, BF8> || std::same_as<T, FP6>,
+                float> || std::same_as<T, double> || std::same_as<T, Half> || std::same_as<T, FP8> || std::same_as<T, BF8> || std::same_as<T, FP6> || std::same_as<T, FP4>,
             "Unsupported floating point type");
 
-        if constexpr(std::same_as<T, FP8> || std::same_as<T, BF8> || std::same_as<T, FP6>)
+        if constexpr(
+            std::same_as<
+                T,
+                FP8> || std::same_as<T, BF8> || std::same_as<T, FP6> || std::same_as<T, FP4>)
         {
             return {};
         }

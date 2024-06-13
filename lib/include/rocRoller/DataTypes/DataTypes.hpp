@@ -36,6 +36,7 @@
 
 #include "DataTypes_BF8.hpp"
 #include "DataTypes_BFloat16.hpp"
+#include "DataTypes_FP4.hpp"
 #include "DataTypes_FP6.hpp"
 #include "DataTypes_FP8.hpp"
 #include "DataTypes_Half.hpp"
@@ -89,6 +90,8 @@ namespace rocRoller
         FP8x4, //< Four 8bit floating point (E4M3); packed into 32bits
         BF8, //< 8bit floating point (E5M2)
         BF8x4, //< Four 8bit floating point (E5M2); packed into 32bits
+        FP4, //< 4bit floating point (E2M1)
+        FP4x8, //< Eight 4bit floating point (E2M1); packed into 32bits
         // TODO: add BF6 and BF6x16
         FP6, //< 6bit floating point in 2e3m format
         FP6x16, //< 16 6bit floating point in FP6 format; packed into 96bits
@@ -852,6 +855,38 @@ namespace rocRoller
     };
 
     template <>
+    struct TypeInfo<FP4> : public BaseTypeInfo<FP4,
+                                               DataType::FP4,
+                                               DataType::FP4,
+                                               PointerType::Value,
+                                               1,
+                                               1,
+                                               4,
+                                               false,
+                                               false,
+                                               true>
+    {
+    };
+
+    struct FP4x8 : public DistinctType<uint32_t, FP4x8>
+    {
+    };
+
+    template <>
+    struct TypeInfo<FP4x8> : public BaseTypeInfo<FP4x8,
+                                                 DataType::FP4x8,
+                                                 DataType::FP4,
+                                                 PointerType::Value,
+                                                 8,
+                                                 1,
+                                                 32,
+                                                 false,
+                                                 false,
+                                                 false>
+    {
+    };
+
+    template <>
     struct TypeInfo<BFloat16> : public BaseTypeInfo<BFloat16,
                                                     DataType::BFloat16,
                                                     DataType::BFloat16,
@@ -1014,6 +1049,8 @@ namespace rocRoller
     DeclareEnumTypeInfo(BF8x4, BF8x4);
     DeclareEnumTypeInfo(FP6, FP6);
     DeclareEnumTypeInfo(FP6x16, FP6x16);
+    DeclareEnumTypeInfo(FP4, FP4);
+    DeclareEnumTypeInfo(FP4x8, FP4x8);
     DeclareEnumTypeInfo(Int8x4, Int8x4);
     DeclareEnumTypeInfo(Int32, int32_t);
     DeclareEnumTypeInfo(Int64, int64_t);

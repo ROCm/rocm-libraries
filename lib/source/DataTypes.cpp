@@ -80,10 +80,14 @@ namespace rocRoller
             return "BF8";
         case DataType::FP6:
             return "FP6";
+        case DataType::FP4:
+            return "FP4";
         case DataType::FP8x4:
             return "FP8x4";
         case DataType::BF8x4:
             return "BF8x4";
+        case DataType::FP4x8:
+            return "FP4x8";
         case DataType::FP6x16:
             return "FP6x16";
         case DataType::Half:
@@ -144,10 +148,14 @@ namespace rocRoller
             return "BF8";
         case DataType::BF8x4:
             return "4xBF8";
+        case DataType::FP4x8:
+            return "8xFP4";
         case DataType::FP6x16:
             return "16xFP6";
         case DataType::FP6:
             return "FP6";
+        case DataType::FP4:
+            return "FP4";
         case DataType::Half:
             return "H";
         case DataType::Halfx2:
@@ -453,8 +461,10 @@ namespace rocRoller
         registerTypeInfo<FP8>();
         registerTypeInfo<BF8>();
         registerTypeInfo<FP6>();
+        registerTypeInfo<FP4>();
         registerTypeInfo<FP8x4>();
         registerTypeInfo<BF8x4>();
+        registerTypeInfo<FP4x8>();
         registerTypeInfo<FP6x16>();
         registerTypeInfo<BFloat16>();
         registerTypeInfo<Half>();

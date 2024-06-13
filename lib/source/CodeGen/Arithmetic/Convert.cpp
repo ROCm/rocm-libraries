@@ -12,6 +12,7 @@ namespace rocRoller
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Halfx2);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP8x4);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::BF8x4);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP4x8);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP6x16);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int32);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int64);
@@ -34,6 +35,7 @@ namespace rocRoller
     DefineSpecializedGetGeneratorConvert(Halfx2);
     DefineSpecializedGetGeneratorConvert(FP8x4);
     DefineSpecializedGetGeneratorConvert(BF8x4);
+    DefineSpecializedGetGeneratorConvert(FP4x8);
     DefineSpecializedGetGeneratorConvert(FP6x16);
     DefineSpecializedGetGeneratorConvert(Int32);
     DefineSpecializedGetGeneratorConvert(Int64);
@@ -199,6 +201,15 @@ namespace rocRoller
         AssertFatal(arg != nullptr);
         auto dataType = getArithDataType(arg);
         Throw<FatalError>("Unsupported datatype for convert to FP6x16 ", ShowValue(dataType));
+    }
+
+    template <>
+    Generator<Instruction> ConvertGenerator<DataType::FP4x8>::generate(Register::ValuePtr dest,
+                                                                       Register::ValuePtr arg)
+    {
+        AssertFatal(arg != nullptr);
+        auto dataType = getArithDataType(arg);
+        Throw<FatalError>("Unsupported datatype for convert to FP4x8 ", ShowValue(dataType));
     }
 
     template <>

@@ -24,6 +24,7 @@ namespace rocRoller
         FP8,
         BF8,
         FP6,
+        FP4,
         bool,
         // int16_t*,
         int32_t*,
