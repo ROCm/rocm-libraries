@@ -34,11 +34,19 @@ namespace rocRoller
             }
 
             template <>
-            TensileGEMMSolution<FP8_NANOO, FP8_NANOO, float, float>::TensileGEMMSolution(
+            TensileGEMMSolution<FP8, FP8, float, float>::TensileGEMMSolution(
                 SolutionParameters const& solutionParams)
-                : GEMMSolution<FP8_NANOO, FP8_NANOO, float, float>(solutionParams.problemParams)
+                : GEMMSolution<FP8, FP8, float, float>(solutionParams.problemParams)
             {
                 AssertFatal(false, "No Tensile GEMM Solution for FP8.");
+            }
+
+            template <>
+            TensileGEMMSolution<BF8, BF8, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<BF8, BF8, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF8.");
             }
         }
     }

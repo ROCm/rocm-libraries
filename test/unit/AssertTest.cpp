@@ -1,0 +1,181 @@
+#include "gtest/gtest.h"
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
+#include <hip/hip_ext.h>
+#include <hip/hip_runtime.h>
+
+#include <rocRoller/AssertOpKinds.hpp>
+#include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
+
+#include "GPUContextFixture.hpp"
+
+using namespace rocRoller;
+using namespace rocRoller::KernelGraph;
+using ::testing::HasSubstr;
+
+namespace AssertTest
+{
+    class AssertTestGPU
+        : public CurrentGPUContextFixture,
+          public ::testing::WithParamInterface<std::tuple<AssertOpKind, std::string>>
+    {
+
+    public:
+        Expression::FastArithmetic fastArith{m_context};
+
+        void SetUp()
+        {
+            CurrentGPUContextFixture::SetUp();
+            Settings::getInstance()->set(Settings::SaveAssembly, true);
+
+            fastArith = Expression::FastArithmetic(m_context);
+        }
+
+        static std::string
+            getTestSuffix(const testing::TestParamInfo<AssertTestGPU::ParamType>& info)
+        {
+            const auto [assertOpKind, _] = info.param;
+            return toString(assertOpKind);
+        }
+    };
+
+    TEST_P(AssertTestGPU, Assert)
+    {
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9
+           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        {
+            GTEST_SKIP() << "Skipping GPU assert tests for "
+                         << m_context->targetArchitecture().target().getVersionString();
+        }
+
+        AssertOpKind assertOpKind;
+        using AssertOpKind::Count;
+        using AssertOpKind::MemoryViolation;
+        using AssertOpKind::NoOp;
+        using AssertOpKind::STrap;
+        std::string outputMsg;
+        std::tie(assertOpKind, outputMsg) = GetParam();
+
+        ::testing::FLAGS_gtest_death_test_style = "threadsafe";
+
+        switch(assertOpKind)
+        {
+        case MemoryViolation:
+        case STrap:
+        {
+            const auto runTest = [&]() {
+                auto one  = Expression::literal(1);
+                auto zero = Expression::literal(0);
+
+                rocRoller::KernelGraph::KernelGraph kgraph;
+
+                auto k = m_context->kernel();
+                k->setKernelDimensions(1);
+                k->setWorkitemCount({one, one, one});
+                k->setWorkgroupSize({1, 1, 1});
+                setKernelOptions({.assertOpKind = assertOpKind});
+                m_context->schedule(k->preamble());
+                m_context->schedule(k->prolog());
+                k->setDynamicSharedMemBytes(zero);
+
+                auto                    testReg = kgraph.coordinates.addElement(Linear());
+                Expression::DataFlowTag testRegTag{
+                    testReg, Register::Type::Scalar, DataType::UInt32};
+                auto testRegExpr = std::make_shared<Expression::Expression>(testRegTag);
+
+                int setToZero = kgraph.control.addElement(Assign{Register::Type::Scalar, zero});
+
+                kgraph.mapper.connect(setToZero, testReg, NaryArgument::DEST);
+
+                auto assertOp
+                    = kgraph.control.addElement(AssertOp{testRegExpr == one, "Assert Test"});
+
+                auto assignOne = kgraph.control.addElement(Assign{Register::Type::Scalar, one});
+
+                auto kernelNode = kgraph.control.addElement(Kernel());
+                kgraph.control.addElement(Body(), {kernelNode}, {setToZero});
+                kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
+                kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
+
+                m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
+
+                m_context->schedule(k->postamble());
+                m_context->schedule(k->amdgpu_metadata());
+
+                EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s3, 0"));
+                EXPECT_THAT(output(), testing::HasSubstr("s_cmp_eq_i32 s3, 1"));
+                EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc1"));
+                EXPECT_THAT(output(), testing::HasSubstr("AssertFailed"));
+                if(assertOpKind == STrap)
+                {
+                    EXPECT_THAT(output(), testing::HasSubstr("s_trap 2"));
+                }
+                else
+                { // MEMORY_VIOLATION
+                    EXPECT_THAT(output(), testing::HasSubstr("s_mov_b64 s[4:5], 0"));
+                    EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s6, 42"));
+                    EXPECT_THAT(output(), testing::HasSubstr("s_store_dword s6, s[4:5], 0 glc"));
+                }
+                EXPECT_THAT(output(), testing::HasSubstr("AssertPassed"));
+                EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s4, 1"));
+
+                if(isLocalDevice())
+                {
+                    KernelArguments kargs;
+
+                    KernelInvocation kinv;
+                    kinv.workitemCount = {1, 1, 1};
+                    kinv.workgroupSize = {1, 1, 1};
+
+                    auto executableKernel = m_context->instructions()->getExecutableKernel();
+                    executableKernel->executeKernel(kargs, kinv);
+                    // Need to wait for signal, otherwise child process may terminate before signal is sent
+                    (void)hipDeviceSynchronize();
+                }
+            };
+            EXPECT_EXIT({ runTest(); }, ::testing::KilledBySignal(SIGABRT), outputMsg);
+        }
+        break;
+        case NoOp:
+        {
+            rocRoller::KernelGraph::KernelGraph kgraph;
+            auto                                k = m_context->kernel();
+            k->setKernelDimensions(1);
+            setKernelOptions({.assertOpKind = assertOpKind});
+            auto assertOp = kgraph.control.addElement(AssertOp{});
+            m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
+            EXPECT_THAT(output(), testing::HasSubstr(outputMsg));
+        }
+        break;
+        case Count:
+        {
+            EXPECT_THAT(
+                [&]() {
+                    rocRoller::KernelGraph::KernelGraph kgraph;
+                    auto                                k = m_context->kernel();
+                    k->setKernelDimensions(1);
+                    setKernelOptions({.assertOpKind = assertOpKind});
+                    auto assertOp = kgraph.control.addElement(AssertOp{});
+                    m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
+                },
+                ::testing::ThrowsMessage<FatalError>(HasSubstr(outputMsg)));
+        }
+        break;
+        }
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        AssertTest,
+        AssertTestGPU,
+        ::testing::Values(std::tuple(AssertOpKind::MemoryViolation, "Memory access fault"),
+                          std::tuple(AssertOpKind::STrap, "HSA_STATUS_ERROR_EXCEPTION"),
+                          std::tuple(AssertOpKind::NoOp, "AssertOpKind == NoOp"),
+                          std::tuple(AssertOpKind::Count, "Invalid AssertOpKind")),
+        AssertTestGPU::getTestSuffix);
+}

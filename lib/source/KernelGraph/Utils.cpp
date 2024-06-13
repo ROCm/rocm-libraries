@@ -517,7 +517,10 @@ namespace rocRoller
         {
             auto currentOffset = context->getScratchAmount();
             auto newCoordinate = User(size, currentOffset);
-            context->allocateScratch(size * literal(DataTypeInfo::Get(varType).elementSize));
+            // TODO Audit bytes/bits
+            // Can we move size inside the CeilDivide?
+            context->allocateScratch(
+                size * literal(CeilDivide(DataTypeInfo::Get(varType).elementBits, 8u)));
 
             return newCoordinate;
         }

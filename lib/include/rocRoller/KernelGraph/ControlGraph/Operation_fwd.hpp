@@ -10,6 +10,7 @@ namespace rocRoller
         struct Barrier;
         struct ComputeIndex;
         struct ConditionalOp;
+        struct AssertOp;
         struct Deallocate;
         struct DoWhileOp;
         struct ForLoopOp;
@@ -36,6 +37,7 @@ namespace rocRoller
                                        Barrier,
                                        ComputeIndex,
                                        ConditionalOp,
+                                       AssertOp,
                                        Deallocate,
                                        DoWhileOp,
                                        ForLoopOp,

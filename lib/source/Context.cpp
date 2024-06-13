@@ -4,6 +4,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
+#include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
@@ -103,6 +104,7 @@ namespace rocRoller
         rv->m_mem          = std::make_shared<MemoryInstructions>(rv);
         rv->m_copier       = std::make_shared<CopyGenerator>(rv);
         rv->m_brancher     = std::make_shared<BranchGenerator>(rv);
+        rv->m_crasher      = std::make_shared<CrashKernelGenerator>(rv);
         // Using a seed of zero by default ensures consistent results.
         // Set ROCROLLER_RANDOM_SEED to specify a different seed.
         rv->m_random = std::make_shared<RandomGenerator>(0);

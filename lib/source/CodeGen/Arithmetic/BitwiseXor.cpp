@@ -23,35 +23,35 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        auto elementSize = std::max({DataTypeInfo::Get(dest->variableType()).elementSize,
-                                     DataTypeInfo::Get(lhs->variableType()).elementSize,
-                                     DataTypeInfo::Get(rhs->variableType()).elementSize});
+        auto elementBits = std::max({DataTypeInfo::Get(dest->variableType()).elementBits,
+                                     DataTypeInfo::Get(lhs->variableType()).elementBits,
+                                     DataTypeInfo::Get(rhs->variableType()).elementBits});
 
         if(dest->regType() == Register::Type::Scalar)
         {
-            if(elementSize <= 4)
+            if(elementBits <= 32u)
             {
                 co_yield_(Instruction("s_xor_b32", {dest}, {lhs, rhs}, {}, ""));
             }
-            else if(elementSize == 8)
+            else if(elementBits == 64u)
             {
                 co_yield_(Instruction("s_xor_b64", {dest}, {lhs, rhs}, {}, ""));
             }
             else
             {
-                Throw<FatalError>("Unsupported element size for bitwiseXor operation:: ",
-                                  ShowValue(elementSize * 8));
+                Throw<FatalError>("Unsupported elementBits for bitwiseXor operation:: ",
+                                  ShowValue(elementBits));
             }
         }
         else if(dest->regType() == Register::Type::Vector)
         {
             co_yield swapIfRHSLiteral(lhs, rhs);
 
-            if(elementSize <= 4)
+            if(elementBits <= 32u)
             {
                 co_yield_(Instruction("v_xor_b32", {dest}, {lhs, rhs}, {}, ""));
             }
-            else if(elementSize == 8)
+            else if(elementBits == 64u)
             {
                 co_yield_(Instruction("v_xor_b32",
                                       {dest->subset({0})},
@@ -66,8 +66,8 @@ namespace rocRoller
             }
             else
             {
-                Throw<FatalError>("Unsupported element size for bitwiseXor operation:: ",
-                                  ShowValue(elementSize * 8));
+                Throw<FatalError>("Unsupported elementBits for bitwiseXor operation:: ",
+                                  ShowValue(elementBits));
             }
         }
         else

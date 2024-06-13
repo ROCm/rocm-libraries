@@ -8,11 +8,21 @@
 #include "Context_fwd.hpp"
 #include "DataTypes/DataTypes.hpp"
 #include "InstructionValues/Register.hpp"
-#include "InstructionValues/Register_fwd.hpp"
-#include "Operations/Command_fwd.hpp"
 
 namespace rocRoller
 {
+    /**
+     * @brief Expression attributes (meta data).
+     *
+     * See also: LoadStoreTileGenerator::generateStride.
+     */
+    struct RegisterExpressionAttributes
+    {
+        DataType dataType; //< Desired result type of the expression
+        bool     unitStride = false; //< Expression corresponds to a unitary (=1) element-stride
+    };
+    std::string toString(RegisterExpressionAttributes t);
+
     /**
      * @brief Register Tag Manager - Keeps track of data flow tags
      * that have been previously calculated.
@@ -56,7 +66,8 @@ namespace rocRoller
          * @param tag
          * @return The expression and the expression's datatype.
          */
-        std::pair<Expression::ExpressionPtr, DataType> getExpression(int tag) const;
+        std::pair<Expression::ExpressionPtr, RegisterExpressionAttributes>
+            getExpression(int tag) const;
 
         /**
          * @brief Get the Register::Value associated with the provided tag.
@@ -109,7 +120,9 @@ namespace rocRoller
          * @param value The expression that represents the value within tag.
          * @param dt The DataType of the provided expression.
          */
-        void addExpression(int tag, Expression::ExpressionPtr value, DataType dt);
+        void addExpression(int                          tag,
+                           Expression::ExpressionPtr    value,
+                           RegisterExpressionAttributes attrs);
 
         /**
          * @brief Delete the value associated with the provided tag.
@@ -139,9 +152,10 @@ namespace rocRoller
         bool hasExpression(int tag) const;
 
     private:
-        std::weak_ptr<Context>                                        m_context;
-        std::map<int, Register::ValuePtr>                             m_registers;
-        std::map<int, std::pair<Expression::ExpressionPtr, DataType>> m_expressions;
+        std::weak_ptr<Context>            m_context;
+        std::map<int, Register::ValuePtr> m_registers;
+        std::map<int, std::pair<Expression::ExpressionPtr, RegisterExpressionAttributes>>
+            m_expressions;
     };
 }
 

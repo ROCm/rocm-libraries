@@ -74,12 +74,16 @@ namespace rocRoller
             return "ComplexFloat";
         case DataType::ComplexDouble:
             return "ComplexDouble";
-        case DataType::FP8_NANOO:
-            return "FP8_NANOO";
+        case DataType::FP8:
+            return "FP8";
+        case DataType::BF8:
+            return "BF8";
         case DataType::FP6:
             return "FP6";
-        case DataType::FP8x4_NANOO:
-            return "FP8x4_NANOO";
+        case DataType::FP8x4:
+            return "FP8x4";
+        case DataType::BF8x4:
+            return "BF8x4";
         case DataType::FP6x16:
             return "FP6x16";
         case DataType::Half:
@@ -132,10 +136,14 @@ namespace rocRoller
             return "C";
         case DataType::ComplexDouble:
             return "Z";
-        case DataType::FP8_NANOO:
-            return "FP8_NANOO";
-        case DataType::FP8x4_NANOO:
-            return "4xFP8_NANOO";
+        case DataType::FP8:
+            return "FP8";
+        case DataType::FP8x4:
+            return "4xFP8";
+        case DataType::BF8:
+            return "BF8";
+        case DataType::BF8x4:
+            return "4xBF8";
         case DataType::FP6x16:
             return "16xFP6";
         case DataType::FP6:
@@ -328,7 +336,8 @@ namespace rocRoller
         switch(pointerType)
         {
         case PointerType::Value:
-            return DataTypeInfo::Get(dataType).elementSize;
+            // TODO Audit bytes/bits
+            return DataTypeInfo::Get(dataType).elementBytes;
         case PointerType::PointerLocal:
             return 4;
         case PointerType::PointerGlobal:
@@ -393,12 +402,14 @@ namespace rocRoller
            && lhsInfo.packing > rhsInfo.packing)
             return rhs;
 
-        if(lhsInfo.elementSize > rhsInfo.elementSize)
+        if(lhsInfo.elementBits > rhsInfo.elementBits)
             return lhs;
 
-        if(lhsInfo.elementSize < rhsInfo.elementSize)
+        if(lhsInfo.elementBits < rhsInfo.elementBits)
             return rhs;
 
+        // TODO Audit bytes/bits
+        // Since we promote based on bits (see above), are the proceeding two checks necessary?
         if(lhsInfo.packing < rhsInfo.packing)
             return lhs;
 
@@ -424,7 +435,8 @@ namespace rocRoller
         info.abbrev              = T_Info::Abbrev();
 
         info.packing       = T_Info::Packing;
-        info.elementSize   = T_Info::ElementSize;
+        info.elementBytes  = T_Info::ElementBytes;
+        info.elementBits   = T_Info::ElementBits;
         info.segmentSize   = T_Info::SegmentSize;
         info.alignment     = T_Info::Alignment;
         info.registerCount = T_Info::RegisterCount;
@@ -438,9 +450,11 @@ namespace rocRoller
 
     void DataTypeInfo::registerAllTypeInfo()
     {
-        registerTypeInfo<FP8_NANOO>();
+        registerTypeInfo<FP8>();
+        registerTypeInfo<BF8>();
         registerTypeInfo<FP6>();
-        registerTypeInfo<FP8x4_NANOO>();
+        registerTypeInfo<FP8x4>();
+        registerTypeInfo<BF8x4>();
         registerTypeInfo<FP6x16>();
         registerTypeInfo<BFloat16>();
         registerTypeInfo<Half>();

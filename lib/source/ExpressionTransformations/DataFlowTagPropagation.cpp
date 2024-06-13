@@ -61,7 +61,7 @@ namespace rocRoller
             {
                 if(m_context->registerTagManager()->hasExpression(expr.tag))
                 {
-                    auto [tagExpr, tagDT]
+                    auto [tagExpr, _ignore]
                         = m_context->registerTagManager()->getExpression(expr.tag);
                     return call(tagExpr);
                 }

@@ -1245,10 +1245,10 @@ namespace MemoryInstructionsTest
         }
     }
 
-    class MemoryInstructions942Test : public GPUContextFixture
+    class MemoryInstructions942Test : public GPUContextFixtureParam<rocRoller::DataType>
     {
     public:
-        void genByteLoadStore()
+        void genByteLoadStore(rocRoller::DataType F8x4Type)
         {
             unsigned int N = 1;
 
@@ -1256,10 +1256,8 @@ namespace MemoryInstructionsTest
             auto command = std::make_shared<Command>();
 
             auto resultTag  = command->allocateTag();
-            auto result_exp = std::make_shared<Expression::Expression>(
-                command->allocateArgument({DataType::FP8x4_NANOO, PointerType::PointerGlobal},
-                                          resultTag,
-                                          ArgumentType::Value));
+            auto result_exp = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {F8x4Type, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
 
             auto workItemCountExpr = std::make_shared<Expression::Expression>(N);
             auto one               = std::make_shared<Expression::Expression>(1u);
@@ -1294,7 +1292,7 @@ namespace MemoryInstructionsTest
                 auto v_a
                     = Register::Value::Placeholder(m_context,
                                                    Register::Type::Vector,
-                                                   DataType::FP8x4_NANOO,
+                                                   F8x4Type,
                                                    size,
                                                    Register::AllocationOptions::FullyContiguous());
 
@@ -1390,12 +1388,15 @@ namespace MemoryInstructionsTest
 
     TEST_P(MemoryInstructions942Test, ByteLoadStore)
     {
-        genByteLoadStore();
+        genByteLoadStore(std::get<rocRoller::DataType>(GetParam()));
+
         if(isLocalDevice())
             executeByteLoadStore();
     }
 
     INSTANTIATE_TEST_SUITE_P(MemoryInstructions942Test,
                              MemoryInstructions942Test,
-                             ::testing::Combine(::testing::Values("gfx942:sramecc+")));
+                             ::testing::Combine(::testing::Values("gfx942:sramecc+"),
+                                                ::testing::Values(rocRoller::DataType::FP8x4,
+                                                                  rocRoller::DataType::BF8x4)));
 }

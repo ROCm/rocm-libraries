@@ -11,9 +11,8 @@ namespace rocRoller
     {
         RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::Float);
         RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::Halfx2);
-        RegisterComponentTemplateSpec(MatrixMultiplyGenerator,
-                                      DataType::Float,
-                                      DataType::FP8x4_NANOO);
+        RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::FP8x4);
+        RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::BF8x4);
 
         const std::string MatrixMultiply::Basename = "MatrixMultiply";
 
@@ -24,8 +23,10 @@ namespace rocRoller
                 return "f32";
             else if constexpr(DATATYPE == DataType::Halfx2)
                 return "f16";
-            else if constexpr(DATATYPE == DataType::FP8x4_NANOO)
+            else if constexpr(DATATYPE == DataType::FP8x4)
                 return "_fp8_fp8";
+            else if constexpr(DATATYPE == DataType::BF8x4)
+                return "_bf8_bf8";
             else
                 return "unknown";
         }
@@ -112,7 +113,7 @@ namespace rocRoller
 
             std::string inputType;
             std::string modifier;
-            if constexpr(INPUT == DataType::FP8x4_NANOO)
+            if constexpr(INPUT == DataType::FP8x4)
             {
                 if((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128))
                 {

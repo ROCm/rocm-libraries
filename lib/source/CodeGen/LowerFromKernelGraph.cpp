@@ -7,6 +7,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
+#include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
 #include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
@@ -76,8 +77,10 @@ namespace rocRoller
                                                   DataType                  dtype,
                                                   Expression::ExpressionPtr offsetInBytes)
             {
-                auto const& info     = DataTypeInfo::Get(dtype);
-                auto        numBytes = Expression::literal(static_cast<uint>(info.elementSize));
+                // TODO Audit bytes/bits
+                auto const& info = DataTypeInfo::Get(dtype);
+                auto        numBytes
+                    = Expression::literal(static_cast<uint>(CeilDivide(info.elementBits, 8u)));
 
                 // TODO: Consider moving numBytes into input of this function.
                 if(offsetInBytes)
@@ -305,6 +308,42 @@ namespace rocRoller
 
                 co_yield Instruction::Label(botLabel);
                 co_yield Instruction::Unlock("Unlock Conditional");
+            }
+
+            Generator<Instruction> operator()(int tag, AssertOp const& op, Transformer coords)
+            {
+                auto assertOpKind = m_context->kernelOptions().assertOpKind;
+                AssertFatal(assertOpKind < AssertOpKind::Count, "Invalid AssertOpKind");
+
+                if(assertOpKind == AssertOpKind::NoOp)
+                {
+                    co_yield Instruction::Nop("AssertOpKind == NoOp");
+                }
+                else
+                {
+                    auto passedLabel = m_context->labelAllocator()->label("AssertPassed");
+
+                    co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Assert");
+
+                    auto expr            = m_fastArith(op.condition);
+                    auto conditionResult = m_context->brancher()->resultRegister(expr);
+
+                    co_yield Expression::generate(conditionResult, expr, m_context);
+
+                    co_yield m_context->brancher()->branchIfNonZero(
+                        passedLabel,
+                        conditionResult,
+                        concatenate("Assert: Passed, jump to ", passedLabel->toString()));
+
+                    auto failedLabel = m_context->labelAllocator()->label("AssertFailed");
+                    co_yield Instruction::Label(failedLabel);
+                    co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
+
+                    co_yield Instruction::Wait(WaitCount::Zero("DEBUG: Wait after branch",
+                                                               m_context->targetArchitecture()));
+                    co_yield Instruction::Label(passedLabel);
+                    co_yield Instruction::Unlock("Unlock Assert");
+                }
             }
 
             Generator<Instruction> operator()(int tag, DoWhileOp const& op, Transformer coords)
@@ -619,7 +658,7 @@ namespace rocRoller
                     co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Scalar);
                 }
 
-                auto numBytes = DataTypeInfo::Get(dst->variableType()).elementSize;
+                auto numBytes = CeilDivide(DataTypeInfo::Get(dst->variableType()).elementBits, 8u);
                 co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Scalar,
                                                 dst,
                                                 vPtr,
@@ -685,7 +724,7 @@ namespace rocRoller
                     co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
                 }
 
-                auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
+                auto numBytes = CeilDivide(DataTypeInfo::Get(vgpr->variableType()).elementBits, 8u);
                 co_yield m_context->mem()->load(
                     MemoryInstructions::MemoryKind::Flat, vgpr, vPtr, nullptr, numBytes);
             }
@@ -712,7 +751,7 @@ namespace rocRoller
                     co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
                 }
 
-                auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
+                auto numBytes = CeilDivide(DataTypeInfo::Get(vgpr->variableType()).elementBits, 8u);
                 co_yield m_context->mem()->load(
                     MemoryInstructions::MemoryKind::Flat, vgpr, vPtr, offset, numBytes);
             }
@@ -818,7 +857,7 @@ namespace rocRoller
                     co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
                 }
 
-                auto numBytes = DataTypeInfo::Get(src->variableType()).elementSize;
+                auto numBytes = CeilDivide(DataTypeInfo::Get(src->variableType()).elementBits, 8u);
                 co_yield m_context->mem()->store(
                     MemoryInstructions::MemoryKind::Flat, vPtr, src, offset, numBytes);
             }
@@ -849,7 +888,7 @@ namespace rocRoller
                     co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Scalar);
                 }
 
-                auto numBytes = DataTypeInfo::Get(src->variableType()).elementSize;
+                auto numBytes = CeilDivide(DataTypeInfo::Get(src->variableType()).elementBits, 8u);
                 co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Scalar,
                                                  vPtr,
                                                  src,

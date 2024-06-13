@@ -2982,8 +2982,8 @@ namespace ExpressionTest
     TEST_P(ARCH_ExpressionTest, MFMA_F32_32x32x64_F8F6F4)
     {
         MFMA_F8F6F4(
-            DataType::FP8x4_NANOO,
-            DataType::FP8x4_NANOO,
+            DataType::FP8x4,
+            DataType::FP8x4,
             32,
             32,
             64,
@@ -2996,8 +2996,8 @@ namespace ExpressionTest
     TEST_P(ARCH_ExpressionTest, MFMA_F32_16x16x128_F8F6F4)
     {
         MFMA_F8F6F4(
-            DataType::FP8x4_NANOO,
-            DataType::FP8x4_NANOO,
+            DataType::FP8x4,
+            DataType::FP8x4,
             16,
             16,
             128,

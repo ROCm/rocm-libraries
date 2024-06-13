@@ -362,7 +362,7 @@ namespace FastDivisionTest
 
                 co_yield this->m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
                 co_yield this->m_context->mem()->storeFlat(
-                    v_result, v_c, 0, infoResult.elementSize);
+                    v_result, v_c, 0, CeilDivide(infoResult.elementBits, 8u));
             };
 
             this->m_context->schedule(kb());
@@ -402,10 +402,11 @@ namespace FastDivisionTest
                         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
                         R result;
-                        ASSERT_THAT(
-                            hipMemcpy(
-                                &result, d_result.get(), infoResult.elementSize, hipMemcpyDefault),
-                            HasHipSuccess(0));
+                        ASSERT_THAT(hipMemcpy(&result,
+                                              d_result.get(),
+                                              CeilDivide(infoResult.elementBits, 8u),
+                                              hipMemcpyDefault),
+                                    HasHipSuccess(0));
 
                         if(IsModulo)
                         {

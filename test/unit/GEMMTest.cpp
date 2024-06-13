@@ -39,7 +39,7 @@ namespace GEMMDriverTest
 
         {
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-            if constexpr(std::is_same_v<T, FP8_NANOO>)
+            if constexpr(std::is_same_v<T, FP8> || std::is_same_v<T, BF8>)
             {
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
             }
@@ -63,7 +63,7 @@ namespace GEMMDriverTest
                             "MacroTile size mismatch (K unroll)");
             }
 
-            auto bpe = DataTypeInfo::Get(dataTypeAB).elementSize;
+            auto bpe = DataTypeInfo::Get(dataTypeAB).elementBytes;
             AssertFatal(gemm.macM * gemm.macK * bpe > gemm.waveM * gemm.waveK,
                         "Not enough elements (A).");
             AssertFatal(gemm.macN * gemm.macK * bpe > gemm.waveN * gemm.waveK,
@@ -851,7 +851,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
+    GEMMProblem setup_GEMMF8_NT()
     {
         GEMMProblem gemm;
 
@@ -883,10 +883,22 @@ namespace GEMMDriverTest
         gemm.transA = "N";
         gemm.transB = "T";
 
-        basicGEMM<FP8_NANOO, float>(m_context, gemm, 2.e-5);
+        return gemm;
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_TN)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
+    {
+        auto gemm = setup_GEMMF8_NT();
+        basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_NT)
+    {
+        auto gemm = setup_GEMMF8_NT();
+        basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
+    }
+
+    GEMMProblem setup_GEMMF8_TN()
     {
         GEMMProblem gemm;
 
@@ -919,8 +931,11 @@ namespace GEMMDriverTest
         gemm.transA = "T";
         gemm.transB = "N";
 
-        basicGEMM<FP8_NANOO, float>(m_context, gemm, 2.e-5);
+        return gemm;
+    }
 
+    void check_GEMMF8_TN(rocRoller::ContextPtr m_context)
+    {
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
         {
             std::string generatedCode = m_context->instructions()->toString();
@@ -936,6 +951,20 @@ namespace GEMMDriverTest
             EXPECT_EQ(countSubstring(generatedCode, "ds_read"), 4);
             EXPECT_EQ(countSubstring(generatedCode, "ds_read_b64 "), 4);
         }
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_TN)
+    {
+        auto gemm = setup_GEMMF8_TN();
+        basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
+        check_GEMMF8_TN(m_context);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_TN)
+    {
+        auto gemm = setup_GEMMF8_TN();
+        basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
+        check_GEMMF8_TN(m_context);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2)

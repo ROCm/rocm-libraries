@@ -62,6 +62,7 @@ namespace rocRoller::KernelGraph
         void operator()(Barrier const& op, int tag);
         void operator()(ComputeIndex const& op, int tag);
         void operator()(ConditionalOp const& op, int tag);
+        void operator()(AssertOp const& op, int tag);
         void operator()(Deallocate const& op, int tag);
         void operator()(DoWhileOp const& op, int tag);
         void operator()(ForLoopOp const& op, int tag);

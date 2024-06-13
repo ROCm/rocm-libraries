@@ -2717,4 +2717,43 @@ namespace KernelGraphTest
         auto tag       = std::get<Expression::DataFlowTag>(*lhs).tag;
         EXPECT_EQ(tag, vgprB);
     }
+
+    TEST_F(KernelGraphTest, ReindexAssertOpExpression)
+    {
+        rocRoller::KernelGraph::KernelGraph kgraph;
+
+        auto unit = Expression::literal(1);
+
+        auto kernel = kgraph.control.addElement(Kernel());
+
+        auto loadA = kgraph.control.addElement(LoadVGPR(DataType::Int32, true));
+        kgraph.control.addElement(Body(), {kernel}, {loadA});
+
+        auto user0 = kgraph.coordinates.addElement(User("user0"));
+        auto vgprA = kgraph.coordinates.addElement(VGPR());
+        kgraph.coordinates.addElement(DataFlow(), {user0}, {vgprA});
+        kgraph.mapper.connect<VGPR>(loadA, vgprA);
+
+        auto exprA = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{vgprA, Register::Type::Scalar, DataType::Int32});
+        auto assertOp = kgraph.control.addElement(AssertOp{exprA > unit, "assert"});
+        kgraph.control.addElement(Sequence(), {loadA}, {assertOp});
+
+        auto loadB = kgraph.control.addElement(LoadVGPR(DataType::Int32, true));
+        kgraph.control.addElement(Body(), {kernel}, {loadB});
+        auto vgprB = kgraph.coordinates.addElement(VGPR());
+        kgraph.coordinates.addElement(DataFlow(), {user0}, {vgprB});
+        kgraph.mapper.connect<VGPR>(loadB, vgprB);
+
+        kgraph.control.addElement(Sequence(), {loadB}, {assertOp});
+
+        GraphReindexer reindexer;
+        reindexer.coordinates.emplace(vgprA, vgprB);
+        reindexExpressions(kgraph, assertOp, reindexer);
+
+        auto condition = kgraph.control.get<AssertOp>(assertOp)->condition;
+        auto lhs       = std::get<Expression::GreaterThan>(*condition).lhs;
+        auto tag       = std::get<Expression::DataFlowTag>(*lhs).tag;
+        EXPECT_EQ(tag, vgprB);
+    }
 }

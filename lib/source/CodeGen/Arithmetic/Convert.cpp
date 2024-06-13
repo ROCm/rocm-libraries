@@ -10,7 +10,8 @@ namespace rocRoller
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Float);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Half);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Halfx2);
-    RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP8x4_NANOO);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP8x4);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::BF8x4);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP6x16);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int32);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int64);
@@ -31,7 +32,8 @@ namespace rocRoller
     DefineSpecializedGetGeneratorConvert(Float);
     DefineSpecializedGetGeneratorConvert(Half);
     DefineSpecializedGetGeneratorConvert(Halfx2);
-    DefineSpecializedGetGeneratorConvert(FP8x4_NANOO);
+    DefineSpecializedGetGeneratorConvert(FP8x4);
+    DefineSpecializedGetGeneratorConvert(BF8x4);
     DefineSpecializedGetGeneratorConvert(FP6x16);
     DefineSpecializedGetGeneratorConvert(Int32);
     DefineSpecializedGetGeneratorConvert(Int64);
@@ -52,7 +54,8 @@ namespace rocRoller
             ConvertCase(Float);
             ConvertCase(Half);
             ConvertCase(Halfx2);
-            ConvertCase(FP8_NANOO);
+            ConvertCase(FP8);
+            ConvertCase(BF8);
             ConvertCase(Int32);
             ConvertCase(Int64);
             ConvertCase(UInt32);
@@ -85,8 +88,11 @@ namespace rocRoller
             co_yield_(
                 Instruction("v_cvt_f32_f16", {dest->element({1})}, {dest->element({1})}, {}, ""));
             break;
-        case DataType::FP8_NANOO:
+        case DataType::FP8:
             co_yield_(Instruction("v_cvt_f32_fp8", {dest}, {arg}, {}, ""));
+            break;
+        case DataType::BF8:
+            co_yield_(Instruction("v_cvt_f32_bf8", {dest}, {arg}, {}, ""));
             break;
         default:
             Throw<FatalError>("Unsupported datatype for convert to float: ", ShowValue(dataType));
@@ -137,9 +143,8 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction>
-        ConvertGenerator<DataType::FP8x4_NANOO>::generate(Register::ValuePtr dest,
-                                                          Register::ValuePtr arg)
+    Generator<Instruction> ConvertGenerator<DataType::FP8x4>::generate(Register::ValuePtr dest,
+                                                                       Register::ValuePtr arg)
     {
         AssertFatal(arg != nullptr);
 
@@ -147,10 +152,10 @@ namespace rocRoller
 
         switch(dataType)
         {
-        case DataType::FP8_NANOO:
+        case DataType::FP8:
         {
             AssertFatal(arg->valueCount() == 4,
-                        "Conversion to FP8x4_NANOO requires four elements",
+                        "Conversion to FP8x4 requires four elements",
                         ShowValue(arg->valueCount()));
             std::vector<Register::ValuePtr> values{
                 arg->element({0}), arg->element({1}), arg->element({2}), arg->element({3})};
@@ -158,8 +163,32 @@ namespace rocRoller
         }
         break;
         default:
-            Throw<FatalError>("Unsupported datatype for convert to FP8x4_NANOO: ",
-                              ShowValue(dataType));
+            Throw<FatalError>("Unsupported datatype for convert to FP8x4: ", ShowValue(dataType));
+        }
+    }
+
+    template <>
+    Generator<Instruction> ConvertGenerator<DataType::BF8x4>::generate(Register::ValuePtr dest,
+                                                                       Register::ValuePtr arg)
+    {
+        AssertFatal(arg != nullptr);
+
+        auto dataType = getArithDataType(arg);
+
+        switch(dataType)
+        {
+        case DataType::BF8:
+        {
+            AssertFatal(arg->valueCount() == 4,
+                        "Conversion to BF8x4 requires four elements",
+                        ShowValue(arg->valueCount()));
+            std::vector<Register::ValuePtr> values{
+                arg->element({0}), arg->element({1}), arg->element({2}), arg->element({3})};
+            co_yield m_context->copier()->pack(dest, values, "Pack into BF8x4");
+        }
+        break;
+        default:
+            Throw<FatalError>("Unsupported datatype for convert to BF8x4: ", ShowValue(dataType));
         }
     }
 

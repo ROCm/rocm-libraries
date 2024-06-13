@@ -225,10 +225,12 @@ set(rocroller_src
  lib/source/AssemblyKernel.cpp
  lib/source/AssemblyKernelArgument.cpp
  lib/source/AssemblyKernel_serialization.cpp
+ lib/source/AssertOpKinds.cpp
  lib/source/CommandSolution.cpp
  lib/source/CommonSubexpressionElim.cpp
  lib/source/Context.cpp
  lib/source/DataTypes.cpp
+ lib/source/DataTypes_F8_Utils.cpp
  lib/source/Error.cpp
  lib/source/ExecutableKernel.cpp
  lib/source/Expression.cpp
@@ -299,6 +301,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/Utility.cpp
  lib/source/CodeGen/ArgumentLoader.cpp
  lib/source/CodeGen/Buffer.cpp
+ lib/source/CodeGen/CrashKernelGenerator.cpp
  lib/source/CodeGen/Instruction.cpp
  lib/source/CodeGen/LoadStoreTileGenerator.cpp
  lib/source/CodeGen/LowerFromKernelGraph.cpp
@@ -478,6 +481,7 @@ set(
   test/unit/ArgumentValueTest.cpp
   test/unit/ArithmeticTest.cpp
   test/unit/AssemblerTest.cpp
+  test/unit/AssertTest.cpp
   test/unit/BranchGeneratorTest.cpp
   test/unit/BufferDescriptorTest.cpp
   test/unit/CommandTest.cpp
@@ -501,7 +505,7 @@ set(
   test/unit/GEMMFusion.cpp
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
-  test/unit/FP8Test.cpp
+  test/unit/F8Test.cpp
   test/unit/FP6Test.cpp
   test/unit/HazardObserverTest.cpp
   test/unit/HypergraphTest.cpp

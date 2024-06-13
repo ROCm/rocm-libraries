@@ -1,6 +1,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
@@ -9,6 +11,7 @@
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
+#include "F8Values.hpp"
 #include "GPUContextFixture.hpp"
 #include "Utilities.hpp"
 
@@ -16,22 +19,25 @@ using namespace rocRoller;
 
 namespace rocRollerTest
 {
-    struct FP8Problem
+    struct F8Problem
     {
         std::shared_ptr<Command>            command;
         rocRoller::Operations::OperationTag resultTag, aTag;
     };
 
-    class FP8Test : public GPUContextFixture
+    class F8Test : public GPUContextFixtureParam<rocRoller::DataType>
     {
     };
 
-    const size_t numFP8PerElement = 4;
+    const size_t numF8PerElement = 4;
 
     /**
-     * Loads FP8x4 to GPU, unpacks to individual FP8s, convert to float, store to CPU
+     * Loads F8x4 to GPU, unpacks to individual F8s, convert to float, store to CPU
     */
-    void genFP8x4LoadToFloatStore(rocRoller::ContextPtr context, FP8Problem& prob, int N)
+    void genF8x4LoadToFloatStore(rocRoller::ContextPtr context,
+                                 F8Problem&            prob,
+                                 int                   N,
+                                 rocRoller::DataType   F8Type)
     {
         auto k = context->kernel();
 
@@ -41,9 +47,10 @@ namespace rocRollerTest
         prob.resultTag  = prob.command->allocateTag();
         auto result_exp = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
             {DataType::Float, PointerType::PointerGlobal}, prob.resultTag, ArgumentType::Value));
-        prob.aTag       = prob.command->allocateTag();
-        auto a_exp      = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
-            {DataType::FP8_NANOO, PointerType::PointerGlobal}, prob.aTag, ArgumentType::Value));
+
+        prob.aTag  = prob.command->allocateTag();
+        auto a_exp = std::make_shared<Expression::Expression>(prob.command->allocateArgument(
+            {F8Type, PointerType::PointerGlobal}, prob.aTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -52,10 +59,7 @@ namespace rocRollerTest
                         {DataType::Float, PointerType::PointerGlobal},
                         DataDirection::WriteOnly,
                         result_exp});
-        k->addArgument({"a",
-                        {DataType::FP8_NANOO, PointerType::PointerGlobal},
-                        DataDirection::ReadOnly,
-                        a_exp});
+        k->addArgument({"a", {F8Type, PointerType::PointerGlobal}, DataDirection::ReadOnly, a_exp});
 
         k->setWorkgroupSize({1, 1, 1});
         k->setWorkitemCount({one, one, one});
@@ -85,8 +89,7 @@ namespace rocRollerTest
             auto v_a = Register::Value::Placeholder(
                 context, Register::Type::Vector, DataType::UInt32, 1);
 
-            auto v_temp = Register::Value::Placeholder(
-                context, Register::Type::Vector, DataType::FP8_NANOO, 1);
+            auto v_temp = Register::Value::Placeholder(context, Register::Type::Vector, F8Type, 1);
 
             co_yield v_a->allocate();
             co_yield a_ptr->allocate();
@@ -95,15 +98,17 @@ namespace rocRollerTest
             co_yield context->copier()->copy(result_ptr, s_result, "Move pointer.");
             co_yield context->copier()->copy(a_ptr, s_a, "Move pointer.");
 
-            auto bpi = DataTypeInfo::Get(a_ptr->variableType().dataType).elementSize;
-            auto bpo = DataTypeInfo::Get(result_ptr->variableType().dataType).elementSize;
+            auto bpi
+                = CeilDivide(DataTypeInfo::Get(a_ptr->variableType().dataType).elementBits, 8u);
+            auto bpo = CeilDivide(
+                DataTypeInfo::Get(result_ptr->variableType().dataType).elementBits, 8u);
 
             for(int i = 0; i < N; i++)
             {
                 co_yield context->mem()->loadFlat(v_a, a_ptr, i * bpi, bpi);
 
-                // Bitmask each FP8 of FP8x4, convert to float, then store
-                for(int fp8_idx = 0; fp8_idx < numFP8PerElement; fp8_idx++)
+                // Bitmask each F8 of F8x4, convert to float, then store
+                for(int f8_idx = 0; f8_idx < numF8PerElement; f8_idx++)
                 {
                     co_yield context->copier()->copy(v_temp, v_a, "Move to temp");
 
@@ -116,12 +121,12 @@ namespace rocRollerTest
 
                     co_yield context->mem()->storeFlat(result_ptr,
                                                        v_temp,
-                                                       (i * numFP8PerElement + fp8_idx) * bpo,
+                                                       (i * numF8PerElement + f8_idx) * bpo,
                                                        bpo,
                                                        "Store to result");
 
                     co_yield_(Instruction::Comment(
-                        "Shift right so lower 8 bits is the fp8 to manipulate"));
+                        "Shift right so lower 8 bits is the f8 to manipulate"));
                     co_yield generateOp<Expression::LogicalShiftR>(
                         v_a, v_a, Register::Value::Literal(8));
                 }
@@ -134,9 +139,10 @@ namespace rocRollerTest
     }
 
     /**
-     * @param N number of FP8x4; so Nx4 float results
+     * @param N number of F8x4; so Nx4 float results
      */
-    void executeFP8x4LoadToFloatStore(rocRoller::ContextPtr context)
+    template <typename T>
+    void executeF8x4LoadToFloatStore(rocRoller::ContextPtr context, rocRoller::DataType F8Type)
     {
         int N = 256;
 
@@ -144,10 +150,10 @@ namespace rocRollerTest
         auto a   = rng.vector<uint>(
             N, std::numeric_limits<uint>::min(), std::numeric_limits<uint>::max());
 
-        std::vector<float> result(a.size() * numFP8PerElement);
+        std::vector<float> result(a.size() * numF8PerElement);
 
-        FP8Problem prob;
-        genFP8x4LoadToFloatStore(context, prob, a.size());
+        F8Problem prob;
+        genF8x4LoadToFloatStore(context, prob, a.size(), F8Type);
         CommandKernel commandKernel(context);
 
         auto d_a      = make_shared_device(a);
@@ -174,13 +180,13 @@ namespace rocRollerTest
             } u;
             u.word = a[i];
 
-            for(int fp8_idx = 0; fp8_idx < numFP8PerElement; fp8_idx++)
+            for(int f8_idx = 0; f8_idx < numF8PerElement; f8_idx++)
             {
-                FP8_NANOO expected_fp8;
-                expected_fp8.data = u.bytes[fp8_idx];
+                T expected_f8;
+                expected_f8.data = u.bytes[f8_idx];
 
-                float actual   = result.at(i * numFP8PerElement + fp8_idx);
-                float expected = expected_fp8.operator float();
+                float actual   = result.at(i * numF8PerElement + f8_idx);
+                float expected = expected_f8.operator float();
 
                 if(std::isnan(expected))
                     EXPECT_TRUE(std::isnan(actual));
@@ -190,25 +196,29 @@ namespace rocRollerTest
         }
     }
 
-    TEST_P(FP8Test, GPU_FP8x4LoadToFloatStore)
+    TEST_P(F8Test, GPU_F8x4LoadToFloatStore)
     {
+        auto F8Type = std::get<rocRoller::DataType>(GetParam());
         if(isLocalDevice())
         {
-            executeFP8x4LoadToFloatStore(m_context);
+            if(F8Type == rocRoller::DataType::FP8)
+                executeF8x4LoadToFloatStore<rocRoller::FP8>(m_context, F8Type);
+            else
+                executeF8x4LoadToFloatStore<rocRoller::BF8>(m_context, F8Type);
         }
         else
         {
-            FP8Problem prob;
-            genFP8x4LoadToFloatStore(m_context, prob, 2);
+            F8Problem prob;
+            genF8x4LoadToFloatStore(m_context, prob, 2, F8Type);
             std::vector<char> assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
     }
 
     /**
-     * Loads sparse FP8s to GPU, packs into FP8x4s, stores to CPU
+     * Loads sparse F8s to GPU, packs into F8x4s, stores to CPU
     */
-    void genFP8LoadGather(rocRoller::ContextPtr m_context, int N)
+    void genF8LoadGather(rocRoller::ContextPtr m_context, int N, rocRoller::DataType F8Type)
     {
         auto k = m_context->kernel();
 
@@ -218,9 +228,10 @@ namespace rocRollerTest
         auto resultTag  = command->allocateTag();
         auto result_exp = std::make_shared<Expression::Expression>(command->allocateArgument(
             {DataType::UInt32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
-        auto aTag       = command->allocateTag();
-        auto a_exp      = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::FP8_NANOO, PointerType::PointerGlobal}, aTag, ArgumentType::Value));
+
+        auto aTag  = command->allocateTag();
+        auto a_exp = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {F8Type, PointerType::PointerGlobal}, aTag, ArgumentType::Value));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -229,10 +240,7 @@ namespace rocRollerTest
                         {DataType::UInt32, PointerType::PointerGlobal},
                         DataDirection::WriteOnly,
                         result_exp});
-        k->addArgument({"a",
-                        {DataType::FP8_NANOO, PointerType::PointerGlobal},
-                        DataDirection::ReadOnly,
-                        a_exp});
+        k->addArgument({"a", {F8Type, PointerType::PointerGlobal}, DataDirection::ReadOnly, a_exp});
 
         k->setWorkgroupSize({1, 1, 1});
         k->setWorkitemCount({one, one, one});
@@ -256,16 +264,15 @@ namespace rocRollerTest
             auto a_ptr
                 = Register::Value::Placeholder(m_context,
                                                Register::Type::Vector,
-                                               {DataType::FP8_NANOO, PointerType::PointerGlobal},
+                                               {F8Type, PointerType::PointerGlobal},
                                                1,
                                                Register::AllocationOptions::FullyContiguous());
-            auto v_a = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::FP8_NANOO, 1);
+            auto v_a = Register::Value::Placeholder(m_context, Register::Type::Vector, F8Type, 1);
 
             auto v_temp
                 = Register::Value::Placeholder(m_context,
                                                Register::Type::Vector,
-                                               DataType::FP8_NANOO,
+                                               F8Type,
                                                4,
                                                Register::AllocationOptions::FullyContiguous());
 
@@ -277,8 +284,10 @@ namespace rocRollerTest
             co_yield m_context->copier()->copy(result_ptr, s_result, "Move pointer.");
             co_yield m_context->copier()->copy(a_ptr, s_a, "Move pointer.");
 
-            auto bpi = DataTypeInfo::Get(a_ptr->variableType().dataType).elementSize;
-            auto bpo = DataTypeInfo::Get(result_ptr->variableType().dataType).elementSize;
+            auto bpi
+                = CeilDivide(DataTypeInfo::Get(a_ptr->variableType().dataType).elementBits, 8u);
+            auto bpo = CeilDivide(
+                DataTypeInfo::Get(result_ptr->variableType().dataType).elementBits, 8u);
 
             auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
             co_yield bufDesc->setup();
@@ -305,11 +314,12 @@ namespace rocRollerTest
     }
 
     /**
-     * @param N number of FP8x4; so Nx4 float results
+     * @param N number of F8x4; so Nx4 float results
      */
-    void executeFP8LoadGather(rocRoller::ContextPtr context, int N)
+    void executeF8LoadGather(rocRoller::ContextPtr context, int N, rocRoller::DataType F8Type)
     {
-        genFP8LoadGather(context, N);
+        genF8LoadGather(context, N, F8Type);
+
         std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
             = context->instructions()->getExecutableKernel();
 
@@ -342,43 +352,91 @@ namespace rocRollerTest
         }
     }
 
-    TEST_P(FP8Test, GPU_FP8LoadGather)
+    TEST_P(F8Test, GPU_F8LoadGather)
     {
         constexpr int N = 4;
         if(isLocalDevice())
         {
-            executeFP8LoadGather(m_context, N);
+            executeF8LoadGather(m_context, N, std::get<rocRoller::DataType>(GetParam()));
         }
         else
         {
-            genFP8LoadGather(m_context, N);
+            genF8LoadGather(m_context, N, std::get<rocRoller::DataType>(GetParam()));
             std::vector<char> assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
     }
 
-    TEST(FP8Test, CPUConversions)
+    template <typename F8Type>
+    void numberConversion(double fp64)
     {
-        auto singleTest = [](auto fp64) {
-            // FP8 to FP32
-            rocRoller::FP8_NANOO fp8(fp64);
-            float                fp32(fp8);
+        // F8 to FP32
+        F8Type f8(fp64);
+        float  fp32(f8);
+        if(!std::isnan(fp64))
             EXPECT_FLOAT_EQ(fp32, fp64);
+        else
+            EXPECT_TRUE(std::isnan(fp32));
 
-            // FP32 to FP8
-            fp8 = rocRoller::FP8_NANOO(fp32);
-            EXPECT_FLOAT_EQ((double)fp8, fp64);
-        };
-
-        constexpr auto cases = std::to_array<double>({-1.76e2, 1 / 1024, 240});
-
-        for(auto const& c : cases)
-        {
-            singleTest(c);
-        }
+        // FP32 to F8
+        f8 = F8Type(fp32);
+        if(!std::isnan(fp64))
+            EXPECT_FLOAT_EQ((double)f8, fp64);
+        else
+            EXPECT_TRUE(std::isnan(f8));
     }
 
-    INSTANTIATE_TEST_SUITE_P(FP8Test,
-                             FP8Test,
-                             ::testing::Combine(::testing::Values("gfx942:sramecc+")));
+    TEST(F8Test, CPUConversions)
+    {
+        auto const& FP8Values = FloatReference<rocRoller::FP8>::Values;
+        std::for_each(FP8Values.begin(), FP8Values.end(), numberConversion<rocRoller::FP8>);
+
+        auto const& BF8Values = FloatReference<rocRoller::BF8>::Values;
+        std::for_each(BF8Values.begin(), BF8Values.end(), numberConversion<rocRoller::BF8>);
+    }
+
+    template <typename F8Type>
+    void checkSpecialValues(float& f32_inf, float& f32_nan, float& f32_zero)
+    {
+        F8Type f8_inf(f32_inf);
+        // FP8/BF8 use the same value for NaN and Inf, so we are unable to know
+        // if the value is NaN or Inf, and we choose to return NaN in both cases.
+        EXPECT_TRUE(std::isnan(f8_inf));
+        EXPECT_FALSE(std::isinf(f8_inf));
+
+        F8Type f8_nan(f32_nan);
+        EXPECT_TRUE(std::isnan(f8_nan));
+
+        F8Type f8_zero(f32_zero);
+        EXPECT_TRUE(std::iszero(f8_zero));
+    }
+
+    TEST(F8Test, SpecialValues)
+    {
+        union
+        {
+            uint32_t bits;
+            float    val;
+        } f32_inf, f32_nan, f32_zero;
+
+        // For single-precision, if all exponent bits are 1 and
+        //  - if mantissa is zero     => Inf
+        //  - if mantissa is non-zero => NaN
+        f32_inf.bits  = 0x7F800000;
+        f32_nan.bits  = 0x7F800001;
+        f32_zero.bits = 0x0;
+
+        EXPECT_TRUE(std::isinf(f32_inf.val));
+        EXPECT_TRUE(std::isnan(f32_nan.val));
+
+        checkSpecialValues<rocRoller::FP8>(f32_inf.val, f32_nan.val, f32_zero.val);
+        checkSpecialValues<rocRoller::BF8>(f32_inf.val, f32_nan.val, f32_zero.val);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(F8Test,
+                             F8Test,
+                             ::testing::Combine(::testing::Values("gfx942:sramecc+"),
+                                                ::testing::Values(rocRoller::DataType::FP8,
+                                                                  rocRoller::DataType::BF8)));
+
 }

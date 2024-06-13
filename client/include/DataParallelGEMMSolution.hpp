@@ -241,7 +241,8 @@ namespace rocRoller
                         wave_k = 8;
                         wave_b = 1;
                     }
-                    else if constexpr(std::is_same_v<A, FP8_NANOO> && std::is_same_v<B, FP8_NANOO>)
+                    else if constexpr((std::is_same_v<A, FP8> && std::is_same_v<B, FP8>)
+                                      || (std::is_same_v<A, BF8> && std::is_same_v<B, BF8>))
                     {
                         wave_m = 16;
                         wave_n = 16;
@@ -263,11 +264,11 @@ namespace rocRoller
                         wave_b = m_solutionParams.waveB;
 
                     AssertFatal(m_solutionParams.macM * m_solutionParams.macK
-                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementSize
+                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementBytes
                                     > wave_m * wave_k,
                                 "Not enough elements (A).");
                     AssertFatal(m_solutionParams.macN * m_solutionParams.macK
-                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementSize
+                                        * DataTypeInfo::Get(TypeInfo<A>::Var.dataType).elementBytes
                                     > wave_n * wave_k,
                                 "Not enough elements (B).");
 

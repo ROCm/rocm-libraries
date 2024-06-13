@@ -15,6 +15,7 @@
 #include "CodeGen/ArgumentLoader_fwd.hpp"
 #include "CodeGen/BranchGenerator_fwd.hpp"
 #include "CodeGen/CopyGenerator_fwd.hpp"
+#include "CodeGen/CrashKernelGenerator_fwd.hpp"
 #include "CodeGen/Instruction_fwd.hpp"
 #include "CodeGen/MemoryInstructions_fwd.hpp"
 #include "Expression_fwd.hpp"
@@ -83,6 +84,7 @@ namespace rocRoller
         std::shared_ptr<MemoryInstructions>    mem() const;
         std::shared_ptr<CopyGenerator>         copier() const;
         std::shared_ptr<BranchGenerator>       brancher() const;
+        std::shared_ptr<CrashKernelGenerator>  crasher() const;
         KernelOptions const&                   kernelOptions();
 
         std::shared_ptr<RandomGenerator> random() const;
@@ -146,6 +148,7 @@ namespace rocRoller
         Expression::ExpressionPtr                  m_scratchAllocator;
         std::shared_ptr<CopyGenerator>             m_copier;
         std::shared_ptr<BranchGenerator>           m_brancher;
+        std::shared_ptr<CrashKernelGenerator>      m_crasher;
         std::shared_ptr<RandomGenerator>           m_random;
         std::shared_ptr<KernelGraph::ScopeManager> m_scope;
 

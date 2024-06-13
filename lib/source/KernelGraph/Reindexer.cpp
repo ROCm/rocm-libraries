@@ -135,6 +135,12 @@ namespace rocRoller
                 graph.control.setElement(tag, newOp);
             }
 
+            void visitOperation(KernelGraph& graph, int tag, AssertOp const& op)
+            {
+                auto newOp = AssertOp{reindexExpression(op.condition, m_reindexer), op.assertName};
+                graph.control.setElement(tag, newOp);
+            }
+
             void visitOperation(KernelGraph& graph, int tag, ForLoopOp const& op)
             {
                 auto newOp = ForLoopOp{reindexExpression(op.condition, m_reindexer), op.loopName};

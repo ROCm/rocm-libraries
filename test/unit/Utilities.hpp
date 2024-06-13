@@ -158,17 +158,29 @@ namespace rocRoller
                bool                       transA = false,
                bool                       transB = true);
 
-    void CPUMM(std::vector<float>&           D,
-               const std::vector<float>&     C,
-               const std::vector<FP8_NANOO>& A,
-               const std::vector<FP8_NANOO>& B,
-               int                           M,
-               int                           N,
-               int                           K,
-               float                         alpha,
-               float                         beta,
-               bool                          transA = false,
-               bool                          transB = true);
+    void CPUMM(std::vector<float>&       D,
+               const std::vector<float>& C,
+               const std::vector<FP8>&   A,
+               const std::vector<FP8>&   B,
+               int                       M,
+               int                       N,
+               int                       K,
+               float                     alpha,
+               float                     beta,
+               bool                      transA = false,
+               bool                      transB = true);
+
+    void CPUMM(std::vector<float>&       D,
+               const std::vector<float>& C,
+               const std::vector<BF8>&   A,
+               const std::vector<BF8>&   B,
+               int                       M,
+               int                       N,
+               int                       K,
+               float                     alpha,
+               float                     beta,
+               bool                      transA = false,
+               bool                      transB = true);
 }
 
 /*

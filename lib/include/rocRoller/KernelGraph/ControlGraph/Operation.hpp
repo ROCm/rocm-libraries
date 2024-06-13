@@ -139,6 +139,33 @@ namespace rocRoller
         };
 
         /**
+         * AssertOp - Represents an assert.
+         *
+         * Must have nodes connected via the following outgoing edges:
+         *
+         * - True  Sequence:
+         * - False <terminates kernel>:
+         *
+         * Currently generates code that behaves like:
+         *
+         * if(not condition)
+         *   <terminates kernel>
+         * <Sequence>
+         *
+         * Where <terminates kernel> is a instruction sequence that causes a trap or exception in kernel code.
+         *
+        */
+        struct AssertOp
+        {
+            Expression::ExpressionPtr condition;
+
+            std::string assertName;
+
+            std::string name() const;
+            std::string toString() const;
+        };
+
+        /**
          * UnrollOp - a kernel unroll.
          */
         struct UnrollOp

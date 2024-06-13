@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2023 Advanced Micro Devices, Inc.
+ * Copyright 2019-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,8 +60,8 @@ TYPED_TEST(TypedDataTypesTest, TypeInfo_Sizing)
     using TheType    = typename TestFixture::DataType;
     using MyTypeInfo = rocRoller::TypeInfo<TheType>;
 
-    static_assert(MyTypeInfo::ElementSize == sizeof(TheType), "Sizeof");
-    static_assert(MyTypeInfo::ElementSize == MyTypeInfo::SegmentSize * MyTypeInfo::Packing,
+    static_assert(MyTypeInfo::ElementBytes == sizeof(TheType), "Sizeof");
+    static_assert(MyTypeInfo::ElementBytes == MyTypeInfo::SegmentSize * MyTypeInfo::Packing,
                   "Packing");
 }
 
@@ -74,7 +74,7 @@ TYPED_TEST(TypedDataTypesTest, TypeInfo_Consistency)
     rocRoller::DataTypeInfo const& fromEnum = rocRoller::DataTypeInfo::Get(MyTypeInfo::Var);
 
     EXPECT_EQ(fromEnum.variableType, MyTypeInfo::Var);
-    EXPECT_EQ(fromEnum.elementSize, sizeof(TheType));
+    EXPECT_EQ(rocRoller::CeilDivide(fromEnum.elementBits, 8u), sizeof(TheType));
     EXPECT_EQ(fromEnum.packing, MyTypeInfo::Packing);
     EXPECT_EQ(fromEnum.segmentSize, MyTypeInfo::SegmentSize);
     EXPECT_EQ(fromEnum.registerCount, MyTypeInfo::RegisterCount);

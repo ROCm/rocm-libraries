@@ -305,6 +305,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(Barrier);
             MAKE_OPERATION_VISITOR(ComputeIndex);
             MAKE_OPERATION_VISITOR(ConditionalOp);
+            MAKE_OPERATION_VISITOR(AssertOp);
             MAKE_OPERATION_VISITOR(Deallocate);
             MAKE_OPERATION_VISITOR(DoWhileOp);
             MAKE_OPERATION_VISITOR(ForLoopOp);

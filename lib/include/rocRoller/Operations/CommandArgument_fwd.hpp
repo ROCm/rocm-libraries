@@ -21,7 +21,8 @@ namespace rocRoller
         float,
         double,
         Half,
-        FP8_NANOO,
+        FP8,
+        BF8,
         FP6,
         bool,
         // int16_t*,
@@ -34,7 +35,8 @@ namespace rocRoller
         float*,
         double*,
         Half*,
-        FP8_NANOO*,
+        FP8*,
+        BF8*,
         FP6*>;
 
     template <typename T>

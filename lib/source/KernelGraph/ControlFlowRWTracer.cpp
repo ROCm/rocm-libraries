@@ -239,6 +239,16 @@ namespace rocRoller::KernelGraph
         generate(falseBody);
     }
 
+    void ControlFlowRWTracer::operator()(AssertOp const& op, int tag)
+    {
+        CollectDataFlowExpressionVisitor visitor;
+        visitor.call(op.condition);
+        for(auto src : visitor.tags)
+        {
+            trackRegister(tag, src, ReadWrite::READ);
+        }
+    }
+
     void ControlFlowRWTracer::operator()(Deallocate const& op, int tag) {}
 
     void ControlFlowRWTracer::operator()(DoWhileOp const& op, int tag)

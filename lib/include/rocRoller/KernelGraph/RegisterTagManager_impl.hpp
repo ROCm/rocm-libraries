@@ -18,7 +18,7 @@ namespace rocRoller
 
     inline RegisterTagManager::~RegisterTagManager() = default;
 
-    inline std::pair<Expression::ExpressionPtr, DataType>
+    inline std::pair<Expression::ExpressionPtr, RegisterExpressionAttributes>
         RegisterTagManager::getExpression(int tag) const
     {
         AssertFatal(hasExpression(tag), ShowValue(tag));
@@ -91,12 +91,14 @@ namespace rocRoller
         m_registers.insert(std::pair<int, Register::ValuePtr>(tag, value));
     }
 
-    inline void
-        RegisterTagManager::addExpression(int tag, Expression::ExpressionPtr value, DataType dt)
+    inline void RegisterTagManager::addExpression(int                          tag,
+                                                  Expression::ExpressionPtr    value,
+                                                  RegisterExpressionAttributes attrs)
     {
         AssertFatal(!hasRegister(tag), "Tag ", tag, " already associated with a register");
         m_expressions.insert(
-            std::pair<int, std::pair<Expression::ExpressionPtr, DataType>>(tag, {value, dt}));
+            std::pair<int, std::pair<Expression::ExpressionPtr, RegisterExpressionAttributes>>(
+                tag, {value, attrs}));
     }
 
     inline void RegisterTagManager::deleteTag(int tag)
