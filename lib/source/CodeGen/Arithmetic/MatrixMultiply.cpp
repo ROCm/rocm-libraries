@@ -97,7 +97,7 @@ namespace rocRoller
                         ShowValue(lhs->regType()));
             AssertFatal(r1hs->variableType() == INPUT,
                         "Invalid R1HS (B) data type",
-                        ShowValue(lhs->variableType()));
+                        ShowValue(r1hs->variableType()));
             AssertFatal(r1hs->regType() == Register::Type::Vector,
                         "Invalid R1HS (B) register type",
                         ShowValue(r1hs->regType()));
@@ -106,10 +106,10 @@ namespace rocRoller
                         ShowValue(r2hs->variableType()));
             AssertFatal(dest->regType() == Register::Type::Accumulator,
                         "Invalid DEST (D) register type",
-                        ShowValue(lhs->regType()));
+                        ShowValue(dest->regType()));
             AssertFatal(dest->variableType() == ACC,
                         "Invalid DEST (D) data type",
-                        ShowValue(lhs->variableType()));
+                        ShowValue(dest->variableType()));
 
             std::string inputType;
             std::string modifier;

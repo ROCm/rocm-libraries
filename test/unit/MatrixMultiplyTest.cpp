@@ -9,6 +9,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ScaledMatrixMultiply.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -837,6 +838,85 @@ namespace MatrixMultiplyTest
                         HasHipSuccess(0));
 
             EXPECT_EQ(resultValue, 7.5f);
+        }
+        else
+        {
+            auto assembledKernel = m_context->instructions()->assemble();
+            ASSERT_GT(assembledKernel.size(), 0);
+        }
+    }
+
+    TEST_P(ScaledMatrixMultiplyTestGPU, GenInstruction)
+    {
+        auto tileMN = std::get<1>(this->GetParam());
+
+        auto k = m_context->kernel();
+
+        auto one  = std::make_shared<Expression::Expression>(1u);
+        auto zero = std::make_shared<Expression::Expression>(0u);
+
+        k->setKernelDimensions(1);
+
+        k->setWorkgroupSize({1, 1, 1});
+        k->setWorkitemCount({one, one, one});
+        k->setDynamicSharedMemBytes(zero);
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        auto M = 16, N = 16, K = 128;
+        if(tileMN == 32)
+        {
+            M = 32;
+            N = 32;
+            K = 64;
+        }
+
+        int abRegs = 8;
+        int cdRegs = 4;
+        if(tileMN != 16)
+        {
+            abRegs = 8;
+            cdRegs = 16;
+        }
+
+        auto kb = [&]() -> Generator<Instruction> {
+            auto fc     = Register::AllocationOptions::FullyContiguous();
+            auto v_dest = Register::Value::Placeholder(
+                m_context, Register::Type::Accumulator, DataType::Float, cdRegs, fc);
+            auto v_a = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::FP8x4, abRegs, fc);
+            auto v_b = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::FP8x4, abRegs, fc);
+            auto v_c = Register::Value::Placeholder(
+                m_context, Register::Type::Accumulator, DataType::Float, cdRegs, fc);
+            auto v_a_scale = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int8, 1, fc);
+            auto v_b_scale = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int8, 1, fc);
+            for(auto reg : {v_a, v_b, v_c, v_a_scale, v_b_scale})
+                co_yield reg->allocate();
+
+            auto smm = Component::Get<rocRoller::InstructionGenerators::ScaledMatrixMultiply>(
+                m_context, DataType::Float, DataType::FP8x4);
+
+            co_yield smm->mul(v_dest, v_a, v_b, v_c, v_a_scale, v_b_scale, M, N, K);
+        };
+
+        m_context->schedule(kb());
+
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+
+        if(isLocalDevice())
+        {
+            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+                = m_context->instructions()->getExecutableKernel();
+
+            KernelArguments  kargs;
+            KernelInvocation invocation;
+
+            executableKernel->executeKernel(kargs, invocation);
         }
         else
         {

@@ -11,6 +11,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MultiplyAdd.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ScaledMatrixMultiply.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
@@ -713,6 +714,63 @@ namespace rocRoller
 
                 r2hs = std::get<Register::ValuePtr>(*expr.r2hs);
                 co_yield mm->mul(dest, lhs, r1hs, r2hs, M, N, K, B);
+            }
+
+            Generator<Instruction> operator()(Register::ValuePtr& dest, ScaledMatrixMultiply expr)
+            {
+                Register::ValuePtr rA, rB, rC, rScaleA, rScaleB;
+                int                M, N, K;
+
+                AssertFatal(std::holds_alternative<WaveTilePtr>(*expr.matA)
+                                && std::holds_alternative<WaveTilePtr>(*expr.matB),
+                            "Expression MatrixMultiply requires WaveTiles");
+
+                auto const atile = *std::get<WaveTilePtr>(*expr.matA);
+                auto const btile = *std::get<WaveTilePtr>(*expr.matB);
+                AssertFatal(!atile.sizes.empty(), "WaveTile in invalid state.");
+                AssertFatal(!btile.sizes.empty(), "WaveTile in invalid state.");
+                AssertFatal(atile.sizes[1] == btile.sizes[0],
+                            "MatrixMultiply WaveTile size mismatch.",
+                            ShowValue(atile.sizes[1]),
+                            ShowValue(btile.sizes[0]));
+
+                M  = atile.sizes[0];
+                N  = btile.sizes[1];
+                K  = atile.sizes[1];
+                rA = atile.vgpr;
+                rB = btile.vgpr;
+
+                AssertFatal(rA->variableType() == rB->variableType(),
+                            "Input types must match ",
+                            ShowValue(rA->variableType()),
+                            ShowValue(rB->variableType()));
+
+                AssertFatal(!rA->variableType().isPointer(),
+                            "Input must not be a pointer. ",
+                            ShowValue(rA->variableType()));
+
+                // accumulator is either f32, f64, or i32
+                DataType accType = expr.accumulationPrecision;
+
+                if(dest == nullptr)
+                {
+                    auto const accRegCount = M * N / m_context->kernel()->wavefront_size();
+
+                    dest = Register::Value::Placeholder(
+                        m_context,
+                        Register::Type::Accumulator,
+                        accType,
+                        accRegCount,
+                        Register::AllocationOptions::FullyContiguous());
+                }
+
+                auto smm = Component::Get<rocRoller::InstructionGenerators::ScaledMatrixMultiply>(
+                    m_context, accType, rA->variableType().dataType);
+
+                rC      = std::get<Register::ValuePtr>(*expr.matC);
+                rScaleA = std::get<Register::ValuePtr>(*expr.scaleA);
+                rScaleB = std::get<Register::ValuePtr>(*expr.scaleB);
+                co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, M, N, K);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, WaveTilePtr const& expr)

@@ -38,6 +38,30 @@ namespace rocRoller::KernelGraph
             }
         }
 
+        void operator()(Expression::ScaledMatrixMultiply const& expr)
+        {
+            if(expr.matA)
+            {
+                call(expr.matA);
+            }
+            if(expr.matB)
+            {
+                call(expr.matB);
+            }
+            if(expr.matC)
+            {
+                call(expr.matC);
+            }
+            if(expr.scaleA)
+            {
+                call(expr.scaleA);
+            }
+            if(expr.scaleB)
+            {
+                call(expr.scaleB);
+            }
+        }
+
         template <Expression::CTernary Expr>
         void operator()(Expr const& expr)
         {

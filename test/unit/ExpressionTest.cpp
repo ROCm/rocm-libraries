@@ -2452,6 +2452,84 @@ namespace ExpressionTest
 
             EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
         }
+
+        void MFMA_SCALE_F8F6F4(DataType          typeA,
+                               DataType          typeB,
+                               int               M,
+                               int               N,
+                               int               K,
+                               int               regCountA,
+                               int               regCountB,
+                               std::string const result)
+        {
+            if(m_context->targetArchitecture().target().getVersionString() != "gfx950")
+            {
+                GTEST_SKIP() << "Skipping MFMA F8F6F4 tests for "
+                             << m_context->targetArchitecture().target().getVersionString();
+            }
+
+            auto ATile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
+            auto BTile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
+
+            ATile->sizes = {M, K};
+            ATile->vgpr
+                = std::make_shared<Register::Value>(m_context,
+                                                    Register::Type::Vector,
+                                                    typeA,
+                                                    regCountA,
+                                                    Register::AllocationOptions::FullyContiguous());
+            ATile->vgpr->allocateNow();
+
+            BTile->sizes = {K, N};
+            BTile->vgpr
+                = std::make_shared<Register::Value>(m_context,
+                                                    Register::Type::Vector,
+                                                    typeB,
+                                                    regCountB,
+                                                    Register::AllocationOptions::FullyContiguous());
+            BTile->vgpr->allocateNow();
+
+            auto rC
+                = std::make_shared<Register::Value>(m_context,
+                                                    Register::Type::Accumulator,
+                                                    DataType::Float,
+                                                    M * N / 64,
+                                                    Register::AllocationOptions::FullyContiguous());
+            rC->allocateNow();
+
+            // M * K is the number of elements in the A wavetile.
+            // (M * K) / 32 is the number of scale elements of A wavetile.
+            // For a wave with 64 threads, each thread will process
+            // (M * K) / (32 * 64 = 2048) scale elements of A wavetile.
+            auto rScaleA
+                = std::make_shared<Register::Value>(m_context,
+                                                    Register::Type::Vector,
+                                                    DataType::UInt32,
+                                                    M * K / 2048,
+                                                    Register::AllocationOptions::FullyContiguous());
+            rScaleA->allocateNow();
+
+            auto rScaleB
+                = std::make_shared<Register::Value>(m_context,
+                                                    Register::Type::Vector,
+                                                    DataType::UInt32,
+                                                    K * N / 2048,
+                                                    Register::AllocationOptions::FullyContiguous());
+            rScaleB->allocateNow();
+
+            auto A      = std::make_shared<Expression::Expression>(ATile);
+            auto B      = std::make_shared<Expression::Expression>(BTile);
+            auto C      = rC->expression();
+            auto scaleA = rScaleA->expression();
+            auto scaleB = rScaleB->expression();
+
+            auto expr = std::make_shared<Expression::Expression>(
+                Expression::ScaledMatrixMultiply(A, B, C, scaleA, scaleB));
+
+            m_context->schedule(Expression::generate(rC, expr, m_context));
+
+            EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
+        }
     };
 
     TEST_P(ARCH_ExpressionTest, BasicExpression01)
@@ -2977,6 +3055,32 @@ namespace ExpressionTest
             std::vector<char> assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
+    }
+
+    TEST_P(ARCH_ExpressionTest, MFMA_SCALE_F32_16x16x128_F8F6F4)
+    {
+        MFMA_SCALE_F8F6F4(
+            DataType::FP8x4,
+            DataType::FP8x4,
+            16,
+            16,
+            128,
+            16 * 128 / 64 / 4, // M * K / 64 / 4
+            128 * 16 / 64 / 4, // K * N / 64 / 4
+            R"(v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:7], v[8:15], a[0:3], v16, v17 cbsz:0 abid:1 blgp:0)");
+    }
+
+    TEST_P(ARCH_ExpressionTest, MFMA_SCALE_F32_32x32x64_F8F6F4)
+    {
+        MFMA_SCALE_F8F6F4(
+            DataType::FP8x4,
+            DataType::FP8x4,
+            32,
+            32,
+            64,
+            32 * 64 / 64 / 4, // M * K / 64 / 4
+            64 * 32 / 64 / 4, // K * N / 64 / 4
+            R"(v_mfma_scale_f32_32x32x64_f8f6f4 a[0:15], v[0:7], v[8:15], a[0:15], v16, v17 cbsz:0 abid:1 blgp:0)");
     }
 
     TEST_P(ARCH_ExpressionTest, MFMA_F32_32x32x64_F8F6F4)

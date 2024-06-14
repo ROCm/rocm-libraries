@@ -452,6 +452,12 @@ namespace rocRoller
 
             struct ExpressionHasNoneDTVisitor
             {
+                bool operator()(ScaledMatrixMultiply const& expr) const
+                {
+                    return call(expr.matA) || call(expr.matB) || call(expr.matC)
+                           || call(expr.scaleA) || call(expr.scaleB);
+                }
+
                 template <CTernary Expr>
                 bool operator()(Expr const& expr) const
                 {

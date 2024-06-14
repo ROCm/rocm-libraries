@@ -334,6 +334,31 @@ namespace rocRoller
             constexpr static inline int             Complexity = 20;
         };
 
+        struct ScaledMatrixMultiply
+        {
+            ExpressionPtr matA, matB, matC, scaleA, scaleB;
+            DataType      accumulationPrecision = DataType::Float;
+            std::string   comment               = "";
+
+            ScaledMatrixMultiply() = default;
+            ScaledMatrixMultiply(ExpressionPtr a,
+                                 ExpressionPtr b,
+                                 ExpressionPtr c,
+                                 ExpressionPtr sA,
+                                 ExpressionPtr sB)
+                : matA(a)
+                , matB(b)
+                , matC(c)
+                , scaleA(sA)
+                , scaleB(sB)
+            {
+            }
+
+            constexpr static inline auto            Type = Category::Arithmetic;
+            constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
+            constexpr static inline int             Complexity = 20;
+        };
+
         /**
          * Represents DEST = LHS ? R1HS : R2HS.
          * Utilizes cselect

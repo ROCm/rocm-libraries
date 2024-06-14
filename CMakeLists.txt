@@ -295,6 +295,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/MultiplyAdd.cpp
  lib/source/CodeGen/Arithmetic/MultiplyHigh.cpp
  lib/source/CodeGen/Arithmetic/Negate.cpp
+ lib/source/CodeGen/Arithmetic/ScaledMatrixMultiply.cpp
  lib/source/CodeGen/Arithmetic/ShiftL.cpp
  lib/source/CodeGen/Arithmetic/ShiftLAdd.cpp
  lib/source/CodeGen/Arithmetic/Subtract.cpp
