@@ -21,7 +21,9 @@ namespace rocRoller::KernelGraph::ControlGraph
 
     std::string AssertOp::toString() const
     {
-        return concatenate(name(), " ", assertName, ": ", condition);
+        std::string nameString      = assertName.empty() ? concatenate(" ", assertName) : "";
+        std::string conditionString = condition != nullptr ? concatenate(": ", condition) : "";
+        return concatenate(name(), nameString, conditionString);
     }
 
     std::string DoWhileOp::toString() const

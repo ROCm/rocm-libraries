@@ -377,6 +377,7 @@ namespace GEMMDriverTest
                     HasHipSuccess(0));
 
                 double rnorm = relativeNorm(d_result, h_result);
+                Log::info("RNorm is {} (iteration {})", rnorm, iteration);
                 if(debuggable && rnorm > acceptableError)
                 {
                     for(size_t i = 0; i < M; i++)

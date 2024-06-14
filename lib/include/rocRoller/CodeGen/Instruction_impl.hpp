@@ -155,17 +155,34 @@ namespace rocRoller
         return Label(label->getLabel());
     }
 
+    inline Instruction Instruction::Label(Register::ValuePtr label, std::string const& comment)
+    {
+        return Label(label->getLabel(), comment);
+    }
+
     inline Instruction Instruction::Label(std::string const& name)
     {
-        Instruction rv;
-        rv.m_label = name;
-        return rv;
+        return Label(name, "");
     }
 
     inline Instruction Instruction::Label(std::string&& name)
     {
+        return Label(name, "");
+    }
+
+    inline Instruction Instruction::Label(std::string const& name, std::string const& comment)
+    {
+        Instruction rv;
+        rv.m_label = name;
+        rv.addComment(comment);
+        return rv;
+    }
+
+    inline Instruction Instruction::Label(std::string&& name, std::string const& comment)
+    {
         Instruction rv;
         rv.m_label = std::move(name);
+        rv.addComment(comment);
         return rv;
     }
 

@@ -84,7 +84,7 @@ namespace rocRoller
 
         /**
          * Translate from Command to (initial) KernelGraph.
-     *
+         *
          * Resulting KernelGraph matches the Command operations
          * closely.
          *
