@@ -38,7 +38,8 @@ namespace rocRoller
         Half*,
         FP8*,
         BF8*,
-        FP6*>;
+        FP6*,
+        FP4*>;
 
     template <typename T>
     concept CCommandArgumentValue = requires(T& val)

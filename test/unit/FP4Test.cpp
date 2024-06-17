@@ -7,9 +7,11 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context.hpp>
+#include <rocRoller/DataTypes/DataTypes_FP4_Utils.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"
+#include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 
 using namespace rocRoller;
@@ -180,6 +182,129 @@ namespace rocRollerTest
         }
     }
 
+    void loadStoreTileFP4(ContextPtr                      m_context,
+                          std::shared_ptr<CommandKernel>& commandKernel,
+                          bool                            launch,
+                          size_t                          nx, // tensor size x
+                          size_t                          ny, // tensor size y
+                          int                             m, // macro tile size x
+                          int                             n, // macro tile size y
+                          int                             t_m = 1, // thread tile size x
+                          int                             t_n = 1) // thread tile size y
+    {
+        AssertFatal(nx % numFP4PerElement == 0, "Invalid FP4 Dimensions");
+
+        int numFP4   = nx * ny;
+        int numFP4x8 = numFP4 / numFP4PerElement;
+
+        unsigned int workgroup_size_x = m / t_m;
+        unsigned int workgroup_size_y = n / t_n;
+
+        // each workgroup will get one tile; since workgroup_size matches m * n
+        auto NX = std::make_shared<Expression::Expression>(nx / t_m); // number of work items x
+        auto NY = std::make_shared<Expression::Expression>(ny / t_n); // number of work items y
+        auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
+
+        auto rng = RandomGenerator(316473u);
+        auto a   = rng.vector<uint>(
+            numFP4x8, std::numeric_limits<uint>::min(), std::numeric_limits<uint>::max());
+
+        std::vector<uint32_t> b(a.size());
+        std::vector<uint32_t> r(a.size());
+
+        auto d_a = make_shared_device(a);
+        auto d_b = make_shared_device(b);
+
+        auto command  = std::make_shared<Command>();
+        auto dataType = DataType::FP4;
+
+        auto tagTensorA
+            = command->addOperation(rocRoller::Operations::Tensor(2, dataType, {0, 1})); // Load A
+        auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
+
+        auto tagTensorB
+            = command->addOperation(rocRoller::Operations::Tensor(2, dataType, {0, 1})); // Store B
+        command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
+
+        KernelArguments runtimeArgs;
+
+        runtimeArgs.append("user0", d_a.get());
+        runtimeArgs.append("d_a_limit", (size_t)nx * ny);
+        runtimeArgs.append("d_a_size_0", (size_t)nx);
+        runtimeArgs.append("d_a_size_1", (size_t)ny);
+        runtimeArgs.append("d_a_stride_0", (size_t)(ny));
+        runtimeArgs.append("d_a_stride_1", (size_t)(1));
+
+        runtimeArgs.append("user1", d_b.get());
+        runtimeArgs.append("d_b_limit", (size_t)nx * ny);
+        runtimeArgs.append("d_b_size_0", (size_t)nx);
+        runtimeArgs.append("d_b_size_1", (size_t)ny);
+        runtimeArgs.append("d_b_stride_0", (size_t)(ny));
+        runtimeArgs.append("d_b_stride_1", (size_t)(1));
+
+        auto params = std::make_shared<CommandParameters>();
+        params->setManualKernelDimension(2);
+        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
+        params->setManualWorkitemCount({NX, NY, NZ});
+
+        auto macTileVGPR
+            = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+
+        params->setDimensionInfo(tagLoadA, macTileVGPR);
+
+        commandKernel = std::make_shared<CommandKernel>(command, "loadStoreTileFP4", params);
+        if(launch)
+        {
+            commandKernel->launchKernel(runtimeArgs.runtimeArguments());
+
+            ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), numFP4x8 * sizeof(FP4x8), hipMemcpyDefault),
+                        HasHipSuccess(0));
+
+            for(size_t i = 0; i < a.size(); ++i)
+            {
+                EXPECT_EQ(r[i], a[i]);
+            }
+        }
+    }
+
+    TEST_P(FP4MemoryInstructionTest, GPU_FP4TiledLoadStore)
+    {
+        int workitemsPerWorkgroup = 64;
+        int elementsPerWorkitem   = 8;
+
+        int macM = workitemsPerWorkgroup * elementsPerWorkitem;
+        int macN = 8;
+
+        int M = 4 * macM;
+        int N = 4 * macN;
+
+        std::shared_ptr<CommandKernel> commandKernel;
+        loadStoreTileFP4(
+            m_context, commandKernel, isLocalDevice(), M, N, macM, macN, 1, elementsPerWorkitem);
+
+        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
+
+        int numBufferLoad    = 0;
+        int numBufferLoadx1  = 0;
+        int numBufferStore   = 0;
+        int numBufferStorex1 = 0;
+        for(auto instruction : instructions)
+        {
+            if(instruction.starts_with("buffer_load"))
+                numBufferLoad++;
+            if(instruction.starts_with("buffer_load_dword "))
+                numBufferLoadx1++;
+            if(instruction.starts_with("buffer_store"))
+                numBufferStore++;
+            if(instruction.starts_with("buffer_store_dword "))
+                numBufferStorex1++;
+        }
+        EXPECT_EQ(numBufferLoad, 1);
+        EXPECT_EQ(numBufferLoadx1, 1);
+        EXPECT_EQ(numBufferStore, 1);
+        EXPECT_EQ(numBufferStorex1, 1);
+    }
+
     TEST_P(FP4MemoryInstructionTest, GPU_FP4x8BufferLoadAndStore)
     {
         int num_fp4 = 8;
@@ -191,6 +316,20 @@ namespace rocRollerTest
         {
             executeFP4x8LoadAndStore(m_context, num_fp4);
         }
+
+        auto instructions = NormalizedSourceLines(m_context->instructions()->toString(), false);
+
+        int numFlatLoad   = 0;
+        int numFlatLoadx1 = 0;
+        for(auto const& instruction : instructions)
+        {
+            if(instruction.starts_with("buffer_load"))
+                numFlatLoad++;
+            if(instruction.starts_with("buffer_load_dword "))
+                numFlatLoadx1++;
+        }
+        EXPECT_EQ(numFlatLoad, 1);
+        EXPECT_EQ(numFlatLoadx1, 1);
     }
 
     TEST_P(FP4MemoryInstructionTest, GPU_FP4x8FlatLoadAndStore)
@@ -205,7 +344,26 @@ namespace rocRollerTest
         {
             executeFP4x8LoadAndStore(m_context, num_fp4);
         }
+
+        auto instructions = NormalizedSourceLines(m_context->instructions()->toString(), false);
+
+        int numFlatLoad   = 0;
+        int numFlatLoadx1 = 0;
+        for(auto const& instruction : instructions)
+        {
+            if(instruction.starts_with("flat_load"))
+                numFlatLoad++;
+            if(instruction.starts_with("flat_load_dword "))
+                numFlatLoadx1++;
+        }
+        EXPECT_EQ(numFlatLoad, 1);
+        EXPECT_EQ(numFlatLoadx1, 1);
     }
+
+    INSTANTIATE_TEST_SUITE_P(
+        FP4MemoryInstructionTest,
+        FP4MemoryInstructionTest,
+        ::testing::Combine(::testing::Values("gfx90a:sramecc+, gfx942:sramecc+")));
 
     TEST(FP4ConversionTest, CPUConversions)
     {
@@ -229,8 +387,44 @@ namespace rocRollerTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        FP4MemoryInstructionTest,
-        FP4MemoryInstructionTest,
-        ::testing::Combine(::testing::Values("gfx90a:sramecc+, gfx942:sramecc+")));
+    TEST(FP4x8PackTest, CPUFP4x8Pack)
+    {
+        int num_fp4 = 16;
+
+        // generate FP4 values
+        std::vector<uint8_t> data(num_fp4);
+        for(int i = 0; i < num_fp4; i++)
+        {
+            data[i] = i % 16;
+        }
+
+        // pack FP4 to FP4x8
+        std::vector<uint32_t> packed(num_fp4 / numFP4PerElement);
+        packFP4x8(&packed[0], &data[0], num_fp4);
+
+        EXPECT_EQ(packed.size(), 2);
+        EXPECT_EQ(packed[0], 0b01110110010101000011001000010000);
+        EXPECT_EQ(packed[1], 0b11111110110111001011101010011000);
+
+        auto result = unpackFP4x8(&packed[0], packed.size());
+
+        for(int i = 0; i < num_fp4; i++)
+            EXPECT_EQ(data[i], result[i]);
+    }
+
+    TEST(FP4x8ConversionTest, CPUFP4x8Conversion)
+    {
+        constexpr auto cases = std::to_array<float>(
+            {0, 0.5, 1, 1.5, 2, 3, 4, 6, -0, -0.5, -1, -1.5, -2, -3, -4, -6});
+        std::vector<float> f32;
+        for(auto const& c : cases)
+            f32.push_back(c);
+
+        auto fp4x8 = f32_to_fp4x8(f32);
+
+        auto floats = fp4x8_to_f32(fp4x8);
+
+        for(int i = 0; i < floats.size(); i++)
+            EXPECT_EQ(cases[i], floats[i]);
+    }
 }
