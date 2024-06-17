@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -39,159 +39,138 @@
 #include <string>
 #include <vector>
 
-namespace
-{
+namespace {
 
 #ifndef DEFAULT_N
 constexpr std::size_t DEFAULT_N = 1024 * 1024 * 128;
 #endif
 
-constexpr unsigned int batch_size  = 10;
+constexpr unsigned int batch_size = 10;
 constexpr unsigned int warmup_size = 5;
 
 template <typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   std::true_type /*copy*/,
-                                  void* const    temporary_storage,
-                                  std::size_t&   storage_size,
-                                  const InputIt  input,
-                                  const OutputIt output,
-                                  Args&&... args)
-{
-    return ::hipcub::DeviceAdjacentDifference::SubtractLeftCopy(
-        temporary_storage, storage_size, input, output, std::forward<Args>(args)...);
+                                  void *const temporary_storage,
+                                  std::size_t &storage_size,
+                                  const InputIt input, const OutputIt output,
+                                  Args &&... args) {
+  return ::hipcub::DeviceAdjacentDifference::SubtractLeftCopy(
+      temporary_storage, storage_size, input, output,
+      std::forward<Args>(args)...);
 }
 
 template <typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::false_type /*left*/,
                                   std::true_type /*copy*/,
-                                  void* const    temporary_storage,
-                                  std::size_t&   storage_size,
-                                  const InputIt  input,
-                                  const OutputIt output,
-                                  Args&&... args)
-{
-    return ::hipcub::DeviceAdjacentDifference::SubtractRightCopy(
-        temporary_storage, storage_size, input, output, std::forward<Args>(args)...);
+                                  void *const temporary_storage,
+                                  std::size_t &storage_size,
+                                  const InputIt input, const OutputIt output,
+                                  Args &&... args) {
+  return ::hipcub::DeviceAdjacentDifference::SubtractRightCopy(
+      temporary_storage, storage_size, input, output,
+      std::forward<Args>(args)...);
 }
 
 template <typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   std::false_type /*copy*/,
-                                  void* const   temporary_storage,
-                                  std::size_t&  storage_size,
+                                  void *const temporary_storage,
+                                  std::size_t &storage_size,
                                   const InputIt input,
-                                  const OutputIt /*output*/,
-                                  Args&&... args)
-{
-    return ::hipcub::DeviceAdjacentDifference::SubtractLeft(
-        temporary_storage, storage_size, input, std::forward<Args>(args)...);
+                                  const OutputIt /*output*/, Args &&... args) {
+  return ::hipcub::DeviceAdjacentDifference::SubtractLeft(
+      temporary_storage, storage_size, input, std::forward<Args>(args)...);
 }
 
 template <typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::false_type /*left*/,
                                   std::false_type /*copy*/,
-                                  void* const   temporary_storage,
-                                  std::size_t&  storage_size,
+                                  void *const temporary_storage,
+                                  std::size_t &storage_size,
                                   const InputIt input,
-                                  const OutputIt /*output*/,
-                                  Args&&... args)
-{
-    return ::hipcub::DeviceAdjacentDifference::SubtractRight(
-        temporary_storage, storage_size, input, std::forward<Args>(args)...);
+                                  const OutputIt /*output*/, Args &&... args) {
+  return ::hipcub::DeviceAdjacentDifference::SubtractRight(
+      temporary_storage, storage_size, input, std::forward<Args>(args)...);
 }
 
 template <typename T, bool left, bool copy>
-void run_benchmark(benchmark::State& state, const std::size_t size, const hipStream_t stream)
-{
-    using output_type = T;
+void run_benchmark(benchmark::State &state, const std::size_t size,
+                   const hipStream_t stream) {
+  using output_type = T;
 
-    // Generate data
-    const std::vector<T> input = benchmark_utils::get_random_data<T>(size, 1, 100);
+  // Generate data
+  const std::vector<T> input =
+      benchmark_utils::get_random_data<T>(size, 1, 100);
 
-    T*           d_input;
-    output_type* d_output = nullptr;
-    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
-    HIP_CHECK(
-        hipMemcpy(d_input, input.data(), input.size() * sizeof(input[0]), hipMemcpyHostToDevice));
+  T *d_input;
+  output_type *d_output = nullptr;
+  HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
+  HIP_CHECK(hipMemcpy(d_input, input.data(), input.size() * sizeof(input[0]),
+                      hipMemcpyHostToDevice));
 
-    if(copy)
-    {
-        HIP_CHECK(hipMalloc(&d_output, size * sizeof(output_type)));
-    }
+  if (copy) {
+    HIP_CHECK(hipMalloc(&d_output, size * sizeof(output_type)));
+  }
 
-    static constexpr std::integral_constant<bool, left> left_tag;
-    static constexpr std::integral_constant<bool, copy> copy_tag;
+  static constexpr std::integral_constant<bool, left> left_tag;
+  static constexpr std::integral_constant<bool, copy> copy_tag;
 
-    // Allocate temporary storage
-    std::size_t temp_storage_size{};
-    void*       d_temp_storage = nullptr;
+  // Allocate temporary storage
+  std::size_t temp_storage_size{};
+  void *d_temp_storage = nullptr;
 
-    const auto launch = [&]
-    {
-        return dispatch_adjacent_difference(left_tag,
-                                            copy_tag,
-                                            d_temp_storage,
-                                            temp_storage_size,
-                                            d_input,
-                                            d_output,
-                                            size,
-                                            hipcub::Sum{},
-                                            stream);
-    };
+  const auto launch = [&] {
+    return dispatch_adjacent_difference(left_tag, copy_tag, d_temp_storage,
+                                        temp_storage_size, d_input, d_output,
+                                        size, hipcub::Sum{}, stream);
+  };
+  HIP_CHECK(launch());
+  HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
+
+  // Warm-up
+  for (size_t i = 0; i < warmup_size; i++) {
     HIP_CHECK(launch());
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
+  }
+  HIP_CHECK(hipDeviceSynchronize());
 
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
-    {
-        HIP_CHECK(launch());
+  // Run
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for (size_t i = 0; i < batch_size; i++) {
+      HIP_CHECK(launch());
     }
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipStreamSynchronize(stream));
 
-    // Run
-    for(auto _ : state)
-    {
-        auto start = std::chrono::high_resolution_clock::now();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed_seconds =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed_seconds.count());
+  }
+  state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
+  state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            HIP_CHECK(launch());
-        }
-        HIP_CHECK(hipStreamSynchronize(stream));
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds
-            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-    hipFree(d_input);
-    if(copy)
-    {
-        hipFree(d_output);
-    }
-    hipFree(d_temp_storage);
+  hipFree(d_input);
+  if (copy) {
+    hipFree(d_output);
+  }
+  hipFree(d_temp_storage);
 }
 
 } // namespace
 
 using namespace std::string_literals;
 
-#define CREATE_BENCHMARK(T, left, copy)                         \
-    benchmark::RegisterBenchmark(                               \
-        std::string("device_adjacent_difference"                \
-            "<data_type:" #T ">."                                \
-            "sub_algorithm_name:Subtract"                        \
-            + std::string(left ? "Left" : "Right")              \
-            + std::string(copy ? "Copy" : "")                   \
-        ).c_str(),                                              \
-        &run_benchmark<T, left, copy>,                          \
-        size,                                                   \
-        stream                                                  \
-        )
+#define CREATE_BENCHMARK(T, left, copy)                  \
+  benchmark::RegisterBenchmark(                          \
+      std::string("device_adjacent_difference"           \
+                  "<data_type:" #T ">."                  \
+                  "sub_algorithm_name:Subtract" +        \
+                  std::string(left ? "Left" : "Right") + \
+                  std::string(copy ? "Copy" : ""))       \
+          .c_str(),                                      \
+      &run_benchmark<T, left, copy>, size, stream)
 
 // clang-format off
 #define CREATE_BENCHMARKS(T)           \
@@ -201,63 +180,56 @@ using namespace std::string_literals;
     CREATE_BENCHMARK(T, false, true)
 // clang-format on
 
-int main(int argc, char* argv[])
-{
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.run_and_exit_if_error();
+int main(int argc, char *argv[]) {
+  cli::Parser parser(argc, argv);
+  parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+  parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+  parser.run_and_exit_if_error();
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
+  // Parse argv
+  benchmark::Initialize(&argc, argv);
+  const size_t size = parser.get<size_t>("size");
+  const int trials = parser.get<int>("trials");
 
-    // HIP
-    const hipStream_t stream = 0; // default
-    hipDeviceProp_t   devProp;
-    int               device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    
-    std::cout << "benchmark_device_adjacent_difference" << std::endl;
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
+  // HIP
+  const hipStream_t stream = 0; // default
+  hipDeviceProp_t devProp;
+  int device_id = 0;
+  HIP_CHECK(hipGetDevice(&device_id));
+  HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
 
-    using custom_float2  = benchmark_utils::custom_type<float, float>;
-    using custom_double2 = benchmark_utils::custom_type<double, double>;
+  std::cout << "benchmark_device_adjacent_difference" << std::endl;
+  std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
-    // Add benchmarks
-    const std::vector<benchmark::internal::Benchmark*> benchmarks = {
-        CREATE_BENCHMARKS(int),
-        CREATE_BENCHMARKS(std::int64_t),
+  using custom_float2 = benchmark_utils::custom_type<float, float>;
+  using custom_double2 = benchmark_utils::custom_type<double, double>;
 
-        CREATE_BENCHMARKS(uint8_t),
+  // Add benchmarks
+  const std::vector<benchmark::internal::Benchmark *> benchmarks = {
+      CREATE_BENCHMARKS(int),           CREATE_BENCHMARKS(std::int64_t),
 
-        CREATE_BENCHMARKS(float),
-        CREATE_BENCHMARKS(double),
+      CREATE_BENCHMARKS(uint8_t),
 
-        CREATE_BENCHMARKS(custom_float2),
-        CREATE_BENCHMARKS(custom_double2),
-    };
+      CREATE_BENCHMARKS(float),         CREATE_BENCHMARKS(double),
 
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
+      CREATE_BENCHMARKS(custom_float2), CREATE_BENCHMARKS(custom_double2),
+  };
+
+  // Use manual timing
+  for (auto &b : benchmarks) {
+    b->UseManualTime();
+    b->Unit(benchmark::kMillisecond);
+  }
+
+  // Force number of iterations
+  if (trials > 0) {
+    for (auto &b : benchmarks) {
+      b->Iterations(trials);
     }
+  }
 
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
+  // Run benchmarks
+  benchmark::RunSpecifiedBenchmarks();
 
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-
-    return 0;
+  return 0;
 }
