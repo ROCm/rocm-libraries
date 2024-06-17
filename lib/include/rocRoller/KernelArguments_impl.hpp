@@ -56,7 +56,7 @@ namespace rocRoller
     template <typename T>
     inline void KernelArguments::append(std::string const& argName, T value)
     {
-        if constexpr(std::is_same<T, CommandArgumentValue>::value)
+        if constexpr(std::is_same_v<T, CommandArgumentValue>)
         {
             AppendKernelArgumentsVisitor visitor{this, argName};
             visitor.call(value);

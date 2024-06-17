@@ -14,7 +14,6 @@ namespace rocRoller
         Limit,
         Size,
         Stride,
-        Format,
 
         Count
     };
