@@ -163,6 +163,11 @@ namespace GPUArchitectureGenerator
                                  rocRoller::GPUArchitectureTarget("gfx950"),
                                  rocRoller::GPUArchitectureTarget("gfx950:sramecc+"),
                              }},
+                            {rocRoller::GPUCapability::HasNaNoo,
+                             {
+                                 rocRoller::GPUArchitectureTarget("gfx942"),
+                                 rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+                             }},
                             {rocRoller::GPUCapability::HasWave64, SupportedISAs}};
 
     inline bool Is10XGPU(rocRoller::GPUArchitectureTarget const& input)

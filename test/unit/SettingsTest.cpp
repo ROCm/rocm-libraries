@@ -79,6 +79,26 @@ namespace rocRollerTest
         EXPECT_EQ(settings->get(Settings::LogLvl), Settings::LogLvl.defaultValue);
         EXPECT_EQ(settings->get(Settings::RandomSeed), Settings::RandomSeed.defaultValue);
         EXPECT_EQ(settings->get(Settings::Scheduler), Settings::Scheduler.defaultValue);
+        EXPECT_EQ(settings->get(Settings::F8ModeOption), Settings::F8ModeOption.defaultValue());
+    }
+
+    TEST_F(GenericSettings, GetDefaultValueTest)
+    {
+        auto settings = Settings::getInstance();
+
+        EXPECT_EQ(settings->getDefault(Settings::LogConsole), Settings::LogConsole.defaultValue);
+        EXPECT_EQ(settings->getDefault(Settings::SaveAssembly),
+                  Settings::SaveAssembly.defaultValue);
+        EXPECT_EQ(settings->getDefault(Settings::AssemblyFile),
+                  Settings::AssemblyFile.defaultValue);
+        EXPECT_EQ(settings->getDefault(Settings::BreakOnThrow),
+                  Settings::BreakOnThrow.defaultValue);
+        EXPECT_EQ(settings->getDefault(Settings::LogFile), Settings::LogFile.defaultValue);
+        EXPECT_EQ(settings->getDefault(Settings::LogLvl), Settings::LogLvl.defaultValue);
+        EXPECT_EQ(settings->getDefault(Settings::RandomSeed), Settings::RandomSeed.defaultValue);
+        EXPECT_EQ(settings->getDefault(Settings::Scheduler), Settings::Scheduler.defaultValue);
+        EXPECT_EQ(settings->getDefault(Settings::F8ModeOption),
+                  Settings::F8ModeOption.defaultValue());
     }
 
     TEST_F(GenericSettings, LogLevelTest)
@@ -123,6 +143,38 @@ namespace rocRollerTest
         EXPECT_EQ(fromString<LogLevel>("Verbose"), LogLevel::Verbose);
         EXPECT_EQ(fromString<LogLevel>("Debug"), LogLevel::Debug);
         EXPECT_ANY_THROW(fromString<LogLevel>("Count"));
+    }
+
+    TEST_F(GenericSettings, F8ModeTest)
+    {
+        auto settings = Settings::getInstance();
+
+        std::ostringstream out;
+        out << F8Mode::NaNoo << std::endl;
+        out << F8Mode::OCP << std::endl;
+        out << F8Mode::Count << std::endl;
+
+        std::string stringify = "";
+        stringify += toString(F8Mode::NaNoo) + '\n';
+        stringify += toString(F8Mode::OCP) + '\n';
+        stringify += toString(F8Mode::Count) + '\n';
+
+        std::string expected = R"(
+            NaNoo
+            OCP
+            Count
+            )";
+
+        EXPECT_EQ(NormalizedSource(expected), NormalizedSource(out.str()));
+        EXPECT_EQ(NormalizedSource(expected), NormalizedSource(stringify));
+
+        EXPECT_EQ(fromString<F8Mode>("NaNoo"), F8Mode::NaNoo);
+        EXPECT_EQ(fromString<F8Mode>("OCP"), F8Mode::OCP);
+        EXPECT_ANY_THROW(fromString<F8Mode>("Count"));
+
+        settings->set(Settings::F8ModeOption, F8Mode::NaNoo);
+        EXPECT_THROW(settings->set(Settings::F8ModeOption, "invalidValue"), FatalError);
+        EXPECT_EQ(settings->get(Settings::F8ModeOption), F8Mode::NaNoo);
     }
 
     TEST_F(GenericSettings, InvalidValueTest)

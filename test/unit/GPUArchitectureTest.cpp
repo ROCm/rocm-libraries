@@ -246,3 +246,19 @@ TEST(GPUArchitectureTest, TargetComparison)
     EXPECT_EQ(GPUArchitectureTarget("gfx908") == GPUArchitectureTarget("gfx908"), true);
     EXPECT_EQ(GPUArchitectureTarget("gfx90a") != GPUArchitectureTarget("gfx908"), true);
 }
+
+TEST(GPUArchitectureTest, F8Mode)
+{
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx942", GPUCapability::HasNaNoo),
+        true);
+    auto allISAs = GPUArchitectureLibrary::getInstance()->getAllSupportedISAs();
+    auto gfx942  = std::remove_if(allISAs.begin(), allISAs.end(), [](const std::string& isa) {
+        return isa.starts_with("gfx942");
+    });
+    for(auto I = allISAs.begin(); I != gfx942; I++)
+    {
+        EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(*I, GPUCapability::HasNaNoo),
+                  false);
+    }
+}

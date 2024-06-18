@@ -389,6 +389,8 @@ set(rocroller_src
  lib/source/Operations/TensorScalar.cpp
  lib/source/Operations/BlockScale.cpp
 
+ lib/source/Utilities/Settings.cpp
+
  lib/source/Schedulers/CooperativeScheduler.cpp
  lib/source/Schedulers/PriorityScheduler.cpp
  lib/source/Schedulers/RandomScheduler.cpp

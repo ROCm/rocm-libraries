@@ -388,25 +388,58 @@ namespace rocRollerTest
 
     TEST(F8Test, CPUConversions)
     {
-        auto const& FP8Values = FloatReference<rocRoller::FP8>::Values;
-        std::for_each(FP8Values.begin(), FP8Values.end(), numberConversion<rocRoller::FP8>);
+        auto settings = Settings::getInstance();
+        settings->set(Settings::F8ModeOption, F8Mode::NaNoo);
+        auto const& FP8ValuesInNaNoo = FloatReference<rocRoller::FP8>::ValuesInNaNooMode;
+        std::for_each(
+            FP8ValuesInNaNoo.begin(), FP8ValuesInNaNoo.end(), numberConversion<rocRoller::FP8>);
 
-        auto const& BF8Values = FloatReference<rocRoller::BF8>::Values;
-        std::for_each(BF8Values.begin(), BF8Values.end(), numberConversion<rocRoller::BF8>);
+        auto const& BF8ValuesInNaNoo = FloatReference<rocRoller::BF8>::ValuesInNaNooMode;
+        std::for_each(
+            BF8ValuesInNaNoo.begin(), BF8ValuesInNaNoo.end(), numberConversion<rocRoller::BF8>);
+
+        settings->set(Settings::F8ModeOption, F8Mode::OCP);
+        auto const& FP8ValuesInOCP = FloatReference<rocRoller::FP8>::ValuesInOCPMode;
+        std::for_each(
+            FP8ValuesInOCP.begin(), FP8ValuesInOCP.end(), numberConversion<rocRoller::FP8>);
+
+        auto const& BF8ValuesInOCP = FloatReference<rocRoller::BF8>::ValuesInOCPMode;
+        std::for_each(
+            BF8ValuesInOCP.begin(), BF8ValuesInOCP.end(), numberConversion<rocRoller::BF8>);
     }
 
-    template <typename F8Type>
+    template <typename F8Type, F8Mode f8Mode>
     void checkSpecialValues(float& f32_inf, float& f32_nan, float& f32_zero)
     {
-        F8Type f8_inf(f32_inf);
-        // FP8/BF8 use the same value for NaN and Inf, so we are unable to know
-        // if the value is NaN or Inf, and we choose to return NaN in both cases.
-        EXPECT_TRUE(std::isnan(f8_inf));
-        EXPECT_FALSE(std::isinf(f8_inf));
+        auto settings = Settings::getInstance();
+        settings->set(Settings::F8ModeOption, f8Mode);
+
+        F8Type f8_pos_inf(f32_inf);
+        F8Type f8_neg_inf(-f32_inf);
+        if constexpr(f8Mode == F8Mode::NaNoo)
+        {
+            // In NaNoo mode, fp8/bf8 use the same value for nan and inf, so we are unable to know
+            // if the value is nan or inf, and we choose to return nan in both cases.
+            EXPECT_TRUE(std::isnan(f8_pos_inf));
+            EXPECT_FALSE(std::isinf(f8_pos_inf));
+            EXPECT_TRUE(std::isnan(f8_neg_inf));
+            EXPECT_FALSE(std::isinf(f8_neg_inf));
+        }
+
+        if constexpr(f8Mode == F8Mode::OCP)
+        {
+            // In OCP mode, bf8 has  +/-inf & NaN as different bit patterns
+            EXPECT_FALSE(std::isnan(f8_pos_inf));
+            EXPECT_FALSE(std::isnan(f8_neg_inf));
+            if constexpr(std::is_same<F8Type, BF8>::value)
+            {
+                EXPECT_TRUE(std::isinf(f8_pos_inf));
+                EXPECT_TRUE(std::isinf(f8_neg_inf));
+            }
+        }
 
         F8Type f8_nan(f32_nan);
         EXPECT_TRUE(std::isnan(f8_nan));
-
         F8Type f8_zero(f32_zero);
         EXPECT_TRUE(std::iszero(f8_zero));
     }
@@ -429,8 +462,11 @@ namespace rocRollerTest
         EXPECT_TRUE(std::isinf(f32_inf.val));
         EXPECT_TRUE(std::isnan(f32_nan.val));
 
-        checkSpecialValues<rocRoller::FP8>(f32_inf.val, f32_nan.val, f32_zero.val);
-        checkSpecialValues<rocRoller::BF8>(f32_inf.val, f32_nan.val, f32_zero.val);
+        checkSpecialValues<rocRoller::FP8, F8Mode::NaNoo>(f32_inf.val, f32_nan.val, f32_zero.val);
+        checkSpecialValues<rocRoller::BF8, F8Mode::NaNoo>(f32_inf.val, f32_nan.val, f32_zero.val);
+
+        checkSpecialValues<rocRoller::FP8, F8Mode::OCP>(f32_inf.val, f32_nan.val, f32_zero.val);
+        checkSpecialValues<rocRoller::BF8, F8Mode::OCP>(f32_inf.val, f32_nan.val, f32_zero.val);
     }
 
     INSTANTIATE_TEST_SUITE_P(F8Test,

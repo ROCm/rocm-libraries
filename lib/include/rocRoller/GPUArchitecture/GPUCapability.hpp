@@ -89,6 +89,8 @@ namespace rocRoller
 
             MaxLdsSize,
 
+            HasNaNoo,
+
             Count,
         };
 

@@ -16,7 +16,7 @@
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-j* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
@@ -53,26 +53,25 @@ namespace rocRoller
     *  Special values:
     *                            +0        -0       INF/-INF     NaN/-NaN
     *  FP8(E4M3, bias=8)        0x00      0x00       0x80         0x80
-    *  BF8(E5M2, bias=16)       0x00      0x00       0x80         0x80
+    *  BF8(E5M2, bias=16)       0x00      0x00      +/-inf       +/-NaN
     *
     *  @tparam wm Number of bits for mantissa
     *  @tparam we Number of bits for exponent
     *  @tparam T Type (half or single precision) to be cast to f8
-    *  @tparam negative_zero_nan Bias control
+    *  @tparam has_infinity if +/inf is not NaN
+    *  @tparam is_ocp Bias control
+    *  @tparam has_negative_zero_nan Bias control
     *
     *  @param _x Floating number to be cast to f8
     *  @param stoch Stochastic rounding or not
     */
-        template <int wm, int we, typename T, bool negative_zero_nan, bool clip>
+        template <int wm, int we, typename T, bool is_ocp, bool negative_zero_nan, bool clip>
         uint8_t cast_to_f8(T _x, bool stoch, uint32_t rng)
         {
             constexpr bool is_half  = std::is_same_v<T, Half>;
             constexpr bool is_float = std::is_same_v<T, float>;
             static_assert(wm + we == 7, "the number of bits of mantissa and exponent must be 7");
             static_assert(is_half || is_float, "Only half and float can be cast to f8");
-
-            //if(sizeof(T)==2 && we==5 && !negative_zero_nan)
-            //return cast_to_f8_no_range_reduce<2, 5, Half>(_x, stoch, rng);
 
             const int mfmt = (sizeof(T) == 4) ? 23 : 10;
             uint32_t  x;
@@ -114,7 +113,6 @@ namespace rocRoller
                 }
                 else
                 {
-                    //if(__hisinf(x) || __hisnan(x))
                     if((x & 0x7C00) == 0x7C00)
                         return 0x80;
                 }
@@ -124,12 +122,12 @@ namespace rocRoller
                 if constexpr(sizeof(T) == 4)
                 {
                     if((x & 0x7F800000) == 0x7F800000)
-                        return signed_inf + (mantissa != 0 ? 1 : 0);
+                        return signed_inf + (mantissa != 0 ? ((1 << wm) - 1) : 0);
                 }
                 else
                 {
                     if((x & 0x7C00) == 0x7C00)
-                        return signed_inf + (mantissa != 0 ? 1 : 0);
+                        return signed_inf + (mantissa != 0 ? ((1 << wm) - 1) : 0);
                 }
             }
             if(x == 0)
@@ -142,7 +140,7 @@ namespace rocRoller
             // exponent and mantissa again
 
             // For IEEE bias mode, the bias is 2^(k-1) -1 where k is the width of exponent bits
-            const int f8_bias                  = (1 << (we - 1)) - 1 + (negative_zero_nan ? 1 : 0);
+            const int f8_bias                  = (1 << (we - 1)) - 1 + (is_ocp ? 0 : 1);
             const int f8_denormal_act_exponent = 1 - f8_bias; //actual exponent of f8 denormal
             // act_exponent is the actual exponent of fp32/fp16 (after subtracting bias)
             // f8_exponent is the converted f8 exponent with bias encoding
@@ -232,7 +230,7 @@ namespace rocRoller
             mantissa >>= (mfmt - wm);
 
             // above range: quantize to maximum possible float of the same sign
-            const int max_exp = (1 << we) - (negative_zero_nan ? 1 : 2);
+            const int max_exp = (1 << we) - 1;
             if(f8_exponent > max_exp)
             {
                 if(clip)
@@ -257,7 +255,7 @@ namespace rocRoller
     *
     *  Also see @ref cast_to_f8
     */
-        template <int wm, int we, typename T, bool negative_zero_nan>
+        template <int wm, int we, typename T, bool negative_zero_nan, bool has_infinity>
         T cast_from_f8(uint8_t x)
         {
             constexpr bool is_half  = std::is_same_v<T, Half>;
@@ -298,18 +296,26 @@ namespace rocRoller
             uint32_t sign     = x >> 7;
             uint32_t mantissa = x & ((1 << wm) - 1);
             int      exponent = (x & 0x7F) >> wm;
-            if constexpr(negative_zero_nan)
+
+            if(x == 0x80)
             {
-                if(x == 0x80)
+                if constexpr(negative_zero_nan)
                     return fNaN;
-            }
-            else
-            {
-                if(x == 0x80)
+                else
                     return fNeg0;
-                if(exponent == ((1 << we) - 1))
-                    return (mantissa == 0) ? (sign ? fNegInf : fInf) : fNaN;
             }
+
+            if constexpr(!negative_zero_nan)
+            {
+                if(exponent == ((1 << we) - 1))
+                {
+                    if constexpr(has_infinity)
+                        return (mantissa == 0) ? (sign ? fNegInf : fInf) : (sign ? -fNaN : fNaN);
+                    else if(mantissa == ((1 << wm) - 1))
+                        return sign ? -fNaN : fNaN;
+                }
+            }
+
             std::conditional_t<sizeof(T) == 2, uint16_t, uint32_t> retval;
             if constexpr(we == 5 && is_half && !negative_zero_nan)
             {
@@ -318,7 +324,7 @@ namespace rocRoller
             }
 
             const int exp_low_cutoff
-                = (1 << (weo - 1)) - (1 << (we - 1)) + 1 - (negative_zero_nan ? 1 : 0);
+                = (1 << (weo - 1)) - (1 << (we - 1)) - (negative_zero_nan ? 1 : 0);
 
             //subnormal input
             if(exponent == 0)
@@ -336,7 +342,7 @@ namespace rocRoller
         */
                 mantissa &= ((1 << wm) - 1);
             }
-            exponent += exp_low_cutoff - 1;
+            exponent += exp_low_cutoff;
             mantissa <<= wmo - wm;
 
             // subnormal output (occurs when T=half, we=5, negative_zero_nan=true)

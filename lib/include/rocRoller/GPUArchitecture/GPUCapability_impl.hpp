@@ -100,5 +100,7 @@ namespace rocRoller
             {"UnalignedSGPRs", Value::UnalignedSGPRs},
 
             {"MaxLdsSize", Value::MaxLdsSize},
+
+            {"HasNaNoo", Value::HasNaNoo},
     };
 }
