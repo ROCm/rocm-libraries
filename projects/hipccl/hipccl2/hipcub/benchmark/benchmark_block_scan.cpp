@@ -147,14 +147,13 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 }
 
 // IPT - items per thread
-#define CREATE_BENCHMARK(T, BS, IPT)                                                           \
-    benchmark::RegisterBenchmark((std::string("block_scan<data_type:" #T ",block_size:" #BS    \
-                                              ",items_per_thread:" #IPT ",sub_algorithm_name:" \
-                                              + algorithm_name + ">.method_name:")             \
-                                  + method_name)                                               \
-                                     .c_str(),                                                 \
-                                 &run_benchmark<Benchmark, T, BS, IPT>,                        \
-                                 stream,                                                       \
+#define CREATE_BENCHMARK(T, BS, IPT)                                                            \
+    benchmark::RegisterBenchmark(std::string("block_scan<data_type:" #T ",block_size:" #BS      \
+                                             ",items_per_thread:" #IPT ",sub_algorithm_name:"   \
+                                             + algorithm_name + ">.method_name:" + method_name) \
+                                     .c_str(),                                                  \
+                                 &run_benchmark<Benchmark, T, BS, IPT>,                         \
+                                 stream,                                                        \
                                  size)
 
 // clang-format off

@@ -419,40 +419,44 @@ void run_unique_by_key_benchmark(benchmark::State& state,
     hipFree(d_temp_storage);
 }
 
-#define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p)                                        \
-    benchmark::RegisterBenchmark(                                                       \
-        ("device_select_flagged<data_type:" #T ",flag_type:" #F ",output_data_type:" #T \
-         ",selected_output_data_type:unsigned int>.(probability:" #p ")"),              \
-        &run_flagged_benchmark<T, F>,                                                   \
-        size,                                                                           \
-        stream,                                                                         \
+#define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p)                                                   \
+    benchmark::RegisterBenchmark(                                                                  \
+        std::string("device_select_flagged<data_type:" #T ",flag_type:" #F ",output_data_type:" #T \
+                    ",selected_output_data_type:unsigned int>.(probability:" #p ")")               \
+            .c_str(),                                                                              \
+        &run_flagged_benchmark<T, F>,                                                              \
+        size,                                                                                      \
+        stream,                                                                                    \
         p)
 
-#define CREATE_SELECT_IF_BENCHMARK(T, p)                                                      \
-    benchmark::RegisterBenchmark(("device_select_if<data_type:" #T ",output_data_type:" #T    \
-                                  ",selected_output_data_type:unsigned int>.(probability:" #p \
-                                  ")"),                                                       \
-                                 &run_selectop_benchmark<T>,                                  \
-                                 size,                                                        \
-                                 stream,                                                      \
-                                 p)
+#define CREATE_SELECT_IF_BENCHMARK(T, p)                                             \
+    benchmark::RegisterBenchmark(                                                    \
+        std::string("device_select_if<data_type:" #T ",output_data_type:" #T         \
+                    ",selected_output_data_type:unsigned int>.(probability:" #p ")") \
+            .c_str(),                                                                \
+        &run_selectop_benchmark<T>,                                                  \
+        size,                                                                        \
+        stream,                                                                      \
+        p)
 
-#define CREATE_UNIQUE_BENCHMARK(T, p)                                                          \
-    benchmark::RegisterBenchmark(("device_select_unique<data_type:" #T ",output_data_type:" #T \
-                                  ",selected_output_data_type:unsigned int>.(probability:" #p  \
-                                  ")"),                                                        \
-                                 &run_unique_benchmark<T>,                                     \
-                                 size,                                                         \
-                                 stream,                                                       \
-                                 p)
+#define CREATE_UNIQUE_BENCHMARK(T, p)                                                \
+    benchmark::RegisterBenchmark(                                                    \
+        std::string("device_select_unique<data_type:" #T ",output_data_type:" #T     \
+                    ",selected_output_data_type:unsigned int>.(probability:" #p ")") \
+            .c_str(),                                                                \
+        &run_unique_benchmark<T>,                                                    \
+        size,                                                                        \
+        stream,                                                                      \
+        p)
 
-#define CREATE_UNIQUE_BY_KEY_BENCHMARK(K, V, p)                                 \
-    benchmark::RegisterBenchmark(                                               \
-        ("device_select_unique_by_key<Key data_type:" #K ",value_data_type:" #V \
-         ",selected_output_data_type:unsigned int>.(probability:" #p ")"),      \
-        &run_unique_by_key_benchmark<K, V>,                                     \
-        size,                                                                   \
-        stream,                                                                 \
+#define CREATE_UNIQUE_BY_KEY_BENCHMARK(K, V, p)                                            \
+    benchmark::RegisterBenchmark(                                                          \
+        std::string("device_select_unique_by_key<Key data_type:" #K ",value_data_type:" #V \
+                    ",selected_output_data_type:unsigned int>.(probability:" #p ")")       \
+            .c_str(),                                                                      \
+        &run_unique_by_key_benchmark<K, V>,                                                \
+        size,                                                                              \
+        stream,                                                                            \
         p)
 
 #define BENCHMARK_FLAGGED_TYPE(type, value)                  \
