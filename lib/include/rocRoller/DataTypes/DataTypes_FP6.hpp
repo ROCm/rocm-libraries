@@ -26,10 +26,12 @@
 
 #pragma once
 
-#include "DataTypes_Half.hpp"
+#include <cassert>
 #include <cinttypes>
 #include <cmath>
+
 #include <iostream>
+#include <vector>
 
 #define ROCROLLER_USE_FP6
 

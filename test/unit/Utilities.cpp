@@ -195,4 +195,22 @@ namespace rocRoller
     {
         CPUMM_F8(D, C, A, B, M, N, K, alpha, beta, transA, transB);
     }
+
+    void CPUMM(std::vector<float>&        D,
+               const std::vector<float>&  C,
+               const std::vector<FP6x16>& A,
+               const std::vector<FP6x16>& B,
+               int                        M,
+               int                        N,
+               int                        K,
+               float                      alpha,
+               float                      beta,
+               bool                       transA,
+               bool                       transB)
+    {
+        auto c_A = unpackFP6x16(A);
+        auto c_B = unpackFP6x16(B);
+        CPUMM(D, C, c_A, c_B, M, N, K, 1.0, 0.0, transA, transB);
+    }
+
 }

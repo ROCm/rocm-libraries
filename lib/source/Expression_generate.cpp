@@ -685,11 +685,6 @@ namespace rocRoller
                 lhs  = atile.vgpr;
                 r1hs = btile.vgpr;
 
-                AssertFatal(lhs->variableType() == r1hs->variableType(),
-                            "Input types must match ",
-                            ShowValue(lhs->variableType()),
-                            ShowValue(r1hs->variableType()));
-
                 AssertFatal(!lhs->variableType().isPointer(),
                             "Input must not be a pointer. ",
                             ShowValue(lhs->variableType()));
@@ -709,8 +704,8 @@ namespace rocRoller
                         Register::AllocationOptions::FullyContiguous());
                 }
 
-                auto mm = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(
-                    m_context, accType, lhs->variableType().dataType);
+                auto mm
+                    = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(m_context);
 
                 r2hs = std::get<Register::ValuePtr>(*expr.r2hs);
                 co_yield mm->mul(dest, lhs, r1hs, r2hs, M, N, K, B);

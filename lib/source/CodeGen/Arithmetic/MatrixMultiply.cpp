@@ -9,133 +9,173 @@ namespace rocRoller
 {
     namespace InstructionGenerators
     {
-        RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::Float);
-        RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::Halfx2);
-        RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::FP8x4);
-        RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::BF8x4);
+        RegisterComponent(MatrixMultiplyGenerator);
 
         const std::string MatrixMultiply::Basename = "MatrixMultiply";
 
-        template <DataType DATATYPE>
-        std::string typeStr()
+        std::string typeStr(auto dtype)
         {
-            if constexpr(DATATYPE == DataType::Float)
+            if(dtype == DataType::Float)
                 return "f32";
-            else if constexpr(DATATYPE == DataType::Halfx2)
+            else if(dtype == DataType::Halfx2)
                 return "f16";
-            else if constexpr(DATATYPE == DataType::FP8x4)
+            else if(dtype == DataType::FP8x4)
                 return "_fp8_fp8";
-            else if constexpr(DATATYPE == DataType::BF8x4)
+            else if(dtype == DataType::BF8x4)
                 return "_bf8_bf8";
-            else
-                return "unknown";
+            else if(dtype == DataType::FP6x16)
+                return "_f8f6f4";
+
+            Throw<FatalError>("Unable to determine MFMA type: unhandled data type.",
+                              ShowValue(dtype));
         }
 
-        template <DataType ACC, DataType INPUT>
-        Generator<Instruction> MatrixMultiplyGenerator<ACC, INPUT>::mul(Register::ValuePtr dest,
-                                                                        Register::ValuePtr lhs,
-                                                                        Register::ValuePtr r1hs,
-                                                                        Register::ValuePtr r2hs,
-                                                                        int                M,
-                                                                        int                N,
-                                                                        int                K,
-                                                                        int                B)
+        std::string modifierStr(auto dtype)
         {
-            AssertFatal(lhs != nullptr);
-            AssertFatal(r1hs != nullptr);
-            AssertFatal(r2hs != nullptr);
+            if(dtype == DataType::FP8x4)
+                return "0b000";
+            if(dtype == DataType::BF8x4)
+                return "0b001";
+            if(dtype == DataType::FP6x16)
+                return "0b010";
+            // if(dtype == DataType::BF6x16)
+            //     return "0b011";
+
+            Throw<FatalError>("Unable to determine MFMA modifier: unhandled data type.",
+                              ShowValue(dtype));
+        }
+
+        Generator<Instruction> MatrixMultiplyGenerator::mul(Register::ValuePtr D,
+                                                            Register::ValuePtr A,
+                                                            Register::ValuePtr B,
+                                                            Register::ValuePtr C,
+                                                            int                M,
+                                                            int                N,
+                                                            int                K,
+                                                            int                BATCH)
+        {
+            AssertFatal(A != nullptr);
+            AssertFatal(B != nullptr);
+            AssertFatal(C != nullptr);
+
+            auto typeA = A->variableType().dataType;
+            auto typeB = B->variableType().dataType;
+            auto typeC = C->variableType().dataType;
+            auto typeD = C->variableType().dataType;
+            if(D != nullptr)
+                typeD = D->variableType().dataType;
 
             auto const lanesPerWavefront = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultWavefrontSize);
-            auto const packing = DataTypeInfo::Get(INPUT).packing;
-            AssertFatal(M > 0 && N > 0 && K > 0 && B > 0 && lanesPerWavefront > 0,
+            auto const packingA = DataTypeInfo::Get(typeA).packing;
+            auto const packingB = DataTypeInfo::Get(typeB).packing;
+            AssertFatal(M > 0 && N > 0 && K > 0 && BATCH > 0 && lanesPerWavefront > 0,
                         "Invalid inputs",
                         ShowValue(M),
                         ShowValue(N),
                         ShowValue(K),
-                        ShowValue(B),
+                        ShowValue(BATCH),
                         ShowValue(lanesPerWavefront));
-            AssertFatal(lhs->valueCount() * packing == (size_t)M * K * B / lanesPerWavefront,
+            AssertFatal(A->valueCount() * packingA == (size_t)M * K * BATCH / lanesPerWavefront,
                         "A matrix size mismatch",
                         ShowValue(M),
                         ShowValue(K),
-                        ShowValue(B),
+                        ShowValue(BATCH),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(M * K * B / lanesPerWavefront),
-                        ShowValue(lhs->valueCount()),
-                        ShowValue(packing));
-            AssertFatal(r1hs->valueCount() * packing == (size_t)K * N * B / lanesPerWavefront,
+                        ShowValue(M * K * BATCH / lanesPerWavefront),
+                        ShowValue(A->valueCount()),
+                        ShowValue(packingA));
+            AssertFatal(B->valueCount() * packingB == (size_t)K * N * BATCH / lanesPerWavefront,
                         "B matrix size mismatch",
                         ShowValue(K),
                         ShowValue(N),
-                        ShowValue(B),
+                        ShowValue(BATCH),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(K * N * B / lanesPerWavefront),
-                        ShowValue(r1hs->valueCount()),
-                        ShowValue(packing));
-            AssertFatal(r2hs->valueCount() == (size_t)M * N * B / lanesPerWavefront,
+                        ShowValue(K * N * BATCH / lanesPerWavefront),
+                        ShowValue(B->valueCount()),
+                        ShowValue(packingA));
+            AssertFatal(C->valueCount() == (size_t)M * N * BATCH / lanesPerWavefront,
                         "C matrix size mismatch",
                         ShowValue(M),
                         ShowValue(N),
-                        ShowValue(B),
+                        ShowValue(BATCH),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(M * N * B / lanesPerWavefront),
-                        ShowValue(r2hs->valueCount()));
-            AssertFatal(dest->valueCount() == (size_t)M * N * B / lanesPerWavefront,
+                        ShowValue(M * N * BATCH / lanesPerWavefront),
+                        ShowValue(C->valueCount()));
+            AssertFatal(D->valueCount() == (size_t)M * N * BATCH / lanesPerWavefront,
                         "D matrix size mismatch",
                         ShowValue(M),
                         ShowValue(N),
-                        ShowValue(B),
+                        ShowValue(BATCH),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(M * N * B / lanesPerWavefront),
-                        ShowValue(dest->valueCount()));
-            AssertFatal(lhs->variableType() == INPUT,
-                        "Invalid LHS (A) data type",
-                        ShowValue(lhs->variableType()));
-            AssertFatal(lhs->regType() == Register::Type::Vector,
+                        ShowValue(M * N * BATCH / lanesPerWavefront),
+                        ShowValue(D->valueCount()));
+            AssertFatal(A->regType() == Register::Type::Vector,
                         "Invalid LHS (A) register type",
-                        ShowValue(lhs->regType()));
-            AssertFatal(r1hs->variableType() == INPUT,
-                        "Invalid R1HS (B) data type",
-                        ShowValue(r1hs->variableType()));
-            AssertFatal(r1hs->regType() == Register::Type::Vector,
-                        "Invalid R1HS (B) register type",
-                        ShowValue(r1hs->regType()));
-            AssertFatal(r2hs->variableType() == ACC,
-                        "Invalid R2HS (C) data type",
-                        ShowValue(r2hs->variableType()));
-            AssertFatal(dest->regType() == Register::Type::Accumulator,
-                        "Invalid DEST (D) register type",
-                        ShowValue(dest->regType()));
-            AssertFatal(dest->variableType() == ACC,
-                        "Invalid DEST (D) data type",
-                        ShowValue(dest->variableType()));
+                        ShowValue(A->regType()));
+            AssertFatal(B->regType() == Register::Type::Vector,
+                        "Invalid B (B) register type",
+                        ShowValue(B->regType()));
+            AssertFatal(C->variableType() == D->variableType(),
+                        "Invalid D/R2HS (D/C) data types",
+                        ShowValue(C->variableType()));
+            AssertFatal(D->regType() == Register::Type::Accumulator,
+                        "Invalid D (D) register type",
+                        ShowValue(A->regType()));
 
             std::string inputType;
             std::string modifier;
-            if constexpr(INPUT == DataType::FP8x4)
+
+            if(typeA == typeB)
             {
-                if((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128))
+                // Uniform type for A and B.  Result will be similar
+                // to "f16", and may be "_f8f6f4".
+                inputType = typeStr(typeA);
+
+                // For F8 types, result will be "_fp8_fp8" (or "bf8").
+                // Change this to "_f8f6f4" for 32x32x64 and 16x16x128
+                // tile sizes.
+                if(typeA == DataType::FP8x4 || typeA == DataType::BF8x4)
                 {
-                    inputType = "_f8f6f4";
-                    // TODO: input matrix types of f8f6f4 can be fp8/bf8, fp6/bf6, fp4 or
-                    //       mixed, where the types are indicated in cbsz and blgp. Here
-                    //       only fp8 is handled and has to be enhanced to support rest types.
-                    std::string cbsz = "cbsz:[0]"; // Matrix A type
-                    std::string blgp = "blgp:[0]"; // Matrix B type
-                    modifier         = concatenate(cbsz, " ", blgp);
-                }
-                else
-                {
-                    inputType = "_fp8_fp8";
+                    if((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128))
+                        inputType = "_f8f6f4";
                 }
             }
             else
-                inputType = typeStr<INPUT>();
+            {
+                Throw<FatalError>(
+                    "Mixed A/B MFMA types not supported yet.", ShowValue(typeA), ShowValue(typeB));
+                // // Mixed types for A and B.  Only works for lower
+                // // precisions.
+                // auto segA = DataTypeInfo::Get(typeA).segmentVariableType;
+                // auto segB = DataTypeInfo::Get(typeB).segmentVariableType;
+                // AssertFatal(DataTypeInfo::Get(segA).elementBits <= 8,
+                //             "Mixed MFMA inputs (A) must be low precision.",
+                //             ShowValue(typeA));
+                // AssertFatal(DataTypeInfo::Get(segB).elementBits <= 8,
+                //             "Mixed MFMA inputs (B) must be low precision.",
+                //             ShowValue(typeB));
+                // inputType = "_f8f6f4";
+            }
 
-            auto mfma = concatenate(
-                "v_mfma_", typeStr<ACC>(), "_", M, "x", N, "x", K, std::move(inputType));
-            co_yield_(Instruction(mfma, {dest}, {lhs, r1hs, r2hs}, {modifier}, ""));
+            if(inputType == "_f8f6f4")
+            {
+                if(!((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128)))
+                {
+                    Throw<FatalError>(
+                        "Invalid F8F6F4 MFMA size.", ShowValue(M), ShowValue(N), ShowValue(K));
+                }
+
+                modifier = concatenate("cbsz:", modifierStr(typeA), " blgp:", modifierStr(typeB));
+
+                // TODO Remove register allocation hack.
+                A = A->withFixedRegisters(8);
+                B = B->withFixedRegisters(8);
+            }
+
+            auto mfma = concatenate("v_mfma_", typeStr(typeD), "_", M, "x", N, "x", K, inputType);
+
+            co_yield_(Instruction(mfma, {D}, {A, B, C}, {modifier}, ""));
         }
     }
 }

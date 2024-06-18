@@ -223,6 +223,25 @@ namespace rocRoller
             ValuePtr negate() const;
 
             /**
+             * Directly set the number of registers.  DO NOT CALL THIS.
+             *
+             * Used as a workaround.  When rendering the GPR string
+             * during code-generation, if the allocated registers are
+             * contigous, `numRegisters` contiguous registers are
+             * emmitted.
+             *
+             * For example, suppose A has six registers allocated.
+             * Normally it's GPR string would be, eg, `v[20:25]`.
+             * After
+             *
+             *    A = A->withFixedRegisters(8);
+             *
+             * it still has six registers in it's allocation, but it's
+             * GPR string will be `v[20:27]`.
+             */
+            ValuePtr withFixedRegisters(uint numRegisters) const;
+
+            /**
              * Return subset of 32bit registers from multi-register values; always DataType::Raw32.
              *
              * For example,
@@ -333,6 +352,8 @@ namespace rocRoller
             std::string m_name;
 
             std::string m_label;
+
+            int m_fakedRegisters = 0;
 
             CommandArgumentValue m_literalValue;
 

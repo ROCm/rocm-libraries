@@ -231,6 +231,7 @@ set(rocroller_src
  lib/source/Context.cpp
  lib/source/DataTypes.cpp
  lib/source/DataTypes_F8_Utils.cpp
+ lib/source/DataTypes_FP6.cpp
  lib/source/DataTypes_FP4.cpp
  lib/source/Error.cpp
  lib/source/ExecutableKernel.cpp

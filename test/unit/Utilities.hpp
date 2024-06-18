@@ -181,6 +181,18 @@ namespace rocRoller
                float                     beta,
                bool                      transA = false,
                bool                      transB = true);
+
+    void CPUMM(std::vector<float>&        D,
+               const std::vector<float>&  C,
+               const std::vector<FP6x16>& A,
+               const std::vector<FP6x16>& B,
+               int                        M,
+               int                        N,
+               int                        K,
+               float                      alpha,
+               float                      beta,
+               bool                       transA = false,
+               bool                       transB = true);
 }
 
 /*

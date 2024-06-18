@@ -42,7 +42,7 @@ namespace rocRoller
             /**
              * Context, accumulation type, input type.
              */
-            using Argument = std::tuple<ContextPtr, DataType, DataType>;
+            using Argument = ContextPtr;
             using Base     = MatrixMultiply;
 
             static const std::string Basename;
@@ -66,7 +66,6 @@ namespace rocRoller
                 = 0;
         };
 
-        template <DataType ACC, DataType INPUT>
         struct MatrixMultiplyGenerator : public MatrixMultiply
         {
             using Base = MatrixMultiply;
@@ -78,15 +77,13 @@ namespace rocRoller
 
             static bool Match(Argument const& arg)
             {
-                auto atype = std::get<1>(arg);
-                auto vtype = std::get<2>(arg);
-                return atype == ACC && vtype == INPUT;
+                return true;
             }
 
             static MatrixMultiplyPtr Build(Argument const& arg)
             {
-                auto context = std::get<0>(arg);
-                return std::make_shared<MatrixMultiplyGenerator<ACC, INPUT>>(context);
+                auto context = arg;
+                return std::make_shared<MatrixMultiplyGenerator>(context);
             }
 
             virtual Generator<Instruction> mul(Register::ValuePtr dest,

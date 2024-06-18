@@ -3094,7 +3094,7 @@ namespace ExpressionTest
             1,
             32 * 64 / 64 / 4, // M * K / 64 / 4
             64 * 32 / 64 / 4, // K * N / 64 / 4
-            R"(v_mfma_f32_32x32x64_f8f6f4 a[0:15], v[0:7], v[8:15], a[0:15] cbsz:[0] blgp:[0])");
+            R"(v_mfma_f32_32x32x64_f8f6f4 a[0:15], v[0:7], v[8:15], a[0:15] cbsz:0b000 blgp:0b000)");
     }
 
     TEST_P(ARCH_ExpressionTest, MFMA_F32_16x16x128_F8F6F4)
@@ -3108,7 +3108,7 @@ namespace ExpressionTest
             1,
             16 * 128 / 64 / 4, // M * K / 64 / 4
             128 * 16 / 64 / 4, // K * N / 64 / 4
-            R"(v_mfma_f32_16x16x128_f8f6f4 a[0:3], v[0:7], v[8:15], a[0:3] cbsz:[0] blgp:[0])");
+            R"(v_mfma_f32_16x16x128_f8f6f4 a[0:3], v[0:7], v[8:15], a[0:3] cbsz:0b000 blgp:0b000)");
     }
 
     INSTANTIATE_TEST_SUITE_P(ARCH_ExpressionTests, ARCH_ExpressionTest, supportedISATuples());

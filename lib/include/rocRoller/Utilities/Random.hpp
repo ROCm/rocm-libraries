@@ -16,6 +16,18 @@
 
 namespace rocRoller
 {
+    template <typename T>
+    struct UnsegmentedTypeOf
+    {
+        typedef T type;
+    };
+
+    template <>
+    struct UnsegmentedTypeOf<FP6>
+    {
+        typedef FP6x16 type;
+    };
+
     /**
      * Random vector generator.
      *
@@ -41,7 +53,7 @@ namespace rocRoller
          * between `min` and `max`.
          */
         template <typename T, typename R>
-        std::vector<T> vector(uint nx, R min, R max);
+        std::vector<typename UnsegmentedTypeOf<T>::type> vector(uint nx, R min, R max);
 
         template <std::integral T>
         T next(T min, T max);

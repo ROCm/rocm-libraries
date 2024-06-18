@@ -7,15 +7,20 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context.hpp>
+#include <rocRoller/DataTypes/DataTypes_FP6.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"
+#include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 
 using namespace rocRoller;
 
 namespace rocRollerTest
 {
+    const size_t numFP6PerFP6x16   = 16;
+    const size_t numBytesPerFP6x16 = 12;
+
     class FP6Test : public GPUContextFixture
     {
     };
@@ -23,77 +28,35 @@ namespace rocRollerTest
     const size_t numFP6PerElement   = 16;
     const size_t numBytesPerElement = 12;
 
-    std::vector<uint32_t> pack_to_fp6x16(std::vector<uint8_t> data)
-    {
-        // append 0 when number of floats is not multiple times of 16
-        // while(data.size() % numFP6PerElement != 0)
-        //     data.push_back(0);
-        AssertFatal(data.size() % numFP6PerElement == 0,
-                    "Number of FP6 values must be multiple times of 16");
-
-        int num_fp6x16 = data.size() / numFP6PerElement;
-
-        std::vector<uint32_t> fp6x16;
-
-        for(int i = 0; i < num_fp6x16; i++)
-        {
-            uint32_t packed1 = 0;
-            uint32_t packed2 = 0;
-            uint32_t packed3 = 0;
-            int      start   = i * numFP6PerElement;
-            packed3          = data[start] | (data[start + 1] << 6) | (data[start + 2] << 12)
-                      | (data[start + 3] << 18) | (data[start + 4] << 24) | (data[start + 5] << 30);
-            packed2 = (data[start + 5] >> 2) | (data[start + 6] << 4) | (data[start + 7] << 10)
-                      | (data[start + 8] << 16) | (data[start + 9] << 22)
-                      | (data[start + 10] << 28);
-            packed1 = (data[start + 10] >> 4) | (data[start + 11] << 2) | (data[start + 12] << 8)
-                      | (data[start + 13] << 14) | (data[start + 14] << 20)
-                      | (data[start + 15] << 26);
-            fp6x16.push_back(packed1);
-            fp6x16.push_back(packed2);
-            fp6x16.push_back(packed3);
-        }
-        return fp6x16;
-    }
-
-    std::vector<uint8_t> unpack_fp6x16(std::vector<uint32_t> fp6x16_data)
-    {
-        std::vector<uint8_t> fp6;
-        for(int i = 0; i < fp6x16_data.size() / 3; i++)
-        {
-            for(int j = 0; j < numFP6PerElement; j++)
-            {
-                int      offset = (j * 6) % 32;
-                int      idx    = 2 - (j * 6) / 32;
-                uint32_t value  = (fp6x16_data[i * 3 + idx] >> offset) & 0x3F;
-                if(32 - offset < 6)
-                {
-                    uint32_t mask = (idx == 2) ? 0xF : 0x3;
-                    value |= ((fp6x16_data[i * 3 + idx - 1] & mask) << (32 - offset));
-                }
-                fp6.push_back(value);
-            }
-        }
-        return fp6;
-    }
-
-    // /**
-    //  * Packs FP6 to FP6x16 on CPU,
-    //  * buffer_load that into FP6x16 to GPU, buffer_store to CPU
-    // */
+    /*
+     * Packs FP6 to FP6x16 on CPU, buffer_load that into FP6x16 to
+     * GPU, buffer_store to CPU
+     */
     void genFP6x16BufferLoadAndStore(rocRoller::ContextPtr m_context, int num_fp6)
     {
-        int N = (num_fp6 / numFP6PerElement) * numBytesPerElement;
+        int N = (num_fp6 / numFP6PerFP6x16) * numBytesPerFP6x16;
 
         auto k = m_context->kernel();
 
         k->setKernelName("BufferLoadAndStoreFP6x16");
         k->setKernelDimensions(1);
 
+        auto command = std::make_shared<Command>();
+
+        auto resultTag  = command->allocateTag();
+        auto resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::UInt32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
+
+        auto aTag  = command->allocateTag();
+        auto aExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::UInt32, PointerType::PointerGlobal}, aTag, ArgumentType::Value));
+
+        k->addArgument({"result",
+                        {DataType::UInt32, PointerType::PointerGlobal},
+                        DataDirection::WriteOnly,
+                        resultExpr});
         k->addArgument(
-            {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
-        k->addArgument(
-            {"a", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::ReadOnly});
+            {"a", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::ReadOnly, aExpr});
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
@@ -105,7 +68,7 @@ namespace rocRollerTest
 
             auto vgprSerial = m_context->kernel()->workitemIndex()[0];
 
-            int  size = num_fp6 / numFP6PerElement;
+            int  size = num_fp6 / numFP6PerFP6x16;
             auto v_a  = Register::Value::Placeholder(m_context,
                                                     Register::Type::Vector,
                                                     DataType::FP6x16,
@@ -118,7 +81,7 @@ namespace rocRollerTest
             co_yield bufDesc->setup();
             co_yield bufDesc->setBasePointer(s_a);
             co_yield bufDesc->setSize(Register::Value::Literal(N));
-            co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
+            co_yield bufDesc->setOptions(Register::Value::Literal(0x00020000));
 
             auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
@@ -132,22 +95,34 @@ namespace rocRollerTest
         m_context->schedule(k->amdgpu_metadata());
     }
 
-    // /**
-    //  * Packs FP6 to FP6x16 on CPU,
-    //  * flat_load that into FP6x16 to GPU, flat_store to CPU
-    // */
+    /**
+     * Packs FP6 to FP6x16 on CPU, flat_load that into FP6x16 to GPU,
+     * flat_store to CPU
+     */
     void genFP6x16FlatLoadAndStore(rocRoller::ContextPtr m_context, int num_fp6)
     {
-        int  N = (num_fp6 / numFP6PerElement) * numBytesPerElement;
+        int  N = (num_fp6 / numFP6PerFP6x16) * numBytesPerFP6x16;
         auto k = m_context->kernel();
 
         k->setKernelName("FlatLoadAndStoreFP6x16");
         k->setKernelDimensions(1);
 
+        auto command = std::make_shared<Command>();
+
+        auto resultTag  = command->allocateTag();
+        auto resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::UInt32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
+
+        auto aTag  = command->allocateTag();
+        auto aExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::UInt32, PointerType::PointerGlobal}, aTag, ArgumentType::Value));
+
+        k->addArgument({"result",
+                        {DataType::UInt32, PointerType::PointerGlobal},
+                        DataDirection::WriteOnly,
+                        resultExpr});
         k->addArgument(
-            {"result", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
-        k->addArgument(
-            {"a", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::ReadOnly});
+            {"a", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::ReadOnly, aExpr});
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
@@ -169,7 +144,7 @@ namespace rocRollerTest
                                                {DataType::UInt32, PointerType::PointerGlobal},
                                                1);
 
-            int  size = num_fp6 / numFP6PerElement;
+            int  size = num_fp6 / numFP6PerFP6x16;
             auto v_a  = Register::Value::Placeholder(m_context,
                                                     Register::Type::Vector,
                                                     DataType::FP6x16,
@@ -195,26 +170,25 @@ namespace rocRollerTest
 
     void executeFP6x16FlatLoadAndStore(rocRoller::ContextPtr m_context, int num_fp6)
     {
-        // generate fp6 values
         std::vector<uint8_t> data(num_fp6);
         for(uint32_t i = 0; i < num_fp6; i++)
         {
             data[i] = (i + 10) % 64;
         }
 
-        std::vector<uint32_t> fp6x16_data = pack_to_fp6x16(data);
+        auto fp6x16_data = packFP6x16(data);
 
         std::vector<uint32_t> result(fp6x16_data.size());
 
-        genFP6x16BufferLoadAndStore(m_context, num_fp6);
+        genFP6x16FlatLoadAndStore(m_context, num_fp6);
         CommandKernel commandKernel(m_context);
 
         auto d_a      = make_shared_device(fp6x16_data);
         auto d_result = make_shared_device<uint32_t>(result.size());
 
         KernelArguments runtimeArgs;
-        runtimeArgs.append("result", d_result.get());
-        runtimeArgs.append("a", d_a.get());
+        runtimeArgs.append<void*>("result", d_result.get());
+        runtimeArgs.append<void*>("a", d_a.get());
 
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
@@ -223,26 +197,22 @@ namespace rocRollerTest
                 result.data(), d_result.get(), sizeof(uint32_t) * result.size(), hipMemcpyDefault),
             HasHipSuccess(0));
 
-        auto actual_fp6 = unpack_fp6x16(result);
+        auto actual_fp6 = unpackFP6x16(result);
         for(int i = 0; i < data.size(); i++)
         {
             EXPECT_EQ(actual_fp6[i], data[i]);
         }
     }
 
-    /**
-     *
-     */
     void executeFP6x16BufferLoadAndStore(rocRoller::ContextPtr m_context, int num_fp6)
     {
-        // generate fp6 values
         std::vector<uint8_t> data(num_fp6);
         for(uint32_t i = 0; i < num_fp6; i++)
         {
             data[i] = (i + 10) % 64;
         }
 
-        std::vector<uint32_t> fp6x16_data = pack_to_fp6x16(data);
+        std::vector<uint32_t> fp6x16_data = packFP6x16(data);
 
         std::vector<uint32_t> result(fp6x16_data.size());
 
@@ -263,26 +233,27 @@ namespace rocRollerTest
                 result.data(), d_result.get(), sizeof(uint32_t) * result.size(), hipMemcpyDefault),
             HasHipSuccess(0));
 
-        auto actual_fp6 = unpack_fp6x16(result);
+        auto actual_fp6 = unpackFP6x16(result);
         for(int i = 0; i < data.size(); i++)
         {
             EXPECT_EQ(actual_fp6[i], data[i]);
         }
     }
 
-    void MacroTileFP6(ContextPtr m_context,
-                      size_t     nx, // tensor size x
-                      size_t     ny, // tensor size y
-                      int        m, // macro tile size x
-                      int        n, // macro tile size y
-                      int        t_m = 1, // thread tile size x
-                      int        t_n = 1 // thread tile size y
-    )
+    void loadStoreTileFP6(ContextPtr                      m_context,
+                          std::shared_ptr<CommandKernel>& commandKernel,
+                          bool                            launch,
+                          size_t                          nx, // tensor size x
+                          size_t                          ny, // tensor size y
+                          int                             m, // macro tile size x
+                          int                             n, // macro tile size y
+                          int                             t_m = 1, // thread tile size x
+                          int                             t_n = 1) // thread tile size y
     {
-        AssertFatal(nx % numFP6PerElement == 0, "Invalid FP6 Dimensions");
+        AssertFatal(nx % numFP6PerFP6x16 == 0, "Invalid FP6 Dimensions");
 
         int numFP6    = nx * ny;
-        int numFP6x16 = numFP6 / numFP6PerElement;
+        int numFP6x16 = numFP6 / numFP6PerFP6x16;
 
         unsigned int workgroup_size_x = m / t_m;
         unsigned int workgroup_size_y = n / t_n;
@@ -298,34 +269,32 @@ namespace rocRollerTest
         {
             data[i] = (i + 10) % 64;
         }
-        auto                  a = pack_to_fp6x16(data);
-        std::vector<uint32_t> b(a.size());
-        std::vector<uint32_t> r(a.size());
+        auto a = packFP6x16(data);
 
         auto d_a = make_shared_device(a);
-        auto d_b = make_shared_device(b);
+        auto d_b = make_shared_device<uint32_t>(a.size());
 
         auto command  = std::make_shared<Command>();
         auto dataType = DataType::FP6;
 
         auto tagTensorA
-            = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // Load A
+            = command->addOperation(rocRoller::Operations::Tensor(2, dataType, {0, 1})); // Load A
         auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
         auto tagTensorB
-            = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // Store B
+            = command->addOperation(rocRoller::Operations::Tensor(2, dataType, {0, 1})); // Store B
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
 
         KernelArguments runtimeArgs;
 
-        runtimeArgs.append("user0", d_a.get());
+        runtimeArgs.append("a", d_a.get());
         runtimeArgs.append("d_a_limit", (size_t)nx * ny);
         runtimeArgs.append("d_a_size_0", (size_t)nx);
         runtimeArgs.append("d_a_size_1", (size_t)ny);
         runtimeArgs.append("d_a_stride_0", (size_t)(ny));
         runtimeArgs.append("d_a_stride_1", (size_t)(1));
 
-        runtimeArgs.append("user1", d_b.get());
+        runtimeArgs.append("result", d_b.get());
         runtimeArgs.append("d_b_limit", (size_t)nx * ny);
         runtimeArgs.append("d_b_size_0", (size_t)nx);
         runtimeArgs.append("d_b_size_1", (size_t)ny);
@@ -342,16 +311,20 @@ namespace rocRollerTest
 
         params->setDimensionInfo(tagLoadA, macTileVGPR);
 
-        CommandKernel commandKernel(command, "MacroTileFP6", params);
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-
-        ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), numFP6x16 * sizeof(FP6x16), hipMemcpyDefault),
-                    HasHipSuccess(0));
-
-        // verify result
-        for(size_t i = 0; i < a.size(); ++i)
+        commandKernel = std::make_shared<CommandKernel>(command, "loadStoreTileFP6", params);
+        if(launch)
         {
-            EXPECT_EQ(r[i], a[i]);
+            commandKernel->launchKernel(runtimeArgs.runtimeArguments());
+
+            auto r = std::vector<uint32_t>(a.size());
+            ASSERT_THAT(
+                hipMemcpy(r.data(), d_b.get(), numFP6x16 * sizeof(FP6x16), hipMemcpyDefault),
+                HasHipSuccess(0));
+
+            for(size_t i = 0; i < a.size(); ++i)
+            {
+                EXPECT_EQ(r[i], a[i]);
+            }
         }
     }
 
@@ -380,18 +353,61 @@ namespace rocRollerTest
         else
         {
             genFP6x16FlatLoadAndStore(m_context, num_fp6);
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
+            auto assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
+
+        auto instructions = NormalizedSourceLines(m_context->instructions()->toString(), false);
+
+        int numFlatLoad   = 0;
+        int numFlatLoadx3 = 0;
+        for(auto const& instruction : instructions)
+        {
+            if(instruction.starts_with("flat_load"))
+                numFlatLoad++;
+            if(instruction.starts_with("flat_load_dwordx3"))
+                numFlatLoadx3++;
+        }
+        EXPECT_EQ(numFlatLoad, 1);
+        EXPECT_EQ(numFlatLoadx3, 1);
     }
 
     TEST_P(FP6Test, GPU_FP6TiledLoadStore)
     {
-        if(!isLocalDevice())
-            return;
+        int workitemsPerWorkgroup = 64;
+        int elementsPerWorkitem   = 16;
 
-        // test one macrotile of FP6
-        MacroTileFP6(m_context, 16, 16, 16, 16);
+        int macM = workitemsPerWorkgroup * elementsPerWorkitem;
+        int macN = 16;
+
+        int M = 4 * macM;
+        int N = 4 * macN;
+
+        std::shared_ptr<CommandKernel> commandKernel;
+        loadStoreTileFP6(
+            m_context, commandKernel, isLocalDevice(), M, N, macM, macN, 1, elementsPerWorkitem);
+
+        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
+
+        int numBufferLoad    = 0;
+        int numBufferLoadx3  = 0;
+        int numBufferStore   = 0;
+        int numBufferStorex3 = 0;
+        for(auto instruction : instructions)
+        {
+            if(instruction.starts_with("buffer_load"))
+                numBufferLoad++;
+            if(instruction.starts_with("buffer_load_dwordx3"))
+                numBufferLoadx3++;
+            if(instruction.starts_with("buffer_store"))
+                numBufferStore++;
+            if(instruction.starts_with("buffer_store_dwordx3"))
+                numBufferStorex3++;
+        }
+        EXPECT_EQ(numBufferLoad, 1);
+        EXPECT_EQ(numBufferLoadx3, 1);
+        EXPECT_EQ(numBufferStore, 1);
+        EXPECT_EQ(numBufferStorex3, 1);
     }
 
     TEST(FP6Test, CPUConversions)
@@ -426,22 +442,47 @@ namespace rocRollerTest
 
     TEST(FP6Test, CPUPack)
     {
-        // test pack and unpack FP6x16 on CPU
-        int                  num_fp6 = 64;
-        std::vector<uint8_t> data(num_fp6);
-        for(uint32_t i = 0; i < num_fp6; i++)
+        std::vector<uint8_t> fp6bytes(64);
+        for(int i = 0; i < fp6bytes.size(); i++)
         {
-            data[i] = (i + 10) % 64;
+            fp6bytes[i] = (i + 10) % 64;
         }
-        auto fp6x16_data = pack_to_fp6x16(data);
-        auto result      = unpack_fp6x16(fp6x16_data);
-        for(int i = 0; i < data.size(); i++)
+
+        auto fp6x16 = packFP6x16(fp6bytes);
+        auto result = unpackFP6x16(fp6x16);
+        for(int i = 0; i < fp6bytes.size(); i++)
         {
-            EXPECT_EQ(result[i], data[i]);
+            EXPECT_EQ(result[i], fp6bytes[i]);
         }
+
+        auto floats = std::to_array<float>({0.125f,
+                                            0.25f,
+                                            0.375f,
+                                            0.5f,
+                                            0.625f,
+                                            0.75f,
+                                            0.875f,
+                                            1.f,
+                                            1.125f,
+                                            1.25f,
+                                            1.375f,
+                                            1.5f,
+                                            1.625f,
+                                            1.75f,
+                                            1.875f,
+                                            2.f});
+        ASSERT_EQ(floats.size(), 16);
+
+        fp6bytes.clear();
+        for(auto v : floats)
+            fp6bytes.push_back(cast_to_fp6(v, FP6_FMT));
+        fp6x16 = packFP6x16(fp6bytes);
+
+        EXPECT_EQ(fp6x16.size(), 3);
+        EXPECT_EQ(fp6x16[0], 0b10000101000100000011000010000001);
+        EXPECT_EQ(fp6x16[1], 0b10110010100010010010000001110001);
+        EXPECT_EQ(fp6x16[2], 0b01000000111100111000110100110000);
     }
 
-    INSTANTIATE_TEST_SUITE_P(FP6Test,
-                             FP6Test,
-                             ::testing::Combine(::testing::Values("gfx942:sramecc+")));
+    INSTANTIATE_TEST_SUITE_P(FP6Test, FP6Test, supportedISATuples());
 }

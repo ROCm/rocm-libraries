@@ -27,6 +27,8 @@
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 
+#include <rocRoller/DataTypes/DataTypes_FP6.hpp>
+
 using namespace rocRoller;
 
 namespace MatrixMultiplyTest
@@ -71,6 +73,16 @@ namespace MatrixMultiplyTest
                     GTEST_SKIP();
                 }
             }
+            if constexpr(std::is_same_v<T, FP6>)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+                // TODO Remove this when we can generate FP8/F6/F4 kernels on archs that don't support FP8
+                if(!isLocalDevice())
+                {
+                    GTEST_SKIP();
+                }
+            }
 
             auto dataTypeAB = TypeInfo<T>::Var.dataType;
             auto dataTypeD  = TypeInfo<ACC>::Var.dataType;
@@ -88,6 +100,11 @@ namespace MatrixMultiplyTest
             {
                 mac_k = 2 * wave_k;
                 K     = 64;
+            }
+            if constexpr(std::is_same_v<T, FP6>)
+            {
+                mac_k = 2 * wave_k;
+                K     = 4 * mac_k;
             }
 
             AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
@@ -136,7 +153,7 @@ namespace MatrixMultiplyTest
 
             CommandArguments commandArgs = command->createArguments();
 
-            commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_A.get());
+            commandArgs.setArgument(tagTensorA, ArgumentType::Value, (uint8_t*)d_A.get());
             commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
             commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
             commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
@@ -151,7 +168,7 @@ namespace MatrixMultiplyTest
                 commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
             }
 
-            commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_B.get());
+            commandArgs.setArgument(tagTensorB, ArgumentType::Value, (uint8_t*)d_B.get());
             commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
             commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
             commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
@@ -679,6 +696,114 @@ namespace MatrixMultiplyTest
             matrixMultiplyMacroTile<FP8, float>(16, 16, 32, 1, 2.e-6, true, "T", "N");
         else
             matrixMultiplyMacroTile<BF8, float>(16, 16, 32, 1, 2.e-6, true, "T", "N");
+    }
+
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP6_32x32x64_TN)
+    {
+        matrixMultiplyMacroTile<FP6, float>(32, 32, 64, 1, 2.e-6, true, "T", "N");
+
+        if(!commandKernel)
+            return;
+
+        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
+
+        int mac_m = 32;
+        int mac_n = 32;
+        int mac_k = 128;
+
+        auto localEndA = 6 * mac_m * mac_k / 8;
+
+        int numLocalWrite = 0;
+        int numLocalRead  = 0;
+        int numMFMA       = 0;
+
+        std::vector<int> expectedLocalWriteOffsets{
+            0, 16, 32, localEndA, localEndA + 16, localEndA + 32};
+
+        std::vector<int> expectedLocalReadOffsets{
+            0, 16, localEndA, localEndA + 16, 48, 64, localEndA + 48, localEndA + 64};
+
+        for(auto const& instruction : instructions)
+        {
+            if(instruction.starts_with("v_mfma_f32_32x32x64_f8f6f4"))
+                numMFMA++;
+
+            // Count the number of ds_write_b128 instructions and make sure they have
+            // the expected offset values
+            if(instruction.starts_with("ds_write_b128"))
+            {
+                if(expectedLocalWriteOffsets[numLocalWrite] > 0)
+                    EXPECT_TRUE(instruction.ends_with(
+                        "offset:" + std::to_string(expectedLocalWriteOffsets[numLocalWrite])));
+                numLocalWrite++;
+            }
+
+            if(instruction.starts_with("ds_read_b128") || instruction.starts_with("ds_read_b64"))
+            {
+                if(expectedLocalReadOffsets[numLocalRead] > 0)
+                    EXPECT_TRUE(instruction.ends_with(
+                        "offset:" + std::to_string(expectedLocalReadOffsets[numLocalRead])));
+                numLocalRead++;
+            }
+        }
+
+        EXPECT_EQ(numLocalWrite, 6);
+        EXPECT_EQ(numLocalRead, 8);
+        EXPECT_EQ(numMFMA, 2);
+    }
+
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP6_16x16x128_TN)
+    {
+        matrixMultiplyMacroTile<FP6, float>(16, 16, 128, 1, 2.e-6, true, "T", "N");
+
+        if(!commandKernel)
+            return;
+
+        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
+
+        int mac_m = 16;
+        int mac_n = 16;
+        int mac_k = 256;
+
+        auto localEndA = 6 * mac_m * mac_k / 8;
+
+        int numLocalWrite = 0;
+        int numLocalRead  = 0;
+        int numMFMA       = 0;
+
+        std::vector<int> expectedLocalWriteOffsets{
+            0, 16, 32, localEndA, localEndA + 16, localEndA + 32};
+
+        std::vector<int> expectedLocalReadOffsets{
+            0, 16, localEndA, localEndA + 16, 96, 112, localEndA + 96, localEndA + 112};
+
+        for(auto const& instruction : instructions)
+        {
+            if(instruction.starts_with("v_mfma_f32_16x16x128_f8f6f4"))
+                numMFMA++;
+
+            // Count the number of ds_write_b128 instructions and make sure they have
+            // the expected offset values
+            if(instruction.starts_with("ds_write_b128"))
+            {
+                if(expectedLocalWriteOffsets[numLocalWrite] > 0)
+                    EXPECT_TRUE(instruction.ends_with(
+                        "offset:" + std::to_string(expectedLocalWriteOffsets[numLocalWrite])));
+                numLocalWrite++;
+            }
+
+            if(instruction.starts_with("ds_read_b128") || instruction.starts_with("ds_read_b64"))
+            {
+                if(expectedLocalReadOffsets[numLocalRead] > 0)
+                    EXPECT_TRUE(instruction.ends_with(
+                        "offset:" + std::to_string(expectedLocalReadOffsets[numLocalRead])));
+                numLocalRead++;
+            }
+        }
+
+        EXPECT_EQ(numLocalWrite, 6);
+        EXPECT_EQ(numLocalRead, 8);
+        EXPECT_EQ(numMFMA, 2);
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
