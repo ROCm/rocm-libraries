@@ -22,6 +22,7 @@ Documentation for rocThrust available at
 
 ### Known issues
 * `thrust::reduce_by_key` outputs are not bit-wise reproducible, as run-to-run results for pseudo-associative reduction operators (e.g. floating-point arithmetic operators) are not deterministic on the same device.
+* Note that currently, rocThrust memory allocation is performed in such a way that most algorithmic API functions cannot be called from within hipGraphs.
 
 ## rocThrust 3.0.0 for ROCm 6.0
 
