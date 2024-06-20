@@ -151,7 +151,7 @@ namespace rocRoller
     CommandKernel::CommandKernel(ContextPtr context)
         : m_context(context)
     {
-        m_executableKernel = m_context->instructions()->getExecutableKernel();
+        loadKernel();
     }
 
     CommandKernel::CommandKernel(CommandPtr command, std::string name)
@@ -159,21 +159,29 @@ namespace rocRoller
         , m_preParameters(std::make_shared<CommandParameters>())
     {
         generateKernel(name);
+        loadKernel();
     }
 
     CommandKernel::CommandKernel(CommandPtr                         command,
                                  std::string                        name,
                                  std::shared_ptr<CommandParameters> preParameters,
                                  std::shared_ptr<CommandParameters> postParameters,
-                                 std::shared_ptr<KernelOptions>     kernelOptions)
+                                 std::shared_ptr<KernelOptions>     kernelOptions,
+                                 ContextPtr                         context)
         : m_command(command)
         , m_preParameters(preParameters)
         , m_postParameters(postParameters)
         , m_kernelOptions(kernelOptions)
+        , m_context(context)
     {
         AssertFatal(m_preParameters);
 
         generateKernel(name);
+
+        if(!context)
+            loadKernel();
+        else
+            assembleKernel();
     }
 
     CommandKernel::CommandKernel(CommandPtr                      command,
@@ -185,7 +193,7 @@ namespace rocRoller
         , m_preParameters(std::make_shared<CommandParameters>())
     {
         generateKernelSource();
-        assembleKernel();
+        loadKernel();
     }
 
     KernelGraph::KernelGraph CommandKernel::getKernelGraph() const
@@ -222,7 +230,10 @@ namespace rocRoller
             m_kernelOptions = std::make_shared<KernelOptions>();
         }
 
-        m_context = Context::ForDefaultHipDevice(name, *m_kernelOptions);
+        if(!m_context)
+        {
+            m_context = Context::ForDefaultHipDevice(name, *m_kernelOptions);
+        }
 
         // TODO: Determine the correct kernel dimensions
         if(m_preParameters->getManualKernelDimension() > 0)
@@ -357,6 +368,13 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::assembleKernel");
 
+        m_context->instructions()->assemble();
+    }
+
+    void CommandKernel::loadKernel()
+    {
+        TIMER(t, "CommandKernel::loadKernel");
+
         m_executableKernel = m_context->instructions()->getExecutableKernel();
     }
 
@@ -366,7 +384,6 @@ namespace rocRoller
 
         generateKernelGraph(name);
         generateKernelSource();
-        assembleKernel();
     }
 
     bool CommandKernel::matchesPredicates(/* args */) const
@@ -392,6 +409,8 @@ namespace rocRoller
         auto kargs = getKernelArguments(args);
         auto inv   = getKernelInvocation(args);
 
+        if(!m_executableKernel)
+            loadKernel();
         m_executableKernel->executeKernel(kargs, inv, timer, iteration);
     }
 

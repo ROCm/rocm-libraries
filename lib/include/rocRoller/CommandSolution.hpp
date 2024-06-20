@@ -133,7 +133,8 @@ namespace rocRoller
                       std::string                        name,
                       std::shared_ptr<CommandParameters> preParams,
                       std::shared_ptr<CommandParameters> postParams    = nullptr,
-                      std::shared_ptr<KernelOptions>     kernelOptions = nullptr);
+                      std::shared_ptr<KernelOptions>     kernelOptions = nullptr,
+                      ContextPtr                         ctx           = nullptr);
 
         CommandKernel(CommandPtr                      command,
                       ContextPtr                      ctx,
@@ -220,6 +221,7 @@ namespace rocRoller
         Generator<Instruction> kernelInstructions();
 
         void assembleKernel();
+        void loadKernel();
     };
 
     class CommandSolution
