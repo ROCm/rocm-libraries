@@ -15,38 +15,44 @@ namespace rocRoller
 
         std::string typeStr(auto dtype)
         {
-            if(dtype == DataType::Float)
+            switch(dtype)
+            {
+            case DataType::Float:
                 return "f32";
-            else if(dtype == DataType::Halfx2)
+            case DataType::Halfx2:
                 return "f16";
-            else if(dtype == DataType::FP8x4)
+            case DataType::FP8x4:
                 return "_fp8_fp8";
-            else if(dtype == DataType::BF8x4)
+            case DataType::BF8x4:
                 return "_bf8_bf8";
-            else if(dtype == DataType::FP6x16)
+            case DataType::FP6x16:
+            case DataType::BF6x16:
+            case DataType::FP4x8:
                 return "_f8f6f4";
-            else if(dtype == DataType::FP4x8)
-                return "_f8f6f4";
-
-            Throw<FatalError>("Unable to determine MFMA type: unhandled data type.",
-                              ShowValue(dtype));
+            default:
+                Throw<FatalError>("Unable to determine MFMA type: unhandled data type.",
+                                  ShowValue(dtype));
+            }
         }
 
         std::string modifierStr(auto dtype)
         {
-            if(dtype == DataType::FP8x4)
+            switch(dtype)
+            {
+            case DataType::FP8x4:
                 return "0b000";
-            if(dtype == DataType::BF8x4)
+            case DataType::BF8x4:
                 return "0b001";
-            if(dtype == DataType::FP6x16)
+            case DataType::FP6x16:
                 return "0b010";
-            // if(dtype == DataType::BF6x16)
-            //     return "0b011";
-            if(dtype == DataType::FP4x8)
+            case DataType::BF6x16:
+                return "0b011";
+            case DataType::FP4x8:
                 return "0b100";
-
-            Throw<FatalError>("Unable to determine MFMA modifier: unhandled data type.",
-                              ShowValue(dtype));
+            default:
+                Throw<FatalError>("Unable to determine MFMA modifier: unhandled data type.",
+                                  ShowValue(dtype));
+            }
         }
 
         Generator<Instruction> MatrixMultiplyGenerator::mul(Register::ValuePtr D,

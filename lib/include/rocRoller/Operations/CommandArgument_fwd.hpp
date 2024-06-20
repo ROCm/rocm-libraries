@@ -24,6 +24,7 @@ namespace rocRoller
         FP8,
         BF8,
         FP6,
+        BF6,
         FP4,
         bool,
         // int16_t*,
@@ -39,6 +40,7 @@ namespace rocRoller
         FP8*,
         BF8*,
         FP6*,
+        BF6*,
         FP4*>;
 
     template <typename T>

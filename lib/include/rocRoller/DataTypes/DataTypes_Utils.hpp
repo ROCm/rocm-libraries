@@ -15,4 +15,11 @@ namespace rocRoller
     std::vector<uint32_t> f32_to_fp4x8(std::vector<float> f32);
     std::vector<float>    fp4x8_to_f32(std::vector<uint32_t> f4x8);
 
+    void                  packF6x16(uint32_t*, uint8_t const*, int);
+    std::vector<uint32_t> packF6x16(std::vector<uint8_t> const&);
+
+    std::vector<uint8_t> unpackF6x16(std::vector<uint32_t> const&);
+
+    std::vector<float> unpackFP6x16(std::vector<FP6x16> const&);
+    std::vector<float> unpackBF6x16(std::vector<BF6x16> const&);
 }

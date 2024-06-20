@@ -7,7 +7,7 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context.hpp>
-#include <rocRoller/DataTypes/DataTypes_FP4_Utils.hpp>
+#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"

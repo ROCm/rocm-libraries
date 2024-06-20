@@ -113,6 +113,7 @@ namespace rocRoller
             Convert<DataType::FP8x4>,
             Convert<DataType::BF8x4>,
             Convert<DataType::FP6x16>,
+            Convert<DataType::BF6x16>,
             Convert<DataType::FP4x8>,
             Convert<DataType::Float>,
             Convert<DataType::Double>,

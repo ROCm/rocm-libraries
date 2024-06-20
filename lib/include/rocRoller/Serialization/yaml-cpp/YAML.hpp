@@ -183,6 +183,14 @@ namespace rocRoller
         }
 
         template <>
+        inline void EmitterOutput::output(BF6& obj)
+        {
+            std::stringstream ss;
+            ss << obj;
+            *emitter << ss.str();
+        }
+
+        template <>
         inline void EmitterOutput::output(FP4& obj)
         {
             std::stringstream ss;
@@ -466,6 +474,28 @@ namespace YAML
         }
 
         static bool decode(const Node& node, rocRoller::FP6& rhs)
+        {
+            if(!node.IsSequence() || node.size() != 1)
+            {
+                return false;
+            }
+
+            rhs.data = node[0].as<decltype(rhs.data)>();
+            return true;
+        }
+    };
+
+    template <>
+    struct convert<rocRoller::BF6>
+    {
+        static Node encode(const rocRoller::BF6& rhs)
+        {
+            Node node;
+            node.push_back(rhs.data);
+            return node;
+        }
+
+        static bool decode(const Node& node, rocRoller::BF6& rhs)
         {
             if(!node.IsSequence() || node.size() != 1)
             {

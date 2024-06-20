@@ -27,9 +27,6 @@
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 
-#include <rocRoller/DataTypes/DataTypes_FP4.hpp>
-#include <rocRoller/DataTypes/DataTypes_FP6.hpp>
-
 using namespace rocRoller;
 
 namespace MatrixMultiplyTest
