@@ -28,6 +28,12 @@ namespace rocRoller
         typedef FP6x16 type;
     };
 
+    template <>
+    struct UnsegmentedTypeOf<FP4>
+    {
+        typedef FP4x8 type;
+    };
+
     /**
      * Random vector generator.
      *

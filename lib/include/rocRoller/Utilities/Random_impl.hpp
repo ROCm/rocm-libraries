@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rocRoller/DataTypes/DataTypes_FP4_Utils.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP6_Utils.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 
@@ -27,6 +28,13 @@ namespace rocRoller
         {
             std::vector<FP6x16> y(nx / 16);
             packFP6x16((uint32_t*)y.data(), (uint8_t const*)x.data(), nx);
+            return y;
+        }
+
+        if constexpr(std::is_same_v<T, FP4>)
+        {
+            std::vector<FP4x8> y(nx / 8);
+            packFP4x8((uint32_t*)y.data(), (uint8_t const*)x.data(), nx);
             return y;
         }
 

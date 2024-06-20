@@ -399,14 +399,14 @@ namespace rocRollerTest
         }
 
         // pack FP4 to FP4x8
-        std::vector<uint32_t> packed(num_fp4 / numFP4PerElement);
-        packFP4x8(&packed[0], &data[0], num_fp4);
+        // std::vector<uint32_t> packed(num_fp4 / numFP4PerElement);
+        std::vector<uint32_t> packed = packFP4x8(data);
 
         EXPECT_EQ(packed.size(), 2);
         EXPECT_EQ(packed[0], 0b01110110010101000011001000010000);
         EXPECT_EQ(packed[1], 0b11111110110111001011101010011000);
 
-        auto result = unpackFP4x8(&packed[0], packed.size());
+        auto result = unpackFP4x8(packed);
 
         for(int i = 0; i < num_fp4; i++)
             EXPECT_EQ(data[i], result[i]);

@@ -25,6 +25,8 @@ namespace rocRoller
                 return "_bf8_bf8";
             else if(dtype == DataType::FP6x16)
                 return "_f8f6f4";
+            else if(dtype == DataType::FP4x8)
+                return "_f8f6f4";
 
             Throw<FatalError>("Unable to determine MFMA type: unhandled data type.",
                               ShowValue(dtype));
@@ -40,6 +42,8 @@ namespace rocRoller
                 return "0b010";
             // if(dtype == DataType::BF6x16)
             //     return "0b011";
+            if(dtype == DataType::FP4x8)
+                return "0b100";
 
             Throw<FatalError>("Unable to determine MFMA modifier: unhandled data type.",
                               ShowValue(dtype));
