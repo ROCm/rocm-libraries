@@ -350,9 +350,6 @@ namespace rocRoller
                                                     concatenate("For ", op.assertName));
                         co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
 
-                        co_yield Instruction::Wait(WaitCount::Zero(
-                            "DEBUG: Wait after branch", m_context->targetArchitecture()));
-
                         co_yield Instruction::Label(passedLabel,
                                                     concatenate("For ", op.assertName));
                         co_yield Instruction::Unlock(
