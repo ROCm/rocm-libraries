@@ -3,33 +3,33 @@
 
 namespace rocRoller
 {
-    static uint8_t getlow(uint8_t twoFp4)
+    uint8_t getLow(uint8_t twoFp4)
     {
         uint32_t ret = twoFp4 & 0xf;
         uint8_t  fp4 = ret;
         return fp4;
     }
 
-    static uint8_t gethigh(uint8_t twoFp4)
+    uint8_t getHigh(uint8_t twoFp4)
     {
         uint32_t ret = (twoFp4 >> 4) & 0xf;
         uint8_t  fp4 = ret;
         return fp4;
     }
 
-    static uint8_t getFp4(uint8_t twoFp4, int high)
+    uint8_t getFp4(uint8_t twoFp4, int high)
     {
         if(high == 1)
         {
-            return gethigh(twoFp4);
+            return getHigh(twoFp4);
         }
         else
         {
-            return getlow(twoFp4);
+            return getLow(twoFp4);
         }
     }
 
-    static void setlow(uint8_t* twoFp4, uint8_t fp4)
+    void setLow(uint8_t* twoFp4, uint8_t fp4)
     {
         uint32_t value = fp4;
         *twoFp4        = *twoFp4 & 0xf0;
@@ -37,7 +37,7 @@ namespace rocRoller
         *twoFp4        = *twoFp4 | value;
     }
 
-    static void sethigh(uint8_t* twoFp4, uint8_t fp4)
+    void setHigh(uint8_t* twoFp4, uint8_t fp4)
     {
         uint32_t value = fp4;
         *twoFp4        = *twoFp4 & 0x0f;
@@ -46,64 +46,25 @@ namespace rocRoller
         *twoFp4        = *twoFp4 | value;
     }
 
-    static void setFp4(uint8_t* twoFp4, uint8_t value, int high)
+    uint8_t getFp4(const uint8_t* const buffer, int index)
     {
-        if(high == 1)
-        {
-            sethigh(twoFp4, value);
-        }
-        else
-        {
-            setlow(twoFp4, value);
-        }
-    }
-
-    // Library function that gets fp4 from matrix
-    static uint8_t getFp4(
-        const uint8_t* const buffer, int m, int n, int i, int j, int rowmajor, bool debug = false)
-    {
-        int index = 0;
-        if(rowmajor == 1)
-        {
-            index = i * n + j;
-        }
-        else
-        {
-            index = j * m + i;
-        }
-        int high = index % 2;
-
+        int     high   = index % 2;
         uint8_t twoFp4 = buffer[index / 2];
         uint8_t ret    = getFp4(twoFp4, high);
-        if(debug)
-        {
-            printf("m:%d, n:%d, i:%d, j:%d, index:%d, rowmajor:%d, ret:%01x\n",
-                   m,
-                   n,
-                   i,
-                   j,
-                   index,
-                   rowmajor,
-                   ret);
-        }
         return ret;
     }
 
-    // Library function that sets fp4 to matrix
-    static void setFp4(uint8_t* buffer, uint8_t value, int m, int n, int i, int j, int rowmajor)
+    void setFp4(uint8_t* buffer, uint8_t value, int index)
     {
-        int index = 0;
-        if(rowmajor == 1)
+        int high = index % 2;
+        if(high == 1)
         {
-            index = i * n + j;
+            setHigh(buffer + index / 2, value);
         }
         else
         {
-            index = j * m + i;
+            setLow(buffer + index / 2, value);
         }
-        int high = index % 2;
-
-        setFp4(buffer + index / 2, value, high);
     }
 
     template <typename T>
@@ -113,7 +74,7 @@ namespace rocRoller
 
         for(int i = 0; i < n * 8; ++i)
         {
-            uint8_t value = getFp4(reinterpret_cast<uint8_t const*>(x), 0, 0, i, 0, 0);
+            uint8_t value = getFp4(reinterpret_cast<uint8_t const*>(x), i);
             if constexpr(std::is_same_v<T, uint8_t>)
                 rv[i] = value;
             else if constexpr(std::is_same_v<T, float>)
@@ -141,8 +102,10 @@ namespace rocRoller
 
     void packFP4x8(uint32_t* out, uint8_t const* data, int n)
     {
+        AssertFatal(n % 8 == 0, "Number of F4 values must be a multiple of 8.");
+        std::memset(out, 0, 4 * n / 8);
         for(int i = 0; i < n; ++i)
-            setFp4(reinterpret_cast<uint8_t*>(out), data[i], 0, 0, i, 0, 0);
+            setFp4(reinterpret_cast<uint8_t*>(out), data[i], i);
         return;
     }
 
@@ -244,7 +207,7 @@ namespace rocRoller
     template <typename DstType, typename SrcType>
     std::vector<DstType> unpackF6x16(uint32_t const* x, size_t n)
     {
-        AssertFatal(n % 3 == 0, "Number of F6x16 registers must be a multiple 3.");
+        AssertFatal(n % 3 == 0, "Number of F6x16 registers must be a multiple of 3.");
         auto rv = std::vector<DstType>(n / 3 * 16);
         for(int i = 0; i < n / 3 * 16; ++i)
         {
@@ -278,8 +241,8 @@ namespace rocRoller
 
     void packF6x16(uint32_t* out, uint8_t const* data, int n)
     {
-        AssertFatal(n % 16 == 0, "Number of F6 values must be a multiple 16.");
-
+        AssertFatal(n % 16 == 0, "Number of F6 values must be a multiple of 16.");
+        std::memset(out, 0, 6 * n / 8);
         for(int i = 0; i < n; ++i)
             setF6(reinterpret_cast<uint8_t*>(out), data[i], i);
     }

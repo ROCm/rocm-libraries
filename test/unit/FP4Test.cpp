@@ -25,9 +25,9 @@ namespace rocRollerTest
     const size_t numValuesPerByte = 2;
     const size_t numFP4PerElement = 8;
 
-    // /**
-    //  * buffer_load that into FP4x8 to GPU, buffer_store to CPU
-    // */
+    /*
+     * buffer_load into FP4x8 to GPU, buffer_store to CPU
+     */
     void genFP4x8BufferLoadAndStore(rocRoller::ContextPtr m_context, int num_fp4)
     {
         AssertFatal(num_fp4 % numFP4PerElement == 0,
@@ -81,9 +81,9 @@ namespace rocRollerTest
         m_context->schedule(k->amdgpu_metadata());
     }
 
-    // /**
-    //  * flat_load that into FP4x8 to GPU, flat_store to CPU
-    // */
+    /*
+     * flat_load into FP4x8 to GPU, flat_store to CPU
+     */
     void genFP4x8FlatLoadAndStore(rocRoller::ContextPtr m_context, int num_fp4)
     {
         AssertFatal(num_fp4 % numFP4PerElement == 0,
@@ -144,9 +144,6 @@ namespace rocRollerTest
         m_context->schedule(k->amdgpu_metadata());
     }
 
-    /**
-     *
-     */
     void executeFP4x8LoadAndStore(rocRoller::ContextPtr m_context, int num_fp4)
     {
         AssertFatal(num_fp4 % numFP4PerElement == 0,
@@ -360,10 +357,9 @@ namespace rocRollerTest
         EXPECT_EQ(numFlatLoadx1, 1);
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        FP4MemoryInstructionTest,
-        FP4MemoryInstructionTest,
-        ::testing::Combine(::testing::Values("gfx90a:sramecc+, gfx942:sramecc+")));
+    INSTANTIATE_TEST_SUITE_P(FP4MemoryInstructionTest,
+                             FP4MemoryInstructionTest,
+                             supportedISATuples());
 
     TEST(FP4ConversionTest, CPUConversions)
     {
@@ -391,15 +387,12 @@ namespace rocRollerTest
     {
         int num_fp4 = 16;
 
-        // generate FP4 values
         std::vector<uint8_t> data(num_fp4);
         for(int i = 0; i < num_fp4; i++)
         {
             data[i] = i % 16;
         }
 
-        // pack FP4 to FP4x8
-        // std::vector<uint32_t> packed(num_fp4 / numFP4PerElement);
         std::vector<uint32_t> packed = packFP4x8(data);
 
         EXPECT_EQ(packed.size(), 2);
