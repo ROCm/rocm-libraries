@@ -448,7 +448,7 @@ void run_segmented_benchmark(benchmark::State&     state,
     if(WS <= device_warp_size)                                                                     \
     {                                                                                              \
         benchmarks.push_back(benchmark::RegisterBenchmark(                                         \
-            std::string("warp_merge_sort<data_type:" #T "block_size:" #BS ",warp_size:" #WS        \
+            std::string("warp_merge_sort<data_type:" #T ",block_size:" #BS ",warp_size:" #WS       \
                         ",items_per_thread:" #IPT ">.sub_algorithm_name:"                          \
                         + name)                                                                    \
                 .c_str(),                                                                          \
