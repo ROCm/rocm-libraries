@@ -214,8 +214,9 @@ namespace MatrixMultiplyTest
             auto postParams = std::make_shared<CommandParameters>();
             postParams->setManualWavefrontCount({1u, 1u});
 
+            setKernelOptions(*kernelOptions);
             commandKernel = std::make_shared<CommandKernel>(
-                command, "MatrixMultiplyMacroTile", params, postParams, kernelOptions, m_context);
+                command, testKernelName(), params, postParams, kernelOptions, m_context);
 
             if(isLocalDevice())
             {
@@ -694,52 +695,40 @@ namespace MatrixMultiplyTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
-        matrixMultiplyMacroTile<FP8, float>(32, 32, 64, 1, 5.e-6, true, "T", "N");
+        bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
+        if(isFP8)
+            matrixMultiplyMacroTile<FP8, float>(32, 32, 64, 1, 5.e-6, true, "T", "N");
+        else
+            matrixMultiplyMacroTile<BF8, float>(32, 32, 64, 1, 5.e-6, true, "T", "N");
 
         std::string generatedCode = m_context->instructions()->toString();
 
         EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), 2);
         EXPECT_EQ(countSubstring(generatedCode, "v_mfma_f32_32x32x64_f8f6f4"), 2);
-        EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 blgp:0b000"), 2);
+        if(isFP8)
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 blgp:0b000"), 2);
+        else
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 blgp:0b001"), 2);
     }
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileFP8_16x16x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
-        matrixMultiplyMacroTile<FP8, float>(16, 16, 128, 1, 5.e-6, true, "T", "N");
+        bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
+        if(isFP8)
+            matrixMultiplyMacroTile<FP8, float>(16, 16, 128, 1, 5.e-6, true, "T", "N");
+        else
+            matrixMultiplyMacroTile<BF8, float>(16, 16, 128, 1, 5.e-6, true, "T", "N");
 
         std::string generatedCode = m_context->instructions()->toString();
 
         EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), 2);
         EXPECT_EQ(countSubstring(generatedCode, "v_mfma_f32_16x16x128_f8f6f4"), 2);
-        EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 blgp:0b000"), 2);
-    }
-
-    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileBF8_32x32x64_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-
-        matrixMultiplyMacroTile<BF8, float>(32, 32, 64, 1, 5.e-6, true, "T", "N");
-
-        std::string generatedCode = m_context->instructions()->toString();
-
-        EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), 2);
-        EXPECT_EQ(countSubstring(generatedCode, "v_mfma_f32_32x32x64_f8f6f4"), 2);
-        EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 blgp:0b001"), 2);
-    }
-
-    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileBF8_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-
-        matrixMultiplyMacroTile<BF8, float>(16, 16, 128, 1, 5.e-6, true, "T", "N");
-
-        std::string generatedCode = m_context->instructions()->toString();
-
-        EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), 2);
-        EXPECT_EQ(countSubstring(generatedCode, "v_mfma_f32_16x16x128_f8f6f4"), 2);
-        EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 blgp:0b001"), 2);
+        if(isFP8)
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 blgp:0b000"), 2);
+        else
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 blgp:0b001"), 2);
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP6_32x32x64_TN)
