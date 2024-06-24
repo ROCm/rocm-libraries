@@ -119,7 +119,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 // IPT - items per thread
 #define CREATE_BENCHMARK(T, BS, IPT)                                                            \
-    benchmark::RegisterBenchmark(std::string("block_reduce<data_type:" #T ",block_sie:" #BS     \
+    benchmark::RegisterBenchmark(std::string("block_reduce<data_type:" #T ",block_size:" #BS     \
                                              ",items_per_thread:" #IPT ",sub_algorithm_name:"   \
                                              + algorithm_name + ">.method_name:" + method_name) \
                                      .c_str(),                                                  \
