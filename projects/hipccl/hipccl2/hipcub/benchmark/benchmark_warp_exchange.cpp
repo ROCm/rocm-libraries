@@ -242,7 +242,7 @@ struct BlockedToStripedOp
                                              ",block_size:" #BS ",items_per_thread:" #IT           \
                                              ",warp_size:" #WS ",algorithm:" #ALG ">.")            \
                                      .c_str(),                                                     \
-                                 &run_benchmark<T, BS, IT, WS, ::hipcub::ALG, StripedToBlockedOp>, \
+                                 &run_benchmark<T, BS, IT, WS, ALG, StripedToBlockedOp>, \
                                  stream,                                                           \
                                  size)
 
@@ -251,7 +251,7 @@ struct BlockedToStripedOp
                                              ",block_size:" #BS ",items_per_thread:" #IT           \
                                              ",warp_size:" #WS ",algorithm:" #ALG ">.")            \
                                      .c_str(),                                                     \
-                                 &run_benchmark<T, BS, IT, WS, ::hipcub::ALG, BlockedToStripedOp>, \
+                                 &run_benchmark<T, BS, IT, WS, ALG, BlockedToStripedOp>, \
                                  stream,                                                           \
                                  size)
 
@@ -264,7 +264,7 @@ struct BlockedToStripedOp
                                  stream,                                                      \
                                  size)
 
-int main(int argc, char* argv[])
+int main(int argc, char* argv[])  
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
@@ -288,29 +288,29 @@ int main(int argc, char* argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks{
-        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 16, WARP_EXCHANGE_SMEM),
-        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 16, WARP_EXCHANGE_SMEM),
-        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 16, 16, WARP_EXCHANGE_SMEM),
-        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 16, 16, WARP_EXCHANGE_SMEM),
-        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 32, WARP_EXCHANGE_SMEM),
-        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 32, WARP_EXCHANGE_SMEM),
-        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 256, 4, 32, WARP_EXCHANGE_SMEM),
-        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 256, 4, 32, WARP_EXCHANGE_SMEM),
+        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 16, ::hipcub::WARP_EXCHANGE_SMEM),
+        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 16, ::hipcub::WARP_EXCHANGE_SMEM),
+        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 16, 16, ::hipcub::WARP_EXCHANGE_SMEM),
+        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 16, 16, ::hipcub::WARP_EXCHANGE_SMEM),
+        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 32, ::hipcub::WARP_EXCHANGE_SMEM),
+        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 32, ::hipcub::WARP_EXCHANGE_SMEM),
+        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 256, 4, 32, ::hipcub::WARP_EXCHANGE_SMEM),
+        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 256, 4, 32, ::hipcub::WARP_EXCHANGE_SMEM),
         CREATE_BENCHMARK_SCATTER_TO_STRIPED(int, int, 128, 4, 16),
         CREATE_BENCHMARK_SCATTER_TO_STRIPED(int, int, 128, 4, 32),
         CREATE_BENCHMARK_SCATTER_TO_STRIPED(int, int, 256, 4, 32),
 
-        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 16, 16, WARP_EXCHANGE_SHUFFLE),
-        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 16, 16, WARP_EXCHANGE_SHUFFLE),
+        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 16, 16, ::hipcub::WARP_EXCHANGE_SHUFFLE),
+        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 16, 16, ::hipcub::WARP_EXCHANGE_SHUFFLE),
 
 // CUB requires WS == IPT for WARP_EXCHANGE_SHUFFLE
 #ifdef HIPCUB_ROCPRIM_API
-        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 16, WARP_EXCHANGE_SHUFFLE),
-        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 16, WARP_EXCHANGE_SHUFFLE),
-        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 32, WARP_EXCHANGE_SHUFFLE),
-        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 32, WARP_EXCHANGE_SHUFFLE),
-        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 256, 4, 32, WARP_EXCHANGE_SHUFFLE),
-        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 256, 4, 32, WARP_EXCHANGE_SHUFFLE),
+        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 16, ::hipcub::WARP_EXCHANGE_SHUFFLE),
+        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 16, ::hipcub::WARP_EXCHANGE_SHUFFLE),
+        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 32, ::hipcub::WARP_EXCHANGE_SHUFFLE),
+        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 32, ::hipcub::WARP_EXCHANGE_SHUFFLE),
+        CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 256, 4, 32, ::hipcub::WARP_EXCHANGE_SHUFFLE),
+        CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 256, 4, 32, ::hipcub::WARP_EXCHANGE_SHUFFLE),
 #endif
     };
 
@@ -318,16 +318,16 @@ int main(int argc, char* argv[])
     if(::benchmark_utils::is_warp_size_supported(64))
     {
         std::vector<benchmark::internal::Benchmark*> additional_benchmarks{
-            CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 64, WARP_EXCHANGE_SMEM),
-            CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 64, WARP_EXCHANGE_SHUFFLE),
-            CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 64, WARP_EXCHANGE_SMEM),
-            CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 64, WARP_EXCHANGE_SHUFFLE),
+            CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 64, ::hipcub::WARP_EXCHANGE_SMEM),
+            CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 128, 4, 64, ::hipcub::WARP_EXCHANGE_SHUFFLE),
+            CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 64, ::hipcub::WARP_EXCHANGE_SMEM),
+            CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 128, 4, 64, ::hipcub::WARP_EXCHANGE_SHUFFLE),
             CREATE_BENCHMARK_SCATTER_TO_STRIPED(int, int, 128, 4, 64),
 
-            CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 256, 4, 64, WARP_EXCHANGE_SMEM),
-            CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 256, 4, 64, WARP_EXCHANGE_SHUFFLE),
-            CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 256, 4, 64, WARP_EXCHANGE_SMEM),
-            CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 256, 4, 64, WARP_EXCHANGE_SHUFFLE),
+            CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 256, 4, 64, ::hipcub::WARP_EXCHANGE_SMEM),
+            CREATE_BENCHMARK_STRIPED_TO_BLOCKED(int, 256, 4, 64, ::hipcub::WARP_EXCHANGE_SHUFFLE),
+            CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 256, 4, 64, ::hipcub::WARP_EXCHANGE_SMEM),
+            CREATE_BENCHMARK_BLOCKED_TO_STRIPED(int, 256, 4, 64, ::hipcub::WARP_EXCHANGE_SHUFFLE),
             CREATE_BENCHMARK_SCATTER_TO_STRIPED(int, int, 256, 4, 64)};
         benchmarks.insert(benchmarks.end(),
                           additional_benchmarks.begin(),
