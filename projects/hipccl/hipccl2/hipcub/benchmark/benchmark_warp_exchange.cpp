@@ -237,22 +237,22 @@ struct BlockedToStripedOp
     }
 };
 
-#define CREATE_BENCHMARK_STRIPED_TO_BLOCKED(T, BS, IT, WS, ALG)                                    \
-    benchmark::RegisterBenchmark(std::string("warp_exchange_striped_to_blocked<data_type:" #T      \
-                                             ",block_size:" #BS ",items_per_thread:" #IT           \
-                                             ",warp_size:" #WS ",sub_algorithm_name:" #ALG ">.")            \
-                                     .c_str(),                                                     \
-                                 &run_benchmark<T, BS, IT, WS, ALG, StripedToBlockedOp>, \
-                                 stream,                                                           \
+#define CREATE_BENCHMARK_STRIPED_TO_BLOCKED(T, BS, IT, WS, ALG)                                  \
+    benchmark::RegisterBenchmark(std::string("warp_exchange_striped_to_blocked<data_type:" #T    \
+                                             ",block_size:" #BS ",items_per_thread:" #IT         \
+                                             ",warp_size:" #WS ",sub_algorithm_name:" #ALG ">.") \
+                                     .c_str(),                                                   \
+                                 &run_benchmark<T, BS, IT, WS, ALG, StripedToBlockedOp>,         \
+                                 stream,                                                         \
                                  size)
 
-#define CREATE_BENCHMARK_BLOCKED_TO_STRIPED(T, BS, IT, WS, ALG)                                    \
-    benchmark::RegisterBenchmark(std::string("warp_exchange_blocked_to_striped<data_type:" #T      \
-                                             ",block_size:" #BS ",items_per_thread:" #IT           \
-                                             ",warp_size:" #WS ",sub_algorithm_name:" #ALG ">.")            \
-                                     .c_str(),                                                     \
-                                 &run_benchmark<T, BS, IT, WS, ALG, BlockedToStripedOp>, \
-                                 stream,                                                           \
+#define CREATE_BENCHMARK_BLOCKED_TO_STRIPED(T, BS, IT, WS, ALG)                                  \
+    benchmark::RegisterBenchmark(std::string("warp_exchange_blocked_to_striped<data_type:" #T    \
+                                             ",block_size:" #BS ",items_per_thread:" #IT         \
+                                             ",warp_size:" #WS ",sub_algorithm_name:" #ALG ">.") \
+                                     .c_str(),                                                   \
+                                 &run_benchmark<T, BS, IT, WS, ALG, BlockedToStripedOp>,         \
+                                 stream,                                                         \
                                  size)
 
 #define CREATE_BENCHMARK_SCATTER_TO_STRIPED(T, OFFSET_T, BS, IT, WS)                          \
@@ -264,7 +264,7 @@ struct BlockedToStripedOp
                                  stream,                                                      \
                                  size)
 
-int main(int argc, char* argv[])  
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");

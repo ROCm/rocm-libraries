@@ -122,7 +122,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 #define CREATE_BENCHMARK(T, BS, IT, WS, ALG)                                              \
     benchmark::RegisterBenchmark(std::string("warp_load<data_type:" #T ",block_size:" #BS \
                                              ",items_per_thread:" #IT ",warp_size:" #WS   \
-                                             ",sub_algorithm_name:" #ALG ">.")           \
+                                             ",sub_algorithm_name:" #ALG ">.")            \
                                      .c_str(),                                            \
                                  &run_benchmark<T, BS, IT, WS, ALG>,                      \
                                  stream,                                                  \
@@ -146,7 +146,7 @@ int main(int argc, char* argv[])
     int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    
+
     std::cout << "benchmark_warp_load" << std::endl;
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
