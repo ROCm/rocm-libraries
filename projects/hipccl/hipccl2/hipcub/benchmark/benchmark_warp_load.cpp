@@ -146,6 +146,8 @@ int main(int argc, char* argv[])
     int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+    
+    std::cout << "benchmark_warp_load" << std::endl;
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     // Add benchmarks
