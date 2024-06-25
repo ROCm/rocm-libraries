@@ -408,8 +408,8 @@ void run_benchmark_memcpy(benchmark::State& state, size_t size, const hipStream_
         [=](benchmark::State& state)                                                          \
         { run_benchmark<T, BS, IPT, METHOD, OPERATION>(state, SIZE, stream); }));
 
-#define CREATE_BENCHMARK_MEMCPY(T, SIZE)                                             \
-    benchmarks.push_back(benchmark::RegisterBenchmark(                               \
+#define CREATE_BENCHMARK_MEMCPY(T, SIZE)                                               \
+    benchmarks.push_back(benchmark::RegisterBenchmark(                                 \
         std::string("device_memory_memcpy<data_type:" #T ",Size:" #SIZE ">.").c_str(), \
         [=](benchmark::State& state) { run_benchmark_memcpy<T>(state, SIZE, stream); }));
 
