@@ -150,7 +150,7 @@ namespace rocRoller
             visit(rocRoller::overloaded{
                       [&](auto op) {},
                       [&](Operations::T_Load_Linear const& op) {
-                          auto tensor = getOperation<Operations::Tensor>(op.getTensorTag());
+                          auto tensor = getOperation<Operations::Tensor>(op.getSrcTag());
                           auto sizes  = tensor.sizes();
                           for(size_t i = 0; i < sizes.size() && i < 3; i++)
                           {

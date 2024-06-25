@@ -10,6 +10,7 @@
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
 
@@ -95,17 +96,29 @@ namespace rocRollerTest
          * - Assign(D = TensorContraction(A, B))
          * - StoreTiled(D)
          */
-        template <typename T>
         class MatrixMultiply
         {
         public:
-            MatrixMultiply();
+            MatrixMultiply(rocRoller::DataType              aType,
+                           rocRoller::DataType              bType  = rocRoller::DataType::None,
+                           rocRoller::DataType              cdType = rocRoller::DataType::None,
+                           rocRoller::Operations::ScaleMode aMode
+                           = rocRoller::Operations::ScaleMode::None,
+                           rocRoller::Operations::ScaleMode bMode
+                           = rocRoller::Operations::ScaleMode::None);
 
             CommandPtr  getCommand();
             KernelGraph getKernelGraph();
 
         private:
             void createCommand();
+
+            rocRoller::DataType m_aType;
+            rocRoller::DataType m_bType;
+            rocRoller::DataType m_cdType;
+
+            rocRoller::Operations::ScaleMode m_aMode;
+            rocRoller::Operations::ScaleMode m_bMode;
 
             CommandPtr m_command;
         };

@@ -7,6 +7,8 @@
 #include <unordered_set>
 #include <variant>
 
+#include <rocRoller/Operations/Operations_fwd.hpp>
+
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
@@ -21,11 +23,6 @@ namespace rocRoller
     {
         struct Nop
         {
-            Nop() {}
-            template <typename... Args>
-            Nop(Args&&... i)
-            {
-            }
         };
 
         struct Inputs

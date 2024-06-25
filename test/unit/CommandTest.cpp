@@ -77,17 +77,17 @@ TEST(CommandTest, VectorAdd)
 
     std::string result = R"(
         Tensor.Float.d1 0, (base=&0, lim=&8, sizes={&16 }, strides={&24 })
-        T_LOAD_LINEAR 1 Tensor 0
+        T_LOAD_LINEAR 1 Source 0
         Tensor.Float.d1 2, (base=&32, lim=&40, sizes={&48 }, strides={&56 })
-        T_LOAD_LINEAR 3 Tensor 2
+        T_LOAD_LINEAR 3 Source 2
         T_EXECUTE 1 3
         E_Add 4, 1, 3
         Tensor.Float.d1 6, (base=&64, lim=&72, sizes={&80 }, strides={&88 })
-        T_STORE_LINEAR 7 Source 4 Tensor 6)";
+        T_STORE_LINEAR 7 Source 4 Dest 6)";
     EXPECT_EQ(NormalizedSource(command->toString()), NormalizedSource(result));
 
     {
-        std::string        expected = R"([
+        std::string expected = R"([
             Tensor_0_pointer: PointerGlobal: Float(offset: 0, size: 8, read_write),
             Tensor_0_extent: Value: Int64(offset: 8, size: 8, read_only),
             Tensor_0_size_0: Value: Int64(offset: 16, size: 8, read_only),
@@ -101,6 +101,7 @@ TEST(CommandTest, VectorAdd)
             Tensor_6_size_0: Value: Int64(offset: 80, size: 8, read_only),
             Tensor_6_stride_0: Value: Int64(offset: 88, size: 8, read_only)
         ])";
+
         std::ostringstream msg;
         msg << command->getArguments();
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(msg.str()));
@@ -159,7 +160,7 @@ TEST(CommandTest, BlockScaleInline)
     auto block_scale_tag
         = command->addOperation(std::make_shared<Operations::Operation>(block_scale));
 
-    EXPECT_EQ(block_scale.pointerMode(), Operations::BlockScale::PointerMode::Inline);
+    EXPECT_EQ(block_scale.scaleMode(), Operations::ScaleMode::Inline);
     EXPECT_EQ(block_scale.strides(), std::vector<size_t>({32, 1, 1}));
     EXPECT_EQ(command->getOperation<Operations::BlockScale>(block_scale_tag).getInputs(),
               std::unordered_set<Operations::OperationTag>({dataTensor}));
@@ -176,7 +177,7 @@ TEST(CommandTest, BlockScaleSeparate)
     auto block_scale_tag
         = command->addOperation(std::make_shared<Operations::Operation>(block_scale));
 
-    EXPECT_EQ(block_scale.pointerMode(), Operations::BlockScale::PointerMode::Separate);
+    EXPECT_EQ(block_scale.scaleMode(), Operations::ScaleMode::Separate);
     EXPECT_EQ(block_scale.strides(), std::vector<size_t>({4, 32, 1}));
     EXPECT_EQ(command->getOperation<Operations::BlockScale>(block_scale_tag).getInputs(),
               std::unordered_set<Operations::OperationTag>({dataTensor, scaleTensor}));

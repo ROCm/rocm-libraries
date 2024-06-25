@@ -163,3 +163,19 @@ TEST(UtilsTest, SetIdentityMatrix)
 
     EXPECT_EQ(mat, expected);
 }
+
+TEST(UtilsTest, SingleVariant)
+{
+    using namespace rocRoller;
+
+    EXPECT_EQ(std::variant<int>(5), singleVariant(5));
+
+    std::string value = "five";
+    auto        var   = singleVariant(value);
+
+    EXPECT_EQ(std::variant<std::string>(value), var);
+
+    auto visitor = [&](int value) { EXPECT_EQ(value, 15); };
+
+    std::visit(visitor, singleVariant(15));
+}

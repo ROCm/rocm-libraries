@@ -235,40 +235,78 @@ namespace rocRollerTest::Graphs
      * MatrixMultiply
      */
 
-    template <typename T>
-    MatrixMultiply<T>::MatrixMultiply()
+    inline MatrixMultiply::MatrixMultiply(DataType              aType,
+                                          DataType              bType,
+                                          DataType              cdType,
+                                          Operations::ScaleMode aMode,
+                                          Operations::ScaleMode bMode)
+        : m_aType(aType)
+        , m_bType(bType)
+        , m_cdType(cdType)
+        , m_aMode(aMode)
+        , m_bMode(bMode)
     {
+        AssertFatal(m_aMode == Operations::ScaleMode::None
+                        || m_aMode == Operations::ScaleMode::Separate,
+                    "Only Separate scale mode supported.",
+                    ShowValue(m_aMode));
+        AssertFatal(m_bMode == Operations::ScaleMode::None
+                        || m_bMode == Operations::ScaleMode::Separate,
+                    "Only Separate scale mode supported.",
+                    ShowValue(m_bMode));
+
+        if(m_bType == DataType::None)
+            m_bType = m_aType;
+
+        if(m_cdType == DataType::None)
+            m_cdType = m_bType;
+
         createCommand();
     }
 
-    template <typename T>
-    void MatrixMultiply<T>::createCommand()
+    inline void MatrixMultiply::createCommand()
     {
         m_command = std::make_shared<rocRoller::Command>();
 
-        auto dataType = TypeInfo<T>::Var.dataType;
+        // auto dataType = TypeInfo<T>::Var.dataType;
 
-        auto tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // A
+        auto tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(2, m_aType)); // A
         auto tagLoadA   = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-        auto tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // B
+        if(m_aMode == Operations::ScaleMode::Separate)
+        {
+            auto scaleA = m_command->addOperation(rocRoller::Operations::Tensor(2, DataType::Int8));
+            auto loadScaleA = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(scaleA));
+
+            tagLoadA = m_command->addOperation(
+                rocRoller::Operations::BlockScale(tagLoadA, 2, loadScaleA, {1, 32}));
+        }
+
+        auto tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(2, m_bType)); // B
         auto tagLoadB   = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
+
+        if(m_bMode == Operations::ScaleMode::Separate)
+        {
+            auto scaleB = m_command->addOperation(rocRoller::Operations::Tensor(2, DataType::Int8));
+            auto loadScaleB = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(scaleB));
+
+            tagLoadB = m_command->addOperation(
+                rocRoller::Operations::BlockScale(tagLoadB, 2, loadScaleB, {32, 1}));
+        }
 
         auto tagStoreD = m_command->addOperation(
             rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // D = A * B
 
-        auto tagTensorD = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // D
+        auto tagTensorD = m_command->addOperation(rocRoller::Operations::Tensor(2, m_cdType)); // D
         m_command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
     }
 
-    template <typename T>
-    CommandPtr MatrixMultiply<T>::getCommand()
+    inline CommandPtr MatrixMultiply::getCommand()
     {
         return m_command;
     }
 
-    template <typename T>
-    KernelGraph MatrixMultiply<T>::getKernelGraph()
+    inline KernelGraph MatrixMultiply::getKernelGraph()
     {
         return rocRoller::KernelGraph::translate(m_command);
     }

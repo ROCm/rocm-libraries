@@ -36,6 +36,7 @@
 #include <set>
 #include <sstream>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 #include "Concepts.hpp"
@@ -86,6 +87,12 @@ namespace rocRoller
         while(!IsPrime(val))
             val++;
         return val;
+    }
+
+    template <typename T>
+    std::variant<T> singleVariant(T value)
+    {
+        return std::variant<T>(std::move(value));
     }
 
     inline std::string toString(int x)

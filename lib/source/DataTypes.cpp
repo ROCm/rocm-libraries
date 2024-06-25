@@ -262,6 +262,10 @@ namespace rocRoller
             return "LHS";
         case NaryArgument::RHS:
             return "RHS";
+        case NaryArgument::LHS_SCALE:
+            return "LHS_SCALE";
+        case NaryArgument::RHS_SCALE:
+            return "RHS_SCALE";
 
         case NaryArgument::Count:;
         }

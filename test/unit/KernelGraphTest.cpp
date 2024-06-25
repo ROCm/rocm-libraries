@@ -796,7 +796,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTest, TranslateMatrixMultiply)
     {
-        auto example = rocRollerTest::Graphs::MatrixMultiply<int>();
+        auto example = rocRollerTest::Graphs::MatrixMultiply(DataType::Int32);
         auto kgraph0 = example.getKernelGraph();
 
         auto bottom = kgraph0.coordinates.roots().to<std::vector>();
@@ -935,6 +935,74 @@ namespace KernelGraphTest
         }).";
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
+    }
+
+    TEST_F(KernelGraphTest, TranslateScaledMatrixMultiply)
+    {
+        auto example = rocRollerTest::Graphs::MatrixMultiply(DataType::FP8,
+                                                             DataType::FP6,
+                                                             DataType::Float,
+                                                             Operations::ScaleMode::Separate,
+                                                             Operations::ScaleMode::Separate);
+
+        auto expectedCommand = R".(
+        Tensor.FP8.d2 0, (base=&0, lim=&8, sizes={&16 &24 }, strides={&32 &40 })
+        T_LOAD_TILED 1 Source 0
+        Tensor.Int8.d2 2, (base=&48, lim=&56, sizes={&64 &72 }, strides={&80 &88 })
+        T_LOAD_TILED 3 Source 2
+        BlockScale(Separate, {1, 32}): Data: 1, Scale: 3
+        Tensor.FP6.d2 5, (base=&96, lim=&104, sizes={&112 &120 }, strides={&128 &136 })
+        T_LOAD_TILED 6 Source 5
+        Tensor.Int8.d2 7, (base=&144, lim=&152, sizes={&160 &168 }, strides={&176 &184 })
+        T_LOAD_TILED 8 Source 7
+        BlockScale(Separate, {32, 1}): Data: 6, Scale: 8
+        T_Mul
+        Tensor.Float.d2 11, (base=&192, lim=&200, sizes={&208 &216 }, strides={&224 &232 })
+        T_STORE_TILED 12 Source 10 Dest 11
+        ).";
+
+        EXPECT_EQ(NormalizedSource(expectedCommand),
+                  NormalizedSource(example.getCommand()->toString()));
+
+        auto kgraph0 = example.getKernelGraph();
+
+        auto roots = kgraph0.coordinates.roots().to<std::vector>();
+        EXPECT_EQ(roots.size(), 4);
+        for(auto const& id : roots)
+        {
+            EXPECT_TRUE(std::holds_alternative<User>(
+                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
+        }
+
+        auto leaves = kgraph0.coordinates.leaves().to<std::vector>();
+        ASSERT_EQ(leaves.size(), 1);
+        for(auto const& id : leaves)
+        {
+            EXPECT_TRUE(std::holds_alternative<User>(
+                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
+        }
+
+        auto reachableFromLeaf
+            = kgraph0.coordinates.depthFirstVisit(leaves[0], Graph::Direction::Upstream)
+                  .to<std::set>();
+
+        for(auto id : roots)
+        {
+            EXPECT_TRUE(reachableFromLeaf.contains(id)) << ShowValue(id) << reachableFromLeaf;
+        }
+
+        // There should be 4 LoadTiled nodes with direct sequence edges to the single TensorContraction node.
+        // These should be all of the LoadTiled nodes in the graph.
+        auto is_tc = kgraph0.control.isElemType<TensorContraction>();
+        auto tc_id = only(kgraph0.control.findElements(is_tc));
+        ASSERT_TRUE(tc_id.has_value());
+
+        auto is_loadTiled  = kgraph0.control.isElemType<LoadTiled>();
+        auto loadTiled_ids = kgraph0.control.findElements(is_loadTiled).to<std::set>();
+
+        auto tc_parent_ids = kgraph0.control.parentNodes(*tc_id).to<std::set>();
+        EXPECT_EQ(loadTiled_ids, tc_parent_ids);
+        EXPECT_EQ(4, loadTiled_ids.size());
     }
 
     TEST_F(KernelGraphTest, LowerTensor)

@@ -176,6 +176,8 @@ namespace rocRoller
         DEST = 0,
         LHS,
         RHS,
+        LHS_SCALE,
+        RHS_SCALE,
 
         Count,
         None = Count
