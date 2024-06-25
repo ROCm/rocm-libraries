@@ -122,7 +122,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 #define CREATE_BENCHMARK(T, BS, IT, WS, ALG)                                              \
     benchmark::RegisterBenchmark(std::string("warp_load<data_type:" #T ",block_size:" #BS \
                                              ",items_per_thread:" #IT ",warp_size:" #WS   \
-                                             ",warp_load_algorithm:" #ALG ">.")           \
+                                             ",sub_algorithm_name:" #ALG ">.")           \
                                      .c_str(),                                            \
                                  &run_benchmark<T, BS, IT, WS, ALG>,                      \
                                  stream,                                                  \

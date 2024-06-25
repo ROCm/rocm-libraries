@@ -240,7 +240,7 @@ struct BlockedToStripedOp
 #define CREATE_BENCHMARK_STRIPED_TO_BLOCKED(T, BS, IT, WS, ALG)                                    \
     benchmark::RegisterBenchmark(std::string("warp_exchange_striped_to_blocked<data_type:" #T      \
                                              ",block_size:" #BS ",items_per_thread:" #IT           \
-                                             ",warp_size:" #WS ",algorithm:" #ALG ">.")            \
+                                             ",warp_size:" #WS ",sub_algorithm_name:" #ALG ">.")            \
                                      .c_str(),                                                     \
                                  &run_benchmark<T, BS, IT, WS, ::hipcub::ALG, StripedToBlockedOp>, \
                                  stream,                                                           \
@@ -249,7 +249,7 @@ struct BlockedToStripedOp
 #define CREATE_BENCHMARK_BLOCKED_TO_STRIPED(T, BS, IT, WS, ALG)                                    \
     benchmark::RegisterBenchmark(std::string("warp_exchange_blocked_to_striped<data_type:" #T      \
                                              ",block_size:" #BS ",items_per_thread:" #IT           \
-                                             ",warp_size:" #WS ",algorithm:" #ALG ">.")            \
+                                             ",warp_size:" #WS ",sub_algorithm_name:" #ALG ">.")            \
                                      .c_str(),                                                     \
                                  &run_benchmark<T, BS, IT, WS, ::hipcub::ALG, BlockedToStripedOp>, \
                                  stream,                                                           \
