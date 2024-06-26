@@ -410,7 +410,7 @@ void run_benchmark_memcpy(benchmark::State& state, size_t size, const hipStream_
 
 #define CREATE_BENCHMARK_MEMCPY(T, SIZE)                                               \
     benchmarks.push_back(benchmark::RegisterBenchmark(                                 \
-        std::string("device_memory_memcpy<data_type:" #T ",Size:" #SIZE ">.").c_str(), \
+        std::string("device_memory_memcpy<data_type:" #T ",size:" #SIZE ">.").c_str(), \
         [=](benchmark::State& state) { run_benchmark_memcpy<T>(state, SIZE, stream); }));
 
 // clang-format off
