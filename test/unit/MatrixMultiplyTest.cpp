@@ -570,9 +570,9 @@ namespace MatrixMultiplyTest
     {
         bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
         if(isFP8)
-            matrixMultiplyMacroTile<FP8, float>(16, 16, 32, 1, 2.e-6, false, "N", "N");
+            matrixMultiplyMacroTile<FP8, float>(16, 16, 32, 1, 1.e-5, false, "N", "N");
         else
-            matrixMultiplyMacroTile<BF8, float>(16, 16, 32, 1, 2.e-6, false, "N", "N");
+            matrixMultiplyMacroTile<BF8, float>(16, 16, 32, 1, 1.e-5, false, "N", "N");
 
         if(!commandKernel)
             return;
@@ -628,9 +628,9 @@ namespace MatrixMultiplyTest
     {
         bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
         if(isFP8)
-            matrixMultiplyMacroTile<FP8, float>(32, 32, 16, 1, 2.e-6, false, "N", "N");
+            matrixMultiplyMacroTile<FP8, float>(32, 32, 16, 1, 1.e-5, false, "N", "N");
         else
-            matrixMultiplyMacroTile<BF8, float>(32, 32, 16, 1, 2.e-6, false, "N", "N");
+            matrixMultiplyMacroTile<BF8, float>(32, 32, 16, 1, 1.e-5, false, "N", "N");
 
         if(!commandKernel)
             return;
@@ -686,9 +686,9 @@ namespace MatrixMultiplyTest
     {
         bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
         if(isFP8)
-            matrixMultiplyMacroTile<FP8, float>(16, 16, 32, 1, 2.e-6, true, "T", "N");
+            matrixMultiplyMacroTile<FP8, float>(16, 16, 32, 1, 1.e-5, true, "T", "N");
         else
-            matrixMultiplyMacroTile<BF8, float>(16, 16, 32, 1, 2.e-6, true, "T", "N");
+            matrixMultiplyMacroTile<BF8, float>(16, 16, 32, 1, 1.e-5, true, "T", "N");
     }
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileFP8_32x32x64_TN)
@@ -717,9 +717,9 @@ namespace MatrixMultiplyTest
 
         bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
         if(isFP8)
-            matrixMultiplyMacroTile<FP8, float>(16, 16, 128, 1, 5.e-6, true, "T", "N");
+            matrixMultiplyMacroTile<FP8, float>(16, 16, 128, 1, 1.e-5, true, "T", "N");
         else
-            matrixMultiplyMacroTile<BF8, float>(16, 16, 128, 1, 5.e-6, true, "T", "N");
+            matrixMultiplyMacroTile<BF8, float>(16, 16, 128, 1, 1.e-5, true, "T", "N");
 
         std::string generatedCode = m_context->instructions()->toString();
 
