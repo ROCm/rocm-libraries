@@ -354,7 +354,6 @@ namespace rocRoller
         unsigned int elementBits;
         unsigned int registerCount;
         size_t       packing;
-        size_t       segmentSize;
         size_t       alignment;
 
         bool isComplex;
@@ -405,8 +404,7 @@ namespace rocRoller
         constexpr static size_t ElementBits  = T_Bits;
         /// Segments per element.
         constexpr static size_t Packing = T_Packing;
-        /// Bytes per segment.
-        constexpr static size_t SegmentSize   = ElementBytes / Packing;
+
         constexpr static size_t Alignment     = alignof(T);
         constexpr static size_t RegisterCount = T_RegCount;
 
@@ -552,27 +550,6 @@ namespace rocRoller
                                   T_IsComplex,
                                   T_IsIntegral,
                                   T_IsSigned>::RegisterCount;
-
-    template <typename T,
-              DataType    T_DEnum,
-              DataType    T_SegmentType,
-              PointerType T_PEnum,
-              int         T_Packing,
-              int         T_RegCount,
-              int         T_Bits,
-              bool        T_IsComplex,
-              bool        T_IsIntegral,
-              bool        T_IsSigned>
-    constexpr size_t BaseTypeInfo<T,
-                                  T_DEnum,
-                                  T_SegmentType,
-                                  T_PEnum,
-                                  T_Packing,
-                                  T_RegCount,
-                                  T_Bits,
-                                  T_IsComplex,
-                                  T_IsIntegral,
-                                  T_IsSigned>::SegmentSize;
 
     template <typename T,
               DataType    T_DEnum,

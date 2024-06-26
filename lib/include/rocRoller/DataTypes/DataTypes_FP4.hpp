@@ -380,7 +380,6 @@ namespace rocRoller
 
         static float fp4_to_float(const FP4 v)
         {
-            // return cast_from_fp4<float>(v.data);
             uint4_t in;
             in.val = v.data;
             return fp4_to_f32<float>(in);
@@ -388,9 +387,6 @@ namespace rocRoller
 
         static FP4 float_to_fp4(const float v)
         {
-            // FP4 fp4;
-            // fp4.data = f32_to_fp4<float>(v);
-            // return fp4;
             FP4     fp4;
             uint4_t fp4_tmp = f32_to_fp4<float>(v);
             fp4.data        = fp4_tmp.val;

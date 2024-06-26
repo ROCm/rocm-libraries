@@ -223,21 +223,21 @@ namespace rocRollerTest
             = command->addOperation(rocRoller::Operations::Tensor(2, dataType, {0, 1})); // Store B
         command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
 
-        KernelArguments runtimeArgs;
+        auto commandArgs = command->createArguments();
 
-        runtimeArgs.append("user0", d_a.get());
-        runtimeArgs.append("d_a_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_a_size_0", (size_t)nx);
-        runtimeArgs.append("d_a_size_1", (size_t)ny);
-        runtimeArgs.append("d_a_stride_0", (size_t)(ny));
-        runtimeArgs.append("d_a_stride_1", (size_t)(1));
+        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
+        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)nx * ny);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)nx);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)ny);
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)(ny));
+        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)(1));
 
-        runtimeArgs.append("user1", d_b.get());
-        runtimeArgs.append("d_b_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_b_size_0", (size_t)nx);
-        runtimeArgs.append("d_b_size_1", (size_t)ny);
-        runtimeArgs.append("d_b_stride_0", (size_t)(ny));
-        runtimeArgs.append("d_b_stride_1", (size_t)(1));
+        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
+        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)nx * ny);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)nx);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)ny);
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)(ny));
+        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)(1));
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -252,7 +252,7 @@ namespace rocRollerTest
         commandKernel = std::make_shared<CommandKernel>(command, "loadStoreTileFP4", params);
         if(launch)
         {
-            commandKernel->launchKernel(runtimeArgs.runtimeArguments());
+            commandKernel->launchKernel(commandArgs.runtimeArguments());
 
             ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), numFP4x8 * sizeof(FP4x8), hipMemcpyDefault),
                         HasHipSuccess(0));
@@ -409,9 +409,7 @@ namespace rocRollerTest
     {
         constexpr auto cases = std::to_array<float>(
             {0, 0.5, 1, 1.5, 2, 3, 4, 6, -0, -0.5, -1, -1.5, -2, -3, -4, -6});
-        std::vector<float> f32;
-        for(auto const& c : cases)
-            f32.push_back(c);
+        std::vector<float> f32(cases.begin(), cases.end());
 
         auto fp4x8 = f32_to_fp4x8(f32);
 

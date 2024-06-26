@@ -457,7 +457,6 @@ namespace rocRoller
         info.packing       = T_Info::Packing;
         info.elementBytes  = T_Info::ElementBytes;
         info.elementBits   = T_Info::ElementBits;
-        info.segmentSize   = T_Info::SegmentSize;
         info.alignment     = T_Info::Alignment;
         info.registerCount = T_Info::RegisterCount;
 
