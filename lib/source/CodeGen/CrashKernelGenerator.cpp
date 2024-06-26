@@ -17,8 +17,13 @@ namespace rocRoller
         switch(assertOpKind)
         {
         case AssertOpKind::MemoryViolation:
+        {
+            auto context = m_context.lock();
             co_yield writeToNullPtr();
-            break;
+            co_yield Instruction::Wait(
+                WaitCount::Zero("DEBUG: Wait after memory write", context->targetArchitecture()));
+        }
+        break;
         case AssertOpKind::STrap:
             co_yield sTrap();
             break;

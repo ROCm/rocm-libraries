@@ -211,3 +211,46 @@ TEST(CommandTest, SetCommandArguments)
     commandArgs.setArgument(tagScalarB, ArgumentType::Value, 2);
     EXPECT_THROW({ commandArgs.setArgument(tagScalarB, ArgumentType::Limit, 10); }, FatalError);
 }
+
+TEST(CommandTest, GetRuntimeArguments)
+{
+    std::unordered_map<DataType, size_t> typeSizes
+        = {{DataType::Float, 4},        {DataType::Double, 8},
+           {DataType::ComplexFloat, 8}, {DataType::ComplexDouble, 16},
+           {DataType::Half, 2},         {DataType::Halfx2, 4},
+           {DataType::FP8, 1},          {DataType::FP8x4, 4},
+           {DataType::BF8, 1},          {DataType::BF8x4, 4},
+           {DataType::Int8x4, 4},       {DataType::Int8, 1},
+           {DataType::Int16, 2},        {DataType::Int32, 4},
+           {DataType::Int64, 8},        {DataType::BFloat16, 2},
+           {DataType::Raw32, 4},        {DataType::UInt8, 1},
+           {DataType::UInt16, 2},       {DataType::UInt32, 4},
+           {DataType::UInt64, 8}};
+
+    // Check scalar
+    for(auto const& [type, bytes] : typeSizes)
+    {
+        auto                  command   = std::make_shared<rocRoller::Command>();
+        [[maybe_unused]] auto tagScalar = command->addOperation(Operations::Scalar(type));
+
+        CommandArguments commandArgs      = command->createArguments();
+        auto             runtimeArguments = commandArgs.runtimeArguments();
+
+        EXPECT_EQ(runtimeArguments.size(), bytes);
+        EXPECT_EQ(runtimeArguments.size_bytes(), bytes);
+    }
+
+    // Check tensor
+    for(auto const& iter : typeSizes)
+    {
+        auto                  command   = std::make_shared<rocRoller::Command>();
+        [[maybe_unused]] auto tagTensor = command->addOperation(Operations::Tensor(1, iter.first));
+
+        CommandArguments commandArgs      = command->createArguments();
+        auto             runtimeArguments = commandArgs.runtimeArguments();
+
+        // The total number of bytes required by pointer, extent, size and stride
+        EXPECT_EQ(runtimeArguments.size(), 32);
+        EXPECT_EQ(runtimeArguments.size_bytes(), 32);
+    }
+}
