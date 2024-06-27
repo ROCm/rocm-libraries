@@ -29,6 +29,12 @@ namespace rocRoller
     };
 
     template <>
+    struct UnsegmentedTypeOf<BF6>
+    {
+        typedef BF6x16 type;
+    };
+
+    template <>
     struct UnsegmentedTypeOf<FP4>
     {
         typedef FP4x8 type;
