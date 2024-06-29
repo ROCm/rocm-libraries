@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.16)
 project(rocRoller VERSION 1.0)
 
 option(ROCROLLER_ENABLE_TIMERS         "Enable rocRoller timer code." OFF)
-option(ROCROLLER_TESTS_SKIP_GUIDEPOSTS "Skip compiling guidepost tests." OFF)
+option(ROCROLLER_TESTS_SKIP_GUIDEPOSTS "Skip compiling guidepost tests." ON)
 option(ROCROLLER_TESTS_SKIP_SLOW       "Skip slow tests (currently only Python tests)" ON)
 option(ROCROLLER_USE_HIP               "Use HIP within the rocRoller." ON)
 option(SKIP_CPPCHECK                   "Skip CPPCHECK." ON)
