@@ -887,15 +887,78 @@ namespace GEMMDriverTest
         return gemm;
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_16x16x32_NT)
     {
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_NT)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_16x16x32_NT)
     {
         auto gemm = setup_GEMMF8_NT();
+        basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
+    }
+
+    GEMMProblem setup_GEMMF8F6F4_NT(int waveM, int waveN, int waveK)
+    {
+        GEMMProblem gemm;
+
+        // 2x2 jamming
+        uint wavesPerWGX = 4;
+        uint wavesPerWGY = 4;
+
+        gemm.waveM = waveM;
+        gemm.waveN = waveN;
+        gemm.waveK = waveK;
+
+        gemm.macM = wavesPerWGX * gemm.waveM;
+        gemm.macN = wavesPerWGY * gemm.waveN;
+        gemm.macK = 2 * gemm.waveK;
+
+        gemm.loadLDSA = true;
+        gemm.loadLDSB = true;
+
+        gemm.workgroupSizeX = 256;
+        gemm.workgroupSizeY = 1;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.alpha = 2.1;
+        gemm.beta  = 0.75;
+
+        gemm.transA = "N";
+        gemm.transB = "T";
+
+        return gemm;
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_16x16x128_NT)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_NT(16, 16, 128);
+        basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_16x16x128_NT)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_NT(16, 16, 128);
+        basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_32x32x64_NT)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_NT(32, 32, 64);
+        basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_32x32x64_NT)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_NT(32, 32, 64);
         basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
     }
 
@@ -954,18 +1017,104 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_TN)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_16x16x32_TN)
     {
         auto gemm = setup_GEMMF8_TN();
         basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
         check_GEMMF8_TN(m_context);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_TN)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_16x16x32_TN)
     {
         auto gemm = setup_GEMMF8_TN();
         basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
         check_GEMMF8_TN(m_context);
+    }
+
+    GEMMProblem setup_GEMMF8F6F4_TN(int waveM, int waveN, int waveK)
+    {
+        GEMMProblem gemm;
+
+        // 2x2 jamming
+        uint wavesPerWGX = 4;
+        uint wavesPerWGY = 4;
+
+        gemm.waveM = waveM;
+        gemm.waveN = waveN;
+        gemm.waveK = waveK;
+
+        gemm.macM = wavesPerWGX * gemm.waveM;
+        gemm.macN = wavesPerWGY * gemm.waveN;
+        gemm.macK = 2 * gemm.waveK;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = false;
+
+        gemm.workgroupSizeX = 256;
+        gemm.workgroupSizeY = 1;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.alpha = 2.1;
+        gemm.beta  = 0.75;
+
+        gemm.transA = "T";
+        gemm.transB = "N";
+
+        return gemm;
+    }
+
+    void check_GEMMF8F6F4_TN(uint numBufferLoads, rocRoller::ContextPtr m_context)
+    {
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        {
+            std::string generatedCode = m_context->instructions()->toString();
+
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load"), numBufferLoads);
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "), numBufferLoads);
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
+
+            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b"), 8);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), 8);
+
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read"), 20);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), 20);
+        }
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
+        basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
+        check_GEMMF8F6F4_TN((16 * 16 + (16 * 128) / 4) / 64, m_context);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
+        basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
+        check_GEMMF8F6F4_TN((16 * 16 + (16 * 128) / 4) / 64, m_context);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
+        basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
+        check_GEMMF8F6F4_TN((32 * 32 + (32 * 64) / 4) / 64, m_context);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
+        basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
+        check_GEMMF8F6F4_TN((32 * 32 + (32 * 64) / 4) / 64, m_context);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2)

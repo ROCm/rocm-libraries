@@ -10,6 +10,13 @@ fp8fp8_fp32 = dict(
     type_D="float",
 )
 
+bf8bf8_fp32 = dict(
+    type_A="bf8",
+    type_B="bf8",
+    type_C="float",
+    type_D="float",
+)
+
 fp16 = dict(
     type_A="half",
     type_B="half",
@@ -516,6 +523,59 @@ def f8gemm():
         workgroup_size_y=1,
         **fp8fp8_fp32,
     )
+
+
+def f8gemm_16x16x128_f8f6f4():
+    params = dict(
+        M=256,
+        N=256,
+        K=512,
+        mac_m=64,
+        mac_n=64,
+        mac_k=128,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
+    )
+    yield GEMMRun(
+        **params,
+        **fp8fp8_fp32,
+    )
+    yield GEMMRun(
+        **params,
+        **bf8bf8_fp32,
+    )
+
+
+def f8gemm_32x32x64_f8f6f4():
+    params = dict(
+        M=256,
+        N=256,
+        K=512,
+        mac_m=128,
+        mac_n=128,
+        mac_k=64,
+        wave_m=32,
+        wave_n=32,
+        wave_k=64,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
+    )
+    yield GEMMRun(
+        **params,
+        **fp8fp8_fp32,
+    )
+    yield GEMMRun(
+        **params,
+        **bf8bf8_fp32,
+    )
+
+
+def f8gemm_f8f6f4():
+    yield from f8gemm_32x32x64_f8f6f4()
+    yield from f8gemm_16x16x128_f8f6f4()
 
 
 def all():
