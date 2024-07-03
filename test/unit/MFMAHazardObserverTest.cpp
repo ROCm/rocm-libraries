@@ -23,7 +23,7 @@ namespace rocRollerTest
         void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
         {
             auto peeked = m_context->observer()->peek(inst);
-            EXPECT_EQ(peeked.nops, expectedNops);
+            EXPECT_EQ(peeked.nops, expectedNops) << inst.toString(LogLevel::Debug);
             m_context->schedule(inst);
         }
     };
@@ -39,7 +39,7 @@ namespace rocRollerTest
         void peekAndSchedule(Instruction inst, uint expectedNops = 0)
         {
             auto peeked = m_context->peek(inst);
-            EXPECT_EQ(peeked.nops, expectedNops);
+            EXPECT_EQ(peeked.nops, expectedNops) << inst.toString(LogLevel::Debug);
             m_context->schedule(inst);
         }
     };
@@ -55,7 +55,23 @@ namespace rocRollerTest
         void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
         {
             auto peeked = m_context->observer()->peek(inst);
-            EXPECT_EQ(peeked.nops, expectedNops);
+            EXPECT_EQ(peeked.nops, expectedNops) << inst.toString(LogLevel::Debug);
+            m_context->schedule(inst);
+        }
+    };
+
+    class MFMA950ObserverTest : public GenericContextFixture
+    {
+    protected:
+        std::string targetArchitecture()
+        {
+            return "gfx950";
+        }
+
+        void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
+        {
+            auto peeked = m_context->observer()->peek(inst);
+            EXPECT_EQ(peeked.nops, expectedNops) << inst.toString(LogLevel::Debug);
             m_context->schedule(inst);
         }
     };
@@ -735,7 +751,7 @@ namespace rocRollerTest
     TEST_F(MFMA942ObserverTest, XDLOPThenMFMA_SrcCExact)
     {
         auto v = createRegisters(Register::Type::Vector, DataType::Float, 4);
-        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1, 4);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1, 1);
 
         // No hazard if SrcC is exactly overlapped
         {
@@ -748,6 +764,25 @@ namespace rocRollerTest
             peekAndSchedule(insts[1]);
 
             EXPECT_THAT(output(), Not(HasSubstr("s_nop")));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA942ObserverTest, XDLOPThenMFMA_SrcCExact2Pass)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 4);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1, 1);
+        // Exception: Hazard for 2 pass MFMAs
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_4x4x1f32", {a[0]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("v_mfma_f32_4x4x1f32", {a[0]}, {v[2], v[3], a[0]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 2);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 1"));
             clearOutput();
         }
     }
@@ -910,5 +945,148 @@ namespace rocRollerTest
 
         EXPECT_THAT(output(), HasSubstr("s_nop 6"));
         clearOutput();
+    }
+
+    TEST_F(MFMA950ObserverTest, XDLOPThenMFMA_SrcCOverlap)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 4);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1, 4);
+
+        // If SrcC is partially overlapped
+        {
+            std::vector<Instruction> insts = {Instruction("v_mfma_f32_16x16x4_f32",
+                                                          {a[0]->subset({0, 1})},
+                                                          {v[0], v[1], a[0]->subset({0, 1})},
+                                                          {},
+                                                          ""),
+                                              Instruction("v_mfma_f32_16x16x4_f32",
+                                                          {a[0]->subset({1, 2})},
+                                                          {v[2], v[3], a[0]->subset({1, 2})},
+                                                          {},
+                                                          ""),
+                                              Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 10);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 9"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA950ObserverTest, XDLOPThenMFMA_SrcCExact)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 4);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1, 1);
+
+        // No hazard if SrcC is exactly overlapped
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_16x16x4_f32", {a[0]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("v_mfma_f32_16x16x4_f32", {a[0]}, {v[2], v[3], a[0]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1]);
+
+            EXPECT_THAT(output(), Not(HasSubstr("s_nop")));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA950ObserverTest, XDLOPThenMFMA_SrcCExact2Pass)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 4);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1, 1);
+
+        // Exception: Hazard for 2 pass MFMAs
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_4x4x1f32", {a[0]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("v_mfma_f32_4x4x1f32", {a[0]}, {v[2], v[3], a[0]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 2);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 1"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA950ObserverTest, XDLOPThenMFMA_ReadA)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2, 4);
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_16x16x4_f32", {v[2]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("v_mfma_f32_16x16x4_f32", {a[1]}, {v[2], v[3], a[1]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 12);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 11"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA950ObserverTest, XDLOPThenFlat)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2, 4);
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_16x16x4_f32", {v[2]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("flat_store_dword", {}, {v[2], v[3]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 12);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 11"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA950ObserverTest, XDLOPThenVALU_Read)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2, 4);
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_16x16x4_f32", {v[2]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("v_or_b32", {v[4]}, {v[2], v[3]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 12);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 11"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(MFMA950ObserverTest, XDLOPThenVALU_Write)
+    {
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2, 4);
+
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_mfma_f32_16x16x4_f32", {v[2]}, {v[0], v[1], a[0]}, {}, ""),
+                   Instruction("v_or_b32", {v[2]}, {v[3], v[4]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 12);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 11"));
+            clearOutput();
+        }
     }
 }

@@ -24,7 +24,7 @@ namespace rocRoller
             static bool required(ContextPtr context)
             {
                 auto arch = context->targetArchitecture().target().getVersionString();
-                return arch == "gfx940" || arch == "gfx941" || arch == "gfx942";
+                return arch == "gfx940" || arch == "gfx941" || arch == "gfx942" || arch == "gfx950";
             }
 
             int         getMaxNops(Instruction const& inst) const;

@@ -23,7 +23,7 @@ namespace rocRoller
             {
                 auto arch = context->targetArchitecture().target().getVersionString();
                 return arch == "gfx90a" || arch == "gfx908" || arch == "gfx940" || arch == "gfx941"
-                       || arch == "gfx942";
+                       || arch == "gfx942" || arch == "gfx950";
             }
 
             int         getMaxNops(Instruction const& inst) const;

@@ -7,7 +7,19 @@ namespace rocRoller
     {
         int XDLWrite94x::getMaxNops(Instruction const& inst) const
         {
-            return getNopFromLatency(inst.getOpCode(), m_latencyAndNops);
+            auto const& architecture = m_context.lock()->targetArchitecture();
+            int         passes = architecture.GetInstructionInfo(inst.getOpCode()).getLatency();
+            bool        is950  = (architecture.target().getVersionString() == "gfx950");
+
+            AssertFatal(m_latencyAndNops.contains(passes),
+                        "Unexpected number of passes",
+                        ShowValue(architecture.target().toString()),
+                        ShowValue(inst.getOpCode()),
+                        ShowValue(passes));
+
+            int adjustFor950 = (is950 && passes > 2) ? 1 : 0;
+
+            return m_latencyAndNops.at(passes) + adjustFor950;
         }
 
         bool XDLWrite94x::trigger(Instruction const& inst) const
@@ -74,7 +86,20 @@ namespace rocRoller
                     }
                     if(overlap)
                     {
-                        return mismatched ? requiredNops : 0;
+                        auto const& architecture = m_context.lock()->targetArchitecture();
+                        int passes = architecture.GetInstructionInfo(inst.getOpCode()).getLatency();
+                        bool is950 = (architecture.target().getVersionString() == "gfx950");
+
+                        if(mismatched)
+                        {
+                            int adjustFor950 = (is950 && passes == 2) ? 1 : 0;
+                            return requiredNops + adjustFor950;
+                        }
+                        else
+                        {
+                            // Assumes MFMA trigger instruction and this current instruction have same number of passes
+                            return passes > 2 ? 0 : 2;
+                        }
                     }
                 }
 
@@ -96,7 +121,9 @@ namespace rocRoller
                     || GPUInstructionInfo::isLDS(inst.getOpCode())
                     || GPUInstructionInfo::isFlat(inst.getOpCode()))
             {
-                return checkSrcs(inst).value_or(0) - decrement;
+                std::optional<int> value = checkSrcs(inst);
+                if(value)
+                    return *value - decrement;
             }
             else if(GPUInstructionInfo::isVALU(inst.getOpCode()))
             {

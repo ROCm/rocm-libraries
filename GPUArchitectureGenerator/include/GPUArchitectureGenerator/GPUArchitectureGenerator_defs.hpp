@@ -1140,12 +1140,13 @@ namespace GPUArchitectureGenerator
                 // TODO: instructions below have different cycles depending on the matrix type,
                 //       but currently GPUInstructionInfo assumes each instruction has only
                 //       a fixed latency.
-                // if (either matrix is F8) -> 32 cycles   else() -> 16 cycles
-                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x128_f8f6f4", 0, {}, 32),
-                rocRoller::GPUInstructionInfo("v_mfma_scale_f32_16x16x128_f8f6f4", 0, {}, 32),
-                // if (either matrix is F8) -> 64 cycles   else() -> 32 cycles
-                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x64_f8f6f4", 0, {}, 64),
-                rocRoller::GPUInstructionInfo("v_mfma_scale_f32_32x32x64_f8f6f4", 0, {}, 64),
+                // Using passes instead of cycles (1 pass = 4 cycles)
+                // if (either matrix is F8) -> 8 passes   else() -> 4 passes
+                rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x128_f8f6f4", 0, {}, 8),
+                rocRoller::GPUInstructionInfo("v_mfma_scale_f32_16x16x128_f8f6f4", 0, {}, 8),
+                // if (either matrix is F8) -> 16 passes  else() -> 8 passes
+                rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x64_f8f6f4", 0, {}, 16),
+                rocRoller::GPUInstructionInfo("v_mfma_scale_f32_32x32x64_f8f6f4", 0, {}, 16),
             }}};
 
     const std::unordered_map<std::string, std::vector<rocRoller::GPUArchitectureTarget>>
