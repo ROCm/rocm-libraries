@@ -59,59 +59,65 @@ ROCPRIM_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
 
 #if ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS == 1
 
-    // Important for syncing. Check section 9.2.2 or 7.3 in the following document
-    // http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
-    #define ROCPRIM_ASM_THREAD_LOAD(cache_modifier,                                        \
-                                    llvm_cache_modifier,                                   \
-                                    type,                                                  \
-                                    interim_type,                                          \
-                                    asm_operator,                                          \
-                                    output_modifier,                                       \
-                                    wait_cmd)                                              \
-        template<>                                                                         \
-        ROCPRIM_DEVICE __forceinline__ type AsmThreadLoad<cache_modifier, type>(void* ptr) \
-        {                                                                                  \
-            interim_type retval;                                                           \
-            asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier "\n\t"               \
-                                       "s_waitcnt " wait_cmd "(%2)"                        \
-                         : "=" #output_modifier(retval)                                    \
-                         : "v"(ptr), "I"(0x00));                                           \
-            return retval;                                                                 \
-        }
+// Important for syncing. Check section 9.2.2 or 7.3 in the following document
+// http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
+#define ROCPRIM_ASM_THREAD_LOAD(cache_modifier,                                        \
+                               llvm_cache_modifier,                                    \
+                               type,                                                   \
+                               interim_type,                                           \
+                               asm_operator,                                           \
+                               output_modifier,                                        \
+                               wait_inst,                                              \
+                               wait_cmd)                                               \
+    template<>                                                                         \
+    ROCPRIM_DEVICE __forceinline__ type AsmThreadLoad<cache_modifier, type>(void* ptr) \
+    {                                                                                  \
+        interim_type retval;                                                           \
+        asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier "\n\t"               \
+                                   wait_inst wait_cmd "(%2)"                           \
+                     : "=" #output_modifier(retval)                                    \
+                     : "v"(ptr), "I"(0x00));                                           \
+        return retval;                                                                 \
+    }
 
 // TODO Add specialization for custom larger data types
-#define ROCPRIM_ASM_THREAD_LOAD_GROUP(cache_modifier, llvm_cache_modifier, wait_cmd)                                  \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int8_t, int16_t, flat_load_sbyte, v, wait_cmd);      \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int16_t, int16_t, flat_load_sshort, v, wait_cmd);    \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint8_t, uint16_t, flat_load_ubyte, v, wait_cmd);    \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint16_t, uint16_t, flat_load_ushort, v, wait_cmd);  \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint32_t, uint32_t, flat_load_dword, v, wait_cmd);   \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, float, uint32_t, flat_load_dword, v, wait_cmd);      \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_load_dwordx2, v, wait_cmd); \
-    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_load_dwordx2, v, wait_cmd);
+#define ROCPRIM_ASM_THREAD_LOAD_GROUP(cache_modifier, llvm_cache_modifier, wait_inst, wait_cmd)                                  \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int8_t, int16_t, flat_load_sbyte, v, wait_inst, wait_cmd);      \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int16_t, int16_t, flat_load_sshort, v, wait_inst, wait_cmd);    \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint8_t, uint16_t, flat_load_ubyte, v, wait_inst, wait_cmd);    \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint16_t, uint16_t, flat_load_ushort, v, wait_inst, wait_cmd);  \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint32_t, uint32_t, flat_load_dword, v, wait_inst, wait_cmd);   \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, float, uint32_t, flat_load_dword, v, wait_inst, wait_cmd);      \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_load_dwordx2, v, wait_inst, wait_cmd); \
+    ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_load_dwordx2, v, wait_inst, wait_cmd);
 
 // [HIP-CPU] MSVC: erronous inline assembly specification (Triggers error C2059: syntax error: 'volatile')
 #ifndef __HIP_CPU_RT__
 #if defined(__gfx940__) || defined(__gfx941__)
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "sc0", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "sc1", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "sc0 sc1", "vmcnt");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "sc0 sc1", "vmcnt");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "sc0", "s_waitcnt", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "sc1", "s_waitcnt", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "sc0 sc1", "s_waitcnt", "vmcnt");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "sc0 sc1", "s_waitcnt", "vmcnt");
 #elif defined(__gfx942__)
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "sc0", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "sc0 nt", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "sc0", "vmcnt");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "sc0", "vmcnt");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "sc0", "s_waitcnt", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "sc0 nt", "s_waitcnt", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "sc0", "s_waitcnt", "vmcnt");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "sc0", "s_waitcnt", "vmcnt");
+#elif defined(__gfx1200__) ||  defined(__gfx1201__)
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "scope:SCOPE_DEV", "s_wait_loadcnt_dscnt", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "th:TH_DEFAULT scope:SCOPE_DEV", "s_wait_loadcnt_dscnt", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "th:TH_DEFAULT scope:SCOPE_DEV", "s_wait_loadcnt_dscnt", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "th:TH_DEFAULT scope:SCOPE_DEV", "s_wait_loadcnt_dscnt", "");
 #else
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "glc", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "glc slc", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "glc", "vmcnt");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "glc", "vmcnt");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "glc", "s_waitcnt", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "glc slc", "s_waitcnt", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "glc", "s_waitcnt", "vmcnt");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "glc", "s_waitcnt", "vmcnt");
 #endif
 
 // TODO find correct modifiers to match these
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ldg, "", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cs, "", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ldg, "", "s_waitcnt", "");
+ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cs, "", "s_waitcnt", "");
 #endif // __HIP_CPU_RT__
 
 #endif
