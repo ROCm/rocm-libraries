@@ -20,45 +20,55 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# Function to add a configured source file to a target.
+# It parses arguments, prepares the output file name, and configures the file.
 function(add_configured_source)
+  # Parse arguments and ensure proper usage
   cmake_parse_arguments(PARSE_ARGV 0 ARG "" "INPUT;TARGET;OUTPUT_PATTERN" "NAMES;VALUES")
   list(LENGTH ARG_NAMES NAMES_LEN)
   list(LENGTH ARG_VALUES VALS_LEN)
   if (NOT NAMES_LEN EQUAL VALS_LEN)
-    message("NAMES_LEN: ${NAMES_LEN}, VALS_LEN: ${VALS_LEN}")
-    message(FATAL_ERROR "The same number of names and values must be provided!")
+    message(FATAL_ERROR "add_configured_source: The same number of names (${NAMES_LEN}) and values (${VALS_LEN}) must be provided!")
   endif()
 
-  math(EXPR max "${VALS_LEN} - 1")
+  # Loop through the names and values, preparing the output pattern
+  set(max ${VALS_LEN})
+  math(EXPR max "${max} - 1")
   foreach(i RANGE ${max})
     list(GET ARG_NAMES ${i} curr_name)
     list(GET ARG_VALUES ${i} "${curr_name}")
   endforeach()
 
+  # Configure the output file and add it to the target
   string(CONFIGURE "${ARG_OUTPUT_PATTERN}" output @ONLY)
   string(MAKE_C_IDENTIFIER ${output} output)
-  configure_file("${ARG_INPUT}" "${ARG_TARGET}.parallel/${output}.cpp" @ONLY)
+  set(output_path "${ARG_TARGET}.parallel/${output}.cpp")
+  configure_file("${ARG_INPUT}" "${output_path}" @ONLY)
   set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${ARG_TARGET}.parallel")
-  target_sources("${ARG_TARGET}" PRIVATE "${ARG_TARGET}.parallel/${output}.cpp")
+  target_sources("${ARG_TARGET}" PRIVATE "${output_path}")
   target_include_directories("${ARG_TARGET}" PRIVATE "../benchmark")
 
-  # Rerun configuration if the input template changes or if the configured file is cleaned
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ARG_INPUT}" "${ARG_TARGET}.parallel/${output}.cpp")
+  # Ensure reconfiguration if necessary
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ARG_INPUT}" "${output_path}")
 endfunction()
 
+# Function to divide two numbers and round up.
 function(div_round_up dividend divisor result_var)
   math(EXPR result "(${dividend} + ${divisor} - 1) / ${divisor}")
   set("${result_var}" "${result}" PARENT_SCOPE)
 endfunction()
 
+# Function to add a matrix of configured sources.
+# It handles permutations of input parameters and calls add_configured_source accordingly.
 function(add_matrix)
   set(single_value_args "TARGET" "INPUT" "OUTPUT_PATTERN" "SHARDS" "CURRENT_SHARD")
   cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${single_value_args}" "NAMES;LISTS")
+
+  # Validate argument lengths
   list(LENGTH ARG_NAMES NAMES_LEN)
   list(LENGTH ARG_LISTS LISTS_LEN)
   if (NOT NAMES_LEN EQUAL LISTS_LEN)
-    message("NAMES_LEN: ${NAMES_LEN}, LISTS_LEN: ${LISTS_LEN}")
-    message(FATAL_ERROR "The same number of names and lists must be provided!")
+    message(FATAL_ERROR "add_matrix: The same number of names (${NAMES_LEN}) and lists (${LISTS_LEN}) must be provided!")
   endif()
 
   # Calculate the total number of permutations
@@ -69,15 +79,17 @@ function(add_matrix)
     math(EXPR total_len "${total_len} * ${LIST_LEN}")
   endforeach()
 
+  # Handle sharding
   if(NOT DEFINED ARG_SHARDS)
     set(ARG_SHARDS 1)
   endif()
   div_round_up("${total_len}" "${ARG_SHARDS}" per_shard)
-  message("per_shard: ${per_shard}")
+
+  # Determine the range of permutations for the current shard
   math(EXPR start "${ARG_CURRENT_SHARD} * ${per_shard}")
   math(EXPR stop "${start} + ${per_shard} - 1")
-  message("start: ${start}, stop: ${stop}")
-  # Run for each permutation of input paramters
+
+  # Process each permutation
   foreach(i RANGE ${start} ${stop})
     set(index ${i})
     set(values "")
@@ -85,12 +97,12 @@ function(add_matrix)
       string(REPLACE " " ";" curr_list ${input_list})
       list(LENGTH curr_list curr_length)
       math(EXPR curr_index "${index} % ${curr_length}")
-
       list(GET curr_list ${curr_index} curr_item)
       list(APPEND values "${curr_item}")
       math(EXPR index "${index} / ${curr_length}")
     endforeach()
 
+    # Add the configured source for each permutation
     add_configured_source(TARGET "${ARG_TARGET}"
             INPUT "${ARG_INPUT}"
             OUTPUT_PATTERN "${ARG_OUTPUT_PATTERN}"
@@ -99,7 +111,8 @@ function(add_matrix)
   endforeach()
 endfunction()
 
-# example of a FILTER rule
+# Function to filter out odd block sizes.
+# It sets a variable in the parent scope based on the condition.
 function(reject_odd_blocksize RESULT BlockSize)
   math(EXPR res "${BlockSize} % 2")
   if(res EQUAL 0)
