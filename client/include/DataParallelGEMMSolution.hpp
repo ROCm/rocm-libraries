@@ -35,10 +35,10 @@ namespace rocRoller
                 Result benchmark(Client::RunParameters const& runParams,
                                  bool                         checkResult,
                                  bool                         doVisualize,
-                                 std::vector<A> const&        h_A,
-                                 std::vector<B> const&        h_B,
-                                 std::vector<C> const&        h_C,
-                                 std::vector<D>&              h_D)
+                                 std::vector<typename UnsegmentedTypeOf<A>::type> const& h_A,
+                                 std::vector<typename UnsegmentedTypeOf<B>::type> const& h_B,
+                                 std::vector<C> const&                                   h_C,
+                                 std::vector<D>&                                         h_D)
                 {
                     Result result;
                     result.solutionParams = m_solutionParams;
@@ -249,6 +249,13 @@ namespace rocRoller
                         wave_k = 32;
                         wave_b = 1;
                     }
+                    else if constexpr(std::is_same_v<A, FP4> && std::is_same_v<B, FP4>)
+                    {
+                        wave_m = 16;
+                        wave_n = 16;
+                        wave_k = 128;
+                        wave_b = 1;
+                    }
                     else
                     {
                         Throw<FatalError>("Unsupported datatype combination in client");
@@ -360,18 +367,19 @@ namespace rocRoller
                                          kernelOptions);
                 }
 
-                CommandArguments makeArgs(std::shared_ptr<A> m_dA,
-                                          std::shared_ptr<B> m_dB,
-                                          std::shared_ptr<C> m_dC,
-                                          std::shared_ptr<D> m_dD)
+                CommandArguments makeArgs(std::shared_ptr<typename UnsegmentedTypeOf<A>::type> m_dA,
+                                          std::shared_ptr<typename UnsegmentedTypeOf<B>::type> m_dB,
+                                          std::shared_ptr<C>                                   m_dC,
+                                          std::shared_ptr<D>                                   m_dD)
                 {
                     CommandArguments commandArgs = this->m_command->createArguments();
 
                     bool no_beta = m_solutionParams.problemParams.beta == 0.0
                                    && m_solutionParams.problemParams.alpha == 1.0;
 
-                    commandArgs.setArgument(m_tagTensorA, ArgumentType::Value, m_dA.get());
-                    commandArgs.setArgument(m_tagTensorB, ArgumentType::Value, m_dB.get());
+                    commandArgs.setArgument(m_tagTensorA, ArgumentType::Value, (A*)m_dA.get());
+                    commandArgs.setArgument(m_tagTensorB, ArgumentType::Value, (B*)m_dB.get());
+
                     commandArgs.setArgument(m_tagTensorA,
                                             ArgumentType::Limit,
                                             (size_t)m_solutionParams.problemParams.m

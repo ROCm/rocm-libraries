@@ -164,6 +164,41 @@ TEST(UtilsTest, SetIdentityMatrix)
     EXPECT_EQ(mat, expected);
 }
 
+TEST(UtilsTest, SetIdentityMatrixFP4)
+{
+    using namespace rocRoller;
+
+    size_t const rows = 8;
+    size_t const cols = 8;
+
+    auto rng = RandomGenerator(12345);
+    auto mat = rng.vector<FP4>(rows * cols, -6.0f, 6.0f);
+
+    SetIdentityMatrix(mat, rows, cols);
+
+    // clang-format off
+    auto const expected = std::to_array<uint8_t> ({
+       0b00100000, 0b00000000, 0b00000000, 0b00000000,
+
+       0b00000010, 0b00000000, 0b00000000, 0b00000000,
+
+       0b00000000, 0b00100000, 0b00000000, 0b00000000,
+
+       0b00000000, 0b00000010, 0b00000000, 0b00000000,
+
+       0b00000000, 0b00000000, 0b00100000, 0b00000000,
+
+       0b00000000, 0b00000000, 0b00000010, 0b00000000,
+
+       0b00000000, 0b00000000, 0b00000000, 0b00100000,
+
+       0b00000000, 0b00000000, 0b00000000, 0b00000010,
+    });
+    // clang-format on
+
+    EXPECT_EQ(std::memcmp(mat.data(), expected.data(), expected.size()), 0);
+}
+
 TEST(UtilsTest, SingleVariant)
 {
     using namespace rocRoller;

@@ -17,6 +17,7 @@ TESTS=("*GPU_MatrixMultiplyMacroTileF8_16x16x32_NN*"
 "*GPU_MatrixMultiplyMacroTileF6_16x16x128_TN*"
 "*GPU_MatrixMultiplyMacroTileF6_32x32x64_TN*"
 "*GPU_MatrixMultiplyMacroTileFP4_16x16x128_TN*"
+"*GPU_MatrixMultiplyMacroTileFP4_32x32x64_TN*"
 "*GPU_MatrixMultiplyABF8_16x16x32*"
 "*GPU_MatrixMultiplyABF8_32x32x16*"
 "*GPU_MatrixMultiplyABF8_16x16x128*"
@@ -31,10 +32,14 @@ TESTS=("*GPU_MatrixMultiplyMacroTileF8_16x16x32_NN*"
 "*GPU_BasicGEMMBF8_16x16x128_TN"
 "*GPU_BasicGEMMFP8_32x32x64_TN"
 "*GPU_BasicGEMMBF8_32x32x64_TN"
+"*GPU_BasicGEMMFP4_16x16x128_TN"
+"*GPU_BasicGEMMFP4_32x32x64_TN"
 )
 
 RRPERF_TESTS=("f8gemm_16x16x128_f8f6f4"
 "f8gemm_32x32x64_f8f6f4"
+"f4gemm_16x16x128_f8f6f4"
+"f4gemm_32x32x64_f8f6f4"
 )
 
 # Loop through each test and execute it

@@ -233,27 +233,41 @@ namespace rocRoller
                              std::vector<TB>&          B,
                              size_t                    sizeB,
                              std::vector<TC>&          C,
-                             size_t                    sizeC)
+                             size_t                    sizeC,
+                             float                     min = -1.f,
+                             float                     max = 1.f)
     {
         auto rngA = RandomGenerator(seed + 1);
         auto rngB = RandomGenerator(seed + 2);
         auto rngC = RandomGenerator(seed + 3);
 
+        auto generateVector = [&](auto& vec, RandomGenerator& rng, size_t sz) {
+            using elemT = typename std::remove_reference_t<decltype(vec)>::value_type;
+            if constexpr(std::is_same_v<elemT, FP4x8>)
+                vec = rng.vector<FP4>(sz, min, max);
+            else if constexpr(std::is_same_v<elemT, FP6x16>)
+                vec = rng.vector<FP6>(sz, min, max);
+            else if constexpr(std::is_same_v<elemT, BF6x16>)
+                vec = rng.vector<BF6>(sz, min, max);
+            else
+                vec = rng.vector<elemT>(sz, min, max);
+        };
+
 #pragma omp parallel sections
         {
 #pragma omp section
             {
-                A = rngA.vector<TA>(sizeA, -1.f, 1.f);
+                generateVector(A, rngA, sizeA);
             }
 
 #pragma omp section
             {
-                B = rngB.vector<TB>(sizeB, -1.f, 1.f);
+                generateVector(B, rngB, sizeB);
             }
 
 #pragma omp section
             {
-                C = rngC.vector<TC>(sizeC, -1.f, 1.f);
+                C = rngC.vector<TC>(sizeC, min, max);
             }
         }
     }
@@ -264,5 +278,30 @@ namespace rocRoller
         for(size_t i = 0; i < cols; i++)
             for(size_t j = 0; j < rows; j++)
                 mat[i + j * cols] = i == j ? static_cast<T>(1.0) : static_cast<T>(0.0);
+    }
+
+    template <>
+    inline void SetIdentityMatrix(std::vector<FP4x8>& mat, size_t cols, size_t rows)
+    {
+        std::fill(mat.begin(), mat.end(), FP4x8()); // zero out the matrix
+
+        // Notice `cols` and `rows` are NOT the actual dimensions of `mat`,
+        // they are the dimensions before packed into FP4x8.
+        size_t const row_bytes = 4 * cols / 8; // number of bytes in a row
+        uint8_t      even      = 0b00100000;
+        uint8_t      odd       = 0b00000010;
+
+        //  Generate FP4 identity matrix with bit pattern like this:
+        //    0010 0000 0000 0000
+        //    0000 0010 0000 0000
+        //    0000 0000 0010 0000
+        //    0000 0000 0000 0010
+        //    ...
+        for(size_t i = 0; i < std::min(rows, cols); i += 2)
+            std::memcpy(
+                reinterpret_cast<uint8_t*>(mat.data()) + (row_bytes * i) + (4 * i / 8), &even, 1);
+        for(size_t i = 1; i < std::min(rows, cols); i += 2)
+            std::memcpy(
+                reinterpret_cast<uint8_t*>(mat.data()) + (row_bytes * i) + (4 * i / 8), &odd, 1);
     }
 }

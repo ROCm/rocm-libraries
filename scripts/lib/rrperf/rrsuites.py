@@ -3,6 +3,13 @@ from rrperf.problems import GEMMRun, CodeGenRun, TensileRun
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
+fp4fp4_fp32 = dict(
+    type_A="fp4",
+    type_B="fp4",
+    type_C="float",
+    type_D="float",
+)
+
 fp8fp8_fp32 = dict(
     type_A="fp8",
     type_B="fp8",
@@ -576,6 +583,55 @@ def f8gemm_32x32x64_f8f6f4():
 def f8gemm_f8f6f4():
     yield from f8gemm_32x32x64_f8f6f4()
     yield from f8gemm_16x16x128_f8f6f4()
+
+
+def f4gemm_16x16x128_f8f6f4():
+    params = dict(
+        M=256,
+        N=256,
+        K=512,
+        mac_m=64,
+        mac_n=64,
+        mac_k=128,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
+        trans_A="T",
+        trans_B="N",
+    )
+    yield GEMMRun(
+        **params,
+        **fp4fp4_fp32,
+    )
+
+
+def f4gemm_32x32x64_f8f6f4():
+    params = dict(
+        M=256,
+        N=256,
+        K=512,
+        mac_m=128,
+        mac_n=128,
+        mac_k=64,
+        wave_m=32,
+        wave_n=32,
+        wave_k=64,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
+        trans_A="T",
+        trans_B="N",
+    )
+    yield GEMMRun(
+        **params,
+        **fp4fp4_fp32,
+    )
+
+
+def f4gemm_f8f6f4():
+    yield from f4gemm_32x32x64_f8f6f4()
+    yield from f4gemm_16x16x128_f8f6f4()
 
 
 def all():

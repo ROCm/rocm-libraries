@@ -99,13 +99,16 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
 {
     // Host Data
     RandomGenerator random(31415u);
-    std::vector<A>  h_A = random.vector<A>(
+    auto            h_A = random.vector<A>(
         solutionParams.problemParams.m * solutionParams.problemParams.k, -1.0, 1.0);
-    std::vector<B> h_B = random.vector<B>(
+    auto h_B = random.vector<B>(
         solutionParams.problemParams.k * solutionParams.problemParams.n, -1.0, 1.0);
     std::vector<C> h_C = random.vector<C>(
         solutionParams.problemParams.m * solutionParams.problemParams.n, -1.0, 1.0);
     std::vector<D> h_D(solutionParams.problemParams.m * solutionParams.problemParams.n, 0.0);
+
+    using unsegTypeA = typename UnsegmentedTypeOf<A>::type;
+    using unsegTypeB = typename UnsegmentedTypeOf<B>::type;
 
     if(solutionParams.scheduler == "TENSILE_ASM")
     {
@@ -179,10 +182,12 @@ int main(int argc, const char* argv[])
               Arg({"trans_B"}, "N: B is not to be transposed.  T: B is to be transposed."));
     po.addArg("alpha", Arg({"a", "alpha"}, "Alpha scalar."));
     po.addArg("beta", Arg({"b", "beta"}, "Beta scalar."));
-    po.addArg("type_A",
-              Arg({"type_A"}, "Datatype of A matrix [float | half | fp8 | bf8].  Default: float."));
-    po.addArg("type_B",
-              Arg({"type_B"}, "Datatype of B matrix [float | half | fp8 | bf8].  Default: float."));
+    po.addArg(
+        "type_A",
+        Arg({"type_A"}, "Datatype of A matrix [float | half | fp8 | bf8 | fp4].  Default: float."));
+    po.addArg(
+        "type_B",
+        Arg({"type_B"}, "Datatype of B matrix [float | half | fp8 | bf8 | fp4].  Default: float."));
     po.addArg("type_C", Arg({"type_C"}, "Datatype of C matrix [float | half].  Default: float."));
     po.addArg("type_D", Arg({"type_D"}, "Datatype of D matrix [float | half].  Default: float."));
     po.addArg("type_acc", Arg({"type_acc"}, "Datatype of accumulation [float]"));
@@ -390,6 +395,11 @@ int main(int argc, const char* argv[])
             && problem.typeD == "float")
     {
         result = GEMM<BF8, BF8, float, float>(solution, runParams, checkResult, doVisualize);
+    }
+    else if(problem.typeA == "fp4" && problem.typeB == "fp4" && problem.typeC == "float"
+            && problem.typeD == "float")
+    {
+        result = GEMM<FP4, FP4, float, float>(solution, runParams, checkResult, doVisualize);
     }
     else
     {

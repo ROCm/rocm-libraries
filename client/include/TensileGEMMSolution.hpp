@@ -30,10 +30,10 @@ namespace rocRoller
                 Result benchmark(Client::RunParameters const& runParams,
                                  bool                         checkResult,
                                  bool                         doVisualize,
-                                 std::vector<A> const&        h_A,
-                                 std::vector<B> const&        h_B,
-                                 std::vector<C> const&        h_C,
-                                 std::vector<D>&              h_D)
+                                 std::vector<typename UnsegmentedTypeOf<A>::type> const& h_A,
+                                 std::vector<typename UnsegmentedTypeOf<B>::type> const& h_B,
+                                 std::vector<C> const&                                   h_C,
+                                 std::vector<D>&                                         h_D)
                 {
                     Result result;
                     result.solutionParams = m_solutionParams;
@@ -368,17 +368,18 @@ namespace rocRoller
                     return commandKernel;
                 }
 
-                CommandArguments makeArgs(std::shared_ptr<A> m_dA,
-                                          std::shared_ptr<B> m_dB,
-                                          std::shared_ptr<C> m_dC,
-                                          std::shared_ptr<D> m_dD)
+                CommandArguments makeArgs(std::shared_ptr<typename UnsegmentedTypeOf<A>::type> m_dA,
+                                          std::shared_ptr<typename UnsegmentedTypeOf<B>::type> m_dB,
+                                          std::shared_ptr<C>                                   m_dC,
+                                          std::shared_ptr<D>                                   m_dD)
                 {
                     CommandArguments commandArgs = this->m_command->createArguments();
 
                     commandArgs.setArgument(m_tagD, ArgumentType::Value, m_dD.get());
                     commandArgs.setArgument(m_tagC, ArgumentType::Value, m_dC.get());
-                    commandArgs.setArgument(m_tagA, ArgumentType::Value, m_dA.get());
-                    commandArgs.setArgument(m_tagB, ArgumentType::Value, m_dB.get());
+
+                    commandArgs.setArgument(m_tagA, ArgumentType::Value, (A*)m_dA.get());
+                    commandArgs.setArgument(m_tagB, ArgumentType::Value, (B*)m_dB.get());
 
                     commandArgs.setArgument(m_tagC,
                                             ArgumentType::Limit,

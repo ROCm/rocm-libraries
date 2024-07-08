@@ -44,6 +44,11 @@ namespace GEMMDriverTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
             }
 
+            if constexpr(std::is_same_v<T, FP4>)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+            }
+
             auto dataTypeAB = TypeInfo<T>::Var.dataType;
             auto dataTypeD  = TypeInfo<TD>::Var.dataType;
 
@@ -115,9 +120,10 @@ namespace GEMMDriverTest
             auto NZ = std::make_shared<Expression::Expression>(1u);
 
             // Host data
-            std::vector<T>  hostA;
-            std::vector<T>  hostB;
-            std::vector<TD> hostC;
+            using UnsegmentedType = typename UnsegmentedTypeOf<T>::type;
+            std::vector<UnsegmentedType> hostA;
+            std::vector<UnsegmentedType> hostB;
+            std::vector<TD>              hostC;
 
             GenerateRandomInput(31415u, hostA, M * K, hostB, K * N, hostC, M * N);
 
@@ -129,8 +135,8 @@ namespace GEMMDriverTest
                 std::fill(hostC.begin(), hostC.end(), static_cast<T>(0.0));
             }
 
-            std::shared_ptr<T>  deviceA = make_shared_device(hostA);
-            std::shared_ptr<T>  deviceB = make_shared_device(hostB);
+            auto                deviceA = make_shared_device(hostA);
+            auto                deviceB = make_shared_device(hostB);
             std::shared_ptr<TD> deviceC = (notSetC) ? nullptr : make_shared_device(hostC);
             std::shared_ptr<TD> deviceD = make_shared_device<TD>(M * N, TD{});
 
@@ -287,8 +293,16 @@ namespace GEMMDriverTest
 
             CommandArguments commandArgs = command->createArguments();
 
-            commandArgs.setArgument(tagTensorA, ArgumentType::Value, deviceA.get());
-            commandArgs.setArgument(tagTensorB, ArgumentType::Value, deviceB.get());
+            if constexpr(std::is_same_v<T, FP4>)
+            {
+                commandArgs.setArgument(tagTensorA, ArgumentType::Value, (uint8_t*)deviceA.get());
+                commandArgs.setArgument(tagTensorB, ArgumentType::Value, (uint8_t*)deviceB.get());
+            }
+            else
+            {
+                commandArgs.setArgument(tagTensorA, ArgumentType::Value, deviceA.get());
+                commandArgs.setArgument(tagTensorB, ArgumentType::Value, deviceB.get());
+            }
             commandArgs.setArgument(tagTensorC, ArgumentType::Value, deviceC.get());
             commandArgs.setArgument(tagTensorD, ArgumentType::Value, deviceD.get());
 
@@ -1067,7 +1081,10 @@ namespace GEMMDriverTest
         return gemm;
     }
 
-    void check_GEMMF8F6F4_TN(uint numBufferLoads, rocRoller::ContextPtr m_context)
+    void check_GEMMF8F6F4_TN(rocRoller::ContextPtr m_context,
+                             uint                  numBufferLoads,
+                             uint                  numDSWrites,
+                             uint                  numDSReads)
     {
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
         {
@@ -1077,12 +1094,47 @@ namespace GEMMDriverTest
             EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "), numBufferLoads);
             EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
 
-            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b"), 8);
-            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), 8);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b"), numDSWrites);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), numDSWrites);
 
-            EXPECT_EQ(countSubstring(generatedCode, "ds_read"), 20);
-            EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), 20);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read"), numDSReads);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads);
         }
+    }
+
+    void check_GEMMFP4_mfma(rocRoller::ContextPtr m_context, std::string f8f6f4_inst)
+    {
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        {
+            auto generatedCode = m_context->instructions()->toString();
+
+            auto mfma_count     = countSubstring(generatedCode, "v_mfma_");
+            auto f8f6f4_count   = countSubstring(generatedCode, f8f6f4_inst);
+            auto modifier_count = countSubstring(generatedCode, "cbsz:0b100 blgp:0b100");
+
+            // All mfma instructions should be f8f6f4
+            EXPECT_EQ(mfma_count, f8f6f4_count);
+            // All f8f6f4 instructions should use 0b100 (FP4) as input matrix format
+            EXPECT_EQ(f8f6f4_count, modifier_count);
+        }
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP4_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
+        basicGEMM<FP4, float>(m_context, gemm, 2.e-5);
+        check_GEMMFP4_mfma(m_context, "v_mfma_f32_16x16x128_f8f6f4");
+        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 8) / 64, 4, 10);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP4_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
+        basicGEMM<FP4, float>(m_context, gemm, 2.e-5);
+        check_GEMMFP4_mfma(m_context, "v_mfma_f32_32x32x64_f8f6f4");
+        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 8) / 64, 4, 10);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_16x16x128_TN)
@@ -1090,7 +1142,7 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
         basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
-        check_GEMMF8F6F4_TN((16 * 16 + (16 * 128) / 4) / 64, m_context);
+        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_16x16x128_TN)
@@ -1098,7 +1150,7 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
         basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
-        check_GEMMF8F6F4_TN((16 * 16 + (16 * 128) / 4) / 64, m_context);
+        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_32x32x64_TN)
@@ -1106,7 +1158,7 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
         basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
-        check_GEMMF8F6F4_TN((32 * 32 + (32 * 64) / 4) / 64, m_context);
+        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_32x32x64_TN)
@@ -1114,7 +1166,7 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
         basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
-        check_GEMMF8F6F4_TN((32 * 32 + (32 * 64) / 4) / 64, m_context);
+        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2)

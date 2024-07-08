@@ -33,10 +33,10 @@ namespace rocRoller
                 Result benchmark(Client::RunParameters const& runParams,
                                  bool                         checkResult,
                                  bool                         doVisualize,
-                                 std::vector<A> const&        h_A,
-                                 std::vector<B> const&        h_B,
-                                 std::vector<C> const&        h_C,
-                                 std::vector<D>&              h_D)
+                                 std::vector<typename UnsegmentedTypeOf<A>::type> const& h_A,
+                                 std::vector<typename UnsegmentedTypeOf<B>::type> const& h_B,
+                                 std::vector<C> const&                                   h_C,
+                                 std::vector<D>&                                         h_D)
                 {
                     Result result;
                     result.solutionParams = this->m_solutionParams;
@@ -116,10 +116,10 @@ namespace rocRoller
                     return kernelOptions;
                 }
 
-                CommandArguments makeArgs(std::shared_ptr<A>       m_dA,
-                                          std::shared_ptr<B>       m_dB,
-                                          std::shared_ptr<C>       m_dC,
-                                          std::shared_ptr<D>       m_dD,
+                CommandArguments makeArgs(std::shared_ptr<typename UnsegmentedTypeOf<A>::type> m_dA,
+                                          std::shared_ptr<typename UnsegmentedTypeOf<B>::type> m_dB,
+                                          std::shared_ptr<C>                                   m_dC,
+                                          std::shared_ptr<D>                                   m_dD,
                                           std::shared_ptr<uint8_t> m_dScratch)
                 {
                     auto commandArgs
