@@ -62,46 +62,52 @@ HIPCUB_DEVICE __forceinline__ void AsmThreadStore(void * ptr, T val)
                                 interim_type,                                                                \
                                 asm_operator,                                                                \
                                 output_modifier,                                                             \
+                                wait_inst,                                                                   \
                                 wait_cmd)                                                                    \
     template<>                                                                                               \
     HIPCUB_DEVICE __forceinline__ void AsmThreadStore<cache_modifier, type>(void * ptr, type val)            \
     {                                                                                                        \
-        interim_type temp_val = val;                                                          \
-        asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier : : "v"(ptr), #output_modifier(temp_val)); \
-        asm volatile("s_waitcnt " wait_cmd "(%0)" : : "I"(0x00));                                            \
+        interim_type temp_val = val;                                                                         \
+        asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier "\n\t"                                     \
+                                   wait_inst wait_cmd "(%2)"                                                 \
+                     : : "v"(ptr), #output_modifier(temp_val), "I"(0x00));                                   \
     }
 
 // TODO fix flat_store_ubyte and flat_store_sbyte issues
 // TODO Add specialization for custom larger data types
-#define HIPCUB_ASM_THREAD_STORE_GROUP(cache_modifier, llvm_cache_modifier, wait_cmd)                                   \
-    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, int8_t, int16_t, flat_store_byte, v, wait_cmd);       \
-    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, int16_t, int16_t, flat_store_short, v, wait_cmd);     \
-    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint8_t, uint16_t, flat_store_byte, v, wait_cmd);     \
-    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint16_t, uint16_t, flat_store_short, v, wait_cmd);   \
-    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint32_t, uint32_t, flat_store_dword, v, wait_cmd);   \
-    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, float, uint32_t, flat_store_dword, v, wait_cmd);      \
-    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_store_dwordx2, v, wait_cmd); \
-    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_store_dwordx2, v, wait_cmd);
+#define HIPCUB_ASM_THREAD_STORE_GROUP(cache_modifier, llvm_cache_modifier, wait_inst, wait_cmd)                                   \
+    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, int8_t, int16_t, flat_store_byte, v, wait_inst, wait_cmd);       \
+    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, int16_t, int16_t, flat_store_short, v, wait_inst, wait_cmd);     \
+    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint8_t, uint16_t, flat_store_byte, v, wait_inst, wait_cmd);     \
+    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint16_t, uint16_t, flat_store_short, v, wait_inst, wait_cmd);   \
+    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint32_t, uint32_t, flat_store_dword, v, wait_inst, wait_cmd);   \
+    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, float, uint32_t, flat_store_dword, v, wait_inst, wait_cmd);      \
+    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_store_dwordx2, v, wait_inst, wait_cmd); \
+    HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_store_dwordx2, v, wait_inst, wait_cmd);
 
 #if defined(__gfx940__) || defined(__gfx941__)
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "sc0 sc1", "");
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "sc0 sc1", "");
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "sc0 sc1", "vmcnt");
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "sc0 sc1", "vmcnt");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "sc0 sc1", "s_waitcnt", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "sc0 sc1", "s_waitcnt", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "sc0 sc1", "s_waitcnt", "vmcnt");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "sc0 sc1", "s_waitcnt", "vmcnt");
 #elif defined(__gfx942__)
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "sc0", "");
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "sc0 nt", "");
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "sc0", "vmcnt");
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "sc0", "vmcnt");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "sc0", "s_waitcnt", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "sc0 nt", "s_waitcnt", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "sc0", "s_waitcnt", "vmcnt");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "sc0", "s_waitcnt", "vmcnt");
+#elif defined(__gfx1200__) ||  defined(__gfx1201__)
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "scope:SCOPE_DEV", "s_wait_storecnt_dscnt", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "th:TH_DEFAULT scope:SCOPE_DEV", "s_wait_storecnt_dscnt", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "scope:SCOPE_DEV", "s_wait_storecnt_dscnt", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "scope:SCOPE_DEV", "s_wait_storecnt_dscnt", "");
 #else
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "glc", "");
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "glc slc", "");
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "glc", "vmcnt");
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "glc", "vmcnt");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "glc", "s_waitcnt", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "glc slc", "s_waitcnt", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "glc", "s_waitcnt", "vmcnt");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "glc", "s_waitcnt", "vmcnt");
 #endif
-
 // TODO find correct modifiers to match these
-HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CS, "", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CS, "", "", "");
 
 #endif
 
