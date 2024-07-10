@@ -370,6 +370,15 @@ int32_t main(int32_t argc, char* argv[])
     // HIP
     hipStream_t stream = hipStreamDefault; // default
 
+    hipDeviceProp_t devProp;
+    int             device_id = 0;
+    
+    HIP_CHECK(hipGetDevice(&device_id));
+    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+
+    std::cout << "benchmark_device_batch_copy" << std::endl;
+    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
+
     // Benchmark info
     benchmark::AddCustomContext("size", std::to_string(size));
 
@@ -383,6 +392,8 @@ int32_t main(int32_t argc, char* argv[])
                   BENCHMARK_TYPE(2, 2),
                   BENCHMARK_TYPE(4, 4),
                   BENCHMARK_TYPE(8, 8)};
+
+            
 
     // Use manual timing
     for(auto& b : benchmarks)
