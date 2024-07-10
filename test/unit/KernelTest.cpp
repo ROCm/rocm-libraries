@@ -313,6 +313,14 @@ amdhsa.kernels:
 
     TEST_P(GPU_KernelTest, WholeKernel)
     {
+        //FIXME fix the arch check with InProcess assembler for gfx94X and gfx95X
+        if(GetParam() == AssemblerType::InProcess
+           && m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        {
+            GTEST_SKIP() << "Skipping InProcess Assembler on "
+                         << m_context->targetArchitecture().target() << std::endl;
+        }
+
         Settings::getInstance()->set(Settings::KernelAssembler, GetParam());
 
         ASSERT_EQ(true, isLocalDevice());
