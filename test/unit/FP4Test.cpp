@@ -11,6 +11,7 @@
 #include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"
+#include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 
@@ -361,7 +362,11 @@ namespace rocRollerTest
                              FP4MemoryInstructionTest,
                              supportedISATuples());
 
-    TEST(FP4ConversionTest, CPUConversions)
+    class CPUFP4Test : public GenericContextFixture
+    {
+    };
+
+    TEST_F(CPUFP4Test, CPUConversions)
     {
         auto singleTest = [](auto fp64) {
             // FP4 to FP32
@@ -383,7 +388,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST(FP4x8PackTest, CPUFP4x8Pack)
+    TEST_F(CPUFP4Test, CPUFP4x8Pack)
     {
         int num_fp4 = 16;
 
@@ -405,7 +410,7 @@ namespace rocRollerTest
             EXPECT_EQ(data[i], result[i]);
     }
 
-    TEST(FP4x8ConversionTest, CPUFP4x8Conversion)
+    TEST_F(CPUFP4Test, CPUFP4x8Conversion)
     {
         constexpr auto cases = std::to_array<float>(
             {0, 0.5, 1, 1.5, 2, 3, 4, 6, -0, -0.5, -1, -1.5, -2, -3, -4, -6});

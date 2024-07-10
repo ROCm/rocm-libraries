@@ -13,6 +13,7 @@
 
 #include "F8Values.hpp"
 #include "GPUContextFixture.hpp"
+#include "GenericContextFixture.hpp"
 #include "Utilities.hpp"
 
 using namespace rocRoller;
@@ -196,7 +197,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST_P(F8Test, GPU_F8x4LoadToFloatStore)
+    TEST_P(F8Test, F8x4LoadToFloatStore)
     {
         auto F8Type = std::get<rocRoller::DataType>(GetParam());
         if(isLocalDevice())
@@ -352,7 +353,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST_P(F8Test, GPU_F8LoadGather)
+    TEST_P(F8Test, F8LoadGather)
     {
         constexpr int N = 4;
         if(isLocalDevice())
@@ -366,6 +367,16 @@ namespace rocRollerTest
             EXPECT_GT(assembledKernel.size(), 0);
         }
     }
+
+    INSTANTIATE_TEST_SUITE_P(
+        F8Test,
+        F8Test,
+        ::testing::Combine(::testing::Values("gfx942:sramecc+", "gfx950:sramecc+", "gfx950:xnack+"),
+                           ::testing::Values(rocRoller::DataType::FP8, rocRoller::DataType::BF8)));
+
+    class CPUF8Test : public GenericContextFixture
+    {
+    };
 
     template <typename F8Type>
     void numberConversion(double fp64)
@@ -386,14 +397,14 @@ namespace rocRollerTest
             EXPECT_TRUE(std::isnan(f8));
     }
 
-    TEST(F8Test, CPUConversions)
+    TEST_F(CPUF8Test, CPUConversions)
     {
         auto settings = Settings::getInstance();
         settings->set(Settings::F8ModeOption, F8Mode::NaNoo);
+
         auto const& FP8ValuesInNaNoo = FloatReference<rocRoller::FP8>::ValuesInNaNooMode;
         std::for_each(
             FP8ValuesInNaNoo.begin(), FP8ValuesInNaNoo.end(), numberConversion<rocRoller::FP8>);
-
         auto const& BF8ValuesInNaNoo = FloatReference<rocRoller::BF8>::ValuesInNaNooMode;
         std::for_each(
             BF8ValuesInNaNoo.begin(), BF8ValuesInNaNoo.end(), numberConversion<rocRoller::BF8>);
@@ -402,10 +413,90 @@ namespace rocRollerTest
         auto const& FP8ValuesInOCP = FloatReference<rocRoller::FP8>::ValuesInOCPMode;
         std::for_each(
             FP8ValuesInOCP.begin(), FP8ValuesInOCP.end(), numberConversion<rocRoller::FP8>);
-
         auto const& BF8ValuesInOCP = FloatReference<rocRoller::BF8>::ValuesInOCPMode;
         std::for_each(
             BF8ValuesInOCP.begin(), BF8ValuesInOCP.end(), numberConversion<rocRoller::BF8>);
+    }
+
+    TEST_F(CPUF8Test, OutOfBoundsConversions)
+    {
+        auto settings = Settings::getInstance();
+
+        settings->set(Settings::F8ModeOption, F8Mode::NaNoo);
+
+        rocRoller::FP8 nF8;
+        nF8 = 241.0;
+        EXPECT_FLOAT_EQ(nF8, 240.0);
+        nF8 = 256.0;
+        EXPECT_FLOAT_EQ(nF8, 240.0);
+        nF8 = 448.0;
+        EXPECT_FLOAT_EQ(nF8, 240.0);
+        nF8 = 480.0;
+        EXPECT_FLOAT_EQ(nF8, 240.0);
+        nF8 = -241.0;
+        EXPECT_FLOAT_EQ(nF8, -240.0);
+        nF8 = -256.0;
+        EXPECT_FLOAT_EQ(nF8, -240.0);
+        nF8 = -448.0;
+        EXPECT_FLOAT_EQ(nF8, -240.0);
+        nF8 = -480.0;
+        EXPECT_FLOAT_EQ(nF8, -240.0);
+
+        rocRoller::BF8 nBF8;
+        nBF8 = 57345.0;
+        EXPECT_FLOAT_EQ(nBF8, 57344.0);
+        nBF8 = 65536.0;
+        EXPECT_FLOAT_EQ(nBF8, 57344.0);
+        nBF8 = 98304.0;
+        EXPECT_FLOAT_EQ(nBF8, 57344.0);
+        nBF8 = 114688.0;
+        EXPECT_FLOAT_EQ(nBF8, 57344.0);
+        nBF8 = -57345.0;
+        EXPECT_FLOAT_EQ(nBF8, -57344.0);
+        nBF8 = -65536.0;
+        EXPECT_FLOAT_EQ(nBF8, -57344.0);
+        nBF8 = -98304.0;
+        EXPECT_FLOAT_EQ(nBF8, -57344.0);
+        nBF8 = -114688.0;
+        EXPECT_FLOAT_EQ(nBF8, -57344.0);
+
+        settings->set(Settings::F8ModeOption, F8Mode::OCP);
+
+        rocRoller::FP8 oF8;
+        oF8 = 449;
+        EXPECT_FLOAT_EQ(oF8, 448.0);
+        oF8 = 479;
+        EXPECT_FLOAT_EQ(oF8, 448.0);
+        oF8 = 480;
+        EXPECT_FLOAT_EQ(oF8, 448.0);
+        oF8 = 512;
+        EXPECT_FLOAT_EQ(oF8, 448.0);
+        oF8 = -449;
+        EXPECT_FLOAT_EQ(oF8, -448.0);
+        oF8 = -479;
+        EXPECT_FLOAT_EQ(oF8, -448.0);
+        oF8 = -480;
+        EXPECT_FLOAT_EQ(oF8, -448.0);
+        oF8 = -512;
+        EXPECT_FLOAT_EQ(oF8, -448.0);
+
+        rocRoller::BF8 oBF8;
+        oBF8 = 57345.0;
+        EXPECT_FLOAT_EQ(oBF8, 57344.0);
+        oBF8 = 65536.0;
+        EXPECT_FLOAT_EQ(oBF8, 57344.0);
+        oBF8 = 98304.0;
+        EXPECT_FLOAT_EQ(oBF8, 57344.0);
+        oBF8 = 114688.0;
+        EXPECT_FLOAT_EQ(oBF8, 57344.0);
+        oBF8 = -57345.0;
+        EXPECT_FLOAT_EQ(oBF8, -57344.0);
+        oBF8 = -65536.0;
+        EXPECT_FLOAT_EQ(oBF8, -57344.0);
+        oBF8 = -98304.0;
+        EXPECT_FLOAT_EQ(oBF8, -57344.0);
+        oBF8 = -114688.0;
+        EXPECT_FLOAT_EQ(oBF8, -57344.0);
     }
 
     template <typename F8Type, F8Mode f8Mode>
@@ -428,13 +519,21 @@ namespace rocRollerTest
 
         if constexpr(f8Mode == F8Mode::OCP)
         {
-            // In OCP mode, bf8 has  +/-inf & NaN as different bit patterns
-            EXPECT_FALSE(std::isnan(f8_pos_inf));
-            EXPECT_FALSE(std::isnan(f8_neg_inf));
             if constexpr(std::is_same<F8Type, BF8>::value)
             {
+                // In OCP mode, bf8 has  +/-inf & NaN as different bit patterns
+                EXPECT_FALSE(std::isnan(f8_pos_inf));
                 EXPECT_TRUE(std::isinf(f8_pos_inf));
+                EXPECT_FALSE(std::isnan(f8_neg_inf));
                 EXPECT_TRUE(std::isinf(f8_neg_inf));
+            }
+            else
+            {
+                //FIXME fix the convert from f32_inf to f8_pos/neg_inf for OCP
+                EXPECT_FALSE(std::isnan(f8_pos_inf));
+                EXPECT_FALSE(std::isinf(f8_pos_inf));
+                EXPECT_FALSE(std::isnan(f8_neg_inf));
+                EXPECT_FALSE(std::isinf(f8_neg_inf));
             }
         }
 
@@ -444,7 +543,7 @@ namespace rocRollerTest
         EXPECT_TRUE(std::iszero(f8_zero));
     }
 
-    TEST(F8Test, SpecialValues)
+    TEST_F(CPUF8Test, SpecialValues)
     {
         union
         {
@@ -468,11 +567,4 @@ namespace rocRollerTest
         checkSpecialValues<rocRoller::FP8, F8Mode::OCP>(f32_inf.val, f32_nan.val, f32_zero.val);
         checkSpecialValues<rocRoller::BF8, F8Mode::OCP>(f32_inf.val, f32_nan.val, f32_zero.val);
     }
-
-    INSTANTIATE_TEST_SUITE_P(F8Test,
-                             F8Test,
-                             ::testing::Combine(::testing::Values("gfx942:sramecc+"),
-                                                ::testing::Values(rocRoller::DataType::FP8,
-                                                                  rocRoller::DataType::BF8)));
-
 }

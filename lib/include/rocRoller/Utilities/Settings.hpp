@@ -5,6 +5,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -248,6 +249,10 @@ namespace rocRoller
     private:
         friend rocRoller::LazySingleton<Settings>;
 
+        using MapReaderLock = std::shared_lock<std::shared_mutex>;
+        using MapWriterLock = std::unique_lock<std::shared_mutex>;
+
+        std::shared_mutex               m_mapLock;
         std::map<std::string, std::any> m_values;
         std::vector<std::string>        m_setBitOptions;
     };

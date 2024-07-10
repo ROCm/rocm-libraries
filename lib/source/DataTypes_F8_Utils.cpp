@@ -34,6 +34,7 @@ namespace rocRoller
                                              4,
                                              float,
                                              /*is_ocp*/ false,
+                                             /*is_bf8*/ false,
                                              /*negative_zero_is_nan*/ true,
                                              /*clip*/ true>(v, 0 /*stochastic*/, 0 /*rng*/);
             break;
@@ -42,6 +43,7 @@ namespace rocRoller
                                              4,
                                              float,
                                              /*is_ocp*/ true,
+                                             /*is_bf8*/ false,
                                              /*negative_zero_is_nan*/ false,
                                              /*clip*/ true>(v, 0 /*stochastic*/, 0 /*rng*/);
             break;
@@ -58,7 +60,7 @@ namespace rocRoller
         {
         case rocRoller::F8Mode::NaNoo:
             return DataTypes::
-                cast_from_f8<2, 5, float, /*negative_zero_is_nan*/ true, /*has_infinity*/ true>(
+                cast_from_f8<2, 5, float, /*negative_zero_is_nan*/ true, /*has_infinity*/ false>(
                     v.data);
         case rocRoller::F8Mode::OCP:
             return DataTypes::
@@ -80,6 +82,7 @@ namespace rocRoller
                                              5,
                                              float,
                                              /*is_ocp*/ false,
+                                             /*is_bf8*/ true,
                                              /*negative_zero_is_nan*/ true,
                                              /*clip*/ true>(v, 0 /*stochastic*/, 0 /*rng*/);
             break;
@@ -88,6 +91,7 @@ namespace rocRoller
                                              5,
                                              float,
                                              /*is_ocp*/ true,
+                                             /*is_bf8*/ true,
                                              /*negative_zero_nan*/ false,
                                              /*clip*/ true>(v, 0 /*stochastic*/, 0 /*rng*/);
             break;

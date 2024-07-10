@@ -115,7 +115,7 @@ namespace rocRollerTest
     {
     };
 
-    TEST(SubassemblerPathTest, VersionedROCM)
+    TEST_F(SubassemblerPathTest, VersionedROCM)
     {
         auto path = static_cast<std::string>(
             std::filesystem::canonical(Settings::getDefault(Settings::SubprocessAssemblerPath)));
@@ -125,7 +125,7 @@ namespace rocRollerTest
         EXPECT_NE(assemble().size(), 0);
     }
 
-    TEST(SubassemblerPathTest, MissingPath)
+    TEST_F(SubassemblerPathTest, MissingPath)
     {
         Settings::getInstance()->set(
             Settings::SubprocessAssemblerPath,

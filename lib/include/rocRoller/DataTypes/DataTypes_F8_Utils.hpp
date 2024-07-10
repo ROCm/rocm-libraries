@@ -65,7 +65,13 @@ namespace rocRoller
     *  @param _x Floating number to be cast to f8
     *  @param stoch Stochastic rounding or not
     */
-        template <int wm, int we, typename T, bool is_ocp, bool negative_zero_nan, bool clip>
+        template <int wm,
+                  int we,
+                  typename T,
+                  bool is_ocp,
+                  bool is_bf8,
+                  bool negative_zero_nan,
+                  bool clip>
         uint8_t cast_to_f8(T _x, bool stoch, uint32_t rng)
         {
             constexpr bool is_half  = std::is_same_v<T, Half>;
@@ -119,6 +125,8 @@ namespace rocRoller
             }
             else
             {
+                // IEEE style
+                //FIXME Fix the return value for the OCP mode
                 if constexpr(sizeof(T) == 4)
                 {
                     if((x & 0x7F800000) == 0x7F800000)
@@ -229,24 +237,32 @@ namespace rocRoller
 
             mantissa >>= (mfmt - wm);
 
+            if(f8_exponent == 0 && mantissa == 0)
+                return negative_zero_nan ? 0 : (sign << 7);
+
+            mantissa &= (1 << wm) - 1;
+
             // above range: quantize to maximum possible float of the same sign
-            const int max_exp = (1 << we) - 1;
-            if(f8_exponent > max_exp)
+            // max valid exponent for OCP BF8(5-bits) : 0x1E and for OCP FP8(4-bits) : 0xF
+            // max valid exponent for NANOO BF8(5-bits) : 0x1F and for NANOO FP8(4-bits) : 0xF
+            const int max_exp      = (1 << we) - ((is_ocp && is_bf8) ? 2 : 1);
+            const int max_mantissa = (1 << wm) - 1;
+            if(f8_exponent > max_exp
+               || (is_ocp && f8_exponent == max_exp && mantissa == max_mantissa))
             {
                 if(clip)
                 {
-                    mantissa    = (1 << wm) - 1;
+                    mantissa    = (1 << wm) - ((is_ocp && !is_bf8) ? 2 : 1);
                     f8_exponent = max_exp;
                 }
                 else
                 {
+                    // IEEE style
+                    //FIXME fix the return value for both OCP and NANOO mode
                     return signed_inf;
                 }
             }
 
-            if(f8_exponent == 0 && mantissa == 0)
-                return negative_zero_nan ? 0 : (sign << 7);
-            mantissa &= (1 << wm) - 1;
             return (sign << 7) | (f8_exponent << wm) | mantissa;
         }
 

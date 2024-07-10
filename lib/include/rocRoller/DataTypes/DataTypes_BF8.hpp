@@ -65,6 +65,12 @@ namespace rocRoller
         {
         }
 
+        template <typename T, typename = typename std::enable_if_t<std::is_convertible_v<T, float>>>
+        void operator=(T const& value)
+        {
+            data = float_to_bf8(static_cast<float>(value)).data;
+        }
+
         explicit operator float() const
         {
             return bf8_to_float(*this);

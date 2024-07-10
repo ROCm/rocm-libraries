@@ -242,7 +242,7 @@ namespace rocRollerTest
         EXPECT_THROW(settings->get(Settings::Scheduler), FatalError);
     }
 
-    TEST(SettingsTest, HelpString)
+    TEST_F(GenericSettings, HelpString)
     {
         auto        settings = Settings::getInstance();
         std::string help     = settings->help();

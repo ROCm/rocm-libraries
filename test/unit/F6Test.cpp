@@ -12,6 +12,7 @@
 #include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"
+#include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 
@@ -441,6 +442,16 @@ namespace rocRollerTest
         EXPECT_EQ(numBufferStorex3, 1);
     }
 
+    INSTANTIATE_TEST_SUITE_P(F6Test,
+                             F6Test,
+                             ::testing::Combine(supportedISAValues(),
+                                                ::testing::Values(rocRoller::DataType::FP6,
+                                                                  rocRoller::DataType::BF6)));
+
+    class CPUF6Test : public GenericContextFixture
+    {
+    };
+
     template <typename F6Type>
     void numberConversion(double fp64)
     {
@@ -454,7 +465,7 @@ namespace rocRollerTest
         EXPECT_FLOAT_EQ((double)f6, fp64);
     }
 
-    TEST(F6Test, CPUConversions)
+    TEST_F(CPUF6Test, CPUConversions)
     {
         auto const& FP6Values = FloatReference<rocRoller::FP6>::Values;
         std::for_each(FP6Values.begin(), FP6Values.end(), numberConversion<rocRoller::FP6>);
@@ -463,7 +474,7 @@ namespace rocRollerTest
         std::for_each(BF6Values.begin(), BF6Values.end(), numberConversion<rocRoller::BF6>);
     }
 
-    TEST(F6Test, CPUPack)
+    TEST_F(CPUF6Test, CPUPack)
     {
         std::vector<uint8_t> f6bytes(64);
         for(int i = 0; i < f6bytes.size(); i++)
@@ -531,11 +542,4 @@ namespace rocRollerTest
         testPacking(fp6, DataTypes::FP6_FMT);
         testPacking(bf6, DataTypes::BF6_FMT);
     }
-
-    INSTANTIATE_TEST_SUITE_P(F6Test,
-                             F6Test,
-                             ::testing::Combine(supportedISAValues(),
-                                                ::testing::Values(rocRoller::DataType::FP6,
-                                                                  rocRoller::DataType::BF6)));
-
 }
