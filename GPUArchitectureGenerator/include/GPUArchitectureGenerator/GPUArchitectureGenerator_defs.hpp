@@ -118,16 +118,19 @@ namespace GPUArchitectureGenerator
                              std::vector<rocRoller::GPUArchitectureTarget>,
                              rocRoller::GPUCapability::Hash>
         ArchSpecificCaps = {{rocRoller::GPUCapability::HasEccHalf,
-                             {rocRoller::GPUArchitectureTarget("gfx906"),
-                              rocRoller::GPUArchitectureTarget("gfx908"),
-                              rocRoller::GPUArchitectureTarget("gfx90a"),
-                              rocRoller::GPUArchitectureTarget("gfx940"),
-                              rocRoller::GPUArchitectureTarget("gfx941"),
-                              rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
-                              rocRoller::GPUArchitectureTarget("gfx942"),
-                              rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
-                              rocRoller::GPUArchitectureTarget("gfx950"),
-                              rocRoller::GPUArchitectureTarget("gfx950:sramecc+")}},
+                             {
+                                 rocRoller::GPUArchitectureTarget("gfx906"),
+                                 rocRoller::GPUArchitectureTarget("gfx908"),
+                                 rocRoller::GPUArchitectureTarget("gfx90a"),
+                                 rocRoller::GPUArchitectureTarget("gfx940"),
+                                 rocRoller::GPUArchitectureTarget("gfx941"),
+                                 rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx942"),
+                                 rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx950"),
+                                 rocRoller::GPUArchitectureTarget("gfx950:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx950:xnack+"),
+                             }},
                             {rocRoller::GPUCapability::Waitcnt0Disabled,
                              {
                                  rocRoller::GPUArchitectureTarget("gfx908"),
@@ -139,6 +142,7 @@ namespace GPUArchitectureGenerator
                                  rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
                                  rocRoller::GPUArchitectureTarget("gfx950"),
                                  rocRoller::GPUArchitectureTarget("gfx950:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx950:xnack+"),
                              }},
                             {rocRoller::GPUCapability::HasAccCD,
                              {
@@ -150,6 +154,7 @@ namespace GPUArchitectureGenerator
                                  rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
                                  rocRoller::GPUArchitectureTarget("gfx950"),
                                  rocRoller::GPUArchitectureTarget("gfx950:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx950:xnack+"),
                              }},
                             {rocRoller::GPUCapability::ArchAccUnifiedRegs,
                              {
@@ -162,11 +167,13 @@ namespace GPUArchitectureGenerator
                                  rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
                                  rocRoller::GPUArchitectureTarget("gfx950"),
                                  rocRoller::GPUArchitectureTarget("gfx950:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx950:xnack+"),
                              }},
                             {rocRoller::GPUCapability::HasNaNoo,
                              {
                                  rocRoller::GPUArchitectureTarget("gfx942"),
                                  rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
+                                 rocRoller::GPUArchitectureTarget("gfx942:xnack+"),
                              }},
                             {rocRoller::GPUCapability::HasWave64, SupportedISAs}};
 
