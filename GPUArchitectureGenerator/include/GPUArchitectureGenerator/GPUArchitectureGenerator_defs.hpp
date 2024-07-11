@@ -486,13 +486,10 @@ namespace GPUArchitectureGenerator
              0,
              {rocRoller::GPUWaitQueueType::VMQueue, rocRoller::GPUWaitQueueType::LGKMDSQueue},
              (1 << 13) - 1}},
+           // single-address LDS instructions
            {gfx9ISAs(),
             {{
                  // clang-format off
-                 "ds_read2_b32",
-                 "ds_read2_b64",
-                 "ds_read2st64_b32",
-                 "ds_read2st64_b64",
                  "ds_read_addtid_b32",
                  "ds_read_b128",
                  "ds_read_b32",
@@ -508,10 +505,6 @@ namespace GPUArchitectureGenerator
                  "ds_read_u16_d16_hi",
                  "ds_read_u8_d16",
                  "ds_read_u8_d16_hi",
-                 "ds_write2_b32",
-                 "ds_write2_b64",
-                 "ds_write2st64_b32",
-                 "ds_write2st64_b64",
                  "ds_write_addtid_b32",
                  "ds_write_b128",
                  "ds_write_b16",
@@ -523,6 +516,23 @@ namespace GPUArchitectureGenerator
                  "ds_write_b96",
                  "ds_write_src2_b32",
                  "ds_write_src2_b64",
+                 // clang-format on
+             },
+             1,
+             {rocRoller::GPUWaitQueueType::LGKMDSQueue},
+             (1 << 16) - 1}},
+           // two-address LDS instructions
+           {gfx9ISAs(),
+            {{
+                 // clang-format off
+                 "ds_read2_b32",
+                 "ds_read2_b64",
+                 "ds_read2st64_b32",
+                 "ds_read2st64_b64",
+                 "ds_write2_b32",
+                 "ds_write2_b64",
+                 "ds_write2st64_b32",
+                 "ds_write2st64_b64",
                  // clang-format on
              },
              1,
