@@ -50,17 +50,20 @@ namespace rocRoller
                           m_problemParams.transA == TransposeType::T,
                           m_problemParams.transB == TransposeType::T);
 
-                    double rnorm = relativeNorm(h_D, h_result);
+                    auto tol = gemmAcceptableError<A, B, D>(
+                        m_problemParams.m,
+                        m_problemParams.n,
+                        m_problemParams.k,
+                        getKernel()->getContext()->targetArchitecture().target());
+                    auto res = compare(h_D, h_result, tol);
 
-                    bool isCorrect = rnorm < 3e-5;
-                    std::cout << "Result: " << (isCorrect ? "Correct" : "Incorrect") << std::endl;
-                    std::cout << "RNorm: " << rnorm << std::endl;
-                    if(!isCorrect)
+                    std::cout << "Result: " << (res.ok ? "Correct" : "Incorrect") << std::endl;
+                    std::cout << "RNorm: " << res.relativeNormL2 << std::endl;
+                    if(!res.ok)
                     {
-                        std::cerr << "WARNING: Result incorrect. RNorm too large: " << rnorm
-                                  << std::endl;
+                        std::cerr << "WARNING: Result incorrect.  " << res.message() << std::endl;
                     }
-                    return {isCorrect, rnorm};
+                    return {res.ok, res.relativeNormL2};
                 }
 
                 BenchmarkResults benchmark(RunParameters const& runParams,

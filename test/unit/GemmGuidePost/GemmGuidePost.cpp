@@ -505,7 +505,7 @@ namespace rocRollerTest
 
         CPUMM(cpuD, hostC, hostA, hostB, strideA0, strideB0, strideB0, alpha, beta);
 
-        double rnorm = relativeNorm(hostD, cpuD);
+        double rnorm = relativeNormL2(hostD, cpuD);
         EXPECT_LT(rnorm, 1.e-6);
     }
 
@@ -573,7 +573,7 @@ namespace rocRollerTest
 
         CPUMM(cpuD, hostC, hostA, hostB, strideA0, strideB0, strideB0, alpha, beta);
 
-        double rnorm = relativeNorm(hostD, cpuD);
+        double rnorm = relativeNormL2(hostD, cpuD);
         EXPECT_LT(rnorm, 2.e-6);
     }
 
@@ -1048,7 +1048,7 @@ namespace rocRollerTest
 
         CPUMM(cpuD, hostC, hostA, hostB, strideA0, strideB0, strideB0, alpha, beta);
 
-        double rnorm = relativeNorm(hostD, cpuD);
+        double rnorm = relativeNormL2(hostD, cpuD);
         EXPECT_LT(rnorm, 1.e-6);
     }
 
@@ -1116,7 +1116,7 @@ namespace rocRollerTest
 
         CPUMM(cpuD, hostC, hostA, hostB, strideA0, strideB0, strideB0, alpha, beta);
 
-        double rnorm = relativeNorm(hostD, cpuD);
+        double rnorm = relativeNormL2(hostD, cpuD);
         EXPECT_LT(rnorm, 2.e-6);
     }
 
@@ -1598,7 +1598,7 @@ namespace rocRollerTest
         std::vector<__half> cpuD(sizeC);
         CPUMM(cpuD, hostC, hostA, hostB, strideA0, strideB0, strideB0, alpha, beta);
 
-        double rnorm2 = relativeNorm(hostD, cpuD);
+        double rnorm2 = relativeNormL2(hostD, cpuD);
         EXPECT_LT(rnorm2, 1.e-4);
 
         double rnormInf = relativeNormInf(hostD, cpuD);
@@ -2083,10 +2083,10 @@ namespace rocRollerTest
         std::vector<__half> cpuD(sizeC);
         CPUMM(cpuD, hostC, hostA, hostB, strideA0, strideB0, strideB0, alpha, beta);
 
-        double rnorm2 = relativeNorm(hostD, cpuD);
+        double rnorm2 = relativeNormL2(hostD, cpuD);
         EXPECT_LT(rnorm2, 1.e-4);
 
         double rnormInf = relativeNormInf(hostD, cpuD);
-        EXPECT_LT(rnormInf, 1.e-4);
+        EXPECT_LT(rnormInf, 1.e-3);
     }
 }

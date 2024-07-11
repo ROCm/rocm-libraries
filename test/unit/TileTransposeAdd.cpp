@@ -155,9 +155,11 @@ namespace TileTransposeAddTest
             }
         }
 
-        double rnorm = relativeNorm(r, x);
+        auto tol = AcceptableError{epsilon<double>(), "Should be exact."};
+        auto res = compare(r, x, tol);
 
-        ASSERT_LT(rnorm, 1.e-12);
+        Log::info("RNorm is {}", res.relativeNormL2);
+        ASSERT_TRUE(res.ok) << res.message();
     }
 
     TEST_P(TileTransposeAddTestGPU, TileTransposeAddTest_GPU)

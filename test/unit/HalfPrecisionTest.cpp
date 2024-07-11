@@ -602,9 +602,9 @@ namespace rocRollerTest
             }
         }
 
-        double rnorm = relativeNorm(r, x);
-
-        ASSERT_LT(rnorm, 1.e-12);
+        auto tol = AcceptableError{epsilon<double>(), "Should be exact."};
+        auto res = compare(r, x, tol);
+        EXPECT_TRUE(res.ok) << res.message();
     }
 
     TEST_F(HalfPrecisionTest, GPU_ExecuteHalfPrecisionAdd)

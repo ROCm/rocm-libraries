@@ -58,9 +58,10 @@ namespace VectorAddBenchmark
                     HasHipSuccess(0));
 
         // reference solution
-        double rnorm = relativeNorm(r, vectorAdd.referenceSolution(alpha, a, b));
+        auto tol = AcceptableError{5 * std::sqrt(nx) * epsilon<double>(), "Sqrt(N) * epsilon"};
+        auto res = compare(r, vectorAdd.referenceSolution(alpha, a, b), tol);
 
-        ASSERT_LT(rnorm, 1.e-12);
+        EXPECT_TRUE(res.ok) << res.message();
         EXPECT_GT(t_kernel->elapsed(), std::chrono::steady_clock::duration(0));
 
         std::cout << TimerPool::summary() << std::endl;

@@ -9,10 +9,13 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <memory>
+#include <sstream>
+
 #include <hip/amd_detail/amd_hip_fp16.h>
 #include <hip/hip_runtime.h>
-#include <memory>
 
+#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -69,20 +72,21 @@ MATCHER_P(HasHipSuccess, p, "")
 }
 
 template <typename T>
-double norm(std::vector<T> a)
+double normL2(std::vector<T> a)
 {
     double r = 0.0;
 
 #pragma omp parallel for reduction(+ : r)
     for(int i = 0; i < a.size(); ++i)
     {
-        r = r + a[i] * a[i];
+        double t = double(a[i]);
+        r        = r + t * t;
     }
     return std::sqrt(r);
 }
 
 template <typename T>
-double relativeNorm(std::vector<T> a, std::vector<T> b)
+double relativeNormL2(std::vector<T> a, std::vector<T> b)
 {
     double d = 0.0;
     double r = 0.0;
@@ -90,8 +94,10 @@ double relativeNorm(std::vector<T> a, std::vector<T> b)
 #pragma omp parallel for reduction(+ : d, r)
     for(size_t i = 0; i < a.size(); ++i)
     {
-        d = d + double(a[i] - b[i]) * (a[i] - b[i]);
-        r = r + b[i] * b[i];
+        double td = double(a[i] - b[i]);
+        double t  = double(b[i]);
+        d         = d + td * td;
+        r         = r + t * t;
     }
 
     return std::sqrt(d / r);
@@ -102,10 +108,12 @@ double normInf(std::vector<T> a)
 {
     double r = 0.0;
 
-#pragma omp parallel for reduction(+ : r)
+#pragma omp parallel for reduction(max : r)
     for(int i = 0; i < a.size(); ++i)
     {
-        r = r + fabs(double(a[i]));
+        double t = fabs(double(a[i]));
+        if(t > r)
+            r = t;
     }
     return r;
 }
@@ -116,14 +124,141 @@ double relativeNormInf(std::vector<T> a, std::vector<T> b)
     double d = 0.0;
     double r = 0.0;
 
-#pragma omp parallel for reduction(+ : d, r)
+#pragma omp parallel for reduction(max : d, r)
     for(size_t i = 0; i < a.size(); ++i)
     {
-        d = d + fabs(double(a[i] - b[i]));
-        r = r + fabs(double(b[i]));
+        double td = fabs(double(a[i] - b[i]));
+        double t  = fabs(double(b[i]));
+
+        if(td > d)
+            d = td;
+        if(t > r)
+            r = t;
     }
 
     return d / r;
+}
+
+struct AcceptableError
+{
+    double      relativeL2Tolerance;
+    std::string reasoning;
+};
+
+struct ComparisonResult
+{
+    bool ok;
+
+    double relativeNormL2, relativeNormInf;
+    double referenceNormL2, referenceNormInf;
+    double xNormL2, xNormInf;
+
+    AcceptableError acceptableError;
+
+    std::string message() const
+    {
+        std::stringstream ss;
+        ss << (ok ? "Comparison PASSED." : "Comparison FAILED.");
+        ss << "  Relative norms:";
+        ss << " L2 " << std::scientific << relativeNormL2;
+        ss << " Inf " << std::scientific << relativeNormInf;
+        ss << "  Norms (x/ref):";
+        ss << " L2 " << std::scientific << xNormL2 << "/" << referenceNormL2;
+        ss << " Inf " << std::scientific << xNormInf << "/" << referenceNormInf;
+        ss << "  Tolerance: " << std::scientific << acceptableError.relativeL2Tolerance;
+        ss << " (" << acceptableError.reasoning << ")";
+        return ss.str();
+    }
+};
+
+/**
+ * Return expected machine epsilon for `T`.
+ */
+template <typename T>
+double epsilon()
+{
+    using namespace rocRoller;
+
+    double rv = 0.0;
+    if constexpr(std::is_same_v<T, __half>)
+        rv = std::pow(2.0, -10);
+    else if constexpr(std::is_same_v<T, FP8>)
+        rv = std::pow(2.0, -3);
+    else if constexpr(std::is_same_v<T, BF8>)
+        rv = std::pow(2.0, -2);
+    else
+        rv = std::numeric_limits<T>::epsilon();
+
+    AssertFatal(rv != 0.0, "Unknown data type.");
+
+    return rv;
+}
+
+/**
+ * Return acceptable error for GEMM problems.
+ *
+ * Currently scales epsilon with the square-root of `K`.
+ *
+ * This assumes that the routines that compute various norms used for
+ * comparison do not accumulate a significant error themselves (if
+ * they did, we would want to include `M` and `N` in the scaling).
+ */
+template <typename TA, typename TB, typename TD>
+AcceptableError
+    gemmAcceptableError(int M, int N, int K, rocRoller::GPUArchitectureTarget const& arch)
+{
+    double eps       = epsilon<TD>();
+    double tolerance = 0.0;
+
+    std::stringstream ss;
+    ss << "Output espilon: " << std::scientific << eps;
+
+    if constexpr(std::is_same_v<TD, rocRoller::FP8> || std::is_same_v<TD, rocRoller::BF8>)
+    {
+        tolerance = eps;
+        ss << " Error expected to be dominated by conversion.";
+    }
+    else
+    {
+        double scale = std::sqrt(K);
+        double fudge = 5;
+
+        ss << " K: " << K;
+        ss << " Problem size scaling: " << scale;
+        ss << " Fudge: " << fudge;
+
+        tolerance = fudge * epsilon<TD>() * std::sqrt(K);
+    }
+
+    return {tolerance, ss.str()};
+}
+
+/**
+ * @brief Compare `x` to a reference `r`.
+ *
+ * The boolean `ok` field of the return value is true if the relative
+ * L2 norm between `x` and `r` is less than `scale` * `epsilon`.
+ *
+ * Various norms are computed and included in the return value.
+ */
+template <typename T>
+ComparisonResult compare(std::vector<T> const&  x,
+                         std::vector<T> const&  r,
+                         AcceptableError const& acceptableError)
+{
+    ComparisonResult rv;
+
+    rv.acceptableError  = acceptableError;
+    rv.referenceNormL2  = normL2(r);
+    rv.referenceNormInf = normInf(r);
+    rv.xNormL2          = normL2(x);
+    rv.xNormInf         = normInf(x);
+    rv.relativeNormL2   = relativeNormL2(x, r);
+    rv.relativeNormInf  = relativeNormInf(x, r);
+
+    rv.ok = rv.relativeNormL2 < rv.acceptableError.relativeL2Tolerance;
+
+    return rv;
 }
 
 int countSubstring(const std::string& str, const std::string& sub);

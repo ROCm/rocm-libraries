@@ -1471,7 +1471,7 @@ namespace KernelGraphTest
                     HasHipSuccess(0));
 
         // reference solution
-        double rnorm = relativeNorm(r, example.referenceSolution(alpha, beta, a, b));
+        double rnorm = relativeNormL2(r, example.referenceSolution(alpha, beta, a, b));
 
         ASSERT_LT(rnorm, 1.e-12);
 
@@ -1577,7 +1577,7 @@ namespace KernelGraphTest
             x[i] = a[i] > 0 ? a[i] : alpha * a[i];
         }
 
-        double rnorm = relativeNorm(r, x);
+        double rnorm = relativeNormL2(r, x);
 
         ASSERT_LT(rnorm, 1.e-12);
     }
@@ -1632,7 +1632,7 @@ namespace KernelGraphTest
         for(size_t i = 0; i < nx; ++i)
             x[i] = a[i];
 
-        double rnorm = relativeNorm(r, x);
+        double rnorm = relativeNormL2(r, x);
 
         ASSERT_LT(rnorm, 1.e-12);
     }
@@ -1676,7 +1676,7 @@ namespace KernelGraphTest
         ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * ny * sizeof(T), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        double rnorm = relativeNorm(r, example.referenceSolution(a));
+        double rnorm = relativeNormL2(r, example.referenceSolution(a));
 
         ASSERT_LT(rnorm, 1.e-12);
     }
@@ -1792,7 +1792,7 @@ namespace KernelGraphTest
                     HasHipSuccess(0));
 
         // reference solution
-        double rnorm = relativeNorm(r, example.referenceSolution(a, b));
+        double rnorm = relativeNormL2(r, example.referenceSolution(a, b));
 
         ASSERT_LT(rnorm, 1.e-12);
     }

@@ -217,9 +217,12 @@ namespace MatrixMultiplyTest
                 std::vector<ACC> c_C(M * N, ACC{});
                 CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, transA == "T", transB == "T");
 
-                double rnorm = relativeNorm(D, c_D);
-                Log::info("RNorm is {}", rnorm);
-                ASSERT_LT(rnorm, acceptableError);
+                auto tol = gemmAcceptableError<T, T, ACC>(
+                    M, N, K, m_context->targetArchitecture().target());
+                auto res = compare(D, c_D, tol);
+
+                Log::info("RNorm is {}", res.relativeNormL2);
+                ASSERT_TRUE(res.ok) << res.message();
             }
         }
 
@@ -349,9 +352,12 @@ namespace MatrixMultiplyTest
                 std::vector<ACC> c_C(M * N, ACC{});
                 CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false, false);
 
-                double rnorm = relativeNorm(D, c_D);
-                Log::info("RNorm is {}", rnorm);
-                ASSERT_LT(rnorm, acceptableError);
+                auto tol = gemmAcceptableError<T, T, ACC>(
+                    M, N, K, m_context->targetArchitecture().target());
+                auto res = compare(D, c_D, tol);
+
+                Log::info("RNorm is {}", res.relativeNormL2);
+                ASSERT_TRUE(res.ok) << res.message();
             }
         }
 
@@ -486,9 +492,12 @@ namespace MatrixMultiplyTest
                 std::vector<T> c_D(M * N, 0.f);
                 CPUMM(c_D, C, A, B, M, N, K, 1.0, 1.0, false, false);
 
-                double rnorm = relativeNorm(D, c_D);
-                Log::info("RNorm is {}", rnorm);
-                ASSERT_LT(rnorm, acceptableError);
+                auto tol = gemmAcceptableError<T, T, T>(
+                    M, N, K, m_context->targetArchitecture().target());
+                auto res = compare(D, c_D, tol);
+
+                Log::info("RNorm is {}", res.relativeNormL2);
+                ASSERT_TRUE(res.ok) << res.message();
             }
         }
     };
