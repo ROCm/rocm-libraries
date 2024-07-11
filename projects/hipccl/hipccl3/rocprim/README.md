@@ -30,20 +30,47 @@ Optional:
 Documentation for rocPRIM is available at
 [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-To build our documentation locally, use the following code:
+### Build documentation locally
 
 ```shell
-# Go to rocPRIM docs directory
+# Change directory to rocPRIM docs
 cd rocPRIM; cd docs
 
-# Install Python dependencies
+# Install documentation dependencies
 python3 -m pip install -r sphinx/requirements.txt
 
 # Build the documentation
 python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 
-# For local HTML version
+# To serve the HTML docs locally
 cd _build/html
+python3 -m http.server
+```
+
+### Build documentation via CMake
+
+Install [rocm-cmake](https://github.com/ROCm/rocm-cmake/)
+
+```shell
+# Change directory to rocPRIM
+cd rocPRIM
+
+# Install documentation dependencies
+python3 -m pip install -r docs/sphinx/requirements.txt
+
+# Set C++ compiler
+# This example uses hipcc and assumes it is at the path /usr/bin
+export CXX=hipcc
+export PATH=/usr/bin:$PATH
+
+# Configure the project
+cmake -S . -B ./build -D BUILD_DOCS=ON
+
+# Build the documentation
+cmake --build ./build --target doc
+
+# To serve the HTML docs locally
+cd ./build/docs/html
 python3 -m http.server
 ```
 
