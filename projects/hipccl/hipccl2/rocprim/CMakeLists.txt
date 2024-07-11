@@ -46,6 +46,7 @@ endif()
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build examples" OFF)
+option(BUILD_DOCS "Build documentation (requires sphinx)" OFF)
 option(USE_HIP_CPU "Prefer HIP-CPU runtime instead of HW acceleration" OFF)
 # Disables building tests, benchmarks, examples
 option(ONLY_INSTALL "Only install" OFF)
@@ -163,6 +164,11 @@ endif()
 # Examples
 if(BUILD_EXAMPLE AND NOT ONLY_INSTALL)
   add_subdirectory(example)
+endif()
+
+# Docs
+if(BUILD_DOCS AND NOT ONLY_INSTALL)
+  add_subdirectory(docs)
 endif()
 
 # Package
