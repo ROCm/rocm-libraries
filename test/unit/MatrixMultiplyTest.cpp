@@ -695,7 +695,7 @@ namespace MatrixMultiplyTest
             matrixMultiplyMacroTile<BF8, float>(16, 16, 32, 1, 1.e-5, true, "T", "N");
     }
 
-    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileFP8_32x32x64_TN)
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
@@ -715,7 +715,7 @@ namespace MatrixMultiplyTest
             EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 blgp:0b001"), 2);
     }
 
-    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileFP8_16x16x128_TN)
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 

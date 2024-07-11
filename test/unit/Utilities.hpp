@@ -304,4 +304,49 @@ namespace rocRoller
             std::memcpy(
                 reinterpret_cast<uint8_t*>(mat.data()) + (row_bytes * i) + (4 * i / 8), &odd, 1);
     }
+
+    template <typename F6x16>
+    requires(
+        std::is_same_v<
+            F6x16,
+            FP6x16> || std::is_same_v<F6x16, BF6x16>) inline void SetIdentityMatrix(std::
+                                                                                        vector<
+                                                                                            F6x16>&
+                                                                                            mat,
+                                                                                    size_t  cols,
+                                                                                    size_t  rows)
+    {
+        std::fill(mat.begin(), mat.end(), F6x16()); // zero out the matrix
+
+        // Notice `cols` and `rows` are NOT the actual dimensions of `mat`,
+        // they are the dimensions before packed into F6x16.
+        size_t const row_bytes = 6 * cols / 8; // number of bytes in a row
+        // clang-format off
+        auto constexpr patterns = [] {
+        if constexpr (std::is_same_v<F6x16, FP6x16>)
+            return std::to_array<uint8_t> ({  //  Bit pattern of FP6 identity matrix:
+                0b00100000,                   //    001000 000000 000000 000000 000000
+                0b10000000,                   //    000000 001000 000000 000000 000000
+                0b00000010,                   //    000000 000000 001000 000000 000000
+                0b00001000,                   //    000000 000000 000000 001000 000000
+            });                               //    000000 000000 000000 000000 001000 (repeat 1st row)
+        else
+            return std::to_array<uint8_t> ({  //  Bit pattern of BF6 identity matrix:
+                0b00110000,                   //    001100 000000 000000 000000 000000
+                0b11000000,                   //    000000 001100 000000 000000 000000
+                0b00000011,                   //    000000 000000 001100 000000 000000
+                0b00001100,                   //    000000 000000 000000 001100 000000
+             });                              //    000000 000000 000000 000000 001100 (repeat 1st row)
+        }();
+        // clang-format on
+        std::array constexpr shift = {0, 1, 0, 0};
+
+        for(size_t i = 0; i < std::min(rows, cols); i++)
+        {
+            int byte_offset = (i * 6) / 8 + shift[i % 4];
+            std::memcpy(reinterpret_cast<uint8_t*>(mat.data()) + (row_bytes * i) + byte_offset,
+                        &patterns[i % 4],
+                        1);
+        }
+    }
 }

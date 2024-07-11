@@ -44,7 +44,7 @@ namespace GEMMDriverTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
             }
 
-            if constexpr(std::is_same_v<T, FP4>)
+            if constexpr(std::is_same_v<T, FP4> || std::is_same_v<T, FP6> || std::is_same_v<T, BF6>)
             {
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
             }
@@ -293,7 +293,7 @@ namespace GEMMDriverTest
 
             CommandArguments commandArgs = command->createArguments();
 
-            if constexpr(std::is_same_v<T, FP4>)
+            if constexpr(std::is_same_v<T, FP4> || std::is_same_v<T, FP6> || std::is_same_v<T, BF6>)
             {
                 commandArgs.setArgument(tagTensorA, ArgumentType::Value, (uint8_t*)deviceA.get());
                 commandArgs.setArgument(tagTensorB, ArgumentType::Value, (uint8_t*)deviceB.get());
@@ -1084,7 +1084,9 @@ namespace GEMMDriverTest
     void check_GEMMF8F6F4_TN(rocRoller::ContextPtr m_context,
                              uint                  numBufferLoads,
                              uint                  numDSWrites,
-                             uint                  numDSReads)
+                             uint                  numDSReads,
+                             bool const            isF6Type = false)
+
     {
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
         {
@@ -1098,11 +1100,21 @@ namespace GEMMDriverTest
             EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), numDSWrites);
 
             EXPECT_EQ(countSubstring(generatedCode, "ds_read"), numDSReads);
-            EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads);
+            if(!isF6Type)
+            {
+                EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads);
+            }
+            else
+            {
+                EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads / 2);
+                EXPECT_EQ(countSubstring(generatedCode, "ds_read_b64 "), numDSReads / 2);
+            }
         }
     }
 
-    void check_GEMMFP4_mfma(rocRoller::ContextPtr m_context, std::string f8f6f4_inst)
+    void check_mfma_f8f6f4(rocRoller::ContextPtr m_context,
+                           std::string           f8f6f4_inst,
+                           std::string           modifier)
     {
         if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
         {
@@ -1110,7 +1122,7 @@ namespace GEMMDriverTest
 
             auto mfma_count     = countSubstring(generatedCode, "v_mfma_");
             auto f8f6f4_count   = countSubstring(generatedCode, f8f6f4_inst);
-            auto modifier_count = countSubstring(generatedCode, "cbsz:0b100 blgp:0b100");
+            auto modifier_count = countSubstring(generatedCode, modifier);
 
             // All mfma instructions should be f8f6f4
             EXPECT_EQ(mfma_count, f8f6f4_count);
@@ -1124,7 +1136,7 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
         basicGEMM<FP4, float>(m_context, gemm, 2.e-5);
-        check_GEMMFP4_mfma(m_context, "v_mfma_f32_16x16x128_f8f6f4");
+        check_mfma_f8f6f4(m_context, "v_mfma_f32_16x16x128_f8f6f4", "cbsz:0b100 blgp:0b100");
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 8) / 64, 4, 10);
     }
 
@@ -1133,8 +1145,44 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
         basicGEMM<FP4, float>(m_context, gemm, 2.e-5);
-        check_GEMMFP4_mfma(m_context, "v_mfma_f32_32x32x64_f8f6f4");
+        check_mfma_f8f6f4(m_context, "v_mfma_f32_32x32x64_f8f6f4", "cbsz:0b100 blgp:0b100");
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 8) / 64, 4, 10);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP6_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
+        basicGEMM<FP6, float>(m_context, gemm, 2.e-5);
+        check_mfma_f8f6f4(m_context, "v_mfma_f32_16x16x128_f8f6f4", "cbsz:0b010 blgp:0b010");
+        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP6_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
+        basicGEMM<FP6, float>(m_context, gemm, 2.e-5);
+        check_mfma_f8f6f4(m_context, "v_mfma_f32_32x32x64_f8f6f4", "cbsz:0b010 blgp:0b010");
+        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF6_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
+        basicGEMM<BF6, float>(m_context, gemm, 2.e-5);
+        check_mfma_f8f6f4(m_context, "v_mfma_f32_16x16x128_f8f6f4", "cbsz:0b011 blgp:0b011");
+        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF6_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
+        basicGEMM<BF6, float>(m_context, gemm, 2.e-5);
+        check_mfma_f8f6f4(m_context, "v_mfma_f32_32x32x64_f8f6f4", "cbsz:0b011 blgp:0b011");
+        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_16x16x128_TN)

@@ -56,6 +56,22 @@ namespace rocRoller
             {
                 AssertFatal(false, "No Tensile GEMM Solution for FP4.");
             }
+
+            template <>
+            TensileGEMMSolution<FP6, FP6, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP6, FP6, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for FP6.");
+            }
+
+            template <>
+            TensileGEMMSolution<BF6, BF6, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<BF6, BF6, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF6.");
+            }
         }
     }
 }
