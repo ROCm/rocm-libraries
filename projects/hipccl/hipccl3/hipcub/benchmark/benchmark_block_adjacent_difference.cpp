@@ -390,10 +390,10 @@ int main(int argc, char* argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<subtract_left>("SubtractLeft", benchmarks, stream, size);
-    add_benchmarks<subtract_right>("SubtractRight", benchmarks, stream, size);
-    add_benchmarks<subtract_left_partial_tile>("SubtractLeftPartialTile", benchmarks, stream, size);
-    add_benchmarks<subtract_right_partial_tile>("SubtractRightPartialTile",
+    add_benchmarks<subtract_left>("subtract_left", benchmarks, stream, size);
+    add_benchmarks<subtract_right>("subtract_right", benchmarks, stream, size);
+    add_benchmarks<subtract_left_partial_tile>("subtract_left_partial_tile", benchmarks, stream, size);
+    add_benchmarks<subtract_right_partial_tile>("subtract_right_partial_tile",
                                                 benchmarks,
                                                 stream,
                                                 size);
