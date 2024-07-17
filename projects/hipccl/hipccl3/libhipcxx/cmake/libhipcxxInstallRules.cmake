@@ -42,6 +42,13 @@ install(DIRECTORY "${libhipcxx_SOURCE_DIR}/lib/cmake/libhipcxx"
   PATTERN *.cmake.in EXCLUDE
 )
 
+set(install_location "${CMAKE_INSTALL_LIBDIR}/cmake/libhipcxx")
+# Transform to a list of directories, replace each directory with "../"
+# and convert back to a string
+string(REGEX REPLACE "/" ";" from_install_prefix "${install_location}")
+list(TRANSFORM from_install_prefix REPLACE ".+" "../")
+list(JOIN from_install_prefix "" from_install_prefix)
+
 # Need to configure a file to store CMAKE_INSTALL_INCLUDEDIR
 # since it can be defined by the user. This is common to work around collisions
 # with the CTK installed headers.
@@ -50,5 +57,5 @@ configure_file("${libhipcxx_SOURCE_DIR}/lib/cmake/libhipcxx/libhipcxx-header-sea
   @ONLY
 )
 install(FILES "${libhipcxx_BINARY_DIR}/lib/cmake/libhipcxx/libhipcxx-header-search.cmake"
-  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/libhipcxx"
+  DESTINATION "${install_location}"
 )
