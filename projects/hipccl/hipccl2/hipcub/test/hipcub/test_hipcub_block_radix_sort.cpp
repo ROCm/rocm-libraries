@@ -291,6 +291,24 @@ __global__ __launch_bounds__(BlockSize) void sort_key_kernel(key_type*    device
     StoreOp<BlockSize, ItemsPerThread, Striped>{}(keys, device_keys_output);
 }
 
+template<class T, class U>
+void assert_eq(T a, U b, size_t index)
+{
+    // GTest's ASSERT_EQ prints the values if the test fails. On Windows, GTest doesn't currently provide overloads for
+    // printing 128 bit types, resulting in linker errors.
+    // Check if we're testing with 128 bit types. If so, test using bools so GTest doesn't try to print them on failure.
+    if (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value ||
+        test_utils::is_int128<U>::value || test_utils::is_uint128<U>::value)
+    {
+        const bool values_equal = (a == b);
+        ASSERT_EQ(values_equal, true) << "at index: " << index;
+    }
+    else
+    {
+        ASSERT_EQ(a, b) << "at index: " << index;
+    }
+}
+
 TYPED_TEST(HipcubBlockRadixSort, SortKeys)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -378,9 +396,8 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
         // Verifying results
         for(size_t i = 0; i < size; i++)
         {
-            ASSERT_EQ(test_utils::convert_to_native(keys_output[i]),
-                      test_utils::convert_to_native(expected[i]))
-                << "at index: " << i;
+            assert_eq(test_utils::convert_to_native(keys_output[i]),
+                      test_utils::convert_to_native(expected[i]), i);
         }
 
         HIP_CHECK(hipFree(device_keys_output));
@@ -547,12 +564,10 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
 
         for(size_t i = 0; i < size; i++)
         {
-            ASSERT_EQ(test_utils::convert_to_native(keys_output[i]),
-                      test_utils::convert_to_native(expected[i].first))
-                << "at index: " << i;
-            ASSERT_EQ(test_utils::convert_to_native(values_output[i]),
-                      test_utils::convert_to_native(expected[i].second))
-                << "at index: " << i;
+            assert_eq(test_utils::convert_to_native(keys_output[i]), 
+                      test_utils::convert_to_native(expected[i].first), i);
+            assert_eq(test_utils::convert_to_native(values_output[i]),
+                      test_utils::convert_to_native(expected[i].second), i);
         }
 
         HIP_CHECK(hipFree(device_keys_output));
