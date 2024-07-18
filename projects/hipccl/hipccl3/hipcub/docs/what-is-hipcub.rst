@@ -1,6 +1,6 @@
 .. meta::
    :description: hipCUB is a thin header-only wrapper library on top of rocPRIM or CUB that enables developers to port project
-using CUB library to the HIP layer.
+    using CUB library to the HIP layer.
    :keywords: hipCUB, ROCm, library, API
 
 .. _what-is-hipcub:
