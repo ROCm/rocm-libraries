@@ -257,7 +257,6 @@ build:windows:
       -D BUILD_$BUILD_TARGET=ON 
       -D GPU_TARGETS=$GPU_TARGET
       -D CMAKE_CXX_COMPILER:PATH="${env:HIP_PATH}\bin\clang++.exe" 
-      -D CMAKE_C_COMPILER:PATH="${env:HIP_PATH}\bin\clang.exe" 
       -D CMAKE_PREFIX_PATH:PATH="${env:HIP_PATH}" 
       -D CMAKE_BUILD_TYPE="$BUILD_TYPE" 
     - cmake --build "$CI_PROJECT_DIR/build" 
