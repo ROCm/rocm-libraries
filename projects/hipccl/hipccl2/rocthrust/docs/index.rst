@@ -25,7 +25,9 @@ The documentation is structured as follows:
 
     * :ref:`data-type-support`
     * :ref:`bitwise-repro`
+    * :ref:`hipgraph-support`
     * :ref:`api-reference`
+    * :ref:`hip-execution-policies`
     * :ref:`genindex`
 
 To contribute to the documentation, refer to
