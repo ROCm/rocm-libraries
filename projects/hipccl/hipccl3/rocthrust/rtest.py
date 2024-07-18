@@ -253,10 +253,14 @@ def batch(script, xml):
         test_dir = cwd 
     else:
         build_type = "debug" if args.debug else "release"
+        
+        # deal with windows pathing
+        install_dir = '//'.join(args.install_dir.split('\\'))
+
         search_paths = [
-            f"{args.install_dir}//{build_type}//clients//staging",
-            f"{args.install_dir}//{build_type}//test",
-            f"{args.install_dir}"
+            f"{install_dir}//{build_type}//clients//staging",
+            f"{install_dir}//{build_type}//test",
+            f"{install_dir}"
         ]
         test_dir = ""
         for path_option in search_paths:
