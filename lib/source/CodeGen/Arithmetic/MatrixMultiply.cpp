@@ -2,6 +2,7 @@
 #include <memory>
 
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
+#include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
@@ -31,26 +32,6 @@ namespace rocRoller
                 return "_f8f6f4";
             default:
                 Throw<FatalError>("Unable to determine MFMA type: unhandled data type.",
-                                  ShowValue(dtype));
-            }
-        }
-
-        std::string modifierStr(auto dtype)
-        {
-            switch(dtype)
-            {
-            case DataType::FP8x4:
-                return "0b000";
-            case DataType::BF8x4:
-                return "0b001";
-            case DataType::FP6x16:
-                return "0b010";
-            case DataType::BF6x16:
-                return "0b011";
-            case DataType::FP4x8:
-                return "0b100";
-            default:
-                Throw<FatalError>("Unable to determine MFMA modifier: unhandled data type.",
                                   ShowValue(dtype));
             }
         }
@@ -176,7 +157,10 @@ namespace rocRoller
                         "Invalid F8F6F4 MFMA size.", ShowValue(M), ShowValue(N), ShowValue(K));
                 }
 
-                modifier = concatenate("cbsz:", modifierStr(typeA), " blgp:", modifierStr(typeB));
+                modifier = concatenate("cbsz:",
+                                       Arithmetic::getModifier(typeA),
+                                       " blgp:",
+                                       Arithmetic::getModifier(typeB));
 
                 // TODO Remove register allocation hack.
                 A = A->withFixedRegisters(8);

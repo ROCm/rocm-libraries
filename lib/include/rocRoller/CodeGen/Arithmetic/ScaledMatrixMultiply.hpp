@@ -67,9 +67,20 @@ namespace rocRoller
                 = 0;
         };
 
-        template <DataType ACC, DataType INPUT>
         struct ScaledMatrixMultiplyGenerator : public ScaledMatrixMultiply
         {
+            static bool constexpr isValidInputType(auto const vtype)
+            {
+                return (vtype == DataType::FP8x4 || vtype == DataType::BF8x4
+                        || vtype == DataType::FP6x16 || vtype == DataType::BF6x16
+                        || vtype == DataType::FP4x8);
+            }
+
+            static bool constexpr isValidOutputType(auto const atype)
+            {
+                return atype == DataType::Float;
+            }
+
             using Base = ScaledMatrixMultiply;
 
             ScaledMatrixMultiplyGenerator(ContextPtr context)
@@ -81,13 +92,16 @@ namespace rocRoller
             {
                 auto atype = std::get<1>(arg);
                 auto vtype = std::get<2>(arg);
-                return atype == ACC && vtype == INPUT;
+                return isValidOutputType(atype) && isValidInputType(vtype);
             }
 
             static ScaledMatrixMultiplyPtr Build(Argument const& arg)
             {
+                if(not Match(arg))
+                    return nullptr;
+
                 auto context = std::get<0>(arg);
-                return std::make_shared<ScaledMatrixMultiplyGenerator<ACC, INPUT>>(context);
+                return std::make_shared<ScaledMatrixMultiplyGenerator>(context);
             }
 
             virtual Generator<Instruction> mul(Register::ValuePtr dest,

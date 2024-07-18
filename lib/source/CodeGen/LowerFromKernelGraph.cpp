@@ -811,10 +811,47 @@ namespace rocRoller
                 auto B
                     = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveB));
 
-                auto matMul = std::make_shared<Expression::Expression>(
-                    Expression::MatrixMultiply(A, B, D->expression()));
+                bool const isScaledMatMul = m_context->kernelOptions().scaleA != 127
+                                            || m_context->kernelOptions().scaleB != 127;
 
-                co_yield Expression::generate(D, matMul, m_context);
+                if(not isScaledMatMul)
+                {
+                    // If no scales provided, we use regular matrix multiplication
+                    auto matMul = std::make_shared<Expression::Expression>(
+                        Expression::MatrixMultiply(A, B, D->expression()));
+
+                    co_yield Expression::generate(D, matMul, m_context);
+                }
+                else
+                {
+                    auto vRegA = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Int32, 1);
+                    co_yield vRegA->allocate();
+                    auto vRegB = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Int32, 1);
+                    co_yield vRegB->allocate();
+
+                    auto literalScaleA
+                        = Register::Value::Literal(m_context->kernelOptions().scaleA);
+                    auto literalScaleB
+                        = Register::Value::Literal(m_context->kernelOptions().scaleB);
+                    co_yield m_context->copier()->copy(
+                        vRegA, literalScaleA, "Copy scaleA to a VGPR");
+                    co_yield m_context->copier()->copy(
+                        vRegB, literalScaleB, "Copy scaleB to a VGPR");
+
+                    // The generated assembly code will look like this:
+                    //
+                    //   v_mov_b32 v8, 128 // Copy scaleA to VGPR
+                    //   v_mov_b32 v11, 125 // Copy scaleB to VGPR
+                    //   s_nop 1
+                    //   v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[12:19], v[16:23], a[0:3], v8, v11 cbsz:0 abid:1 blgp:0
+                    //
+                    auto scaledMatMul
+                        = std::make_shared<Expression::Expression>(Expression::ScaledMatrixMultiply(
+                            A, B, D->expression(), vRegA->expression(), vRegB->expression()));
+                    co_yield Expression::generate(D, scaledMatMul, m_context);
+                }
             }
 
             Generator<Instruction> operator()(int tag, NOP const&, Transformer coords)

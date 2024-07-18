@@ -217,6 +217,8 @@ namespace GEMMDriverTest
             kernelOptions->prefetchMixMemOps             = gemm.prefetchMixMemOps;
             kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
             kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
+            kernelOptions->scaleA                                      = gemm.scaleA;
+            kernelOptions->scaleB                                      = gemm.scaleB;
 
             if(gemm.loopOverTiles > 0)
             {
@@ -358,6 +360,12 @@ namespace GEMMDriverTest
             {
                 commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numCUs);
             }
+
+            // GPU is doing: D = alpha * scaleA * scaleB * (A*B) + beta*C. So we need to
+            // account for the scales on CPU side as well.
+            // Multiply alpha by the scales. Scale is E8M0 and has a bias of 127
+            alpha
+                *= std::pow(2.0f, int(gemm.scaleA) - 127) * std::pow(2.0f, int(gemm.scaleB) - 127);
 
             // Host result
             std::vector<TD> h_result(M * N, TD{});
@@ -955,10 +963,28 @@ namespace GEMMDriverTest
         basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMFP8_16x16x128_NT)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_NT(16, 16, 128);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
+        basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_16x16x128_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_NT(16, 16, 128);
+        basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMBF8_16x16x128_NT)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_NT(16, 16, 128);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
         basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
     }
 
@@ -969,10 +995,28 @@ namespace GEMMDriverTest
         basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMFP8_32x32x64_NT)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_NT(32, 32, 64);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
+        basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_32x32x64_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_NT(32, 32, 64);
+        basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMBF8_32x32x64_NT)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_NT(32, 32, 64);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
         basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
     }
 
@@ -1140,12 +1184,36 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 8) / 64, 4, 10);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMFP4_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_TN(16, 16, 128);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
+        basicGEMM<FP4, float>(m_context, gemm, 2.e-5);
+        check_mfma_f8f6f4(
+            m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b100 abid:1 blgp:0b100");
+        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 8) / 64, 4, 10);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP4_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
         basicGEMM<FP4, float>(m_context, gemm, 2.e-5);
         check_mfma_f8f6f4(m_context, "v_mfma_f32_32x32x64_f8f6f4", "cbsz:0b100 blgp:0b100");
+        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 8) / 64, 4, 10);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMFP4_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_TN(32, 32, 64);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
+        basicGEMM<FP4, float>(m_context, gemm, 2.e-5);
+        check_mfma_f8f6f4(
+            m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b100 abid:1 blgp:0b100");
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 8) / 64, 4, 10);
     }
 
@@ -1158,12 +1226,36 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMFP6_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_TN(16, 16, 128);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
+        basicGEMM<FP6, float>(m_context, gemm, 2.e-5);
+        check_mfma_f8f6f4(
+            m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b010 abid:1 blgp:0b010");
+        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP6_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
         basicGEMM<FP6, float>(m_context, gemm, 2.e-5);
         check_mfma_f8f6f4(m_context, "v_mfma_f32_32x32x64_f8f6f4", "cbsz:0b010 blgp:0b010");
+        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMFP6_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_TN(32, 32, 64);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
+        basicGEMM<FP6, float>(m_context, gemm, 2.e-5);
+        check_mfma_f8f6f4(
+            m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b010 abid:1 blgp:0b010");
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
@@ -1176,6 +1268,18 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMBF6_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_TN(16, 16, 128);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
+        basicGEMM<BF6, float>(m_context, gemm, 2.e-5);
+        check_mfma_f8f6f4(
+            m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b011 abid:1 blgp:0b011");
+        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF6_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
@@ -1185,10 +1289,32 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMBF6_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_TN(32, 32, 64);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
+        basicGEMM<BF6, float>(m_context, gemm, 2.e-5);
+        check_mfma_f8f6f4(
+            m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b011 abid:1 blgp:0b011");
+        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_16x16x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
+        basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
+        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMFP8_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_TN(16, 16, 128);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
         basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
     }
@@ -1201,6 +1327,16 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMBF8_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_TN(16, 16, 128);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
+        basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
+        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
@@ -1209,10 +1345,30 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMFP8_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_TN(32, 32, 64);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
+        basicGEMM<FP8, float>(m_context, gemm, 2.e-5);
+        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
+        basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
+        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicScaledGEMMBF8_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm   = setup_GEMMF8F6F4_TN(32, 32, 64);
+        gemm.scaleA = 128;
+        gemm.scaleB = 125;
         basicGEMM<BF8, float>(m_context, gemm, 2.e-5);
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
     }

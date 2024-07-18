@@ -56,7 +56,9 @@ namespace MatrixMultiplyTest
                                      double      acceptableError,
                                      bool        useLDSB = true,
                                      std::string transA  = "N",
-                                     std::string transB  = "N")
+                                     std::string transB  = "N",
+                                     uint8_t     scaleA  = 127,
+                                     uint8_t     scaleB  = 127)
         {
             commandKernel = nullptr;
 
@@ -189,6 +191,9 @@ namespace MatrixMultiplyTest
             kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = transA == "T";
             kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = transB == "T";
 
+            kernelOptions->scaleA = scaleA;
+            kernelOptions->scaleB = scaleB;
+
             auto params = std::make_shared<CommandParameters>();
             params->setManualKernelDimension(2);
             params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
@@ -228,7 +233,11 @@ namespace MatrixMultiplyTest
 
                 std::vector<ACC> c_D(M * N, ACC{});
                 std::vector<ACC> c_C(M * N, ACC{});
-                CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, transA == "T", transB == "T");
+
+                float alpha = 1.0f;
+                alpha *= std::pow(2.0f, int(scaleA) - 127) * std::pow(2.0f, int(scaleB) - 127);
+
+                CPUMM(c_D, c_C, A, B, M, N, K, alpha, 0.0, transA == "T", transB == "T");
 
                 double rnorm = relativeNorm(D, c_D);
                 Log::info("RNorm is {}", rnorm);
@@ -237,9 +246,18 @@ namespace MatrixMultiplyTest
         }
 
         template <typename T, typename ACC = T>
-        void
-            matrixMultiplyAB(int wave_m, int wave_n, int wave_k, int wave_b, double acceptableError)
+        void matrixMultiplyAB(int     wave_m,
+                              int     wave_n,
+                              int     wave_k,
+                              int     wave_b,
+                              double  acceptableError,
+                              int     M      = 1024,
+                              int     N      = 1024,
+                              int     K      = 512,
+                              uint8_t scaleA = 127,
+                              uint8_t scaleB = 127)
         {
+            // matrix size: A is MxK; B is KxN; D is MxN
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
             if constexpr(std::is_same_v<T, FP8> || std::is_same_v<T, BF8>)
             {
@@ -254,11 +272,6 @@ namespace MatrixMultiplyTest
 
             auto dataTypeAB = TypeInfo<T>::Var.dataType;
             auto dataTypeD  = TypeInfo<ACC>::Var.dataType;
-
-            // matrix size: A is MxK; B is KxN; D is MxN
-            int M = 1024;
-            int N = 1024;
-            int K = 512;
 
             // output macro tile size; we will launch 2x2 waves
             int mac_m = 2 * wave_m;
@@ -349,7 +362,12 @@ namespace MatrixMultiplyTest
             auto postParams = std::make_shared<CommandParameters>();
             postParams->setManualWavefrontCount({2u, 2u});
 
-            CommandKernel commandKernel(command, "MatrixMultiplyAB", params, postParams);
+            auto kernelOptions    = std::make_shared<KernelOptions>();
+            kernelOptions->scaleA = scaleA;
+            kernelOptions->scaleB = scaleB;
+
+            CommandKernel commandKernel(
+                command, "MatrixMultiplyAB", params, postParams, kernelOptions);
             if(isLocalDevice())
             {
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
@@ -360,7 +378,11 @@ namespace MatrixMultiplyTest
 
                 std::vector<ACC> c_D(M * N, ACC{});
                 std::vector<ACC> c_C(M * N, ACC{});
-                CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false, false);
+
+                float alpha = 1.0f;
+                alpha *= std::pow(2.0f, int(scaleA) - 127) * std::pow(2.0f, int(scaleB) - 127);
+
+                CPUMM(c_D, c_C, A, B, M, N, K, alpha, 0.0, false, false);
 
                 double rnorm = relativeNorm(D, c_D);
                 Log::info("RNorm is {}", rnorm);
@@ -715,6 +737,31 @@ namespace MatrixMultiplyTest
             EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 blgp:0b001"), 2);
     }
 
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_ScaledMatrixMultiplyMacroTileF8_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        uint8_t scaleA = 128;
+        uint8_t scaleB = 125;
+
+        bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
+        if(isFP8)
+            matrixMultiplyMacroTile<FP8, float>(
+                32, 32, 64, 1, 5.e-6, true, "T", "N", scaleA, scaleB);
+        else
+            matrixMultiplyMacroTile<BF8, float>(
+                32, 32, 64, 1, 5.e-6, true, "T", "N", scaleA, scaleB);
+
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), 2);
+        EXPECT_EQ(countSubstring(generatedCode, "v_mfma_scale_f32_32x32x64_f8f6f4"), 2);
+        if(isFP8)
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 abid:1 blgp:0b000"), 2);
+        else
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 abid:1 blgp:0b001"), 2);
+    }
+
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
@@ -733,6 +780,31 @@ namespace MatrixMultiplyTest
             EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 blgp:0b000"), 2);
         else
             EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 blgp:0b001"), 2);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_ScaledMatrixMultiplyMacroTileF8_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        uint8_t scaleA = 128;
+        uint8_t scaleB = 125;
+
+        bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
+        if(isFP8)
+            matrixMultiplyMacroTile<FP8, float>(
+                16, 16, 128, 1, 1.e-5, true, "T", "N", scaleA, scaleB);
+        else
+            matrixMultiplyMacroTile<BF8, float>(
+                16, 16, 128, 1, 1.e-5, true, "T", "N", scaleA, scaleB);
+
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), 2);
+        EXPECT_EQ(countSubstring(generatedCode, "v_mfma_scale_f32_16x16x128_f8f6f4"), 2);
+        if(isFP8)
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 abid:1 blgp:0b000"), 2);
+        else
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 abid:1 blgp:0b001"), 2);
     }
 
     void verifyInsturctions(std::string       instructionString,
@@ -811,6 +883,40 @@ namespace MatrixMultiplyTest
                            "cbsz:0b100 blgp:0b100");
     }
 
+    TEST_P(MatrixMultiplyTestGPU, GPU_ScaledMatrixMultiplyMacroTileFP4_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        uint8_t scaleA = 128;
+        uint8_t scaleB = 125;
+
+        matrixMultiplyMacroTile<FP4, float>(32, 32, 64, 1, 2.e-6, true, "T", "N", scaleA, scaleB);
+
+        if(!commandKernel)
+            return;
+
+        std::string instructionString = commandKernel->getInstructions();
+
+        int mac_m = 32;
+        int mac_n = 32;
+        int mac_k = 128;
+
+        auto localEndA = 4 * mac_m * mac_k / 8;
+
+        std::vector<int> expectedLocalWriteOffsets{0, 64, localEndA, localEndA + 64};
+
+        std::vector<int> expectedLocalReadOffsets{0, localEndA, 32, localEndA + 32};
+
+        verifyInsturctions(instructionString,
+                           expectedLocalWriteOffsets,
+                           expectedLocalReadOffsets,
+                           4,
+                           4,
+                           2,
+                           "v_mfma_scale_f32_32x32x64_f8f6f4",
+                           "cbsz:0b100 abid:1 blgp:0b100");
+    }
+
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP4_16x16x128_TN)
     {
         matrixMultiplyMacroTile<FP4, float>(16, 16, 128, 1, 2.e-6, true, "T", "N");
@@ -838,6 +944,40 @@ namespace MatrixMultiplyTest
                            2,
                            "v_mfma_f32_16x16x128_f8f6f4",
                            "cbsz:0b100 blgp:0b100");
+    }
+
+    TEST_P(MatrixMultiplyTestGPU, GPU_ScaledMatrixMultiplyMacroTileFP4_16x16x128_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        uint8_t scaleA = 128;
+        uint8_t scaleB = 125;
+
+        matrixMultiplyMacroTile<FP4, float>(16, 16, 128, 1, 2.e-6, true, "T", "N", scaleA, scaleB);
+
+        if(!commandKernel)
+            return;
+
+        std::string instructionString = commandKernel->getInstructions();
+
+        int mac_m = 16;
+        int mac_n = 16;
+        int mac_k = 256;
+
+        auto localEndA = 4 * mac_m * mac_k / 8;
+
+        std::vector<int> expectedLocalWriteOffsets{0, 128, localEndA, localEndA + 128};
+
+        std::vector<int> expectedLocalReadOffsets{0, localEndA, 64, localEndA + 64};
+
+        verifyInsturctions(instructionString,
+                           expectedLocalWriteOffsets,
+                           expectedLocalReadOffsets,
+                           4,
+                           4,
+                           2,
+                           "v_mfma_scale_f32_16x16x128_f8f6f4",
+                           "cbsz:0b100 abid:1 blgp:0b100");
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
@@ -876,6 +1016,31 @@ namespace MatrixMultiplyTest
             matrixMultiplyAB<BF8, float>(32, 32, 64, 1, 2.e-5);
     }
 
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_ScaledMatrixMultiplyABF8_32x32x64)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        int wave_m = 32;
+        int wave_n = 32;
+        int wave_k = 64;
+        int wave_b = 1;
+
+        // For quick verification, the matrix size is kept small
+        int M = 2 * wave_m;
+        int N = 2 * wave_n;
+        int K = 2 * wave_k;
+
+        uint8_t scaleA = 128;
+        uint8_t scaleB = 125;
+
+        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
+            matrixMultiplyAB<FP8, float>(
+                wave_m, wave_n, wave_k, wave_b, 2.e-5, M, N, K, scaleA, scaleB);
+        else
+            matrixMultiplyAB<BF8, float>(
+                wave_m, wave_n, wave_k, wave_b, 2.e-5, M, N, K, scaleA, scaleB);
+    }
+
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyABF8_16x16x128)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
@@ -884,6 +1049,31 @@ namespace MatrixMultiplyTest
             matrixMultiplyAB<FP8, float>(16, 16, 128, 1, 2.e-5);
         else
             matrixMultiplyAB<BF8, float>(16, 16, 128, 1, 2.e-5);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_ScaledMatrixMultiplyABF8_16x16x128)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        int wave_m = 16;
+        int wave_n = 16;
+        int wave_k = 128;
+        int wave_b = 1;
+
+        // For quick verification, the matrix size is kept small
+        int M = 2 * wave_m;
+        int N = 2 * wave_n;
+        int K = 2 * wave_k;
+
+        uint8_t scaleA = 128;
+        uint8_t scaleB = 125;
+
+        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
+            matrixMultiplyAB<FP8, float>(
+                wave_m, wave_n, wave_k, wave_b, 2.e-5, M, N, K, scaleA, scaleB);
+        else
+            matrixMultiplyAB<BF8, float>(
+                wave_m, wave_n, wave_k, wave_b, 2.e-5, M, N, K, scaleA, scaleB);
     }
 
     TEST_P(MatrixMultiplyTestGPUF6, GPU_MatrixMultiplyMacroTileF6_16x16x128_TN)
@@ -921,6 +1111,50 @@ namespace MatrixMultiplyTest
                            8,
                            2,
                            "v_mfma_f32_16x16x128_f8f6f4",
+                           mfmaDataTypes);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUF6, GPU_ScaledMatrixMultiplyMacroTileF6_16x16x128_TN)
+    {
+        auto mfmaDataTypes = "cbsz:0b010 abid:1 blgp:0b010";
+
+        uint8_t scaleA = 128;
+        uint8_t scaleB = 125;
+
+        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP6)
+            matrixMultiplyMacroTile<FP6, float>(
+                16, 16, 128, 1, 2.e-6, true, "T", "N", scaleA, scaleB);
+        else
+        {
+            matrixMultiplyMacroTile<BF6, float>(
+                16, 16, 128, 1, 2.e-6, true, "T", "N", scaleA, scaleB);
+            mfmaDataTypes = "cbsz:0b011 abid:1 blgp:0b011";
+        }
+
+        if(!commandKernel)
+            return;
+
+        std::string instructionString = commandKernel->getInstructions();
+
+        int mac_m = 16;
+        int mac_n = 16;
+        int mac_k = 256;
+
+        auto localEndA = 6 * mac_m * mac_k / 8;
+
+        std::vector<int> expectedLocalWriteOffsets{
+            0, 16, 32, localEndA, localEndA + 16, localEndA + 32};
+
+        std::vector<int> expectedLocalReadOffsets{
+            0, 16, localEndA, localEndA + 16, 96, 112, localEndA + 96, localEndA + 112};
+
+        verifyInsturctions(instructionString,
+                           expectedLocalWriteOffsets,
+                           expectedLocalReadOffsets,
+                           6,
+                           8,
+                           2,
+                           "v_mfma_scale_f32_16x16x128_f8f6f4",
                            mfmaDataTypes);
     }
 
@@ -963,6 +1197,54 @@ namespace MatrixMultiplyTest
                            8,
                            2,
                            "v_mfma_f32_32x32x64_f8f6f4",
+                           mfmaDataTypes);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUF6, GPU_ScaledMatrixMultiplyMacroTileF6_32x32x64_TN)
+    {
+        auto mfmaDataTypes = "cbsz:0b010 abid:1 blgp:0b010";
+
+        uint8_t scaleA = 128;
+        uint8_t scaleB = 125;
+
+        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP6)
+            matrixMultiplyMacroTile<FP6, float>(
+                32, 32, 64, 1, 2.e-6, true, "T", "N", scaleA, scaleB);
+        else
+        {
+            matrixMultiplyMacroTile<BF6, float>(
+                32, 32, 64, 1, 2.e-6, true, "T", "N", scaleA, scaleB);
+            mfmaDataTypes = "cbsz:0b011 abid:1 blgp:0b011";
+        }
+
+        if(!commandKernel)
+            return;
+
+        std::string instructionString = commandKernel->getInstructions();
+
+        int mac_m = 32;
+        int mac_n = 32;
+        int mac_k = 128;
+
+        auto localEndA = 6 * mac_m * mac_k / 8;
+
+        int numLocalWrite = 0;
+        int numLocalRead  = 0;
+        int numMFMA       = 0;
+
+        std::vector<int> expectedLocalWriteOffsets{
+            0, 16, 32, localEndA, localEndA + 16, localEndA + 32};
+
+        std::vector<int> expectedLocalReadOffsets{
+            0, 16, localEndA, localEndA + 16, 48, 64, localEndA + 48, localEndA + 64};
+
+        verifyInsturctions(instructionString,
+                           expectedLocalWriteOffsets,
+                           expectedLocalReadOffsets,
+                           6,
+                           8,
+                           2,
+                           "v_mfma_scale_f32_32x32x64_f8f6f4",
                            mfmaDataTypes);
     }
 

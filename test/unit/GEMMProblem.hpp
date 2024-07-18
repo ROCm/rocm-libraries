@@ -52,4 +52,7 @@ struct GEMMProblem
     bool streamKTwoTile = false;
 
     bool splitStoreTileIntoWaveBlocks = false;
+
+    uint8_t scaleA = 127;
+    uint8_t scaleB = 127;
 };

@@ -66,6 +66,13 @@ namespace rocRoller
         bool setNextFreeVGPRToMax          = false;
 
         /**
+         * The scale values are used for scaled MFMA instructions.
+     * A scale is an 8-bit biased exponent (E8M0) with bias = 127.
+     */
+        uint8_t scaleA = 127;
+        uint8_t scaleB = 127;
+
+        /**
          * These two are expected to become permanently enabled;
          */
 

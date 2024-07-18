@@ -2,6 +2,7 @@
 #include <memory>
 
 #include <rocRoller/CodeGen/Arithmetic/ScaledMatrixMultiply.hpp>
+#include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
@@ -9,23 +10,19 @@ namespace rocRoller
 {
     namespace InstructionGenerators
     {
-        RegisterComponentTemplateSpec(ScaledMatrixMultiplyGenerator,
-                                      DataType::Float,
-                                      DataType::FP8x4);
+        RegisterComponent(ScaledMatrixMultiplyGenerator);
 
         const std::string ScaledMatrixMultiply::Basename = "ScaledMatrixMultiply";
 
-        template <DataType ACC, DataType INPUT>
-        Generator<Instruction>
-            ScaledMatrixMultiplyGenerator<ACC, INPUT>::mul(Register::ValuePtr dest,
-                                                           Register::ValuePtr matA,
-                                                           Register::ValuePtr matB,
-                                                           Register::ValuePtr matC,
-                                                           Register::ValuePtr scaleA,
-                                                           Register::ValuePtr scaleB,
-                                                           int                M,
-                                                           int                N,
-                                                           int                K)
+        Generator<Instruction> ScaledMatrixMultiplyGenerator::mul(Register::ValuePtr dest,
+                                                                  Register::ValuePtr matA,
+                                                                  Register::ValuePtr matB,
+                                                                  Register::ValuePtr matC,
+                                                                  Register::ValuePtr scaleA,
+                                                                  Register::ValuePtr scaleB,
+                                                                  int                M,
+                                                                  int                N,
+                                                                  int                K)
         {
             AssertFatal(matA != nullptr);
             AssertFatal(matB != nullptr);
@@ -35,7 +32,7 @@ namespace rocRoller
 
             auto const lanesPerWavefront = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultWavefrontSize);
-            auto const packing = DataTypeInfo::Get(INPUT).packing;
+            auto const packing = DataTypeInfo::Get(matA->variableType()).packing;
             AssertFatal(M > 0 && N > 0 && K > 0 && lanesPerWavefront > 0,
                         "Invalid inputs",
                         ShowValue(M),
@@ -72,37 +69,43 @@ namespace rocRoller
                         ShowValue(lanesPerWavefront),
                         ShowValue(M * N / lanesPerWavefront),
                         ShowValue(dest->valueCount()));
-            AssertFatal(matA->variableType() == INPUT,
+            AssertFatal(isValidInputType(matA->variableType()),
                         "Invalid matrix A data type",
                         ShowValue(matA->variableType()));
             AssertFatal(matA->regType() == Register::Type::Vector,
                         "Invalid matrix A register type",
                         ShowValue(matA->regType()));
-            AssertFatal(matB->variableType() == INPUT,
+            AssertFatal(isValidInputType(matB->variableType()),
                         "Invalid matrix B data type",
                         ShowValue(matB->variableType()));
             AssertFatal(matB->regType() == Register::Type::Vector,
                         "Invalid matrix B register type",
                         ShowValue(matB->regType()));
-            AssertFatal(matC->variableType() == ACC,
+            AssertFatal(isValidOutputType(matC->variableType()),
                         "Invalid matrix C data type",
                         ShowValue(matC->variableType()));
             AssertFatal(dest->regType() == Register::Type::Accumulator,
                         "Invalid matrix D register type",
                         ShowValue(dest->regType()));
-            AssertFatal(dest->variableType() == ACC,
+            AssertFatal(isValidOutputType(dest->variableType()),
                         "Invalid matrix D data type",
                         ShowValue(dest->variableType()));
 
-            // TODO: input matrix types of f8f6f4 can be fp8/bf8, fp6/bf6, fp4 or
-            //       mixed, where the types are indicated in cbsz and blgp. Here
-            //       only fp8 is handled and has to be enhanced to support rest types.
-            std::string cbsz     = "cbsz:0"; // Matrix A type
-            std::string blgp     = "blgp:0"; // Matrix B type
+            auto        typeA    = matA->variableType().dataType;
+            auto        typeB    = matB->variableType().dataType;
+            std::string cbsz     = "cbsz:" + Arithmetic::getModifier(typeA); // Matrix A type
+            std::string blgp     = "blgp:" + Arithmetic::getModifier(typeB); // Matrix B type
             std::string abid     = "abid:1"; // Enable scale
             std::string modifier = concatenate(cbsz, " ", abid, " ", blgp);
 
             auto mfma = concatenate("v_mfma_scale_f32_", M, "x", N, "x", K, "_f8f6f4");
+
+            // Currently compiler has a bug that the number of VGPRs must be 8 regardless
+            // the data types of input matrices, and the following two lines are to workaround
+            // this bug.
+            // TODO: Remove these two lines when the compiler bug gets fixed.
+            matA = matA->withFixedRegisters(8);
+            matB = matB->withFixedRegisters(8);
             co_yield_(
                 Instruction(mfma, {dest}, {matA, matB, matC, scaleA, scaleB}, {modifier}, ""));
         }
