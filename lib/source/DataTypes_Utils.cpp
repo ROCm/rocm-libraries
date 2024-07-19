@@ -253,4 +253,64 @@ namespace rocRoller
         packF6x16(f6x16regs.data(), f6bytes.data(), f6bytes.size());
         return f6x16regs;
     }
+
+    std::vector<float> unpackToFloat(std::vector<FP8> const& f8)
+    {
+        auto n = f8.size();
+
+        std::vector<float> rv(n);
+        for(auto i = 0; i < n; ++i)
+            rv[i] = float(f8[i]);
+        return rv;
+    }
+
+    std::vector<float> unpackToFloat(std::vector<BF8> const& f8)
+    {
+        auto n = f8.size();
+
+        std::vector<float> rv(n);
+        for(auto i = 0; i < n; ++i)
+            rv[i] = float(f8[i]);
+        return rv;
+    }
+
+    std::vector<float> unpackToFloat(std::vector<FP8x4> const& f8x4)
+    {
+        auto n     = f8x4.size() * 4;
+        auto f8ptr = reinterpret_cast<FP8 const*>(f8x4.data());
+
+        std::vector<float> rv(n);
+        for(auto i = 0; i < n; ++i)
+            rv[i] = float(f8ptr[i]);
+        return rv;
+    }
+
+    std::vector<float> unpackToFloat(std::vector<BF8x4> const& f8x4)
+    {
+        auto n     = f8x4.size() * 4;
+        auto f8ptr = reinterpret_cast<BF8 const*>(f8x4.data());
+
+        std::vector<float> rv(n);
+        for(auto i = 0; i < n; ++i)
+            rv[i] = float(f8ptr[i]);
+        return rv;
+    }
+
+    std::vector<float> unpackToFloat(std::vector<FP6x16> const& f6x16)
+    {
+        return unpackF6x16<float, FP6x16>(reinterpret_cast<uint32_t const*>(f6x16.data()),
+                                          3 * f6x16.size());
+    }
+
+    std::vector<float> unpackToFloat(std::vector<BF6x16> const& f6x16)
+    {
+        return unpackF6x16<float, BF6x16>(reinterpret_cast<uint32_t const*>(f6x16.data()),
+                                          3 * f6x16.size());
+    }
+
+    std::vector<float> unpackToFloat(std::vector<FP4x8> const& f4x8)
+    {
+        return unpackFP4x8<float>(reinterpret_cast<uint32_t const*>(f4x8.data()), f4x8.size());
+    }
+
 };

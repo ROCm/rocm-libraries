@@ -134,20 +134,20 @@ namespace rocRoller
             }
             else
             {
-                Throw<FatalError>(
-                    "Mixed A/B MFMA types not supported yet.", ShowValue(typeA), ShowValue(typeB));
-                // // Mixed types for A and B.  Only works for lower
-                // // precisions.
-                // auto segA = DataTypeInfo::Get(typeA).segmentVariableType;
-                // auto segB = DataTypeInfo::Get(typeB).segmentVariableType;
-                // AssertFatal(DataTypeInfo::Get(segA).elementBits <= 8,
-                //             "Mixed MFMA inputs (A) must be low precision.",
-                //             ShowValue(typeA));
-                // AssertFatal(DataTypeInfo::Get(segB).elementBits <= 8,
-                //             "Mixed MFMA inputs (B) must be low precision.",
-                //             ShowValue(typeB));
-                // inputType = "_f8f6f4";
+                // Mixed types for A and B.  Only works for lower
+                // precisions.
+                auto segA = DataTypeInfo::Get(typeA).segmentVariableType;
+                auto segB = DataTypeInfo::Get(typeB).segmentVariableType;
+                AssertFatal(DataTypeInfo::Get(segA).elementBits <= 8,
+                            "Mixed MFMA inputs (A) must be low precision.",
+                            ShowValue(typeA));
+                AssertFatal(DataTypeInfo::Get(segB).elementBits <= 8,
+                            "Mixed MFMA inputs (B) must be low precision.",
+                            ShowValue(typeB));
+                inputType = "_f8f6f4";
             }
+
+            // TODO: _fp8_bf8 not handled
 
             if(inputType == "_f8f6f4")
             {

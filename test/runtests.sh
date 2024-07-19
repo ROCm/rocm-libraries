@@ -26,6 +26,7 @@ F8TESTS=("*GPU_MatrixMultiplyMacroTileF8_16x16x32_NN*"
 "*GPU_BasicGEMMBF8_16x16x128_TN"
 "*GPU_BasicGEMMFP8_32x32x64_TN"
 "*GPU_BasicGEMMBF8_32x32x64_TN"
+"*GPU_MatrixMultiplyMixed*"
 )
 
 F6TESTS=("*GPU_MatrixMultiplyMacroTileF6_16x16x128_TN*"

@@ -208,20 +208,16 @@ namespace rocRoller
             }
         }
 
-        Generator<Instruction> LoadStoreTileGenerator::generateStride(Register::ValuePtr& stride,
-                                                                      bool& unitStride,
-                                                                      int   tag,
-                                                                      int   dimension)
+        Generator<Instruction> LoadStoreTileGenerator::generateStride(
+            Register::ValuePtr& stride, RegisterExpressionAttributes& attrs, int tag, int dimension)
         {
-            unitStride = false;
-
             auto strideTag = m_graph->mapper.get<Stride>(tag, dimension);
             if(strideTag >= 0)
             {
                 auto [strideExpr, strideAttributes]
                     = m_context->registerTagManager()->getExpression(strideTag);
 
-                unitStride = strideAttributes.unitStride;
+                attrs = strideAttributes;
 
                 if(!Expression::evaluationTimes(strideExpr)[EvaluationTime::Translate])
                 {
@@ -339,7 +335,6 @@ namespace rocRoller
             {
                 auto indexExpr = ci.forward ? coords.forwardStride(increment, L(1), {target})[0]
                                             : coords.reverseStride(increment, L(1), {target})[0];
-                Log::debug("  Stride({}): {}", stride, toString(indexExpr));
 
                 // We have to manually invoke m_fastArith here since it can't traverse into the
                 // RegisterTagManager.
@@ -350,8 +345,43 @@ namespace rocRoller
                     if(getUnsignedInt(evaluate(indexExpr)) == 1u)
                         unitStride = true;
                 }
+
+                uint          elementBlockSize = 0;
+                ExpressionPtr elementBlockStride;
+
+                // For F8 data types and either 16x16x128 or 32x32x64
+                // MFMA instructions, each lane loads 32 matrix
+                // elements in blocks of 16 elements.  These two sets
+                // of 16 elements are not contiguous; and hence we
+                // need to break the loads into two, with a stride
+                // between them.
+                //
+                // Setting the elementBlockSize to 16 for other 8bit
+                // MFMA configurations is harmless; as the generated
+                // stride between sets will be contiguous (and the
+                // loads are dwordx4, so the same code will be
+                // generated).
+                uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
+                if(numBits == 8)
+                {
+                    elementBlockSize = 16;
+
+                    elementBlockStride
+                        = ci.forward
+                              ? coords.forwardStride(increment, L(elementBlockSize), {target})[0]
+                              : coords.reverseStride(increment, L(elementBlockSize), {target})[0];
+                }
+
+                Log::debug("  Stride({}): {}", stride, toString(indexExpr));
+                Log::debug("  Stride({}): unitStride: {} vgprBlockSize: {}",
+                           stride,
+                           unitStride,
+                           elementBlockSize);
+
                 tagger->addExpression(
-                    stride, m_fastArith(toBytes(indexExpr)), {ci.strideType, unitStride});
+                    stride,
+                    m_fastArith(toBytes(indexExpr)),
+                    {ci.strideType, unitStride, elementBlockSize, toBytes(elementBlockStride)});
                 scope->addRegister(stride);
             }
 
@@ -421,29 +451,54 @@ namespace rocRoller
             auto rowStride   = getUnsignedInt(info.rowStrideReg->getLiteralValue());
             auto colStride   = getUnsignedInt(info.colStrideReg->getLiteralValue());
 
-            if(info.unitStride)
+            if(info.colStrideAttributes.unitStride)
             {
+                uint numVGPRBlocks = 1;
+                if(info.colStrideAttributes.elementBlockSize > 0
+                   && info.n > info.colStrideAttributes.elementBlockSize)
+                {
+                    AssertFatal(info.n % info.colStrideAttributes.elementBlockSize == 0);
+                    numVGPRBlocks = info.n / info.colStrideAttributes.elementBlockSize;
+                }
+
                 // Segmented
-                auto bitsPerMove  = info.n * info.elementBits;
+                auto bitsPerMove  = info.n * info.elementBits / numVGPRBlocks;
                 auto bytesPerMove = bitsPerMove / 8u;
 
                 // Unsegmented
                 auto elementsPerMove = bitsPerMove / unsegmentedDataType.elementBits;
 
+                Log::debug("  M {} N {} elementsPerMove {} bytesPerMove {} rowStride {} colStride "
+                           "{} vgprBlockSize {} numVGPRBlocks {}",
+                           info.m,
+                           info.n,
+                           elementsPerMove,
+                           bytesPerMove,
+                           rowStride,
+                           colStride,
+                           info.colStrideAttributes.elementBlockSize,
+                           numVGPRBlocks);
+
                 for(uint64_t i = 0; i < info.m; ++i)
                 {
-                    auto start = i * elementsPerMove;
-                    auto stop  = (i + 1) * elementsPerMove;
-                    co_yield m_context->mem()->moveData<Dir>(
-                        info.kind,
-                        info.rowOffsetReg,
-                        info.data->element(Generated(iota(start, stop))),
-                        Register::Value::Literal(offsetValue),
-                        bytesPerMove,
-                        "",
-                        false,
-                        info.bufDesc,
-                        info.bufOpts);
+                    for(uint r = 0; r < numVGPRBlocks; ++r)
+                    {
+                        auto start = (i * numVGPRBlocks + r) * elementsPerMove;
+                        auto stop  = (i * numVGPRBlocks + r + 1) * elementsPerMove;
+                        co_yield m_context->mem()->moveData<Dir>(
+                            info.kind,
+                            info.rowOffsetReg,
+                            info.data->element(Generated(iota(start, stop))),
+                            Register::Value::Literal(offsetValue),
+                            bytesPerMove,
+                            "",
+                            false,
+                            info.bufDesc,
+                            info.bufOpts);
+                        if(numVGPRBlocks > 1)
+                            offsetValue += getUnsignedInt(
+                                evaluate(info.colStrideAttributes.elementBlockStride));
+                    }
                     offsetValue += rowStride;
                 }
             }
@@ -606,12 +661,11 @@ namespace rocRoller
 
             info.elementBits = (uint)DataTypeInfo::Get(dataType).elementBits;
 
-            bool _ignore;
             if(m > 1)
-                co_yield generateStride(info.rowStrideReg, _ignore, tag, 0);
+                co_yield generateStride(info.rowStrideReg, info.rowStrideAttributes, tag, 0);
             else
                 info.rowStrideReg = Register::Value::Literal(0u);
-            co_yield generateStride(info.colStrideReg, info.unitStride, tag, 1);
+            co_yield generateStride(info.colStrideReg, info.colStrideAttributes, tag, 1);
 
             AssertFatal(info.rowStrideReg, "Invalid row stride register.");
             AssertFatal(info.colStrideReg, "Invalid col stride register.");
@@ -621,7 +675,7 @@ namespace rocRoller
             bool allStridesAreLiteral
                 = (info.rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
                    && info.offset->regType() == Register::Type::Literal);
-            bool colStrideIsOne = colStrideIsLiteral && info.unitStride;
+            bool colStrideIsOne = colStrideIsLiteral && info.colStrideAttributes.unitStride;
 
             if(Dir == MemoryInstructions::MemoryDirection::Load)
             {

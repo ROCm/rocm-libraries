@@ -7,6 +7,7 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 
 #include <rocRoller/Expression_fwd.hpp>
 
@@ -99,12 +100,13 @@ namespace rocRoller
                 uint64_t                          m;
                 uint64_t                          n;
                 uint32_t                          elementBits;
-                bool                              unitStride;
                 uint32_t                          packedAmount;
                 Register::ValuePtr                data;
                 Register::ValuePtr                rowOffsetReg;
                 Register::ValuePtr                rowStrideReg;
+                RegisterExpressionAttributes      rowStrideAttributes;
                 Register::ValuePtr                colStrideReg;
+                RegisterExpressionAttributes      colStrideAttributes;
                 Register::ValuePtr                offset;
                 std::shared_ptr<BufferDescriptor> bufDesc;
                 BufferInstructionOptions          bufOpts;
@@ -152,8 +154,10 @@ namespace rocRoller
              * | FP8       | 1           | true                |
              * | Sub-byte  | 1           | maybe!              |
              */
-            Generator<Instruction>
-                generateStride(Register::ValuePtr& stride, bool& isUnit, int tag, int dimension);
+            Generator<Instruction> generateStride(Register::ValuePtr&           stride,
+                                                  RegisterExpressionAttributes& attrs,
+                                                  int                           tag,
+                                                  int                           dimension);
 
             // Move Tile Helpers
             template <MemoryInstructions::MemoryDirection Dir>
