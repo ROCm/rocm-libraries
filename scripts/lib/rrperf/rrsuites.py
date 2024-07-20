@@ -705,6 +705,75 @@ def f4gemm_f8f6f4():
     yield from f4gemm_16x16x128_f8f6f4()
 
 
+def gemm_mixed_16x16x128_f8f6f4():
+    params = dict(
+        M=256,
+        N=256,
+        K=512,
+        mac_m=64,
+        mac_n=64,
+        mac_k=128,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
+        trans_A="T",
+        trans_B="N",
+    )
+    TA = {"fp8", "bf8", "fp6", "bf6", "fp4"}
+    TB = {"fp8", "bf8", "fp6", "bf6", "fp4"}
+    for A in TA:
+        for B in TB:
+            AB_fp32 = dict(
+                type_A=A,
+                type_B=B,
+                type_C="float",
+                type_D="float",
+            )
+            yield GEMMRun(
+                **params,
+                **AB_fp32,
+            )
+
+
+def gemm_mixed_32x32x64_f8f6f4():
+    params = dict(
+        M=256,
+        N=256,
+        K=512,
+        mac_m=128,
+        mac_n=128,
+        mac_k=64,
+        wave_m=32,
+        wave_n=32,
+        wave_k=64,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
+        trans_A="T",
+        trans_B="N",
+    )
+    TA = {"fp8", "bf8", "fp6", "bf6", "fp4"}
+    TB = {"fp8", "bf8", "fp6", "bf6", "fp4"}
+    for A in TA:
+        for B in TB:
+            AB_fp32 = dict(
+                type_A=A,
+                type_B=B,
+                type_C="float",
+                type_D="float",
+            )
+            yield GEMMRun(
+                **params,
+                **AB_fp32,
+            )
+
+
+def mixedgemm_f8f6f4():
+    yield from gemm_mixed_16x16x128_f8f6f4()
+    yield from gemm_mixed_32x32x64_f8f6f4()
+
+
 def all():
     yield from sgemm()
     yield from hgemm()

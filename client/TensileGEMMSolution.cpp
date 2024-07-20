@@ -42,6 +42,46 @@ namespace rocRoller
             }
 
             template <>
+            TensileGEMMSolution<FP8, BF8, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP8, BF8, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF6.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP8, FP6, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP8, FP6, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF6.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP8, BF6, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP8, BF6, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF6.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP8, FP4, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP8, FP4, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF6.");
+            }
+
+            template <>
+            TensileGEMMSolution<BF8, FP8, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<BF8, FP8, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF8.");
+            }
+
+            template <>
             TensileGEMMSolution<BF8, BF8, float, float>::TensileGEMMSolution(
                 SolutionParameters const& solutionParams)
                 : GEMMSolution<BF8, BF8, float, float>(solutionParams.problemParams)
@@ -50,11 +90,43 @@ namespace rocRoller
             }
 
             template <>
-            TensileGEMMSolution<FP4, FP4, float, float>::TensileGEMMSolution(
+            TensileGEMMSolution<BF8, FP6, float, float>::TensileGEMMSolution(
                 SolutionParameters const& solutionParams)
-                : GEMMSolution<FP4, FP4, float, float>(solutionParams.problemParams)
+                : GEMMSolution<BF8, FP6, float, float>(solutionParams.problemParams)
             {
-                AssertFatal(false, "No Tensile GEMM Solution for FP4.");
+                AssertFatal(false, "No Tensile GEMM Solution for BF8.");
+            }
+
+            template <>
+            TensileGEMMSolution<BF8, BF6, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<BF8, BF6, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF8.");
+            }
+
+            template <>
+            TensileGEMMSolution<BF8, FP4, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<BF8, FP4, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF8.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP6, FP8, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP6, FP8, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for FP6.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP6, BF8, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP6, BF8, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for FP6.");
             }
 
             template <>
@@ -66,12 +138,101 @@ namespace rocRoller
             }
 
             template <>
+            TensileGEMMSolution<FP6, BF6, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP6, BF6, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for FP6.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP6, FP4, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP6, FP4, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for FP6.");
+            }
+
+            template <>
+            TensileGEMMSolution<BF6, FP8, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<BF6, FP8, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF6.");
+            }
+
+            template <>
+            TensileGEMMSolution<BF6, BF8, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<BF6, BF8, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF6.");
+            }
+
+            template <>
+            TensileGEMMSolution<BF6, FP6, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<BF6, FP6, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF6.");
+            }
+
+            template <>
             TensileGEMMSolution<BF6, BF6, float, float>::TensileGEMMSolution(
                 SolutionParameters const& solutionParams)
                 : GEMMSolution<BF6, BF6, float, float>(solutionParams.problemParams)
             {
                 AssertFatal(false, "No Tensile GEMM Solution for BF6.");
             }
+
+            template <>
+            TensileGEMMSolution<BF6, FP4, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<BF6, FP4, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for BF6.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP4, FP8, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP4, FP8, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for FP4.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP4, BF8, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP4, BF8, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for FP4.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP4, FP6, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP4, FP6, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for FP4.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP4, BF6, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP4, BF6, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for FP4.");
+            }
+
+            template <>
+            TensileGEMMSolution<FP4, FP4, float, float>::TensileGEMMSolution(
+                SolutionParameters const& solutionParams)
+                : GEMMSolution<FP4, FP4, float, float>(solutionParams.problemParams)
+            {
+                AssertFatal(false, "No Tensile GEMM Solution for FP4.");
+            }
+
         }
     }
 }

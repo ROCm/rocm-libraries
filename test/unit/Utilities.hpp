@@ -196,14 +196,15 @@ namespace rocRoller
         auto rngB = RandomGenerator(seed + 2);
         auto rngC = RandomGenerator(seed + 3);
 
+        // TODO: use data-generator here, avoid hard coded values below
         auto generateVector = [&](auto& vec, RandomGenerator& rng, size_t sz) {
             using elemT = typename std::remove_reference_t<decltype(vec)>::value_type;
             if constexpr(std::is_same_v<elemT, FP4x8>)
-                vec = rng.vector<FP4>(sz, min, max);
+                vec = rng.vector<FP4>(sz, -6.f, 6.f);
             else if constexpr(std::is_same_v<elemT, FP6x16>)
-                vec = rng.vector<FP6>(sz, min, max);
+                vec = rng.vector<FP6>(sz, -7.5f, 7.5f);
             else if constexpr(std::is_same_v<elemT, BF6x16>)
-                vec = rng.vector<BF6>(sz, min, max);
+                vec = rng.vector<BF6>(sz, -28.f, 28.f);
             else
                 vec = rng.vector<elemT>(sz, min, max);
         };

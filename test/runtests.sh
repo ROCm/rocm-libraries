@@ -26,7 +26,6 @@ F8TESTS=("*GPU_MatrixMultiplyMacroTileF8_16x16x32_NN*"
 "*GPU_BasicGEMMBF8_16x16x128_TN"
 "*GPU_BasicGEMMFP8_32x32x64_TN"
 "*GPU_BasicGEMMBF8_32x32x64_TN"
-"*GPU_MatrixMultiplyMixed*"
 )
 
 F6TESTS=("*GPU_MatrixMultiplyMacroTileF6_16x16x128_TN*"
@@ -44,6 +43,12 @@ F4TESTS=("*GPU_MatrixMultiplyMacroTileFP4_16x16x128_TN*"
 )
 
 MISCTESTS=("*ScaledMatrixMultiplyTestGPU*"
+"*GPU_BasicScaledGEMM*"
+"*GPU_ScaledGEMMMixed*"
+)
+
+MIXEDTESTS=("*GPU_MatrixMultiplyMixed*"
+"*GPU_BasicGEMMMixedF8F6F4*"
 )
 
 SKIPTESTS=("*BasicGEMMFP16Prefetch3*"
@@ -62,16 +67,16 @@ RRPERF_F4TESTS=("f4gemm_16x16x128_f8f6f4"
 "f4gemm_32x32x64_f8f6f4"
 )
 
-
-
-
+RRPERF_MIXEDTESTS=("gemm_mixed_16x16x128_f8f6f4"
+"gemm_mixed_32x32x64_f8f6f4"
+)
 
 suite="small"
 while getopts "t:" opt; do
     case "${opt}" in
     t) suite="${OPTARG,,}";;
     [?]) echo >&2 "Usage: $0 [-t option]
-             option: {f8 | f6 | f4 | small | full}"
+             option: {f8 | f6 | f4 | mixed | scaled | small | full}"
          exit 1;;
     esac
 done
@@ -89,6 +94,9 @@ if [ "$suite" = "full" ]; then
         $RRPERF run --suite "$testName"
     done
     for testName in "${RRPERF_F6TESTS[@]}"; do
+        $RRPERF run --suite "$testName"
+    done
+    for testName in "${RRPERF_MIXEDTESTS[@]}"; do
         $RRPERF run --suite "$testName"
     done
 elif [ "$suite" = "f8" ]; then
@@ -111,6 +119,17 @@ elif [ "$suite" = "f4" ]; then
     done
     for testName in "${RRPERF_F4TESTS[@]}"; do
         $RRPERF run --suite "$testName"
+    done
+elif [ "$suite" = "mixed" ]; then
+    for testName in "${MIXEDTESTS[@]}"; do
+        $RRTESTS --gtest_filter="$testName"
+    done
+    for testName in "${RRPERF_MIXEDTESTS[@]}"; do
+        $RRPERF run --suite "$testName"
+    done
+elif [ "$suite" = "scaled" ]; then
+    for testName in "${MISCTESTS[@]}"; do
+        $RRTESTS --gtest_filter="$testName"
     done
 else
     # Loop through each test and execute it
@@ -135,6 +154,9 @@ else
         $RRPERF run --suite "$testName"
     done
     for testName in "${RRPERF_F6TESTS[@]}"; do
+        $RRPERF run --suite "$testName"
+    done
+    for testName in "${RRPERF_MIXEDTESTS[@]}"; do
         $RRPERF run --suite "$testName"
     done
 fi

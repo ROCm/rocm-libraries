@@ -735,11 +735,6 @@ namespace rocRoller
                 rA = atile.vgpr;
                 rB = btile.vgpr;
 
-                AssertFatal(rA->variableType() == rB->variableType(),
-                            "Input types must match ",
-                            ShowValue(rA->variableType()),
-                            ShowValue(rB->variableType()));
-
                 AssertFatal(!rA->variableType().isPointer(),
                             "Input must not be a pointer. ",
                             ShowValue(rA->variableType()));

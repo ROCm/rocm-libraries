@@ -12,6 +12,10 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
+            template <typename T>
+            concept isF8F6F4 = std::is_same_v<T, FP8> || std::is_same_v<T, BF8> || std::
+                is_same_v<T, FP6> || std::is_same_v<T, BF6> || std::is_same_v<T, FP4>;
+
             template <typename A, typename B, typename C, typename D>
             class DataParallelGEMMSolution : public GEMMSolution<A, B, C, D>
             {
@@ -252,6 +256,13 @@ namespace rocRoller
                     else if constexpr((std::is_same_v<A, FP4> && std::is_same_v<B, FP4>)
                                       || (std::is_same_v<A, FP6> && std::is_same_v<B, FP6>)
                                       || (std::is_same_v<A, BF6> && std::is_same_v<B, BF6>))
+                    {
+                        wave_m = 16;
+                        wave_n = 16;
+                        wave_k = 128;
+                        wave_b = 1;
+                    }
+                    else if constexpr(!std::is_same_v<A, B> && isF8F6F4<A> && isF8F6F4<B>)
                     {
                         wave_m = 16;
                         wave_n = 16;

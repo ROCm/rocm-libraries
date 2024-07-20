@@ -32,29 +32,30 @@ namespace rocRoller
 
             auto const lanesPerWavefront = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultWavefrontSize);
-            auto const packing = DataTypeInfo::Get(matA->variableType()).packing;
             AssertFatal(M > 0 && N > 0 && K > 0 && lanesPerWavefront > 0,
                         "Invalid inputs",
                         ShowValue(M),
                         ShowValue(N),
                         ShowValue(K),
                         ShowValue(lanesPerWavefront));
-            AssertFatal(matA->valueCount() * packing == (size_t)M * K / lanesPerWavefront,
+            auto const packingA = DataTypeInfo::Get(matA->variableType()).packing;
+            AssertFatal(matA->valueCount() * packingA == (size_t)M * K / lanesPerWavefront,
                         "A matrix size mismatch",
                         ShowValue(M),
                         ShowValue(K),
                         ShowValue(lanesPerWavefront),
                         ShowValue(M * K / lanesPerWavefront),
                         ShowValue(matA->valueCount()),
-                        ShowValue(packing));
-            AssertFatal(matB->valueCount() * packing == (size_t)K * N / lanesPerWavefront,
+                        ShowValue(packingA));
+            auto const packingB = DataTypeInfo::Get(matB->variableType()).packing;
+            AssertFatal(matB->valueCount() * packingB == (size_t)K * N / lanesPerWavefront,
                         "B matrix size mismatch",
                         ShowValue(K),
                         ShowValue(N),
                         ShowValue(lanesPerWavefront),
                         ShowValue(K * N / lanesPerWavefront),
                         ShowValue(matB->valueCount()),
-                        ShowValue(packing));
+                        ShowValue(packingB));
             AssertFatal(matC->valueCount() == (size_t)M * N / lanesPerWavefront,
                         "C matrix size mismatch",
                         ShowValue(M),

@@ -167,6 +167,71 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
     }
 }
 
+// D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
+template <typename A, typename C, typename D>
+Client::GEMMClient::Result GEMMMixed(Client::GEMMClient::SolutionParameters const& solutionParams,
+                                     Client::RunParameters const&                  runParams,
+                                     bool                                          checkResult,
+                                     bool                                          doVisualize,
+                                     auto                                          typeB)
+{
+    if(typeB == "fp8")
+    {
+        return GEMM<A, FP8, C, D>(solutionParams, runParams, checkResult, doVisualize);
+    }
+    else if(typeB == "bf8")
+    {
+        return GEMM<A, BF8, C, D>(solutionParams, runParams, checkResult, doVisualize);
+    }
+    else if(typeB == "fp6")
+    {
+        return GEMM<A, FP6, C, D>(solutionParams, runParams, checkResult, doVisualize);
+    }
+    else if(typeB == "bf6")
+    {
+        return GEMM<A, BF6, C, D>(solutionParams, runParams, checkResult, doVisualize);
+    }
+    else if(typeB == "fp4")
+    {
+        return GEMM<A, FP4, C, D>(solutionParams, runParams, checkResult, doVisualize);
+    }
+    else
+        Throw<FatalError>("Invalid type for Mixed GEMM.");
+}
+
+// D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
+template <typename C, typename D>
+Client::GEMMClient::Result GEMMMixed(Client::GEMMClient::SolutionParameters const& solutionParams,
+                                     Client::RunParameters const&                  runParams,
+                                     bool                                          checkResult,
+                                     bool                                          doVisualize,
+                                     auto                                          typeA,
+                                     auto                                          typeB)
+{
+    if(typeA == "fp8")
+    {
+        return GEMMMixed<FP8, C, D>(solutionParams, runParams, checkResult, doVisualize, typeB);
+    }
+    else if(typeA == "bf8")
+    {
+        return GEMMMixed<BF8, C, D>(solutionParams, runParams, checkResult, doVisualize, typeB);
+    }
+    else if(typeA == "fp6")
+    {
+        return GEMMMixed<FP6, C, D>(solutionParams, runParams, checkResult, doVisualize, typeB);
+    }
+    else if(typeA == "bf6")
+    {
+        return GEMMMixed<BF6, C, D>(solutionParams, runParams, checkResult, doVisualize, typeB);
+    }
+    else if(typeA == "fp4")
+    {
+        return GEMMMixed<FP4, C, D>(solutionParams, runParams, checkResult, doVisualize, typeB);
+    }
+    else
+        Throw<FatalError>("Invalid type for Mixed GEMM.");
+}
+
 int main(int argc, const char* argv[])
 {
     ParseOptions po("GEMM Driver: D (MxN) = alpha * A (MxK) * B (KxN) + beta * C (MxN)",
@@ -378,6 +443,11 @@ int main(int argc, const char* argv[])
 
     Client::GEMMClient::Result result;
 
+    auto isF8F6F4 = [](auto dtype) {
+        return (dtype == "fp8" || dtype == "bf8" || dtype == "fp6" || dtype == "bf6"
+                || dtype == "fp4");
+    };
+
     if(problem.typeA == "float" && problem.typeB == "float" && problem.typeC == "float"
        && problem.typeD == "float")
     {
@@ -412,6 +482,11 @@ int main(int argc, const char* argv[])
             && problem.typeD == "float")
     {
         result = GEMM<FP4, FP4, float, float>(solution, runParams, checkResult, doVisualize);
+    }
+    else if((problem.typeA != problem.typeB) && isF8F6F4(problem.typeA) && isF8F6F4(problem.typeB))
+    {
+        result = GEMMMixed<float, float>(
+            solution, runParams, checkResult, doVisualize, problem.typeA, problem.typeB);
     }
     else
     {
