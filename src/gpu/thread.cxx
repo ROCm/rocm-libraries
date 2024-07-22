@@ -264,6 +264,8 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t wor
     }
 
     oldWorkNode->link_to_self = nullptr;
+    // TODO: Technically this is not standards compliant. Even though WorkNode<T> is TriviallyCopyable, it is not a
+    // StandardLayoutType, so WorkNode_Header and WorkNode<T> pointers are not interchangeable.
     gpu::memcpy(newWorkNode, oldWorkNode, worknodeSize);
 
     // If there is a waiting worknode, update its link_to_self value so it points at newWorkNode->next.
