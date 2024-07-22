@@ -32,7 +32,6 @@ namespace GEMMDriverTest
     template <typename T>
     concept isF6F4 = std::is_same_v<T, FP6> || std::is_same_v<T, BF6> || std::is_same_v<T, FP4>;
 
-    // struct GEMMTestGPU : public CurrentGPUContextFixture
     template <typename... Ts>
     class BaseGEMMContextFixture
         : public BaseGPUContextFixture,

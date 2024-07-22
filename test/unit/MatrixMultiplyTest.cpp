@@ -294,18 +294,25 @@ namespace MatrixMultiplyTest
                                           double              err,
                                           bool                useLDSB = true,
                                           std::string         transA  = "N",
-                                          std::string         transB  = "N")
+                                          std::string         transB  = "N",
+                                          uint8_t             scaleA  = 127,
+                                          uint8_t             scaleB  = 127)
         {
             if(typeB == rocRoller::DataType::FP8)
-                matrixMultiplyMacroTile<TA, FP8, float>(m, n, k, b, err, useLDSB, transA, transB);
+                matrixMultiplyMacroTile<TA, FP8, float>(
+                    m, n, k, b, err, useLDSB, transA, transB, scaleA, scaleB);
             else if(typeB == rocRoller::DataType::BF8)
-                matrixMultiplyMacroTile<TA, BF8, float>(m, n, k, b, err, useLDSB, transA, transB);
+                matrixMultiplyMacroTile<TA, BF8, float>(
+                    m, n, k, b, err, useLDSB, transA, transB, scaleA, scaleB);
             else if(typeB == rocRoller::DataType::FP6)
-                matrixMultiplyMacroTile<TA, FP6, float>(m, n, k, b, err, useLDSB, transA, transB);
+                matrixMultiplyMacroTile<TA, FP6, float>(
+                    m, n, k, b, err, useLDSB, transA, transB, scaleA, scaleB);
             else if(typeB == rocRoller::DataType::BF6)
-                matrixMultiplyMacroTile<TA, BF6, float>(m, n, k, b, err, useLDSB, transA, transB);
+                matrixMultiplyMacroTile<TA, BF6, float>(
+                    m, n, k, b, err, useLDSB, transA, transB, scaleA, scaleB);
             else if(typeB == rocRoller::DataType::FP4)
-                matrixMultiplyMacroTile<TA, FP4, float>(m, n, k, b, err, useLDSB, transA, transB);
+                matrixMultiplyMacroTile<TA, FP4, float>(
+                    m, n, k, b, err, useLDSB, transA, transB, scaleA, scaleB);
             else
                 Throw<FatalError>("Invalid type.");
         }
@@ -319,18 +326,25 @@ namespace MatrixMultiplyTest
                                           double              err,
                                           bool                useLDSB = true,
                                           std::string         transA  = "N",
-                                          std::string         transB  = "N")
+                                          std::string         transB  = "N",
+                                          uint8_t             scaleA  = 127,
+                                          uint8_t             scaleB  = 127)
         {
             if(typeA == rocRoller::DataType::FP8)
-                matrixMultiplyMacroTileMixed<FP8>(typeB, m, n, k, b, err, useLDSB, transA, transB);
+                matrixMultiplyMacroTileMixed<FP8>(
+                    typeB, m, n, k, b, err, useLDSB, transA, transB, scaleA, scaleB);
             else if(typeA == rocRoller::DataType::BF8)
-                matrixMultiplyMacroTileMixed<BF8>(typeB, m, n, k, b, err, useLDSB, transA, transB);
+                matrixMultiplyMacroTileMixed<BF8>(
+                    typeB, m, n, k, b, err, useLDSB, transA, transB, scaleA, scaleB);
             else if(typeA == rocRoller::DataType::FP6)
-                matrixMultiplyMacroTileMixed<FP6>(typeB, m, n, k, b, err, useLDSB, transA, transB);
+                matrixMultiplyMacroTileMixed<FP6>(
+                    typeB, m, n, k, b, err, useLDSB, transA, transB, scaleA, scaleB);
             else if(typeA == rocRoller::DataType::BF6)
-                matrixMultiplyMacroTileMixed<BF6>(typeB, m, n, k, b, err, useLDSB, transA, transB);
+                matrixMultiplyMacroTileMixed<BF6>(
+                    typeB, m, n, k, b, err, useLDSB, transA, transB, scaleA, scaleB);
             else if(typeA == rocRoller::DataType::FP4)
-                matrixMultiplyMacroTileMixed<FP4>(typeB, m, n, k, b, err, useLDSB, transA, transB);
+                matrixMultiplyMacroTileMixed<FP4>(
+                    typeB, m, n, k, b, err, useLDSB, transA, transB, scaleA, scaleB);
             else
                 Throw<FatalError>("Invalid type.");
         }
@@ -1399,6 +1413,51 @@ namespace MatrixMultiplyTest
                                                                 rocRoller::DataType::BF6,
                                                                 rocRoller::DataType::FP4),
                                               ::testing::Values(64, 128))));
+
+    // Params are: A type, B type, scale pair, K tile size
+    class ScaledMatrixMultiplyTestGPUMixed
+        : public BaseMatrixMultiplyContextFixture<
+              std::
+                  tuple<rocRoller::DataType, rocRoller::DataType, std::pair<uint8_t, uint8_t>, int>>
+    {
+    };
+
+    TEST_P(ScaledMatrixMultiplyTestGPUMixed, GPU_ScaledMatrixMultiplyMixedMacroTile)
+    {
+        auto [typeA, typeB, scales, MFMAK] = std::get<
+            std::tuple<rocRoller::DataType, rocRoller::DataType, std::pair<uint8_t, uint8_t>, int>>(
+            GetParam());
+
+        auto [scaleA, scaleB] = scales;
+
+        int wave_m = (MFMAK == 128) ? 16 : 32;
+        int wave_n = (MFMAK == 128) ? 16 : 32;
+        int wave_k = MFMAK;
+
+        matrixMultiplyMacroTileMixed(
+            typeA, typeB, wave_m, wave_n, wave_k, 1, 1.e-5, true, "T", "N", scaleA, scaleB);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        MatrixMultiplyTest,
+        ScaledMatrixMultiplyTestGPUMixed,
+        ::testing::Combine(
+            ::testing::Values("gfx950"), //mfmaSupportedISAValues(),
+            ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
+                                                 rocRoller::DataType::BF8,
+                                                 rocRoller::DataType::FP6,
+                                                 rocRoller::DataType::BF6,
+                                                 rocRoller::DataType::FP4),
+                               ::testing::Values(rocRoller::DataType::FP8,
+                                                 rocRoller::DataType::BF8,
+                                                 rocRoller::DataType::FP6,
+                                                 rocRoller::DataType::BF6,
+                                                 rocRoller::DataType::FP4),
+                               ::testing::Values(std::pair<uint8_t, uint8_t>{125u, 125u},
+                                                 std::pair<uint8_t, uint8_t>{125u, 128u},
+                                                 std::pair<uint8_t, uint8_t>{128u, 125u},
+                                                 std::pair<uint8_t, uint8_t>{128u, 128u}),
+                               ::testing::Values(64, 128))));
 
     /**
      * Extra param: M/N tile size of instruction, allowing us to test both
