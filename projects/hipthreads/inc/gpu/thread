@@ -106,10 +106,10 @@ class thread {
     __host__ static void start();
     __host__ static void finish(bool blocking = true);
   private:
-    template <class Callable_t>
-    __host__ void sendWorkNodeViaKernel(std::unique_ptr<WorkNode<Callable_t>> worknode_h);
-    template <class Callable_t>
-    __host__ void sendWorkNodeViaBuffer(std::unique_ptr<WorkNode<Callable_t>> worknode_h, std::shared_ptr<WorkNode_Header> previous_worknode);
+    template <class WorkNode_t>
+    __host__ void sendWorkNodeViaKernel(std::unique_ptr<WorkNode_t> worknode_h);
+    template <class WorkNode_t>
+    __host__ void sendWorkNodeViaBuffer(std::unique_ptr<WorkNode_t> worknode_h, std::shared_ptr<WorkNode_Header> previous_worknode);
 
 #ifdef __HIP_DEVICE_COMPILE__
     // If we don't initialize worknode_d to nullptr, operator= might fail when assigning to a default constructed gpu::thread.
@@ -157,15 +157,16 @@ static_assert(std::is_standard_layout_v<WorkNode_Header>);
 
 template <class Callable_t>
 struct WorkNode {
+    using Callable = Callable_t;
     WorkNode(WorkNode &&other) = default;
-    inline __device__ WorkNode(uint32_t width, Callable_t &&callable);
-    inline __host__ WorkNode(uint32_t width, Callable_t &&callable);
+    inline __device__ WorkNode(uint32_t width, Callable &&callable);
+    inline __host__ WorkNode(uint32_t width, Callable &&callable);
 
     // Note: Don't try to flatten access to Header's member variables, as it would result in a bunch of strict aliasing
     // violations.
     using Header = WorkNode_Header;
     Header header;
-    Callable_t fn;
+    Callable fn;
 };
 
 template <class Fn_t, class... Args_t>
@@ -218,16 +219,16 @@ __device__ void setCurrentWorkNode(WorkNode_Header *node, bool yielding);
 
 // Precondition: We're still holding the lock acquired in invokeNext. Needed to make sure detach doesn't make worknode
 // an invalid pointer before we load typed_node_ptr and width.
-template <class Callable_t>
+template <class WorkNode_t>
 __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
-    static_assert(std::is_standard_layout_v<WorkNode<Callable_t>>);
+    static_assert(std::is_standard_layout_v<WorkNode_t>);
     // TODO: Part of C++20, not yet implemented in libc++. See https://libcxx.llvm.org/Status/Cxx20.html -> P0466R5
-    // static_assert(std::is_pointer_interconvertible_with_class(WorkNode<Callable_t>::header));
+    // static_assert(std::is_pointer_interconvertible_with_class(WorkNode_t::header));
 
-    // Because of pointer-interconvertability of WorkNode<Callable_t>::header and WorkNode<Callable_t>, reading from typed_node_ptr
+    // Because of pointer-interconvertability of WorkNode_t::header and WorkNode_t, reading from typed_node_ptr
     // shouldn't result in a strict-aliasing violation.
-    WorkNode<Callable_t> *typed_node_ptr = reinterpret_cast<WorkNode<Callable_t> *>(worknode);
-    Callable_t fn = std::move(typed_node_ptr->fn);
+    WorkNode_t *typed_node_ptr = reinterpret_cast<WorkNode_t *>(worknode);
+    typename WorkNode_t::Callable fn = std::move(typed_node_ptr->fn);
     uint32_t width = typed_node_ptr->header.width;
     __syncthreads();
     // Include a threadfence for all threads just to be safe.
@@ -245,7 +246,7 @@ __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
 
 template <class Callable_t>
 __device__ WorkNode<Callable_t>::WorkNode(uint32_t width, Callable_t &&callable) : fn(std::move(callable)) {
-    header.wrapper_fn = wrapper<Callable_t>;
+    header.wrapper_fn = wrapper<WorkNode<Callable_t>>;
     header.width = width;
 }
 
@@ -260,15 +261,15 @@ __host__ WorkNode<Callable_t>::WorkNode(uint32_t width, Callable_t &&callable) :
 
     // Why do we NEED a kernel?
     // We can't reference __device__ functions from __host__ functions, so this is illegal:
-    // header = {nullptr, nullptr, false, {}, 0, wrapper<Callable_t> };
+    // header = {nullptr, nullptr, false, {}, 0, wrapper<WorkNode<Callable_t>> };
     //
     // Extended lambda's don't define a pointer-to-function conversion operator, so wrapping the invokation of the
     // __device__ function in an extended lambda without captures doesn't work:
-    // header = {nullptr, nullptr, false, {}, 0, [] __device__ () { wrapper<Callable_t>() } };
+    // header = {nullptr, nullptr, false, {}, 0, [] __device__ () { wrapper<WorkNode<Callable_t>>() } };
     // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html 14.7.2.16 Extended Lambda Restrictions
     //
     // __device__ template variables cannot be instantiated using a type defined in host code, so this doesn't work:
-    // template <class Fn_t> __device__ WrappedFnPointer wrapper_ptr = wrapper<Fn_t>;
+    // template <class Fn_t> __device__ WrappedFnPointer wrapper_ptr = wrapper<WorkNode<Fn_t>>;
     // __LIBGPU_HIP_CHECK__(hipMemcpyFromSymbol(&temp, HIP_SYMBOL(wrapper_ptr<Callable_t>), sizeof(temp), 0,
     // hipMemcpyDeviceToHost)); https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html 14.5.12 Restrictions ->
     // Templates
@@ -289,9 +290,9 @@ __host__ void insertWorkNodeIntoCPUQueue(WorkNode_Header *worknode, const uint32
 //      KERNELS
 //====================================================================================================================//
 
-template <class Callable_t>
+template <class WorkNode_t>
 __global__ void insertWorkNodeFromHost(WorkNode_Header *worknode) {
-    worknode->wrapper_fn = wrapper<Callable_t>;
+    worknode->wrapper_fn = wrapper<WorkNode_t>;
     insertWorkNodeIntoMainQueue(worknode);
 }
 
@@ -317,6 +318,7 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
         throw std::length_error("thread::thread: width must not exceed " + std::to_string(MAX_THREAD_WIDTH));
     }
     std::unique_ptr worknode_h = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+    using WorkNode_t = typename decltype(worknode_h)::element_type;
     // First two are prerequisites for the third, and produce more user-friendly error messages
     // Note: is_trivially_copyable can behave strangely for extended lambdas. See
     // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html 14.7.2.18 Extended Lambda Restrictions
@@ -327,11 +329,11 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     // is_trivially_constructible<remove_ref<T>, decltype(t)> (i.e. is_trivially_move_constructible or
     // is_trivially_copy_constructible depending on if T is rvalue or lvalue ref)?
     // Note: Do we need to worry about non-object Fn_t's?
-    static_assert(std::is_trivially_copyable_v<typename decltype(worknode_h)::element_type>);
+    static_assert(std::is_trivially_copyable_v<WorkNode_t>);
 
 #ifdef __HIP_DEVICE_COMPILE__
     // Need to make sure that the insertWorkNodeFromHost template is always instantiated
-    hipLaunchKernelGGL(insertWorkNodeFromHost<decltype(worknode_h->fn)>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d);
+    hipLaunchKernelGGL(insertWorkNodeFromHost<WorkNode_t>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d);
 #else
     {
         WorkNode_Header *temp_ptr;
@@ -350,16 +352,16 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     std::shared_ptr<WorkNode_Header> previous_worknode = previous_worknode_weak.lock();
     previous_worknode_weak = worknode_d;
     if (previous_worknode == nullptr) {
-        sendWorkNodeViaKernel<decltype(worknode_h->fn)>(std::move(worknode_h));
+        sendWorkNodeViaKernel<WorkNode_t>(std::move(worknode_h));
     } else {
-        sendWorkNodeViaBuffer<decltype(worknode_h->fn)>(std::move(worknode_h), std::move(previous_worknode));
+        sendWorkNodeViaBuffer<WorkNode_t>(std::move(worknode_h), std::move(previous_worknode));
     }
 #endif //!__HIP_DEVICE_COMPILE__
 }
 
-template <class Callable_t>
+template <class WorkNode_t>
 inline __host__ void
-thread::sendWorkNodeViaKernel(std::unique_ptr<internal::WorkNode<Callable_t>> worknode_h [[maybe_unused]]) {
+thread::sendWorkNodeViaKernel(std::unique_ptr<WorkNode_t> worknode_h [[maybe_unused]]) {
 #ifndef __HIP_DEVICE_COMPILE__
     // Maybe we want to do this memcpy in the kernel?
     __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), worknode_h.get(), sizeof(*worknode_h), hipMemcpyHostToDevice, getEnqueingStream()));
@@ -368,7 +370,7 @@ thread::sendWorkNodeViaKernel(std::unique_ptr<internal::WorkNode<Callable_t>> wo
     __LIBGPU_HIP_CHECK__(hipEventCreate(&event));
     __LIBGPU_HIP_CHECK__(hipEventRecord(event, getEnqueingStream()));
 
-    hipLaunchKernelGGL(insertWorkNodeFromHost<decltype(worknode_h->fn)>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
+    hipLaunchKernelGGL(insertWorkNodeFromHost<WorkNode_t>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
 
     // Make sure that the copy is finished before worknode_h goes out of scope and gets unregistered and/or destroyed.
     __LIBGPU_HIP_CHECK__(hipEventSynchronize(event));
@@ -376,9 +378,9 @@ thread::sendWorkNodeViaKernel(std::unique_ptr<internal::WorkNode<Callable_t>> wo
 #endif //!__HIP_DEVICE_COMPILE__
 }
 
-template <class Callable_t>
+template <class WorkNode_t>
 inline __host__ void
-thread::sendWorkNodeViaBuffer(std::unique_ptr<internal::WorkNode<Callable_t>> worknode_h [[maybe_unused]],
+thread::sendWorkNodeViaBuffer(std::unique_ptr<WorkNode_t> worknode_h [[maybe_unused]],
                               std::shared_ptr<WorkNode_Header> previous_worknode [[maybe_unused]]) {
 #ifndef __HIP_DEVICE_COMPILE__
     const uint32_t myCount = cpuWorkQueueIndex_push++;
