@@ -494,6 +494,7 @@ set(
   test/unit/CommonSubexpressionElimTest.cpp
   test/unit/ComponentTest.cpp
   test/unit/ControlGraphTest.cpp
+  test/unit/ConversionInstructions/Convert_F16_F32.cpp
   test/unit/CoordinateGraphTest.cpp
   test/unit/CopyGeneratorTest.cpp
   test/unit/DataTypesTest.cpp
