@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -49,7 +49,7 @@ constexpr std::size_t DEFAULT_N = 1024 * 1024 * 128;
 constexpr unsigned int batch_size  = 10;
 constexpr unsigned int warmup_size = 5;
 
-template <typename InputIt, typename OutputIt, typename... Args>
+template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   std::true_type /*copy*/,
                                   void* const    temporary_storage,
@@ -58,11 +58,14 @@ auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   const OutputIt output,
                                   Args&&... args)
 {
-    return ::hipcub::DeviceAdjacentDifference::SubtractLeftCopy(
-        temporary_storage, storage_size, input, output, std::forward<Args>(args)...);
+    return ::hipcub::DeviceAdjacentDifference::SubtractLeftCopy(temporary_storage,
+                                                                storage_size,
+                                                                input,
+                                                                output,
+                                                                std::forward<Args>(args)...);
 }
 
-template <typename InputIt, typename OutputIt, typename... Args>
+template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::false_type /*left*/,
                                   std::true_type /*copy*/,
                                   void* const    temporary_storage,
@@ -71,11 +74,14 @@ auto dispatch_adjacent_difference(std::false_type /*left*/,
                                   const OutputIt output,
                                   Args&&... args)
 {
-    return ::hipcub::DeviceAdjacentDifference::SubtractRightCopy(
-        temporary_storage, storage_size, input, output, std::forward<Args>(args)...);
+    return ::hipcub::DeviceAdjacentDifference::SubtractRightCopy(temporary_storage,
+                                                                 storage_size,
+                                                                 input,
+                                                                 output,
+                                                                 std::forward<Args>(args)...);
 }
 
-template <typename InputIt, typename OutputIt, typename... Args>
+template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   std::false_type /*copy*/,
                                   void* const   temporary_storage,
@@ -84,11 +90,13 @@ auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   const OutputIt /*output*/,
                                   Args&&... args)
 {
-    return ::hipcub::DeviceAdjacentDifference::SubtractLeft(
-        temporary_storage, storage_size, input, std::forward<Args>(args)...);
+    return ::hipcub::DeviceAdjacentDifference::SubtractLeft(temporary_storage,
+                                                            storage_size,
+                                                            input,
+                                                            std::forward<Args>(args)...);
 }
 
-template <typename InputIt, typename OutputIt, typename... Args>
+template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::false_type /*left*/,
                                   std::false_type /*copy*/,
                                   void* const   temporary_storage,
@@ -97,11 +105,13 @@ auto dispatch_adjacent_difference(std::false_type /*left*/,
                                   const OutputIt /*output*/,
                                   Args&&... args)
 {
-    return ::hipcub::DeviceAdjacentDifference::SubtractRight(
-        temporary_storage, storage_size, input, std::forward<Args>(args)...);
+    return ::hipcub::DeviceAdjacentDifference::SubtractRight(temporary_storage,
+                                                             storage_size,
+                                                             input,
+                                                             std::forward<Args>(args)...);
 }
 
-template <typename T, bool left, bool copy>
+template<typename T, bool left, bool copy>
 void run_benchmark(benchmark::State& state, const std::size_t size, const hipStream_t stream)
 {
     using output_type = T;
@@ -180,12 +190,15 @@ void run_benchmark(benchmark::State& state, const std::size_t size, const hipStr
 
 using namespace std::string_literals;
 
-#define CREATE_BENCHMARK(T, left, copy)                                    \
-    benchmark::RegisterBenchmark(("Subtract" + (left ? "Left"s : "Right"s) \
-                                  + (copy ? "Copy"s : ""s) + "<" #T ">")   \
-                                     .c_str(),                             \
-                                 &run_benchmark<T, left, copy>,            \
-                                 size,                                     \
+#define CREATE_BENCHMARK(T, left, copy)                                             \
+    benchmark::RegisterBenchmark(std::string("device_adjacent_difference"           \
+                                             "<data_type:" #T ">."                  \
+                                             "sub_algorithm_name:subtract_"         \
+                                             + std::string(left ? "left" : "right") \
+                                             + std::string(copy ? "_copy" : ""))    \
+                                     .c_str(),                                      \
+                                 &run_benchmark<T, left, copy>,                     \
+                                 size,                                              \
                                  stream)
 
 // clang-format off
@@ -214,6 +227,8 @@ int main(int argc, char* argv[])
     int               device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+
+    std::cout << "benchmark_device_adjacent_difference" << std::endl;
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     using custom_float2  = benchmark_utils::custom_type<float, float>;

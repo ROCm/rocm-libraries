@@ -36,6 +36,7 @@ else()
   set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
 
+
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(DEPENDENCIES_FORCE_DOWNLOAD "Download dependencies and do not search for packages" OFF)

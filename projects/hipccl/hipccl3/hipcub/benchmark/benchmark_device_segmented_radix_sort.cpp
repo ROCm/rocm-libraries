@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -25,26 +25,25 @@
 // HIP API
 #include "hipcub/hipcub.hpp"
 
-
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-const unsigned int batch_size = 4;
+const unsigned int batch_size  = 4;
 const unsigned int warmup_size = 2;
 
-constexpr bool Ascending = false;
+constexpr bool Ascending  = false;
 constexpr bool Descending = true;
 
 template<class Key>
 void run_sort_keys_benchmark(benchmark::State& state,
-                             size_t desired_segments,
-                             hipStream_t stream, 
-                             size_t size,
-                             bool descending = false)
+                             size_t            desired_segments,
+                             hipStream_t       stream,
+                             size_t            size,
+                             bool              descending = false)
 {
     using offset_type = int;
-    using key_type = Key;
+    using key_type    = Key;
     typedef hipError_t (*sort_func)(void*,
                                     size_t&,
                                     const key_type*,
@@ -57,11 +56,10 @@ void run_sort_keys_benchmark(benchmark::State& state,
                                     int,
                                     hipStream_t);
 
-    sort_func func_ascending  = &hipcub::DeviceSegmentedRadixSort::SortKeys
-        <key_type, offset_type *>;
-    sort_func func_descending = &hipcub::DeviceSegmentedRadixSort::SortKeysDescending
-        <key_type, offset_type *>;
-        
+    sort_func func_ascending = &hipcub::DeviceSegmentedRadixSort::SortKeys<key_type, offset_type*>;
+    sort_func func_descending
+        = &hipcub::DeviceSegmentedRadixSort::SortKeysDescending<key_type, offset_type*>;
+
     sort_func sorting = descending ? func_descending : func_ascending;
 
     // Generate data
@@ -69,13 +67,13 @@ void run_sort_keys_benchmark(benchmark::State& state,
 
     const double avg_segment_length = static_cast<double>(size) / desired_segments;
 
-    const unsigned int seed = 123;
+    const unsigned int         seed = 123;
     std::default_random_engine gen(seed);
 
     std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
 
     unsigned int segments_count = 0;
-    size_t offset = 0;
+    size_t       offset         = 0;
     while(offset < size)
     {
         const size_t segment_length = std::round(segment_length_dis(gen));
@@ -88,41 +86,31 @@ void run_sort_keys_benchmark(benchmark::State& state,
     std::vector<key_type> keys_input;
     if(std::is_floating_point<key_type>::value)
     {
-        keys_input = benchmark_utils::get_random_data<key_type>(
-            size, (key_type)-1000, (key_type)+1000);
-    }
-    else
+        keys_input
+            = benchmark_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type) + 1000);
+    } else
     {
-        keys_input = benchmark_utils::get_random_data<key_type>(
-            size,
-            std::numeric_limits<key_type>::min(),
-            std::numeric_limits<key_type>::max()
-        );
+        keys_input
+            = benchmark_utils::get_random_data<key_type>(size,
+                                                         std::numeric_limits<key_type>::min(),
+                                                         std::numeric_limits<key_type>::max());
     }
 
-    offset_type * d_offsets;
+    offset_type* d_offsets;
     HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_offsets, offsets.data(),
-            (segments_count + 1) * sizeof(offset_type),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_offsets,
+                        offsets.data(),
+                        (segments_count + 1) * sizeof(offset_type),
+                        hipMemcpyHostToDevice));
 
-    key_type * d_keys_input;
-    key_type * d_keys_output;
+    key_type* d_keys_input;
+    key_type* d_keys_output;
     HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
     HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
     HIP_CHECK(
-        hipMemcpy(
-            d_keys_input, keys_input.data(),
-            size * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
+        hipMemcpy(d_keys_input, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
 
-    void * d_temporary_storage = nullptr;
+    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(sorting(d_temporary_storage,
                       temporary_storage_bytes,
@@ -156,7 +144,7 @@ void run_sort_keys_benchmark(benchmark::State& state,
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
 
@@ -177,8 +165,8 @@ void run_sort_keys_benchmark(benchmark::State& state,
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
@@ -192,14 +180,14 @@ void run_sort_keys_benchmark(benchmark::State& state,
 
 template<class Key, class Value>
 void run_sort_pairs_benchmark(benchmark::State& state,
-                              size_t desired_segments,
-                              hipStream_t stream,
-                              size_t size,
-                              bool descending = false)
+                              size_t            desired_segments,
+                              hipStream_t       stream,
+                              size_t            size,
+                              bool              descending = false)
 {
     using offset_type = int;
-    using key_type = Key;
-    using value_type = Value;
+    using key_type    = Key;
+    using value_type  = Value;
     typedef hipError_t (*sort_func)(void*,
                                     size_t&,
                                     const key_type*,
@@ -214,10 +202,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
                                     int,
                                     hipStream_t);
 
-    sort_func func_ascending  = &hipcub::DeviceSegmentedRadixSort::SortPairs
-        <key_type, value_type, offset_type *>;
-    sort_func func_descending = &hipcub::DeviceSegmentedRadixSort::SortPairsDescending
-        <key_type, value_type, offset_type *>;
+    sort_func func_ascending
+        = &hipcub::DeviceSegmentedRadixSort::SortPairs<key_type, value_type, offset_type*>;
+    sort_func func_descending = &hipcub::DeviceSegmentedRadixSort::
+                                    SortPairsDescending<key_type, value_type, offset_type*>;
 
     sort_func sorting = descending ? func_descending : func_ascending;
 
@@ -226,13 +214,13 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 
     const double avg_segment_length = static_cast<double>(size) / desired_segments;
 
-    const unsigned int seed = 123;
+    const unsigned int         seed = 123;
     std::default_random_engine gen(seed);
 
     std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
 
     unsigned int segments_count = 0;
-    size_t offset = 0;
+    size_t       offset         = 0;
     while(offset < size)
     {
         const size_t segment_length = std::round(segment_length_dis(gen));
@@ -245,56 +233,43 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     std::vector<key_type> keys_input;
     if(std::is_floating_point<key_type>::value)
     {
-        keys_input = benchmark_utils::get_random_data<key_type>(
-            size, (key_type)-1000, (key_type)+1000);
-    }
-    else
+        keys_input
+            = benchmark_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type) + 1000);
+    } else
     {
-        keys_input = benchmark_utils::get_random_data<key_type>(
-            size,
-            std::numeric_limits<key_type>::min(),
-            std::numeric_limits<key_type>::max()
-        );
+        keys_input
+            = benchmark_utils::get_random_data<key_type>(size,
+                                                         std::numeric_limits<key_type>::min(),
+                                                         std::numeric_limits<key_type>::max());
     }
 
     std::vector<value_type> values_input(size);
     std::iota(values_input.begin(), values_input.end(), 0);
 
-    offset_type * d_offsets;
+    offset_type* d_offsets;
     HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_offsets, offsets.data(),
-            (segments_count + 1) * sizeof(offset_type),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_offsets,
+                        offsets.data(),
+                        (segments_count + 1) * sizeof(offset_type),
+                        hipMemcpyHostToDevice));
 
-    key_type * d_keys_input;
-    key_type * d_keys_output;
+    key_type* d_keys_input;
+    key_type* d_keys_output;
     HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
     HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
     HIP_CHECK(
-        hipMemcpy(
-            d_keys_input, keys_input.data(),
-            size * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
+        hipMemcpy(d_keys_input, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
 
-    value_type * d_values_input;
-    value_type * d_values_output;
+    value_type* d_values_input;
+    value_type* d_values_output;
     HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
     HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_values_input, values_input.data(),
-            size * sizeof(value_type),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_values_input,
+                        values_input.data(),
+                        size * sizeof(value_type),
+                        hipMemcpyHostToDevice));
 
-    void * d_temporary_storage = nullptr;
+    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(sorting(d_temporary_storage,
                       temporary_storage_bytes,
@@ -332,7 +307,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
 
@@ -355,13 +330,12 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(
-        state.iterations() * batch_size * size * (sizeof(key_type) + sizeof(value_type))
-    );
+    state.SetBytesProcessed(state.iterations() * batch_size * size
+                            * (sizeof(key_type) + sizeof(value_type)));
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
     HIP_CHECK(hipFree(d_temporary_storage));
@@ -372,41 +346,40 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_values_output));
 }
 
-#define CREATE_SORT_KEYS_BENCHMARK(Key, SEGMENTS) \
-benchmark::RegisterBenchmark( \
-    (std::string("sort_keys") + "<Key Datatype:" #Key ">" + \
-        "(Segments:~" + std::to_string(SEGMENTS) + " segments)" \
-    ).c_str(), \
-    [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, Ascending); } \
-)
+#define CREATE_SORT_KEYS_BENCHMARK(Key, SEGMENTS)              \
+    benchmark::RegisterBenchmark(                              \
+        std::string("device_segmented_radix_sort_keys"         \
+                    "<key_data_type:" #Key ",ascending:true>." \
+                    "(segments:~"                              \
+                    + std::to_string(SEGMENTS) + " segments)") \
+            .c_str(),                                          \
+        [=](benchmark::State& state)                           \
+        { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, Ascending); })
 
-#define CREATE_SORT_KEYS_DESCENDING_BENCHMARK(Key, SEGMENTS) \
-benchmark::RegisterBenchmark( \
-    (std::string("sort_keys") + "<" #Key ">" + \
-        "(~" + std::to_string(SEGMENTS) + " segments), descending" \
-    ).c_str(), \
-    [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, Descending); } \
-)
+#define CREATE_SORT_KEYS_DESCENDING_BENCHMARK(Key, SEGMENTS)    \
+    benchmark::RegisterBenchmark(                               \
+        std::string("device_segmented_radix_sort_keys"          \
+                    "<key_data_type:" #Key ",ascending:false>." \
+                    "(segments:~"                               \
+                    + std::to_string(SEGMENTS) + " segments)")  \
+            .c_str(),                                           \
+        [=](benchmark::State& state)                            \
+        { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, Descending); })
 
-#define BENCHMARK_KEY_TYPE(type) \
-    CREATE_SORT_KEYS_BENCHMARK(type, 1), \
-    CREATE_SORT_KEYS_BENCHMARK(type, 10), \
-    CREATE_SORT_KEYS_BENCHMARK(type, 100), \
-    CREATE_SORT_KEYS_BENCHMARK(type, 1000), \
-    CREATE_SORT_KEYS_BENCHMARK(type, 10000), \
-    CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 1), \
-    CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 10), \
-    CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 100), \
-    CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 1000), \
-    CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 10000)
-
+#define BENCHMARK_KEY_TYPE(type)                                                                 \
+    CREATE_SORT_KEYS_BENCHMARK(type, 1), CREATE_SORT_KEYS_BENCHMARK(type, 10),                   \
+        CREATE_SORT_KEYS_BENCHMARK(type, 100), CREATE_SORT_KEYS_BENCHMARK(type, 1000),           \
+        CREATE_SORT_KEYS_BENCHMARK(type, 10000), CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 1), \
+        CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 10),                                         \
+        CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 100),                                        \
+        CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 1000),                                       \
+        CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 10000)
 
 void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                              hipStream_t stream,
-                              size_t size)
+                              hipStream_t                                   stream,
+                              size_t                                        size)
 {
-    std::vector<benchmark::internal::Benchmark*> bs =
-    {
+    std::vector<benchmark::internal::Benchmark*> bs = {
         BENCHMARK_KEY_TYPE(float),
         BENCHMARK_KEY_TYPE(double),
         BENCHMARK_KEY_TYPE(int8_t),
@@ -416,45 +389,45 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-#define CREATE_SORT_PAIRS_BENCHMARK(Key, Value, SEGMENTS) \
-benchmark::RegisterBenchmark( \
-    (std::string("sort_pairs") + "<Key Datatype:" #Key ",Value Datatype:" #Value ">" + \
-        "(Segments:~" + std::to_string(SEGMENTS) + " segments)" \
-    ).c_str(), \
-    [=](benchmark::State& state) { \
-        run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, Ascending); } \
-)
+#define CREATE_SORT_PAIRS_BENCHMARK(Key, Value, SEGMENTS)                                 \
+    benchmark::RegisterBenchmark(                                                         \
+        std::string("device_segmented_radix_sort_pairs"                                   \
+                    "<key_data_type:" #Key ",value_data_type:" #Value ",ascending:true>." \
+                    "(segments:~"                                                         \
+                    + std::to_string(SEGMENTS) + " segments)")                            \
+            .c_str(),                                                                     \
+        [=](benchmark::State& state)                                                      \
+        { run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, Ascending); })
 
-#define CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(Key, Value, SEGMENTS) \
-benchmark::RegisterBenchmark( \
-    (std::string("sort_pairs") + "<" #Key ", " #Value ">" + \
-        "(~" + std::to_string(SEGMENTS) + " segments), descending" \
-    ).c_str(), \
-    [=](benchmark::State& state) { \
-        run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, Descending); } \
-)
+#define CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(Key, Value, SEGMENTS)                       \
+    benchmark::RegisterBenchmark(                                                          \
+        std::string("device_segmented_radix_sort_pairs"                                    \
+                    "<key_data_type:" #Key ",value_data_type:" #Value ",ascending:false>." \
+                    "(segments:~"                                                          \
+                    + std::to_string(SEGMENTS) + " segments)")                             \
+            .c_str(),                                                                      \
+        [=](benchmark::State& state)                                                       \
+        { run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, Descending); })
 
-#define BENCHMARK_PAIR_TYPE(type, value) \
-    CREATE_SORT_PAIRS_BENCHMARK(type, value, 1), \
-    CREATE_SORT_PAIRS_BENCHMARK(type, value, 10), \
-    CREATE_SORT_PAIRS_BENCHMARK(type, value, 100), \
-    CREATE_SORT_PAIRS_BENCHMARK(type, value, 1000), \
-    CREATE_SORT_PAIRS_BENCHMARK(type, value, 10000), \
-    CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 1), \
-    CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 10), \
-    CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 100), \
-    CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 1000), \
-    CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 10000)
+#define BENCHMARK_PAIR_TYPE(type, value)                                                       \
+    CREATE_SORT_PAIRS_BENCHMARK(type, value, 1), CREATE_SORT_PAIRS_BENCHMARK(type, value, 10), \
+        CREATE_SORT_PAIRS_BENCHMARK(type, value, 100),                                         \
+        CREATE_SORT_PAIRS_BENCHMARK(type, value, 1000),                                        \
+        CREATE_SORT_PAIRS_BENCHMARK(type, value, 10000),                                       \
+        CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 1),                                \
+        CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 10),                               \
+        CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 100),                              \
+        CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 1000),                             \
+        CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 10000)
 
 void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                               hipStream_t stream,
-                               size_t size)
+                               hipStream_t                                   stream,
+                               size_t                                        size)
 {
-    using custom_float2 = benchmark_utils::custom_type<float, float>;
+    using custom_float2  = benchmark_utils::custom_type<float, float>;
     using custom_double2 = benchmark_utils::custom_type<double, double>;
 
-    std::vector<benchmark::internal::Benchmark*> bs =
-    {
+    std::vector<benchmark::internal::Benchmark*> bs = {
         BENCHMARK_PAIR_TYPE(int, float),
         BENCHMARK_PAIR_TYPE(long long, double),
         BENCHMARK_PAIR_TYPE(int8_t, int8_t),
@@ -465,7 +438,7 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
@@ -474,15 +447,15 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t size   = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
 
     std::cout << "benchmark_device_segmented_radix_sort" << std::endl;
 
     // HIP
-    hipStream_t stream = 0; // default
+    hipStream_t     stream = 0; // default
     hipDeviceProp_t devProp;
-    int device_id = 0;
+    int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;

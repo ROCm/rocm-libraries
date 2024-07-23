@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -53,7 +53,8 @@ constexpr int32_t blev_min_size = 1024;
 // have source and destinations mappings not be the identity function:
 //
 //  batch_copy(
-//    [&a0 , &b0 , &c0 , &d0 ], // from (note the order is still just a, b, c, d!)
+//    [&a0 , &b0 , &c0 , &d0 ], // from (note the order is still just a, b, c,
+//    d!)
 //    [&a0', &b0', &c0', &d0'], // to   (order is the same as above too!)
 //    [3   , 2   , 1   , 2   ]) // size
 //
@@ -327,15 +328,20 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
-#define CREATE_BENCHMARK(item_size, item_alignment, size_type, num_tlev, num_wlev, num_blev)     \
-    benchmark::RegisterBenchmark(                                                                \
-        "{lvl:device,item_size:" #item_size ",item_alignment:" #item_alignment                   \
-        ",size_type:" #size_type ",algo:batch_memcpy,num_tlev:" #num_tlev ",num_wlev:" #num_wlev \
-        ",num_blev:" #num_blev ",cfg:default_config}",                                           \
-        [=](benchmark::State& state)                                                             \
-        {                                                                                        \
-            run_benchmark<benchmark_utils::custom_aligned_type<item_size, item_alignment>,       \
-                          size_type>(state, stream, num_tlev, num_wlev, num_blev);               \
+#define CREATE_BENCHMARK(IS, IA, T, num_tlev, num_wlev, num_blev)                     \
+    benchmark::RegisterBenchmark(                                                     \
+        std::string("device_batch_copy"                                               \
+                    "<data_type:" #T ",item_size:" #IS ",item_alignment:" #IA         \
+                    ",number_of_tlev:" #num_tlev ",number_of_wlev:" #num_wlev         \
+                    ",number_of_blev:" #num_blev ">.")                                \
+            .c_str(),                                                                 \
+        [=](benchmark::State& state)                                                  \
+        {                                                                             \
+            run_benchmark<benchmark_utils::custom_aligned_type<IS, IA>, T>(state,     \
+                                                                           stream,    \
+                                                                           num_tlev,  \
+                                                                           num_wlev,  \
+                                                                           num_blev); \
         })
 
 #define BENCHMARK_TYPE(item_size, item_alignment)                            \
@@ -364,6 +370,15 @@ int32_t main(int32_t argc, char* argv[])
     // HIP
     hipStream_t stream = hipStreamDefault; // default
 
+    hipDeviceProp_t devProp;
+    int             device_id = 0;
+    
+    HIP_CHECK(hipGetDevice(&device_id));
+    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+
+    std::cout << "benchmark_device_batch_copy" << std::endl;
+    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
+
     // Benchmark info
     benchmark::AddCustomContext("size", std::to_string(size));
 
@@ -377,6 +392,8 @@ int32_t main(int32_t argc, char* argv[])
                   BENCHMARK_TYPE(2, 2),
                   BENCHMARK_TYPE(4, 4),
                   BENCHMARK_TYPE(8, 8)};
+
+            
 
     // Use manual timing
     for(auto& b : benchmarks)

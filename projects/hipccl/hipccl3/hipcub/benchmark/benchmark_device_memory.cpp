@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -272,8 +272,7 @@ void run_benchmark(benchmark::State& state, size_t size, const hipStream_t strea
     if(std::is_floating_point<T>::value)
     {
         input = benchmark_utils::get_random_data<T>(size, (T)-1000, (T) + 1000);
-    }
-    else
+    } else
     {
         input = benchmark_utils::get_random_data<T>(size,
                                                     std::numeric_limits<T>::min(),
@@ -350,9 +349,9 @@ template<typename T>
 void run_benchmark_memcpy(benchmark::State& state, size_t size, const hipStream_t stream)
 {
     // Allocate device buffers
-    // Note: since this benchmark only tests memcpy performance between device buffers,
-    // we don't really need to copy data into these from the host - whatever happens
-    // to be in memory will suffice.
+    // Note: since this benchmark only tests memcpy performance between device
+    // buffers, we don't really need to copy data into these from the host -
+    // whatever happens to be in memory will suffice.
     T* d_input;
     T* d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
@@ -401,20 +400,18 @@ void run_benchmark_memcpy(benchmark::State& state, size_t size, const hipStream_
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK_IPT(METHOD, OPERATION, T, SIZE, BLOCK_SIZE, IPT)                     \
-    {                                                                                         \
-        benchmarks.push_back(benchmark::RegisterBenchmark(                                    \
-            #METHOD "_" #OPERATION "<" #T "," #SIZE ",BS:" #BLOCK_SIZE ",IPT:" #IPT ">",      \
-            [=](benchmark::State& state)                                                      \
-            { run_benchmark<T, BLOCK_SIZE, IPT, METHOD, OPERATION>(state, SIZE, stream); })); \
-    }
+#define CREATE_BENCHMARK_IPT(METHOD, OPERATION, T, SIZE, BS, IPT)                             \
+    benchmarks.push_back(benchmark::RegisterBenchmark(                                        \
+        std::string("device_memory<method:" #METHOD ",operation:" #OPERATION ",data_type:" #T \
+                    ",size:" #SIZE ",block_size:" #BS ",items_per_thread:" #IPT ">.")         \
+            .c_str(),                                                                         \
+        [=](benchmark::State& state)                                                          \
+        { run_benchmark<T, BS, IPT, METHOD, OPERATION>(state, SIZE, stream); }));
 
-#define CREATE_BENCHMARK_MEMCPY(T, SIZE)                                                      \
-    {                                                                                         \
-        benchmarks.push_back(benchmark::RegisterBenchmark(                                    \
-            "Memcpy<" #T "," #SIZE ">",                                                       \
-            [=](benchmark::State& state) { run_benchmark_memcpy<T>(state, SIZE, stream); })); \
-    }
+#define CREATE_BENCHMARK_MEMCPY(T, SIZE)                                               \
+    benchmarks.push_back(benchmark::RegisterBenchmark(                                 \
+        std::string("device_memory_memcpy<data_type:" #T ",size:" #SIZE ">.").c_str(), \
+        [=](benchmark::State& state) { run_benchmark_memcpy<T>(state, SIZE, stream); }));
 
 // clang-format off
 #define CREATE_BENCHMARK_BLOCK_SIZE(MEM_OP, OP, TYPE, SIZE, BLOCK_SIZE) \

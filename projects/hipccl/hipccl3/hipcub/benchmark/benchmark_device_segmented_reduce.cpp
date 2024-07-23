@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -25,36 +25,34 @@
 // HIP API
 #include "hipcub/device/device_segmented_reduce.hpp"
 
-
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-
-const unsigned int batch_size = 10;
+const unsigned int batch_size  = 10;
 const unsigned int warmup_size = 5;
 
 using OffsetType = int;
 
 template<class T, class OutputT, class SegmentedReduceKernel>
-void run_benchmark(benchmark::State& state,
-                   size_t desired_segments,
-                   hipStream_t stream,
-                   size_t size,
+void run_benchmark(benchmark::State&     state,
+                   size_t                desired_segments,
+                   hipStream_t           stream,
+                   size_t                size,
                    SegmentedReduceKernel segmented_reduce)
 {
     using value_type = T;
 
     // Generate data
-    const unsigned int seed = 123;
+    const unsigned int         seed = 123;
     std::default_random_engine gen(seed);
 
     const double avg_segment_length = static_cast<double>(size) / desired_segments;
     std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
 
     std::vector<OffsetType> offsets;
-    unsigned int segments_count = 0;
-    size_t offset = 0;
+    unsigned int            segments_count = 0;
+    size_t                  offset         = 0;
     while(offset < size)
     {
         const size_t segment_length = std::round(segment_length_dis(gen));
@@ -67,30 +65,24 @@ void run_benchmark(benchmark::State& state,
     std::vector<value_type> values_input(size);
     std::iota(values_input.begin(), values_input.end(), 0);
 
-    OffsetType * d_offsets;
+    OffsetType* d_offsets;
     HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(OffsetType)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_offsets, offsets.data(),
-            (segments_count + 1) * sizeof(OffsetType),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_offsets,
+                        offsets.data(),
+                        (segments_count + 1) * sizeof(OffsetType),
+                        hipMemcpyHostToDevice));
 
-    value_type * d_values_input;
+    value_type* d_values_input;
     HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_values_input, values_input.data(),
-            size * sizeof(value_type),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_values_input,
+                        values_input.data(),
+                        size * sizeof(value_type),
+                        hipMemcpyHostToDevice));
 
-    OutputT * d_aggregates_output;
+    OutputT* d_aggregates_output;
     HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(OutputT)));
 
-    void * d_temporary_storage = nullptr;
+    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
 
     HIP_CHECK(segmented_reduce(d_temporary_storage,
@@ -119,7 +111,7 @@ void run_benchmark(benchmark::State& state,
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
 
@@ -137,8 +129,8 @@ void run_benchmark(benchmark::State& state,
         HIP_CHECK(hipStreamSynchronize(stream));
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(value_type));
@@ -154,8 +146,10 @@ template<typename T, typename Op>
 struct Benchmark;
 
 template<typename T>
-struct Benchmark<T, hipcub::Sum> {
-    static void run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
+struct Benchmark<T, hipcub::Sum>
+{
+    static void
+        run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
     {
         hipError_t (*ptr_to_sum)(void*, size_t&, T*, T*, int, OffsetType*, OffsetType*, hipStream_t)
             = &hipcub::DeviceSegmentedReduce::Sum;
@@ -164,8 +158,10 @@ struct Benchmark<T, hipcub::Sum> {
 };
 
 template<typename T>
-struct Benchmark<T, hipcub::Min> {
-    static void run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
+struct Benchmark<T, hipcub::Min>
+{
+    static void
+        run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
     {
         hipError_t (*ptr_to_min)(void*, size_t&, T*, T*, int, OffsetType*, OffsetType*, hipStream_t)
             = &hipcub::DeviceSegmentedReduce::Min;
@@ -174,12 +170,14 @@ struct Benchmark<T, hipcub::Min> {
 };
 
 template<typename T>
-struct Benchmark<T, hipcub::ArgMin> {
+struct Benchmark<T, hipcub::ArgMin>
+{
     using Difference = OffsetType;
-    using Iterator = typename hipcub::ArgIndexInputIterator<T*, Difference>;
-    using KeyValue = typename Iterator::value_type;
+    using Iterator   = typename hipcub::ArgIndexInputIterator<T*, Difference>;
+    using KeyValue   = typename Iterator::value_type;
 
-    static void run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
+    static void
+        run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
     {
         hipError_t (*ptr_to_argmin)(void*,
                                     size_t&,
@@ -194,50 +192,48 @@ struct Benchmark<T, hipcub::ArgMin> {
     }
 };
 
-#define CREATE_BENCHMARK(T, SEGMENTS, REDUCE_OP) \
-benchmark::RegisterBenchmark( \
-    (std::string("segmented_reduce") + "<Datatype:" #T ", ReduceOp:" #REDUCE_OP ">" + \
-        "(Number of segments:~" + std::to_string(SEGMENTS) + " segments)" \
-    ).c_str(), \
-    &Benchmark<T, REDUCE_OP>::run, \
-    SEGMENTS, stream, size \
-)
+#define CREATE_BENCHMARK(T, SEGMENTS, REDUCE_OP)                                            \
+    benchmark::RegisterBenchmark(std::string("device_segmented_reduce"                      \
+                                             "<data_type:" #T ",reduce_op:" #REDUCE_OP ">." \
+                                             "(number_of_segments:~"                        \
+                                             + std::to_string(SEGMENTS) + " segments)")     \
+                                     .c_str(),                                              \
+                                 &Benchmark<T, REDUCE_OP>::run,                             \
+                                 SEGMENTS,                                                  \
+                                 stream,                                                    \
+                                 size)
 
-#define BENCHMARK_TYPE(type, REDUCE_OP) \
-    CREATE_BENCHMARK(type, 1, REDUCE_OP), \
-    CREATE_BENCHMARK(type, 100, REDUCE_OP), \
-    CREATE_BENCHMARK(type, 10000, REDUCE_OP)
+#define BENCHMARK_TYPE(type, REDUCE_OP)                                           \
+    CREATE_BENCHMARK(type, 1, REDUCE_OP), CREATE_BENCHMARK(type, 100, REDUCE_OP), \
+        CREATE_BENCHMARK(type, 10000, REDUCE_OP)
 
-#define CREATE_BENCHMARKS(REDUCE_OP) \
-    BENCHMARK_TYPE(float, REDUCE_OP), \
-    BENCHMARK_TYPE(double, REDUCE_OP), \
-    BENCHMARK_TYPE(int8_t, REDUCE_OP), \
-    BENCHMARK_TYPE(int, REDUCE_OP)
+#define CREATE_BENCHMARKS(REDUCE_OP)                                     \
+    BENCHMARK_TYPE(float, REDUCE_OP), BENCHMARK_TYPE(double, REDUCE_OP), \
+        BENCHMARK_TYPE(int8_t, REDUCE_OP), BENCHMARK_TYPE(int, REDUCE_OP)
 
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hipStream_t stream,
-                    size_t size)
+                    hipStream_t                                   stream,
+                    size_t                                        size)
 {
     using custom_double2 = benchmark_utils::custom_type<double, double>;
 
-    std::vector<benchmark::internal::Benchmark*> bs =
-    {
+    std::vector<benchmark::internal::Benchmark*> bs = {
         CREATE_BENCHMARKS(hipcub::Sum),
         BENCHMARK_TYPE(custom_double2, hipcub::Sum),
         CREATE_BENCHMARKS(hipcub::Min),
-        #ifdef HIPCUB_ROCPRIM_API
+#ifdef HIPCUB_ROCPRIM_API
         BENCHMARK_TYPE(custom_double2, hipcub::Min),
-        #endif
+#endif
         CREATE_BENCHMARKS(hipcub::ArgMin),
-        #ifdef HIPCUB_ROCPRIM_API
+#ifdef HIPCUB_ROCPRIM_API
         BENCHMARK_TYPE(custom_double2, hipcub::ArgMin),
-        #endif
+#endif
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
@@ -246,15 +242,15 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t size   = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
 
     std::cout << "benchmark_device_segmented_reduce" << std::endl;
 
     // HIP
-    hipStream_t stream = 0; // default
+    hipStream_t     stream = 0; // default
     hipDeviceProp_t devProp;
-    int device_id = 0;
+    int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;

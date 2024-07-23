@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -23,10 +23,9 @@
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include "hipcub/block/block_radix_sort.hpp"
 #include "hipcub/block/block_load.hpp"
+#include "hipcub/block/block_radix_sort.hpp"
 #include "hipcub/block/block_store.hpp"
-
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 128;
@@ -135,7 +134,7 @@ __global__ __launch_bounds__(BlockSize) void sort_keys_kernel(const T* input, T*
     T keys[ItemsPerThread];
     Helper::template load<BlockSize>(lid, input + block_offset, keys);
 
-    #pragma nounroll
+#pragma nounroll
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         Helper::template sort<BlockSize>(keys);
@@ -163,7 +162,7 @@ __global__ __launch_bounds__(BlockSize) void sort_pairs_kernel(const T* input, T
         values[i] = keys[i] + T(1);
     }
 
-    #pragma nounroll
+#pragma nounroll
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         Helper::template sort<BlockSize>(keys, values);
@@ -188,32 +187,23 @@ void run_benchmark(benchmark::State& state,
                    size_t            N)
 {
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
-    const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
+    const auto     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
     std::vector<T> input;
     if(std::is_floating_point<T>::value)
     {
-        input = benchmark_utils::get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
+        input = benchmark_utils::get_random_data<T>(size, (T)-1000, (T) + 1000);
+    } else
     {
-        input = benchmark_utils::get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
+        input = benchmark_utils::get_random_data<T>(size,
+                                                    std::numeric_limits<T>::min(),
+                                                    std::numeric_limits<T>::max());
     }
-    T * d_input;
-    T * d_output;
+    T* d_input;
+    T* d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
     HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
     for(auto _ : state)
@@ -224,8 +214,7 @@ void run_benchmark(benchmark::State& state,
         {
             sort_keys_kernel<Helper, T, BlockSize, ItemsPerThread, Trials>
                 <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
-        }
-        else if(benchmark_kind == benchmark_kinds::sort_pairs)
+        } else if(benchmark_kind == benchmark_kinds::sort_pairs)
         {
             sort_pairs_kernel<Helper, T, BlockSize, ItemsPerThread, Trials>
                 <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
@@ -234,8 +223,8 @@ void run_benchmark(benchmark::State& state,
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
     state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
@@ -246,9 +235,9 @@ void run_benchmark(benchmark::State& state,
 }
 
 #define CREATE_BENCHMARK(T, BS, IPT)                                                             \
-    benchmark::RegisterBenchmark((std::string("block_radix_sort<Datatype:" #T ",Block Size:" #BS \
-                                              ",Items Per Thread:" #IPT ">.SubAlgorithm Name:")  \
-                                  + name)                                                        \
+    benchmark::RegisterBenchmark(std::string("block_radix_sort<data_type:" #T ",block_size:" #BS \
+                                             ",items_per_thread:" #IPT ">.sub_algorithm_name:"   \
+                                             + name)                                             \
                                      .c_str(),                                                   \
                                  &run_benchmark<Helper, T, BS, IPT>,                             \
                                  benchmark_kind,                                                 \
@@ -293,7 +282,7 @@ void add_benchmarks(benchmark_kinds                               benchmark_kind
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
@@ -302,15 +291,15 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t size   = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
 
     std::cout << "benchmark_block_radix_sort" << std::endl;
 
     // HIP
-    hipStream_t stream = 0; // default
+    hipStream_t     stream = 0; // default
     hipDeviceProp_t devProp;
-    int device_id = 0;
+    int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;

@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -214,22 +214,21 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK_IPT(BS, IPT)                                                       \
-    benchmark::RegisterBenchmark(                                                           \
-        (std::string("block_shuffle<Datatype:") + type_name                                 \
-         + std::string(",Block Size:" #BS ",Items Per Thread:" #IPT ">.SubAlgorithm Name:") \
-         + name)                                                                            \
-            .c_str(),                                                                       \
-        &run_benchmark<Benchmark, T, BS, IPT>,                                              \
-        stream,                                                                             \
+#define CREATE_BENCHMARK_IPT(BS, IPT)                                                   \
+    benchmark::RegisterBenchmark(                                                       \
+        ("block_shuffle<data_type:" + type_name                                         \
+         + ",block_size:" #BS ",items_per_thread:" #IPT ">.sub_algorithm_name:" + name) \
+            .c_str(),                                                                   \
+        &run_benchmark<Benchmark, T, BS, IPT>,                                          \
+        stream,                                                                         \
         size)
 
-#define CREATE_BENCHMARK(BS)                                                                       \
-    benchmark::RegisterBenchmark((std::string("block_shuffle<Datatype:") + type_name               \
-                                  + std::string(",Block Size:" #BS ">.SubAlgorithm Name:") + name) \
-                                     .c_str(),                                                     \
-                                 &run_benchmark<Benchmark, T, BS>,                                 \
-                                 stream,                                                           \
+#define CREATE_BENCHMARK(BS)                                                           \
+    benchmark::RegisterBenchmark(("block_shuffle<data_type:" + type_name               \
+                                  + ",block_size:" #BS ">.sub_algorithm_name:" + name) \
+                                     .c_str(),                                         \
+                                 &run_benchmark<Benchmark, T, BS>,                     \
+                                 stream,                                               \
                                  size)
 
 template<class Benchmark, class T, std::enable_if_t<Benchmark::uses_ipt, bool> = true>
@@ -303,6 +302,7 @@ int main(int argc, char* argv[])
     hipStream_t     stream = 0; // default
     hipDeviceProp_t devProp;
     int             device_id = 0;
+
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;

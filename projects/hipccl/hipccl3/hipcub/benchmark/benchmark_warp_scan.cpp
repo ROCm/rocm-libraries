@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -116,23 +116,17 @@ template<class Benchmark,
 void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 {
     // Make sure size is a multiple of BlockSize
-    size = BlockSize * ((size + BlockSize - 1)/BlockSize);
+    size = BlockSize * ((size + BlockSize - 1) / BlockSize);
     // Allocate and fill memory
     std::vector<T> input(size, 1.0f);
-    T * d_input;
-    T * d_output;
+    T*             d_input;
+    T*             d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
     HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, WarpSize, Trials>),
@@ -147,8 +141,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
 
         state.SetIterationTime(elapsed_seconds.count());
     }
@@ -160,9 +154,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 }
 
 #define CREATE_BENCHMARK_IMPL(T, BS, WS, OP)                                              \
-    benchmark::RegisterBenchmark((std::string("warp_scan<Datatype:" #T ",Block Size:" #BS \
-                                              ",Warp Size:" #WS ">.Method Name:")         \
-                                  + method_name)                                          \
+    benchmark::RegisterBenchmark(std::string("warp_scan<data_type:" #T ",block_size:" #BS \
+                                             ",warp_size:" #WS ">.sub_algorithm_name:"    \
+                                             + method_name)                               \
                                      .c_str(),                                            \
                                  &run_benchmark<OP, T, BS, WS>,                           \
                                  stream,                                                  \
@@ -199,7 +193,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t                                   stream,
                     size_t                                        size)
 {
-    using custom_double2 = benchmark_utils::custom_type<double, double>;
+    using custom_double2    = benchmark_utils::custom_type<double, double>;
     using custom_int_double = benchmark_utils::custom_type<int, double>;
 
     std::vector<benchmark::internal::Benchmark*> new_benchmarks = {
@@ -229,7 +223,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
@@ -238,15 +232,15 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t size   = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
 
     std::cout << "benchmark_warp_scan" << std::endl;
 
     // HIP
-    hipStream_t stream = 0; // default
+    hipStream_t     stream = 0; // default
     hipDeviceProp_t devProp;
-    int device_id = 0;
+    int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;

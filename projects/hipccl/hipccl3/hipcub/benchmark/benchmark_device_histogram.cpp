@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -36,7 +36,7 @@
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-const unsigned int batch_size = 10;
+const unsigned int batch_size  = 10;
 const unsigned int warmup_size = 5;
 
 template<class T>
@@ -50,9 +50,9 @@ std::vector<T>
 
     const size_t max_random_size = 1024 * 1024;
 
-    std::random_device rd;
+    std::random_device         rd;
     std::default_random_engine gen(rd());
-    std::vector<T> data(size);
+    std::vector<T>             data(size);
     std::generate(data.begin(),
                   data.begin() + std::min(size, max_random_size),
                   [&]()
@@ -87,15 +87,15 @@ int get_entropy_percents(int entropy_reduction)
     }
 }
 
-const int entropy_reductions[] = { 0, 2, 4, 6 };
+const int entropy_reductions[] = {0, 2, 4, 6};
 
 template<class T>
 void run_even_benchmark(benchmark::State& state,
-                        size_t bins,
-                        size_t scale,
-                        int entropy_reduction,
-                        hipStream_t stream,
-                        size_t size)
+                        size_t            bins,
+                        size_t            scale,
+                        int               entropy_reduction,
+                        hipStream_t       stream,
+                        size_t            size)
 {
     using counter_type = unsigned int;
 
@@ -107,19 +107,13 @@ void run_even_benchmark(benchmark::State& state,
     // Generate data
     std::vector<T> input = generate<T>(size, entropy_reduction, lower_level, upper_level);
 
-    T * d_input;
-    counter_type * d_histogram;
+    T*            d_input;
+    counter_type* d_histogram;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
     HIP_CHECK(hipMalloc(&d_histogram, size * sizeof(counter_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
 
-    void * d_temporary_storage = nullptr;
+    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
                                                      temporary_storage_bytes,
@@ -149,7 +143,7 @@ void run_even_benchmark(benchmark::State& state,
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
 
@@ -168,8 +162,8 @@ void run_even_benchmark(benchmark::State& state,
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
@@ -182,11 +176,11 @@ void run_even_benchmark(benchmark::State& state,
 
 template<class T, unsigned int Channels, unsigned int ActiveChannels>
 void run_multi_even_benchmark(benchmark::State& state,
-                              size_t bins,
-                              size_t scale,
-                              int entropy_reduction,
-                              hipStream_t stream,
-                              size_t size)
+                              size_t            bins,
+                              size_t            scale,
+                              int               entropy_reduction,
+                              hipStream_t       stream,
+                              size_t            size)
 {
     using counter_type = unsigned int;
 
@@ -197,28 +191,23 @@ void run_multi_even_benchmark(benchmark::State& state,
     {
         lower_level[channel] = 0;
         upper_level[channel] = bins * scale;
-        num_levels[channel] = bins + 1;
+        num_levels[channel]  = bins + 1;
     }
 
     // Generate data
-    std::vector<T> input = generate<T>(size * Channels, entropy_reduction, lower_level[0], upper_level[0]);
+    std::vector<T> input
+        = generate<T>(size * Channels, entropy_reduction, lower_level[0], upper_level[0]);
 
-    T * d_input;
-    counter_type * d_histogram[ActiveChannels];
+    T*            d_input;
+    counter_type* d_histogram[ActiveChannels];
     HIP_CHECK(hipMalloc(&d_input, size * Channels * sizeof(T)));
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
         HIP_CHECK(hipMalloc(&d_histogram[channel], bins * sizeof(counter_type)));
     }
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * Channels * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * Channels * sizeof(T), hipMemcpyHostToDevice));
 
-    void * d_temporary_storage = nullptr;
+    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
         d_temporary_storage,
@@ -250,7 +239,7 @@ void run_multi_even_benchmark(benchmark::State& state,
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
 
@@ -270,8 +259,8 @@ void run_multi_even_benchmark(benchmark::State& state,
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
     state.SetBytesProcessed(state.iterations() * batch_size * size * Channels * sizeof(T));
@@ -296,28 +285,16 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
     std::vector<T> levels(bins + 1);
     std::iota(levels.begin(), levels.end(), static_cast<T>(0));
 
-    T * d_input;
-    T * d_levels;
-    counter_type * d_histogram;
+    T*            d_input;
+    T*            d_levels;
+    counter_type* d_histogram;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
     HIP_CHECK(hipMalloc(&d_levels, (bins + 1) * sizeof(T)));
     HIP_CHECK(hipMalloc(&d_histogram, size * sizeof(counter_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(
-        hipMemcpy(
-            d_levels, levels.data(),
-            (bins + 1) * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_levels, levels.data(), (bins + 1) * sizeof(T), hipMemcpyHostToDevice));
 
-    void * d_temporary_storage = nullptr;
+    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(d_temporary_storage,
                                                       temporary_storage_bytes,
@@ -345,7 +322,7 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
 
@@ -363,8 +340,8 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
@@ -377,15 +354,18 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
 }
 
 template<class T, unsigned int Channels, unsigned int ActiveChannels>
-void run_multi_range_benchmark(benchmark::State& state, size_t bins, hipStream_t stream, size_t size)
+void run_multi_range_benchmark(benchmark::State& state,
+                               size_t            bins,
+                               hipStream_t       stream,
+                               size_t            size)
 {
     using counter_type = unsigned int;
 
     // Number of levels for a single channel
-    const int num_levels_channel = bins + 1;
-    int num_levels[ActiveChannels];
+    const int      num_levels_channel = bins + 1;
+    int            num_levels[ActiveChannels];
     std::vector<T> levels[ActiveChannels];
-    for (unsigned int channel = 0; channel < ActiveChannels; channel++)
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
         levels[channel].resize(num_levels_channel);
         std::iota(levels[channel].begin(), levels[channel].end(), static_cast<T>(0));
@@ -395,9 +375,9 @@ void run_multi_range_benchmark(benchmark::State& state, size_t bins, hipStream_t
     // Generate data
     std::vector<T> input = benchmark_utils::get_random_data<T>(size * Channels, 0, bins);
 
-    T * d_input;
-    T * d_levels[ActiveChannels];
-    counter_type * d_histogram[ActiveChannels];
+    T*            d_input;
+    T*            d_levels[ActiveChannels];
+    counter_type* d_histogram[ActiveChannels];
     HIP_CHECK(hipMalloc(&d_input, size * Channels * sizeof(T)));
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
@@ -405,25 +385,16 @@ void run_multi_range_benchmark(benchmark::State& state, size_t bins, hipStream_t
         HIP_CHECK(hipMalloc(&d_histogram[channel], size * sizeof(counter_type)));
     }
 
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * Channels * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * Channels * sizeof(T), hipMemcpyHostToDevice));
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
-        HIP_CHECK(
-            hipMemcpy(
-                d_levels[channel], levels[channel].data(),
-                num_levels_channel * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        HIP_CHECK(hipMemcpy(d_levels[channel],
+                            levels[channel].data(),
+                            num_levels_channel * sizeof(T),
+                            hipMemcpyHostToDevice));
     }
 
-    void * d_temporary_storage = nullptr;
+    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
         d_temporary_storage,
@@ -453,7 +424,7 @@ void run_multi_range_benchmark(benchmark::State& state, size_t bins, hipStream_t
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
 
@@ -472,8 +443,8 @@ void run_multi_range_benchmark(benchmark::State& state, size_t bins, hipStream_t
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
     state.SetBytesProcessed(state.iterations() * batch_size * size * Channels * sizeof(T));
@@ -510,9 +481,11 @@ struct num_limits<__half>
     if(num_limits<T>::max() > BINS * SCALE)                                                    \
     {                                                                                          \
         VECTOR.push_back(benchmark::RegisterBenchmark(                                         \
-            (std::string("histogram_even") + "<Datatype:" #T ">" + "(Entropy Percent:"         \
-             + std::to_string(get_entropy_percents(entropy_reduction)) + "%,Bin Count:"        \
-             + std::to_string(BINS) + " bins)")                                                \
+            std::string("device_histogram_even"                                                \
+                        "<data_type:" #T ">."                                                  \
+                        "(entropy_percent:"                                                    \
+                        + std::to_string(get_entropy_percents(entropy_reduction))              \
+                        + "%,bin_count:" + std::to_string(BINS) + " bins)")                    \
                 .c_str(),                                                                      \
             [=](benchmark::State& state)                                                       \
             { run_even_benchmark<T>(state, BINS, SCALE, entropy_reduction, stream, size); })); \
@@ -527,8 +500,8 @@ struct num_limits<__half>
     CREATE_EVEN_BENCHMARK(VECTOR, T, 65536, 1)
 
 void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                         hipStream_t stream,
-                         size_t size)
+                         hipStream_t                                   stream,
+                         size_t                                        size)
 {
     for(int entropy_reduction : entropy_reductions)
     {
@@ -538,34 +511,40 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
         BENCHMARK_TYPE(benchmarks, uint8_t);
         BENCHMARK_TYPE(benchmarks, double);
         BENCHMARK_TYPE(benchmarks, float);
-        //this limitation can be removed once https://github.com/NVIDIA/cub/issues/484 is fixed
+        // this limitation can be removed once
+        // https://github.com/NVIDIA/cub/issues/484 is fixed
 #ifdef __HIP_PLATFORM_AMD__
         BENCHMARK_TYPE(benchmarks, __half);
 #endif
     };
 }
 
-#define CREATE_MULTI_EVEN_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS, SCALE) \
-benchmark::RegisterBenchmark( \
-    (std::string("multi_histogram_even") + "<Channels:" #CHANNELS ",Active Channels:" #ACTIVE_CHANNELS ",Datatype:" #T ">" + \
-        "(Entropy Percent:" + std::to_string(get_entropy_percents(entropy_reduction)) + "%,Bin Count:" + \
-        std::to_string(BINS) + " bins)" \
-    ).c_str(), \
-    [=](benchmark::State& state) { \
-        run_multi_even_benchmark<T, CHANNELS, ACTIVE_CHANNELS>( \
-            state, BINS, SCALE, entropy_reduction, stream, size \
-        ); \
-    } \
-)
+#define CREATE_MULTI_EVEN_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS, SCALE)                   \
+    benchmark::RegisterBenchmark(                                                                \
+        std::string("device_multi_histogram_even"                                                \
+                    "<channels:" #CHANNELS ",active_channels:" #ACTIVE_CHANNELS ",data_type:" #T \
+                    ">."                                                                         \
+                    "(entropy_percent:"                                                          \
+                    + std::to_string(get_entropy_percents(entropy_reduction))                    \
+                    + "%,bin_count:" + std::to_string(BINS) + " bins)")                          \
+            .c_str(),                                                                            \
+        [=](benchmark::State& state)                                                             \
+        {                                                                                        \
+            run_multi_even_benchmark<T, CHANNELS, ACTIVE_CHANNELS>(state,                        \
+                                                                   BINS,                         \
+                                                                   SCALE,                        \
+                                                                   entropy_reduction,            \
+                                                                   stream,                       \
+                                                                   size);                        \
+        })
 
 void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                               hipStream_t stream,
-                               size_t size)
+                               hipStream_t                                   stream,
+                               size_t                                        size)
 {
     for(int entropy_reduction : entropy_reductions)
     {
-        std::vector<benchmark::internal::Benchmark*> bs =
-        {
+        std::vector<benchmark::internal::Benchmark*> bs = {
             CREATE_MULTI_EVEN_BENCHMARK(4, 3, int, 10, 1234),
             CREATE_MULTI_EVEN_BENCHMARK(4, 3, int, 100, 1234),
 
@@ -580,13 +559,14 @@ void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
     };
 }
 
-#define CREATE_RANGE_BENCHMARK(T, BINS) \
-benchmark::RegisterBenchmark( \
-    (std::string("histogram_range") + "<Datatype:" #T ">" + \
-        "(Bin Count:" + std::to_string(BINS) + " bins)" \
-    ).c_str(), \
-    [=](benchmark::State& state) { run_range_benchmark<T>(state, BINS, stream, size); } \
-)
+#define CREATE_RANGE_BENCHMARK(T, BINS)                                         \
+    benchmark::RegisterBenchmark(std::string("device_histogram_range"           \
+                                             "<data_type:" #T ">."              \
+                                             "(bin_count:"                      \
+                                             + std::to_string(BINS) + " bins)") \
+                                     .c_str(),                                  \
+                                 [=](benchmark::State& state)                   \
+                                 { run_range_benchmark<T>(state, BINS, stream, size); })
 
 #define BENCHMARK_RANGE_TYPE(T)                                            \
     CREATE_RANGE_BENCHMARK(T, 10), CREATE_RANGE_BENCHMARK(T, 100),         \
@@ -594,32 +574,29 @@ benchmark::RegisterBenchmark( \
         CREATE_RANGE_BENCHMARK(T, 100000), CREATE_RANGE_BENCHMARK(T, 1000000)
 
 void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                          hipStream_t stream,
-                          size_t size)
+                          hipStream_t                                   stream,
+                          size_t                                        size)
 {
     std::vector<benchmark::internal::Benchmark*> bs
         = {BENCHMARK_RANGE_TYPE(float), BENCHMARK_RANGE_TYPE(double)};
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-#define CREATE_MULTI_RANGE_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS) \
-benchmark::RegisterBenchmark( \
-    (std::string("multi_histogram_range") + "<" #CHANNELS ", " #ACTIVE_CHANNELS ", " #T ">" + \
-        "(" + std::to_string(BINS) + " bins)" \
-    ).c_str(), \
-    [=](benchmark::State& state) { \
-        run_multi_range_benchmark<T, CHANNELS, ACTIVE_CHANNELS>( \
-            state, BINS, stream, size \
-        ); \
-    } \
-)
+#define CREATE_MULTI_RANGE_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS)                         \
+    benchmark::RegisterBenchmark(                                                                \
+        std::string("device_multi_histogram_range"                                               \
+                    "<channels:" #CHANNELS ",active_channels:" #ACTIVE_CHANNELS ",data_type:" #T \
+                    ">.(bin_count:"                                                              \
+                    + std::to_string(BINS) + " bins)")                                           \
+            .c_str(),                                                                            \
+        [=](benchmark::State& state)                                                             \
+        { run_multi_range_benchmark<T, CHANNELS, ACTIVE_CHANNELS>(state, BINS, stream, size); })
 
 void add_multi_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                hipStream_t stream,
-                                size_t size)
+                                hipStream_t                                   stream,
+                                size_t                                        size)
 {
-    std::vector<benchmark::internal::Benchmark*> bs =
-    {
+    std::vector<benchmark::internal::Benchmark*> bs = {
         CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 10),
         CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 100),
         CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 1000),
@@ -630,7 +607,7 @@ void add_multi_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& be
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
@@ -639,15 +616,15 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t size   = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
 
     std::cout << "benchmark_device_histogram" << std::endl;
 
     // HIP
-    hipStream_t stream = 0; // default
+    hipStream_t     stream = 0; // default
     hipDeviceProp_t devProp;
-    int device_id = 0;
+    int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
