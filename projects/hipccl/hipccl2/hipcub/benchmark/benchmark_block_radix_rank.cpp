@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -115,8 +115,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         input = benchmark_utils::get_random_data<T>(size,
                                                     static_cast<T>(-1000),
                                                     static_cast<T>(1000));
-    }
-    else
+    } else
     {
         input = benchmark_utils::get_random_data<T>(size,
                                                     std::numeric_limits<T>::min(),
@@ -157,12 +156,14 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, KIND, BS, IPT)                                                       \
-    benchmark::RegisterBenchmark(                                                                \
-        (std::string("block_radix_rank<" #T ", " #KIND ", " #BS ", " #IPT ">.") + name).c_str(), \
-        &run_benchmark<T, KIND, BS, IPT>,                                                        \
-        stream,                                                                                  \
-        size)
+#define CREATE_BENCHMARK(T, KIND, BS, IPT)                                                     \
+    benchmark::RegisterBenchmark(std::string("block_radix_rank<data_type:" #T ",kind:" #KIND   \
+                                             ",block_size:" #BS ",items_per_thread:" #IPT ">." \
+                                             + name)                                           \
+                                     .c_str(),                                                 \
+                                 &run_benchmark<T, KIND, BS, IPT>,                             \
+                                 stream,                                                       \
+                                 size)
 
 // clang-format off
 #define CREATE_BENCHMARK_KINDS(type, block, ipt)                                \
@@ -218,6 +219,8 @@ int main(int argc, char* argv[])
     int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+
+    std::cout << "benchmark_block_radix_rank" << std::endl;
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     // Add benchmarks

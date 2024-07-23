@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE
 
-// CUB's implementation of single_pass_scan_operators has maybe uninitialized parameters,
-// disable the warning because all warnings are threated as errors:
+// CUB's implementation of single_pass_scan_operators has maybe uninitialized
+// parameters, disable the warning because all warnings are threated as errors:
 #ifdef __HIP_PLATFORM_NVIDIA__
     #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
@@ -30,7 +30,6 @@
 
 // HIP API
 #include "hipcub/device/device_scan.hpp"
-
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
@@ -68,7 +67,7 @@ auto run_device_scan(void*             temporary_storage,
                      const hipStream_t stream) ->
     typename std::enable_if<!Exclusive, hipError_t>::type
 {
-    (void) initial_value;
+    (void)initial_value;
     return hipcub::DeviceScan::InclusiveScan(temporary_storage,
                                              storage_size,
                                              input,
@@ -125,55 +124,47 @@ auto run_device_scan_by_key(void*   temporary_storage,
                                                   stream);
 }
 
-template<
-    bool Exclusive,
-    class T,
-    class BinaryFunction
->
+template<bool Exclusive, class T, class BinaryFunction>
 void run_benchmark(benchmark::State& state,
-                   size_t size,
+                   size_t            size,
                    const hipStream_t stream,
-                   BinaryFunction scan_op)
+                   BinaryFunction    scan_op)
 {
-    std::vector<T> input = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
-    T initial_value = T(123);
-    T * d_input;
-    T * d_output;
+    std::vector<T> input         = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
+    T              initial_value = T(123);
+    T*             d_input;
+    T*             d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
     HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Allocate temporary storage memory
     size_t temp_storage_size_bytes = 0;
-    void * d_temp_storage = nullptr;
+    void*  d_temp_storage          = nullptr;
     // Get size of d_temp_storage
-    HIP_CHECK((
-        run_device_scan<Exclusive>(
-            d_temp_storage, temp_storage_size_bytes,
-            d_input, d_output, initial_value, size,
-            scan_op, stream
-        )
-    ));
-    HIP_CHECK(hipMalloc(&d_temp_storage,temp_storage_size_bytes));
+    HIP_CHECK((run_device_scan<Exclusive>(d_temp_storage,
+                                          temp_storage_size_bytes,
+                                          d_input,
+                                          d_output,
+                                          initial_value,
+                                          size,
+                                          scan_op,
+                                          stream)));
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
     for(size_t i = 0; i < 5; i++)
     {
-        HIP_CHECK((
-            run_device_scan<Exclusive>(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, initial_value, size,
-                scan_op, stream
-            )
-        ));
+        HIP_CHECK((run_device_scan<Exclusive>(d_temp_storage,
+                                              temp_storage_size_bytes,
+                                              d_input,
+                                              d_output,
+                                              initial_value,
+                                              size,
+                                              scan_op,
+                                              stream)));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -183,19 +174,20 @@ void run_benchmark(benchmark::State& state,
         auto start = std::chrono::high_resolution_clock::now();
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK((
-                run_device_scan<Exclusive>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, initial_value, size,
-                    scan_op, stream
-                )
-            ));
+            HIP_CHECK((run_device_scan<Exclusive>(d_temp_storage,
+                                                  temp_storage_size_bytes,
+                                                  d_input,
+                                                  d_output,
+                                                  initial_value,
+                                                  size,
+                                                  scan_op,
+                                                  stream)));
         }
         HIP_CHECK(hipStreamSynchronize(stream));
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
@@ -206,70 +198,59 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
-template<
-    bool Exclusive,
-    class T,
-    class BinaryFunction
->
+template<bool Exclusive, class T, class BinaryFunction>
 void run_benchmark_by_key(benchmark::State& state,
-                          size_t size,
+                          size_t            size,
                           const hipStream_t stream,
-                          BinaryFunction scan_op)
+                          BinaryFunction    scan_op)
 {
-    using key_type = int;
+    using key_type                      = int;
     constexpr size_t max_segment_length = 100;
 
-    const std::vector<key_type> keys = benchmark_utils::get_random_segments<key_type>(
-        size, max_segment_length, std::random_device{}()
-    );
-    const std::vector<T> input = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
-    const T initial_value = T(123);
-    key_type * d_keys;
-    T * d_input;
-    T * d_output;
+    const std::vector<key_type> keys
+        = benchmark_utils::get_random_segments<key_type>(size,
+                                                         max_segment_length,
+                                                         std::random_device{}());
+    const std::vector<T> input         = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
+    const T              initial_value = T(123);
+    key_type*            d_keys;
+    T*                   d_input;
+    T*                   d_output;
     HIP_CHECK(hipMalloc(&d_keys, size * sizeof(key_type)));
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
     HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_keys, keys.data(),
-            size * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_keys, keys.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Allocate temporary storage memory
     size_t temp_storage_size_bytes = 0;
-    void * d_temp_storage = nullptr;
+    void*  d_temp_storage          = nullptr;
     // Get size of d_temp_storage
-    HIP_CHECK((
-        run_device_scan_by_key<Exclusive>(
-            d_temp_storage, temp_storage_size_bytes,
-            d_keys, d_input, d_output, initial_value,
-            size, scan_op, stream
-        )
-    ));
-    HIP_CHECK(hipMalloc(&d_temp_storage,temp_storage_size_bytes));
+    HIP_CHECK((run_device_scan_by_key<Exclusive>(d_temp_storage,
+                                                 temp_storage_size_bytes,
+                                                 d_keys,
+                                                 d_input,
+                                                 d_output,
+                                                 initial_value,
+                                                 size,
+                                                 scan_op,
+                                                 stream)));
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
     for(size_t i = 0; i < 5; i++)
     {
-        HIP_CHECK((
-            run_device_scan_by_key<Exclusive>(
-                d_temp_storage, temp_storage_size_bytes,
-                d_keys, d_input, d_output, initial_value,
-                size, scan_op, stream
-            )
-        ));
+        HIP_CHECK((run_device_scan_by_key<Exclusive>(d_temp_storage,
+                                                     temp_storage_size_bytes,
+                                                     d_keys,
+                                                     d_input,
+                                                     d_output,
+                                                     initial_value,
+                                                     size,
+                                                     scan_op,
+                                                     stream)));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -279,19 +260,21 @@ void run_benchmark_by_key(benchmark::State& state,
         auto start = std::chrono::high_resolution_clock::now();
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK((
-                run_device_scan_by_key<Exclusive>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_keys, d_input, d_output, initial_value,
-                    size, scan_op, stream
-                )
-            ));
+            HIP_CHECK((run_device_scan_by_key<Exclusive>(d_temp_storage,
+                                                         temp_storage_size_bytes,
+                                                         d_keys,
+                                                         d_input,
+                                                         d_output,
+                                                         initial_value,
+                                                         size,
+                                                         scan_op,
+                                                         stream)));
         }
         HIP_CHECK(hipStreamSynchronize(stream));
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
@@ -303,37 +286,38 @@ void run_benchmark_by_key(benchmark::State& state,
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
-#define CREATE_BENCHMARK(EXCL, T, SCAN_OP) \
-benchmark::RegisterBenchmark( \
-    (std::string(EXCL ? "exclusive_scan" : "inclusive_scan") + \
-    ("<Datatype:" #T ",Op:" #SCAN_OP ">")).c_str(), \
-    &run_benchmark<EXCL, T, SCAN_OP>, size, stream, SCAN_OP() \
-), \
-benchmark::RegisterBenchmark( \
-    (std::string(EXCL ? "exclusive_scan_by_key" : "inclusive_scan_by_key") + \
-    ("<Datatype:" #T ",Op:" #SCAN_OP ">")).c_str(), \
-    &run_benchmark_by_key<EXCL, T, SCAN_OP>, size, stream, SCAN_OP() \
-)
+#define CREATE_BENCHMARK(EXCL, T, SCAN_OP)                                                \
+    benchmark::RegisterBenchmark(                                                         \
+        std::string(std::string(EXCL ? "device_exclusive_scan" : "device_inclusive_scan") \
+                    + "<data_type:" #T ",op:" #SCAN_OP ">.")                              \
+            .c_str(),                                                                     \
+        &run_benchmark<EXCL, T, SCAN_OP>,                                                 \
+        size,                                                                             \
+        stream,                                                                           \
+        SCAN_OP()),                                                                       \
+        benchmark::RegisterBenchmark(                                                     \
+            std::string(std::string(EXCL ? "device_exclusive_scan_by_key"                 \
+                                         : "device_inclusive_scan_by_key")                \
+                        + "<data_type:" #T ",op:" #SCAN_OP ">.")                          \
+                .c_str(),                                                                 \
+            &run_benchmark_by_key<EXCL, T, SCAN_OP>,                                      \
+            size,                                                                         \
+            stream,                                                                       \
+            SCAN_OP())
 
-#define CREATE_BENCHMARKS(SCAN_OP) \
-    CREATE_BENCHMARK(false, int, SCAN_OP), \
-    CREATE_BENCHMARK(true, int, SCAN_OP), \
-    CREATE_BENCHMARK(false, float, SCAN_OP), \
-    CREATE_BENCHMARK(true, float, SCAN_OP), \
-    CREATE_BENCHMARK(false, double, SCAN_OP), \
-    CREATE_BENCHMARK(true, double, SCAN_OP), \
-    CREATE_BENCHMARK(false, long long, SCAN_OP), \
-    CREATE_BENCHMARK(true, long long, SCAN_OP), \
-    CREATE_BENCHMARK(false, custom_float2, SCAN_OP), \
-    CREATE_BENCHMARK(true, custom_float2, SCAN_OP), \
-    CREATE_BENCHMARK(false, custom_double2, SCAN_OP), \
-    CREATE_BENCHMARK(true, custom_double2, SCAN_OP), \
-    CREATE_BENCHMARK(false, int8_t, SCAN_OP), \
-    CREATE_BENCHMARK(true, int8_t, SCAN_OP), \
-    CREATE_BENCHMARK(false, uint8_t, SCAN_OP), \
-    CREATE_BENCHMARK(true, uint8_t, SCAN_OP)
+#define CREATE_BENCHMARKS(SCAN_OP)                                                                 \
+    CREATE_BENCHMARK(false, int, SCAN_OP), CREATE_BENCHMARK(true, int, SCAN_OP),                   \
+        CREATE_BENCHMARK(false, float, SCAN_OP), CREATE_BENCHMARK(true, float, SCAN_OP),           \
+        CREATE_BENCHMARK(false, double, SCAN_OP), CREATE_BENCHMARK(true, double, SCAN_OP),         \
+        CREATE_BENCHMARK(false, long long, SCAN_OP), CREATE_BENCHMARK(true, long long, SCAN_OP),   \
+        CREATE_BENCHMARK(false, custom_float2, SCAN_OP),                                           \
+        CREATE_BENCHMARK(true, custom_float2, SCAN_OP),                                            \
+        CREATE_BENCHMARK(false, custom_double2, SCAN_OP),                                          \
+        CREATE_BENCHMARK(true, custom_double2, SCAN_OP), CREATE_BENCHMARK(false, int8_t, SCAN_OP), \
+        CREATE_BENCHMARK(true, int8_t, SCAN_OP), CREATE_BENCHMARK(false, uint8_t, SCAN_OP),        \
+        CREATE_BENCHMARK(true, uint8_t, SCAN_OP)
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
@@ -342,29 +326,29 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t size   = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
 
     std::cout << "benchmark_device_scan" << std::endl;
 
     // HIP
-    hipStream_t stream = 0; // default
+    hipStream_t     stream = 0; // default
     hipDeviceProp_t devProp;
-    int device_id = 0;
+    int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     using custom_double2 = benchmark_utils::custom_type<double, double>;
-    using custom_float2 = benchmark_utils::custom_type<float, float>;
+    using custom_float2  = benchmark_utils::custom_type<float, float>;
 
-    // Compilation may never finish, if the compiler needs to compile too many kernels,
-    // it is recommended to compile benchmarks only for 1-2 types when BENCHMARK_CONFIG_TUNING is used
-    // (all other CREATE_*_BENCHMARK should be commented/removed).
+    // Compilation may never finish, if the compiler needs to compile too many
+    // kernels, it is recommended to compile benchmarks only for 1-2 types when
+    // BENCHMARK_CONFIG_TUNING is used (all other CREATE_*_BENCHMARK should be
+    // commented/removed).
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks =
-    {
+    std::vector<benchmark::internal::Benchmark*> benchmarks = {
         CREATE_BENCHMARKS(hipcub::Sum),
         CREATE_BENCHMARKS(hipcub::Min),
     };

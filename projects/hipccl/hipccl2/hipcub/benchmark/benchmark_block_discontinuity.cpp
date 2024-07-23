@@ -9,8 +9,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -25,10 +25,9 @@
 // HIP API
 #include "hipcub/block/block_discontinuity.hpp"
 
-#include "hipcub/thread/thread_operators.hpp" //to use hipcub::Equality
 #include "hipcub/block/block_load.hpp"
 #include "hipcub/block/block_store.hpp"
-
+#include "hipcub/thread/thread_operators.hpp" //to use hipcub::Equality
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 128;
@@ -44,49 +43,41 @@ struct custom_flag_op1
     }
 };
 
-template<
-    class Runner,
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    bool WithTile,
-    unsigned int Trials
->
-__global__
-__launch_bounds__(BlockSize)
-void kernel(const T * d_input, T * d_output)
+template<class Runner,
+         class T,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         bool         WithTile,
+         unsigned int Trials>
+__global__ __launch_bounds__(BlockSize) void kernel(const T* d_input, T* d_output)
 {
     Runner::template run<T, BlockSize, ItemsPerThread, WithTile, Trials>(d_input, d_output);
 }
 
 struct flag_heads
 {
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        bool WithTile,
-        unsigned int Trials
-    >
-    __device__
-    static void run(const T * d_input, T * d_output)
+    template<class T,
+             unsigned int BlockSize,
+             unsigned int ItemsPerThread,
+             bool         WithTile,
+             unsigned int Trials>
+    __device__ static void run(const T* d_input, T* d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
+        const unsigned int lid          = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
-        #pragma nounroll
+#pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
-            bool head_flags[ItemsPerThread];
+            bool                                     head_flags[ItemsPerThread];
             if(WithTile)
             {
                 bdiscontinuity.FlagHeads(head_flags, input, hipcub::Equality(), T(123));
-            }
-            else
+            } else
             {
                 bdiscontinuity.FlagHeads(head_flags, input, hipcub::Equality());
             }
@@ -103,32 +94,28 @@ struct flag_heads
 
 struct flag_tails
 {
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        bool WithTile,
-        unsigned int Trials
-    >
-    __device__
-    static void run(const T * d_input, T * d_output)
+    template<class T,
+             unsigned int BlockSize,
+             unsigned int ItemsPerThread,
+             bool         WithTile,
+             unsigned int Trials>
+    __device__ static void run(const T* d_input, T* d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
+        const unsigned int lid          = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
-        #pragma nounroll
+#pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
-            bool tail_flags[ItemsPerThread];
+            bool                                     tail_flags[ItemsPerThread];
             if(WithTile)
             {
                 bdiscontinuity.FlagTails(tail_flags, input, hipcub::Equality(), T(123));
-            }
-            else
+            } else
             {
                 bdiscontinuity.FlagTails(tail_flags, input, hipcub::Equality());
             }
@@ -145,33 +132,34 @@ struct flag_tails
 
 struct flag_heads_and_tails
 {
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        bool WithTile,
-        unsigned int Trials
-    >
-    __device__
-    static void run(const T * d_input, T * d_output)
+    template<class T,
+             unsigned int BlockSize,
+             unsigned int ItemsPerThread,
+             bool         WithTile,
+             unsigned int Trials>
+    __device__ static void run(const T* d_input, T* d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
+        const unsigned int lid          = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
-        #pragma nounroll
+#pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
-            bool head_flags[ItemsPerThread];
-            bool tail_flags[ItemsPerThread];
+            bool                                     head_flags[ItemsPerThread];
+            bool                                     tail_flags[ItemsPerThread];
             if(WithTile)
             {
-                bdiscontinuity.FlagHeadsAndTails(head_flags, T(123), tail_flags, T(234), input, hipcub::Equality());
-            }
-            else
+                bdiscontinuity.FlagHeadsAndTails(head_flags,
+                                                 T(123),
+                                                 tail_flags,
+                                                 T(234),
+                                                 input,
+                                                 hipcub::Equality());
+            } else
             {
                 bdiscontinuity.FlagHeadsAndTails(head_flags, tail_flags, input, hipcub::Equality());
             }
@@ -187,31 +175,23 @@ struct flag_heads_and_tails
     }
 };
 
-template<
-    class Benchmark,
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    bool WithTile,
-    unsigned int Trials = 100
->
+template<class Benchmark,
+         class T,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         bool         WithTile,
+         unsigned int Trials = 100>
 void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 {
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
-    const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
+    const auto     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
     std::vector<T> input = benchmark_utils::get_random_data<T>(size, T(0), T(10));
-    T * d_input;
-    T * d_output;
+    T*             d_input;
+    T*             d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
     HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
     for(auto _ : state)
@@ -220,15 +200,18 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, WithTile, Trials>),
-            dim3(size/items_per_block), dim3(BlockSize), 0, stream,
-            d_input, d_output
-        );
+            dim3(size / items_per_block),
+            dim3(BlockSize),
+            0,
+            stream,
+            d_input,
+            d_output);
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
     state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
@@ -238,29 +221,27 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE) \
-benchmark::RegisterBenchmark( \
-    (std::string("block_discontinuity<Datatype:" #T ",Block Size:" #BS ">.SubAlgorithm Name:") + name + ("<Items Per Thread:" #IPT ",With Tile:" #WITH_TILE ">")).c_str(), \
-    &run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>, \
-    stream, size \
-)
+#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                                                    \
+    benchmark::RegisterBenchmark(                                                                  \
+        std::string("block_discontinuity<data_type:" #T ",block_size:" #BS ">.sub_algorithm_name:" \
+                    + name + "<items_per_thread:" #IPT ",with_tile:" #WITH_TILE ">.")              \
+            .c_str(),                                                                              \
+        &run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>,                                          \
+        stream,                                                                                    \
+        size)
 
-#define BENCHMARK_TYPE(type, block, bool) \
-    CREATE_BENCHMARK(type, block, 1, bool), \
-    CREATE_BENCHMARK(type, block, 2, bool), \
-    CREATE_BENCHMARK(type, block, 3, bool), \
-    CREATE_BENCHMARK(type, block, 4, bool), \
-    CREATE_BENCHMARK(type, block, 8, bool)
-
+#define BENCHMARK_TYPE(type, block, bool)                                               \
+    CREATE_BENCHMARK(type, block, 1, bool), CREATE_BENCHMARK(type, block, 2, bool),     \
+        CREATE_BENCHMARK(type, block, 3, bool), CREATE_BENCHMARK(type, block, 4, bool), \
+        CREATE_BENCHMARK(type, block, 8, bool)
 
 template<class Benchmark>
-void add_benchmarks(const std::string& name,
+void add_benchmarks(const std::string&                            name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hipStream_t stream,
-                    size_t size)
+                    hipStream_t                                   stream,
+                    size_t                                        size)
 {
-    std::vector<benchmark::internal::Benchmark*> bs =
-    {
+    std::vector<benchmark::internal::Benchmark*> bs = {
         BENCHMARK_TYPE(int, 256, false),
         BENCHMARK_TYPE(int, 256, true),
         BENCHMARK_TYPE(int8_t, 256, false),
@@ -274,7 +255,7 @@ void add_benchmarks(const std::string& name,
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
@@ -283,15 +264,15 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t size   = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
 
     std::cout << "benchmark_block_discontinuity" << std::endl;
 
     // HIP
-    hipStream_t stream = 0; // default
+    hipStream_t     stream = 0; // default
     hipDeviceProp_t devProp;
-    int device_id = 0;
+    int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
