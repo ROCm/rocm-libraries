@@ -71,6 +71,7 @@ int main(int argc, char* argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+                                     
 #ifdef BENCHMARK_CONFIG_TUNING
     // optionally run an evenly split subset of benchmarks, when making multiple program invocations
     parser.set_optional<int>("parallel_instance",
