@@ -76,7 +76,7 @@ while getopts "t:" opt; do
     case "${opt}" in
     t) suite="${OPTARG,,}";;
     [?]) echo >&2 "Usage: $0 [-t option]
-             option: {f8 | f6 | f4 | mixed | scaled | small | full}"
+             option: {f8 | f6 | f4 | mixed | mixed-client | scaled | small | full}"
          exit 1;;
     esac
 done
@@ -124,6 +124,7 @@ elif [ "$suite" = "mixed" ]; then
     for testName in "${MIXEDTESTS[@]}"; do
         $RRTESTS --gtest_filter="$testName"
     done
+elif [ "$suite" = "mixed-client" ]; then
     for testName in "${RRPERF_MIXEDTESTS[@]}"; do
         $RRPERF run --suite "$testName"
     done
@@ -154,9 +155,6 @@ else
         $RRPERF run --suite "$testName"
     done
     for testName in "${RRPERF_F6TESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-    for testName in "${RRPERF_MIXEDTESTS[@]}"; do
         $RRPERF run --suite "$testName"
     done
 fi
