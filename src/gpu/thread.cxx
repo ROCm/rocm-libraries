@@ -11,6 +11,7 @@ __device__ uint32_t numVcores = NUM_VCORES;
 __device__ WorkNode_Header *cpuWorkQueue[CPU_WORK_QUEUE_SIZE] = {};
 std::atomic<uint32_t> cpuWorkQueueIndex_push = 0;
 __device__ uint32_t cpuWorkQueueIndex_pop = 0;
+__device__ volatile uint32_t cpuWorkQueueIndex_last = -1U; // If cpuWorkQueueIndex_last == cpuWorkQueueIndex_pop, then we're not going to receive any more work from the CPU
 
 __device__ WorkNode_Header *mainWorkQueue[MAIN_WORK_QUEUE_SIZE] = {};
 __device__ uint32_t mainWorkQueueIndex_pop = 0;
@@ -21,7 +22,6 @@ __device__ WorkNode_Header *currentWorkNode[NUM_VCORES] = {};
 
 hipStream_t mainStream;
 bool started = false;
-__device__ volatile bool finishing = false;
 
 
 // Locks and returns the worknode at location. If *location == nullptr (i.e. it's locked), waits for the node to be unlocked.
@@ -107,7 +107,7 @@ __device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *worknode) {
 
 // Tries to fetch and simultaneously lock the next waiting worknode in mainWorkQueue. If none exists, or the next one is
 // currently locked, or someone else got to it first, returns nullptr.
-[[nodiscard]] static inline __device__ WorkNode_Header *popWorkNodeFromMainQueue() {
+[[nodiscard]] static inline __device__ WorkNode_Header *popWorkNodeFromMainQueue(bool shouldIncrementActiveCount) {
     // Don't increment until we've successfully fetched a WorkNode.
     uint32_t index = atomicAdd(&mainWorkQueueIndex_pop, 0) % MAIN_WORK_QUEUE_SIZE;
     // Note: I think access through this cast might be a strict aliasing violation, but it's kind of unavoidable.
@@ -115,6 +115,10 @@ __device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *worknode) {
     // resulting in a strict aliasing violation.
     WorkNode_Header *work = reinterpret_cast<WorkNode_Header*>(atomicExch(reinterpret_cast<uintptr_t*>(&mainWorkQueue[index]), 0));
     if (work != nullptr) {
+        if (shouldIncrementActiveCount) {
+            atomicAdd(&activeVcoreCount, 1);
+        }
+        __threadfence();
         atomicAdd(&mainWorkQueueIndex_pop, 1);
     }
     return work;
@@ -122,7 +126,7 @@ __device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *worknode) {
 
 // Tries to fetch and simultaneously lock the next waiting worknode in cpuWorkQueue. If none exists, or the next one is
 // currently locked, or someone else got to it first, returns nullptr.
-static inline __device__ WorkNode_Header *popWorkNodeFromCpuQueue() {
+static inline __device__ WorkNode_Header *popWorkNodeFromCpuQueue(bool shouldIncrementActiveCount) {
     uint32_t index = atomicAdd(&cpuWorkQueueIndex_pop, 0) % CPU_WORK_QUEUE_SIZE;
     WorkNode_Header *work = nullptr;
     // Atomic ops are only atomic with respect to the actions of other GPU cores, not the copy engine. In other words,
@@ -134,6 +138,10 @@ static inline __device__ WorkNode_Header *popWorkNodeFromCpuQueue() {
         work = reinterpret_cast<WorkNode_Header*>(atomicExch(reinterpret_cast<uintptr_t*>(&cpuWorkQueue[index]), 0));
     }
     if (work != nullptr) {
+        if (shouldIncrementActiveCount) {
+            atomicAdd(&activeVcoreCount, 1);
+        }
+        __threadfence();
         atomicAdd(&cpuWorkQueueIndex_pop, 1);
     }
     return work;
@@ -143,8 +151,8 @@ static inline __device__ WorkNode_Header *popWorkNodeFromCpuQueue() {
 static inline __device__ bool invokeNext(bool yielding = false) {
     __shared__ WorkNode_Header *worknode_s;
     if (threadIdx.x == 0) {
-        WorkNode_Header *workFromCpu = popWorkNodeFromCpuQueue();
-        WorkNode_Header *workFromMainQueue = popWorkNodeFromMainQueue();
+        WorkNode_Header *workFromCpu = popWorkNodeFromCpuQueue(!yielding);
+        WorkNode_Header *workFromMainQueue = popWorkNodeFromMainQueue(!yielding && workFromCpu == nullptr);
 
         if (workFromMainQueue != nullptr) {
             if (workFromCpu != nullptr) {
@@ -160,9 +168,6 @@ static inline __device__ bool invokeNext(bool yielding = false) {
     if (worknode_s == nullptr) {
         return false;
     }
-
-    if (threadIdx.x == 0 && !yielding)
-        atomicAdd(&activeVcoreCount, 1);
 
     // Invoke the user-provided function.
     // So we don't have to keep locking and re-loading worknode from currentWorkNode[], wrapper_fn is responsible for unlock
@@ -222,16 +227,28 @@ __host__ void insertWorkNodeIntoCPUQueue(WorkNode_Header *worknode_d, const uint
     __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &raw_ptrs[myIndex], sizeof(void*), myIndex * sizeof(void*), hipMemcpyHostToDevice, getEnqueingStream()));
 }
 
+static __device__ bool shouldKeepPollingForWork() {
+    // Don't bother with any of the atomic loads if the CPU hasn't told us it's done sending work.
+    if (cpuWorkQueueIndex_last == -1U) {
+        return true;
+    }
+    // Pre-fetch the pop indices so that the load of activeVcoreCount happens after the load of the pop index, but
+    // before the load of the push index. This ensures that if popWorkNodeFromMainQueue and/or popWorkNodeFromCpuQueue
+    // returned null only because someone beat us to the punch, we're guaranteed shouldKeepPollingForWork will return
+    // true.
+    uint32_t cached_cpuPopIndex = atomicAdd(&cpuWorkQueueIndex_pop, 0);
+    uint32_t cached_mainPopIndex = atomicAdd(&mainWorkQueueIndex_pop, 0);
+    return atomicAdd(&activeVcoreCount, 0) != 0 ||
+            cached_mainPopIndex         < atomicAdd(&mainWorkQueueIndex_push, 0) ||
+            cached_cpuPopIndex          < cpuWorkQueueIndex_last;
+}
+
 //====================================================================================================================//
 //      KERNELS
 //====================================================================================================================//
 
 static __global__ void threading_main() {
-    // TODO: Because invokeNext can return false even if there's work waiting (because somebody else snagged the job
-    // before we could - see popWorkNodeFromMainQueue and popWorkNodeFromCpuQueue), and we don't increment
-    // activeVcoreCount until AFTER we pop work from the queues, it's theoretically possible for a vcore to exit before
-    // all the work is done. I don't know if this is a big enough concern to be worth fixing or not.
-    for (bool workFound = true; workFound || !finishing || atomicAdd(&activeVcoreCount, 0) != 0;) {
+    for (bool workFound = true; workFound || shouldKeepPollingForWork();) {
         // TODO: why do we need this when blockDim.x == MAX_THREAD_WIDTH == warpSize?
         __syncthreads();
         workFound = invokeNext();
@@ -493,8 +510,8 @@ __host__ void thread::finish(bool blocking) {
     if (!started) {
         throw std::logic_error("called gpu::finish() before calling gpu::start()");
     }
-    bool temp = true;
-    __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(finishing), &temp, sizeof(bool), 0, hipMemcpyHostToDevice, getEnqueingStream()));
+    uint32_t temp = cpuWorkQueueIndex_push;
+    __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueueIndex_last), &temp, sizeof(temp), 0, hipMemcpyHostToDevice, getEnqueingStream()));
     if (blocking) {
         // We could wait for the memcpy to finish (with hipStreamSynchronize(enqueingStream)) before
         // synchronizing on mainStream, but there's no need.
