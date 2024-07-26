@@ -102,5 +102,10 @@ namespace rocRoller
             {"MaxLdsSize", Value::MaxLdsSize},
 
             {"HasNaNoo", Value::HasNaNoo},
+
+            {"HasDSReadTransposeB16", Value::HasDSReadTransposeB16},
+            {"HasDSReadTransposeB8", Value::HasDSReadTransposeB8},
+            {"HasDSReadTransposeB6", Value::HasDSReadTransposeB6},
+            {"HasDSReadTransposeB4", Value::HasDSReadTransposeB4},
     };
 }

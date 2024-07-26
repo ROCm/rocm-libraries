@@ -47,6 +47,19 @@ MISCTESTS=("*ScaledMatrixMultiplyTestGPU*"
 "*GPU_ScaledGEMMMixed*"
 )
 
+TRANSPOSETESTS=(
+"*B4Transpose16x128GPUTest"
+"*B4Transpose32x64GPUTest"
+"*B6AlignedVGPRsTranspose16x128GPUTest"
+"*B6AlignedVGPRsTranspose32x64GPUTest"
+"*B6UnalignedVGPRsTranspose16x128GPUTest"
+"*B6UnalignedVGPRsTranspose32x64GPUTest"
+"*B8Transpose16x64GPUTest"
+"*B8Transpose32x32GPUTest"
+"*B16Transpose16x32GPUTest"
+"*B16Transpose32x16GPUTest"
+)
+
 MIXEDTESTS=("*GPU_MatrixMultiplyMixed*"
 "*GPU_BasicGEMMMixedF8F6F4*"
 )
@@ -71,91 +84,71 @@ RRPERF_MIXEDTESTS=("gemm_mixed_16x16x128_f8f6f4"
 "gemm_mixed_32x32x64_f8f6f4"
 )
 
-suite="small"
-while getopts "t:" opt; do
+RRPERF_MISCTESTS=()
+RRPERF_TRANSPOSETESTS=()
+
+RRPERF_TESTS_LIST=()
+RRTESTS_LIST=()
+RUN_CLIENT_TESTS=n
+SUITE="small"
+while getopts "ct:" opt; do
     case "${opt}" in
-    t) suite="${OPTARG,,}";;
-    [?]) echo >&2 "Usage: $0 [-t option]
-             option: {f8 | f6 | f4 | mixed | mixed-client | scaled | small | full}"
-         exit 1;;
+    c)  RUN_CLIENT_TESTS=y
+        ;;
+    t)
+        SUITE="${OPTARG,,}"
+        ;;
+    [?])
+        echo >&2 "Usage: $0 [-t option] [-c]
+             option: {f8 | f6 | f4 | mixed | scaled | misc | transpose | small | full}
+             -c: enables client tests.
+                 Default: always enabled with small & full, disabled otherwise."
+        exit 1
+        ;;
     esac
 done
 
+case "${SUITE}" in
+  "f8" | "f6" | "f4" | "mixed" | "scaled" | "misc" | "transpose")
+      RRTESTS_VARNAME="${SUITE^^}TESTS"
+      RRPERF_TESTS_VARNAME="RRPERF_${SUITE^^}TESTS"
+      read -r -a RRTESTS_LIST <<<"$(eval echo "\${${RRTESTS_VARNAME}[@]}")"
+      if [[ ${RUN_CLIENT_TESTS} == "y" ]]; then
+          read -r -a RRPERF_TESTS_LIST <<<"$(eval echo "\${${RRPERF_TESTS_VARNAME}[@]}")"
+      fi
+      ;;
+  "small" | "full")
+      if [ "$SUITE" == "full" ]; then
+          for t in "${SKIPTESTS[@]}"  \
+                   "${MIXEDTESTS[@]}" ; do
+              RRTESTS_LIST+=("$t")
+          done
 
-if [ "$suite" = "full" ]; then
-    skip=${SKIPTESTS[*]}
-    $RRTESTS --gtest_filter="-${skip// /:}"
+          for t in "${RRPERF_MIXEDTESTS[@]}"; do
+              RRTESTS_LIST+=("$t")
+          done
+      fi
+      for t in "${F8TESTS[@]}"        \
+               "${F6TESTS[@]}"        \
+               "${F4TESTS[@]}"        \
+               "${MISCTESTS[@]}"      \
+               "${TRANSPOSETESTS[@]}" ; do
+          RRTESTS_LIST+=("$t")
+      done
+      for t in "${RRPERF_F8TESTS[@]}"        \
+               "${RRPERF_F6TESTS[@]}"        \
+               "${RRPERF_F4TESTS[@]}"        \
+               "${RRPERF_MISCTESTS[@]}"      \
+               "${RRPERF_TRANSPOSETESTS[@]}" ; do
+          RRPERF_TESTS_LIST+=("$t")
+      done
+      ;;
+esac
 
-    # Run rrperf tests
-    for testName in "${RRPERF_F8TESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-    for testName in "${RRPERF_F4TESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-    for testName in "${RRPERF_F6TESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-    for testName in "${RRPERF_MIXEDTESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-elif [ "$suite" = "f8" ]; then
-    for testName in "${F8TESTS[@]}"; do
-        $RRTESTS --gtest_filter="$testName"
-    done
-    for testName in "${RRPERF_F8TESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-elif [ "$suite" = "f6" ]; then
-    for testName in "${F6TESTS[@]}"; do
-        $RRTESTS --gtest_filter="$testName"
-    done
-    for testName in "${RRPERF_F6TESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-elif [ "$suite" = "f4" ]; then
-    for testName in "${F4TESTS[@]}"; do
-        $RRTESTS --gtest_filter="$testName"
-    done
-    for testName in "${RRPERF_F4TESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-elif [ "$suite" = "mixed" ]; then
-    for testName in "${MIXEDTESTS[@]}"; do
-        $RRTESTS --gtest_filter="$testName"
-    done
-elif [ "$suite" = "mixed-client" ]; then
-    for testName in "${RRPERF_MIXEDTESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-elif [ "$suite" = "scaled" ]; then
-    for testName in "${MISCTESTS[@]}"; do
-        $RRTESTS --gtest_filter="$testName"
-    done
-else
-    # Loop through each test and execute it
-    for testName in "${F8TESTS[@]}"; do
-        $RRTESTS --gtest_filter="$testName"
-    done
-    for testName in "${F6TESTS[@]}"; do
-        $RRTESTS --gtest_filter="$testName"
-    done
-    for testName in "${F4TESTS[@]}"; do
-        $RRTESTS --gtest_filter="$testName"
-    done
-    for testName in "${MISCTESTS[@]}"; do
-        $RRTESTS --gtest_filter="$testName"
-    done
+for testName in "${RRTESTS_LIST[@]}"; do
+    $RRTESTS --gtest_filter="$testName"
+done
 
-    # Run rrperf tests
-    for testName in "${RRPERF_F8TESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-    for testName in "${RRPERF_F4TESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-    for testName in "${RRPERF_F6TESTS[@]}"; do
-        $RRPERF run --suite "$testName"
-    done
-fi
-
+for testName in "${RRPERF_TESTS_LIST[@]}"; do
+    $RRPERF run --suite "$testName"
+done

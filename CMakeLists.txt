@@ -548,6 +548,7 @@ set(
   test/unit/SupportedInstructionObserverTest.cpp
   test/unit/TileTransposeAdd.cpp
   test/unit/TimerTest.cpp
+  test/unit/TransposeLoadsTest.cpp
   test/unit/Utilities.cpp
   test/unit/UtilsTest.cpp
   test/unit/VariantTest.cpp

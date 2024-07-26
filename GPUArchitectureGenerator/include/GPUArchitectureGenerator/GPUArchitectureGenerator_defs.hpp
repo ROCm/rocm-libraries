@@ -111,6 +111,15 @@ namespace GPUArchitectureGenerator
              {"buffer_atomic_add_f32 v0, v1, s[0:3], 0 offen offset:0", ""}},
 
             {rocRoller::GPUCapability::UnalignedVGPRs, {"v_add_f64 v[0:1], v[0:1], v[3:4]", ""}},
+
+            {rocRoller::GPUCapability::HasDSReadTransposeB16,
+             {"ds_read_b64_tr_b16 v[4:5], v1, offset:0", ""}},
+            {rocRoller::GPUCapability::HasDSReadTransposeB8,
+             {"ds_read_b64_tr_b8  v[4:5], v1, offset:0", ""}},
+            {rocRoller::GPUCapability::HasDSReadTransposeB6,
+             {"ds_read_b96_tr_b6  v[4:6], v1, offset:0", ""}},
+            {rocRoller::GPUCapability::HasDSReadTransposeB4,
+             {"ds_read_b64_tr_b4  v[4:5], v1, offset:0", ""}},
     };
 
     // GPUCapability -> <Vector of ISAs That Support It>
@@ -1154,6 +1163,27 @@ namespace GPUArchitectureGenerator
                 // if (either matrix is F8) -> 16 passes  else() -> 8 passes
                 rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x64_f8f6f4", 0, {}, 16),
                 rocRoller::GPUInstructionInfo("v_mfma_scale_f32_32x32x64_f8f6f4", 0, {}, 16),
+                // DS_READ_B64_TR_B{16,8,4} and DS_READ_B96_TR_B6
+                rocRoller::GPUInstructionInfo("ds_read_b64_tr_b16",
+                                              1,
+                                              {rocRoller::GPUWaitQueueType::LGKMDSQueue},
+                                              4,
+                                              (1 << 16) - 1),
+                rocRoller::GPUInstructionInfo("ds_read_b64_tr_b8",
+                                              1,
+                                              {rocRoller::GPUWaitQueueType::LGKMDSQueue},
+                                              4,
+                                              (1 << 16) - 1),
+                rocRoller::GPUInstructionInfo("ds_read_b64_tr_b4",
+                                              1,
+                                              {rocRoller::GPUWaitQueueType::LGKMDSQueue},
+                                              4,
+                                              (1 << 16) - 1),
+                rocRoller::GPUInstructionInfo("ds_read_b96_tr_b6",
+                                              1,
+                                              {rocRoller::GPUWaitQueueType::LGKMDSQueue},
+                                              8,
+                                              (1 << 16) - 1),
             }}};
 
     const std::unordered_map<std::string, std::vector<rocRoller::GPUArchitectureTarget>>

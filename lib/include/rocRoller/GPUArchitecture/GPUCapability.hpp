@@ -91,6 +91,11 @@ namespace rocRoller
 
             HasNaNoo,
 
+            HasDSReadTransposeB16,
+            HasDSReadTransposeB8,
+            HasDSReadTransposeB6,
+            HasDSReadTransposeB4,
+
             Count,
         };
 
