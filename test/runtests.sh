@@ -119,12 +119,7 @@ case "${SUITE}" in
       ;;
   "small" | "full")
       if [ "$SUITE" == "full" ]; then
-          for t in "${SKIPTESTS[@]}"  \
-                   "${MIXEDTESTS[@]}" ; do
-              RRTESTS_LIST+=("$t")
-          done
-
-          for t in "${RRPERF_MIXEDTESTS[@]}"; do
+          for t in "${SKIPTESTS[@]}"  ; do
               RRTESTS_LIST+=("$t")
           done
       fi
@@ -132,6 +127,7 @@ case "${SUITE}" in
                "${F6TESTS[@]}"        \
                "${F4TESTS[@]}"        \
                "${MISCTESTS[@]}"      \
+               "${MIXEDTESTS[@]}"     \
                "${TRANSPOSETESTS[@]}" ; do
           RRTESTS_LIST+=("$t")
       done
@@ -139,6 +135,7 @@ case "${SUITE}" in
                "${RRPERF_F6TESTS[@]}"        \
                "${RRPERF_F4TESTS[@]}"        \
                "${RRPERF_MISCTESTS[@]}"      \
+               "${RRPERF_MIXEDTESTS[@]}"     \
                "${RRPERF_TRANSPOSETESTS[@]}" ; do
           RRPERF_TESTS_LIST+=("$t")
       done

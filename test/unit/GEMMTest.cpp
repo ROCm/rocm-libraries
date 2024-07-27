@@ -528,6 +528,10 @@ namespace GEMMDriverTest
     {
     };
 
+    class GEMMBasicScaledTestGPU : public BaseGEMMContextFixture<std::tuple<int, int>>
+    {
+    };
+
     // This test is to ensure each scheduler properly yields insts for a basic GEMM
     TEST_P(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
     {
@@ -997,12 +1001,13 @@ namespace GEMMDriverTest
         basicGEMM<FP8, FP8, float>(m_context, gemm, 2.e-5);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, DISABLED_GPU_BasicScaledGEMMFP8_16x16x128_NT)
+    TEST_P(GEMMBasicScaledTestGPU, DISABLED_GPU_BasicScaledGEMMFP8_16x16x128_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_NT(16, 16, 128);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_NT(16, 16, 128);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<FP8, FP8, float>(m_context, gemm, 2.e-5);
     }
 
@@ -1013,12 +1018,14 @@ namespace GEMMDriverTest
         basicGEMM<BF8, BF8, float>(m_context, gemm, 2.e-5);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, DISABLED_GPU_BasicScaledGEMMBF8_16x16x128_NT)
+    TEST_P(GEMMBasicScaledTestGPU, DISABLED_GPU_BasicScaledGEMMBF8_16x16x128_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_NT(16, 16, 128);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_NT(16, 16, 128);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<BF8, BF8, float>(m_context, gemm, 2.e-5);
     }
 
@@ -1029,12 +1036,13 @@ namespace GEMMDriverTest
         basicGEMM<FP8, FP8, float>(m_context, gemm, 2.e-5);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, DISABLED_GPU_BasicScaledGEMMFP8_32x32x64_NT)
+    TEST_P(GEMMBasicScaledTestGPU, DISABLED_GPU_BasicScaledGEMMFP8_32x32x64_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_NT(32, 32, 64);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_NT(32, 32, 64);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<FP8, FP8, float>(m_context, gemm, 2.e-5);
     }
 
@@ -1045,12 +1053,13 @@ namespace GEMMDriverTest
         basicGEMM<BF8, BF8, float>(m_context, gemm, 2.e-5);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, DISABLED_GPU_BasicScaledGEMMBF8_32x32x64_NT)
+    TEST_P(GEMMBasicScaledTestGPU, DISABLED_GPU_BasicScaledGEMMBF8_32x32x64_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_NT(32, 32, 64);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_NT(32, 32, 64);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<BF8, BF8, float>(m_context, gemm, 2.e-5);
     }
 
@@ -1146,12 +1155,13 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 8) / 64, 4, 10);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicScaledGEMMFP4_16x16x128_TN)
+    TEST_P(GEMMBasicScaledTestGPU, GPU_BasicScaledGEMMFP4_16x16x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_TN(16, 16, 128);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_TN(16, 16, 128);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<FP4, FP4, float>(m_context, gemm, 2.e-5);
         check_mfma_f8f6f4(
             m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b100 abid:1 blgp:0b100");
@@ -1167,12 +1177,13 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 8) / 64, 4, 10);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicScaledGEMMFP4_32x32x64_TN)
+    TEST_P(GEMMBasicScaledTestGPU, GPU_BasicScaledGEMMFP4_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_TN(32, 32, 64);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_TN(32, 32, 64);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<FP4, FP4, float>(m_context, gemm, 2.e-5);
         check_mfma_f8f6f4(
             m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b100 abid:1 blgp:0b100");
@@ -1188,12 +1199,13 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicScaledGEMMFP6_16x16x128_TN)
+    TEST_P(GEMMBasicScaledTestGPU, GPU_BasicScaledGEMMFP6_16x16x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_TN(16, 16, 128);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_TN(16, 16, 128);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<FP6, FP6, float>(m_context, gemm, 2.e-5);
         check_mfma_f8f6f4(
             m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b010 abid:1 blgp:0b010");
@@ -1209,12 +1221,13 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicScaledGEMMFP6_32x32x64_TN)
+    TEST_P(GEMMBasicScaledTestGPU, GPU_BasicScaledGEMMFP6_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_TN(32, 32, 64);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_TN(32, 32, 64);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<FP6, FP6, float>(m_context, gemm, 2.e-5);
         check_mfma_f8f6f4(
             m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b010 abid:1 blgp:0b010");
@@ -1230,12 +1243,13 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicScaledGEMMBF6_16x16x128_TN)
+    TEST_P(GEMMBasicScaledTestGPU, GPU_BasicScaledGEMMBF6_16x16x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_TN(16, 16, 128);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_TN(16, 16, 128);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<BF6, BF6, float>(m_context, gemm, 2.e-5);
         check_mfma_f8f6f4(
             m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b011 abid:1 blgp:0b011");
@@ -1251,12 +1265,13 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicScaledGEMMBF6_32x32x64_TN)
+    TEST_P(GEMMBasicScaledTestGPU, GPU_BasicScaledGEMMBF6_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_TN(32, 32, 64);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_TN(32, 32, 64);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<BF6, BF6, float>(m_context, gemm, 2.e-5);
         check_mfma_f8f6f4(
             m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b011 abid:1 blgp:0b011");
@@ -1271,12 +1286,13 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicScaledGEMMFP8_16x16x128_TN)
+    TEST_P(GEMMBasicScaledTestGPU, GPU_BasicScaledGEMMFP8_16x16x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_TN(16, 16, 128);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_TN(16, 16, 128);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<FP8, FP8, float>(m_context, gemm, 2.e-5);
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
     }
@@ -1289,12 +1305,13 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicScaledGEMMBF8_16x16x128_TN)
+    TEST_P(GEMMBasicScaledTestGPU, GPU_BasicScaledGEMMBF8_16x16x128_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_TN(16, 16, 128);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_TN(16, 16, 128);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<BF8, BF8, float>(m_context, gemm, 2.e-5);
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
     }
@@ -1307,12 +1324,13 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicScaledGEMMFP8_32x32x64_TN)
+    TEST_P(GEMMBasicScaledTestGPU, GPU_BasicScaledGEMMFP8_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_TN(32, 32, 64);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_TN(32, 32, 64);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<FP8, FP8, float>(m_context, gemm, 2.e-5);
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
     }
@@ -1325,12 +1343,13 @@ namespace GEMMDriverTest
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicScaledGEMMBF8_32x32x64_TN)
+    TEST_P(GEMMBasicScaledTestGPU, GPU_BasicScaledGEMMBF8_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm   = setup_GEMMF8F6F4_TN(32, 32, 64);
-        gemm.scaleA = 128;
-        gemm.scaleB = 125;
+        auto [scaleA, scaleB] = std::get<std::tuple<int, int>>(GetParam());
+        auto gemm             = setup_GEMMF8F6F4_TN(32, 32, 64);
+        gemm.scaleA           = scaleA;
+        gemm.scaleB           = scaleB;
         basicGEMM<BF8, BF8, float>(m_context, gemm, 2.e-5);
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
     }
@@ -1868,4 +1887,11 @@ namespace GEMMDriverTest
                                               ::testing::Values(64, 128),
                                               ::testing::Values(125, 128),
                                               ::testing::Values(125, 128))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMBasicScaledTest,
+        GEMMBasicScaledTestGPU,
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Combine(::testing::Values(101, 125, 128),
+                                              ::testing::Values(101, 125, 128))));
 }
