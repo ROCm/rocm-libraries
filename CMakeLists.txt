@@ -651,14 +651,17 @@ if (NOT CODE_ANALYSIS)
   gtest_discover_tests(rocRollerTests
     XML_OUTPUT_DIR ${TEST_REPORT_DIR}
     TEST_FILTER "-*GPU_*"
+    DISCOVERY_MODE PRE_TEST
   )
   gtest_discover_tests(rocRollerTests
     XML_OUTPUT_DIR ${TEST_REPORT_DIR}
     TEST_FILTER "*GPU_*"
     PROPERTIES "LABELS" "GPU"
+    DISCOVERY_MODE PRE_TEST
   )
   gtest_discover_tests(ArchGenTests
     XML_OUTPUT_DIR ${TEST_REPORT_DIR}
+    DISCOVERY_MODE PRE_TEST
   )
 
   # Add script linting
