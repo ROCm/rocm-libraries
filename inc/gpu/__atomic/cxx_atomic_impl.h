@@ -149,17 +149,34 @@ bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_base_impl<_Tp> *__a, _Tp *_
         static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
 
+template <typename _Tp>
+struct __skip_amt {
+  enum { value = 1 };
+};
+
+template <typename _Tp>
+struct __skip_amt<_Tp*> {
+  enum { value = sizeof(_Tp) };
+};
+
+// FIXME: Haven't figured out what the spec says about using arrays with
+// atomic_fetch_add. Force a failure rather than creating bad behavior.
+template <typename _Tp>
+struct __skip_amt<_Tp[]> {};
+template <typename _Tp, int n>
+struct __skip_amt<_Tp[n]> {};
+
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 _Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __delta, memory_order __order) _NOEXCEPT {
     // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
-    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __delta,
+    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __delta * __skip_amt<_Tp>::value,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 _Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> *__a, _Tp __delta, memory_order __order) _NOEXCEPT {
-    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), __delta,
+    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), __delta * __skip_amt<_Tp>::value,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 
@@ -167,13 +184,13 @@ template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 _Tp *__cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp *> volatile *__a, ptrdiff_t __delta, memory_order __order) _NOEXCEPT {
     // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
-    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __delta,
+    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __delta * __skip_amt<_Tp *>::value,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 _Tp *__cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp *> *__a, ptrdiff_t __delta, memory_order __order) _NOEXCEPT {
-    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), __delta,
+    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), __delta * __skip_amt<_Tp *>::value,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 
@@ -181,26 +198,27 @@ template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 _Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __delta, memory_order __order) _NOEXCEPT {
     // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
-    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), -__delta,
+    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), -__delta * __skip_amt<_Tp>::value,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 _Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> *__a, _Tp __delta, memory_order __order) _NOEXCEPT {
-    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), -__delta,
+    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), -__delta * __skip_amt<_Tp>::value,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 _Tp *__cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp *> volatile *__a, ptrdiff_t __delta, memory_order __order) _NOEXCEPT {
     // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
-    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), -__delta,
+    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)),
+                                  -__delta * __skip_amt<_Tp *>::value,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 _Tp *__cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp *> *__a, ptrdiff_t __delta, memory_order __order) _NOEXCEPT {
-    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), -__delta,
+    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), -__delta * __skip_amt<_Tp *>::value,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 
