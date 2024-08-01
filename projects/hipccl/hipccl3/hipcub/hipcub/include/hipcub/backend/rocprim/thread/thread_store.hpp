@@ -69,7 +69,7 @@ HIPCUB_DEVICE __forceinline__ void AsmThreadStore(void * ptr, T val)
     {                                                                                                        \
         interim_type temp_val = val;                                                                         \
         asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier "\n\t"                                     \
-                                   wait_inst wait_cmd "(%2)"                                                 \
+                                   #wait_inst wait_cmd "(%2)"                                                \
                      : : "v"(ptr), #output_modifier(temp_val), "I"(0x00));                                   \
     }
 
