@@ -31,7 +31,7 @@ def runTestCommand (platform, project)
 {
     String sudo = auxiliary.sudo(platform.jenkinsLabel)
 
-    def testCommand = "ctest --output-on-failure"
+    def testCommand = "ctest --output-on-failure --verbose --timeout 900"
     def command = """#!/usr/bin/env bash
                 set -x
                 cd ${project.paths.project_build_prefix}
