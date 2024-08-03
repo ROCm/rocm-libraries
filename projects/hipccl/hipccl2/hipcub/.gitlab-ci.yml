@@ -27,6 +27,7 @@ include:
         - /defaults.yaml
         - /deps-cmake.yaml
         - /deps-docs.yaml
+        - /deps-format.yaml
         - /deps-rocm.yaml
         - /deps-nvcc.yaml
         - /gpus-rocm.yaml
@@ -41,20 +42,7 @@ stages:
 
 clang-format:
   extends:
-    - .deps:rocm
-  stage: lint
-  needs: []
-  tags:
-    - build
-  variables:
-    CLANG_FORMAT: "/opt/rocm/llvm/bin/clang-format"
-    GIT_CLANG_FORMAT: "/opt/rocm/llvm/bin/git-clang-format"
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  script:
-    - cd $CI_PROJECT_DIR
-    - git config --global --add safe.directory $CI_PROJECT_DIR
-    - scripts/code-format/check-format.sh $CI_MERGE_REQUEST_DIFF_BASE_SHA --binary "$CLANG_FORMAT"
+    - .lint:clang-format
 
 copyright-date:
   extends:

@@ -23,11 +23,12 @@
 #include "common_test_header.hpp"
 
 // Thread operators fixes for extended float types
+#include "test_utils_data_generation.hpp"
 #include "test_utils_thread_operators.hpp"
 
 // hipcub API
 #include "hipcub/device/device_segmented_reduce.hpp"
-#include "test_utils_data_generation.hpp"
+#include "hipcub/iterator/counting_input_iterator.hpp"
 
 std::vector<size_t> get_sizes()
 {
@@ -67,19 +68,16 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<params1<unsigned int, unsigned int, hipcub::Sum>,
-                         params1<int, int, hipcub::Sum, -100, 0, 10000>,
-                         params1<double, double, hipcub::Min, 1000, 0, 10000>,
-                         params1<int, short, hipcub::Max, 10, 1000, 10000>,
-                         params1<short, double, hipcub::Sum, 5, 1, 1000>,
-                         params1<float, double, hipcub::Max, 50, 2, 10>,
-                         params1<float, float, hipcub::Sum, 123, 100, 200>
-#ifdef __HIP_PLATFORM_AMD__
-                         ,
-                         params1<test_utils::half, test_utils::half, hipcub::Max, 50, 2, 10>,
-                         params1<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 50, 2, 10>
-#endif
-                         >
+typedef ::testing::Types<
+    params1<unsigned int, unsigned int, hipcub::Sum>,
+    params1<int, int, hipcub::Sum, -100, 0, 10000>,
+    params1<double, double, hipcub::Min, 1000, 0, 10000>,
+    params1<int, short, hipcub::Max, 10, 1000, 10000>,
+    params1<short, double, hipcub::Sum, 5, 1, 1000>,
+    params1<float, double, hipcub::Max, 50, 2, 10>,
+    params1<float, float, hipcub::Sum, 123, 100, 200>,
+    params1<test_utils::half, test_utils::half, hipcub::Max, 50, 2, 10>,
+    params1<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 50, 2, 10>>
     Params1;
 
 TYPED_TEST_SUITE(HipcubDeviceSegmentedReduceOp, Params1);
@@ -783,13 +781,13 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, ArgMax)
 }
 
 template<class T>
-class HipcubDeviceReduceArgMinMaxSpecialTests : public testing::Test
+class HipcubDeviceSegmentedReduceArgMinMaxSpecialTests : public testing::Test
 {};
 
-using HipcubDeviceReduceArgMinMaxSpecialTestsParams
+using HipcubDeviceSegmentedReduceArgMinMaxSpecialTestsParams
     = ::testing::Types<float, test_utils::half, test_utils::bfloat16>;
-TYPED_TEST_SUITE(HipcubDeviceReduceArgMinMaxSpecialTests,
-                 HipcubDeviceReduceArgMinMaxSpecialTestsParams);
+TYPED_TEST_SUITE(HipcubDeviceSegmentedReduceArgMinMaxSpecialTests,
+                 HipcubDeviceSegmentedReduceArgMinMaxSpecialTestsParams);
 
 template<typename TypeParam, typename DispatchFunction>
 void test_argminmax_allinf(TypeParam value, TypeParam empty_value)
@@ -912,7 +910,7 @@ void test_argminmax_allinf(TypeParam value, TypeParam empty_value)
 // TODO: enable for NVIDIA platform once CUB backend incorporates fix
 #ifdef __HIP_PLATFORM_AMD__
 /// ArgMin with all +Inf should result in +Inf.
-TYPED_TEST(HipcubDeviceReduceArgMinMaxSpecialTests, ReduceArgMinInf)
+TYPED_TEST(HipcubDeviceSegmentedReduceArgMinMaxSpecialTests, ReduceArgMinInf)
 {
     test_argminmax_allinf<TypeParam, ArgMinDispatch>(
         test_utils::numeric_limits<TypeParam>::infinity(),
@@ -920,10 +918,139 @@ TYPED_TEST(HipcubDeviceReduceArgMinMaxSpecialTests, ReduceArgMinInf)
 }
 
 /// ArgMax with all -Inf should result in -Inf.
-TYPED_TEST(HipcubDeviceReduceArgMinMaxSpecialTests, ReduceArgMaxInf)
+TYPED_TEST(HipcubDeviceSegmentedReduceArgMinMaxSpecialTests, ReduceArgMaxInf)
 {
     test_argminmax_allinf<TypeParam, ArgMaxDispatch>(
         test_utils::numeric_limits<TypeParam>::infinity_neg(),
         test_utils::numeric_limits<TypeParam>::lowest());
 }
 #endif // __HIP_PLATFORM_AMD__
+
+// ---------------------------------------------------------
+// Test for large indices
+// ---------------------------------------------------------
+
+TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T              = size_t;
+    using input_type     = T;
+    using output_type    = T;
+    using IteratorType   = hipcub::CountingInputIterator<input_type>;
+    using reduce_op_type = typename hipcub::Sum;
+    using offset_type    = T;
+
+    const input_type init = input_type(0);
+    reduce_op_type   reduce_op;
+
+    static constexpr hipStream_t stream = 0; // default
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        const std::vector<size_t> sizes = test_utils::get_large_sizes(seed_value);
+
+        for(const auto size : sizes)
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            const size_t min_segment_length = size_t{1} << 31;
+            const size_t max_segment_length = std::max(min_segment_length, size);
+
+            std::random_device                    rd;
+            std::default_random_engine            gen(seed_value);
+            std::uniform_int_distribution<size_t> segment_length_dis(min_segment_length,
+                                                                     max_segment_length);
+
+            const auto gauss_sum = [&](output_type n)
+            { return (n % 2 == 0) ? (n / 2) * (n - 1) : n * ((n - 1) / 2); };
+
+            std::vector<output_type> aggregates_expected;
+            std::vector<offset_type> offsets;
+
+            unsigned int num_segments = 0;
+            offset_type  offset       = 0;
+            while(offset < size)
+            {
+                const size_t segment_length = segment_length_dis(gen);
+                offsets.push_back(offset);
+
+                const offset_type end       = std::min(size, offset + segment_length);
+                output_type       aggregate = init;
+                aggregate = reduce_op(aggregate, gauss_sum(end) - gauss_sum(offset));
+                aggregates_expected.push_back(aggregate);
+
+                num_segments++;
+                offset += segment_length;
+            }
+            offsets.push_back(size);
+
+            // Device inputs
+            IteratorType d_input(input_type{0});
+            offset_type* d_offsets = nullptr;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets,
+                                                         sizeof(offset_type) * (num_segments + 1)));
+            HIP_CHECK(hipMemcpy(d_offsets,
+                                offsets.data(),
+                                sizeof(offset_type) * (num_segments + 1),
+                                hipMemcpyHostToDevice));
+
+            // Device outputs
+            output_type* d_aggregates_output;
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_aggregates_output,
+                                                         sizeof(output_type) * num_segments));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Temp storage
+            size_t temp_storage_size_bytes;
+            void*  d_temp_storage = nullptr;
+
+            // Get size of d_temp_storage
+            HIP_CHECK(hipcub::DeviceSegmentedReduce::Sum(d_temp_storage,
+                                                         temp_storage_size_bytes,
+                                                         d_input,
+                                                         d_aggregates_output,
+                                                         num_segments,
+                                                         d_offsets,
+                                                         d_offsets + 1,
+                                                         stream));
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0U);
+
+            // Allocate temporary storage
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+
+            // Run
+            HIP_CHECK(hipcub::DeviceSegmentedReduce::Sum(d_temp_storage,
+                                                         temp_storage_size_bytes,
+                                                         d_input,
+                                                         d_aggregates_output,
+                                                         num_segments,
+                                                         d_offsets,
+                                                         d_offsets + 1,
+                                                         stream));
+
+            // Copy output to host
+            std::vector<output_type> aggregates_output(num_segments);
+            HIP_CHECK(hipMemcpy(aggregates_output.data(),
+                                d_aggregates_output,
+                                sizeof(output_type) * num_segments,
+                                hipMemcpyDeviceToHost));
+
+            HIP_CHECK(hipFree(d_offsets));
+            HIP_CHECK(hipFree(d_temp_storage));
+            HIP_CHECK(hipFree(d_aggregates_output));
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(aggregates_output, aggregates_expected));
+        }
+    }
+}

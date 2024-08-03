@@ -35,12 +35,12 @@
 #ifndef HIPCUB_ROCPRIM_BLOCK_BLOCK_RAKING_LAYOUT_HPP_
 #define HIPCUB_ROCPRIM_BLOCK_BLOCK_RAKING_LAYOUT_HPP_
 
-#include <type_traits>
-
 #include "../../../config.hpp"
 
 #include <rocprim/config.hpp>
 #include <rocprim/detail/various.hpp>
+
+#include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
 

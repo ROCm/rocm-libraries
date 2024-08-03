@@ -30,19 +30,20 @@
 #ifndef HIPCUB_ROCPRIM_DEVICE_DEVICE_REDUCE_HPP_
 #define HIPCUB_ROCPRIM_DEVICE_DEVICE_REDUCE_HPP_
 
-#include <iterator>
-#include <limits>
-
-#include <hip/hip_bfloat16.h> // hip_bfloat16
-#include <hip/hip_fp16.h> // __half
-
 #include "../../../config.hpp"
+
 #include "../../../util_deprecated.hpp"
 #include "../iterator/arg_index_input_iterator.hpp"
 #include "../thread/thread_operators.hpp"
 
 #include <rocprim/device/device_reduce.hpp>
 #include <rocprim/device/device_reduce_by_key.hpp>
+
+#include <hip/hip_bfloat16.h> // hip_bfloat16
+#include <hip/hip_fp16.h> // __half
+
+#include <iterator>
+#include <limits>
 
 BEGIN_HIPCUB_NAMESPACE
 namespace detail

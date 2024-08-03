@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,12 +27,14 @@
  *
  ******************************************************************************/
 
- #ifndef HIBCUB_ROCPRIM_THREAD_THREAD_SEARCH_HPP_
- #define HIBCUB_ROCPRIM_THREAD_THREAD_SEARCH_HPP_
+#ifndef HIBCUB_ROCPRIM_THREAD_THREAD_SEARCH_HPP_
+#define HIBCUB_ROCPRIM_THREAD_THREAD_SEARCH_HPP_
 
- #include <iterator>
+#include "../../../config.hpp"
 
- BEGIN_HIPCUB_NAMESPACE
+#include <iterator>
+
+BEGIN_HIPCUB_NAMESPACE
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
 

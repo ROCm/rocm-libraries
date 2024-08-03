@@ -41,7 +41,6 @@ AllowShortLoopsOnASingleLine: false
 AlwaysBreakAfterReturnType: None
 AlwaysBreakBeforeMultilineStrings: false
 AlwaysBreakTemplateDeclarations: Yes
-AttributeMacros: ['HIPCUB_DEVICE', 'HIPCUB_HOST', 'HIPCUB_HOST_DEVICE', 'HIPCUB_SHARED_MEMORY', 'HIPCUB_RUNTIME_FUNCTION']
 BinPackArguments: false
 BinPackParameters: false
 BitFieldColonSpacing: Both
@@ -133,4 +132,37 @@ SpacesInConditionalStatement: false
 SpacesInContainerLiterals: true
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
+
+AttributeMacros:
+    - __host__
+    - __device__
+    - __global__
+    - __forceinline__
+    - __shared__
+    - __launch_bounds__
+    - HIPCUB_DEVICE
+    - HIPCUB_HOST
+    - HIPCUB_HOST_DEVICE
+    - HIPCUB_SHARED_MEMORY
+    - HIPCUB_RUNTIME_FUNCTION
+    - HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS
+
+# Trick clang into thinking that our C-style attributes are C++-style attributes
+# Make sure that the sizes line up for linebreaks etc
+Macros:
+    - __host__=[[host]]
+    - __device__=[[device]]
+    - __global__=[[global]]
+    - __forceinline__=[[forceinline]]
+    - __shared__=[[shared]]
+    - __launch_bounds__(x)=[[launch_bounds(x)]]
+    - __attribute__(x)=[[attribute(x)]]
+    - HIPCUB_DEVICE=[[DEVICE___]]
+    - HIPCUB_HOST=[[HOST___]]
+    - HIPCUB_HOST_DEVICE=[[HOST_DEVICE___]]
+    - HIPCUB_SHARED_MEMORY=[[SHARED_MEMORY___]]
+    - HIPCUB_RUNTIME_FUNCTION=[[RUNTIME_FUNCTION___]]
+    - HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS=[[DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS___]]
+BreakAfterAttributes: Always
+
 ---

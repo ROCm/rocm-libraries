@@ -62,15 +62,10 @@ typedef ::testing::Types<
     params<unsigned int, int, hipcub::Sum, 2048, 2048>,
     params<unsigned int, double, hipcub::Min, 1000, 50000>,
     params<long long, short, hipcub::Sum, 1000, 10000, long long>,
-    params<unsigned long long, unsigned long long, hipcub::Sum, 100000, 100000>
-#ifdef __HIP_PLATFORM_AMD__
-    ,
-    // Kernel doesn't work on NVidia.
+    params<unsigned long long, unsigned long long, hipcub::Sum, 100000, 100000>,
     // Sum for half and bfloat will result in values too big due to limited range.
     params<test_utils::half, test_utils::half, hipcub::Max, 3, 100>,
-    params<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 20, 100>
-#endif
-    >
+    params<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 20, 100>>
     Params;
 
 TYPED_TEST_SUITE(HipcubDeviceReduceByKey, Params);

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,14 +27,17 @@
  *
  ******************************************************************************/
 
-
 #include "hipcub/thread/thread_load.hpp"
 #include "hipcub/thread/thread_store.hpp"
 #include "hipcub/thread/thread_reduce.hpp"
 #include "hipcub/thread/thread_scan.hpp"
 #include "hipcub/thread/thread_search.hpp"
 
+#include "test_utils_bfloat16.hpp"
+#include "test_utils_half.hpp"
+
 #include "common_test_header.hpp"
+#include <ostream>
 
 template<
     class T,
@@ -78,9 +81,11 @@ typedef ::testing::Types<
     params<uint16_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
     params<uint32_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
     params<uint64_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
+    params<test_utils::bfloat16, hipcub::LOAD_CV, hipcub::STORE_WB>,
+    params<test_utils::half, hipcub::LOAD_CV, hipcub::STORE_WB>,
     params<test_utils::custom_test_type<uint64_t>, hipcub::LOAD_CV, hipcub::STORE_WB>,
-    params<test_utils::custom_test_type<double>, hipcub::LOAD_CV, hipcub::STORE_WB>
-> ThreadOperationTestParams;
+    params<test_utils::custom_test_type<double>, hipcub::LOAD_CV, hipcub::STORE_WB>>
+    ThreadOperationTestParams;
 
 TYPED_TEST_SUITE(HipcubThreadOperationTests, ThreadOperationTestParams);
 
@@ -98,7 +103,9 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::type;
+    using T        = typename TestFixture::type;
+    using native_T = test_utils::convert_to_native_t<T>;
+
     constexpr hipcub::CacheLoadModifier Modifier = TestFixture::load_modifier;
 
     constexpr uint32_t block_size = 256;
@@ -111,7 +118,15 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 100, seed_value);
+        std::vector<native_T> input_native
+            = test_utils::get_random_data<native_T>(size, 2, 100, seed_value);
+        std::vector<T> input(size);
+
+        for(size_t i = 0; i < size; i++)
+        {
+            input[i] = test_utils::convert_to_device<T>(input_native[i]);
+        }
+
         std::vector<T> output(size);
 
         // Calculate expected results on host
@@ -145,7 +160,7 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
         // Verifying results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(static_cast<native_T>(output[i]), static_cast<native_T>(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -167,7 +182,9 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::type;
+    using T        = typename TestFixture::type;
+    using native_T = test_utils::convert_to_native_t<T>;
+
     constexpr hipcub::CacheStoreModifier Modifier = TestFixture::store_modifier;
     constexpr uint32_t block_size = 256;
     constexpr uint32_t grid_size = 128;
@@ -179,7 +196,15 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 100, seed_value);
+        std::vector<native_T> input_native
+            = test_utils::get_random_data<native_T>(size, 2, 100, seed_value);
+        std::vector<T> input(size);
+
+        for(size_t i = 0; i < size; i++)
+        {
+            input[i] = test_utils::convert_to_device<T>(input_native[i]);
+        }
+
         std::vector<T> output(size);
 
         // Calculate expected results on host
@@ -213,7 +238,7 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
         // Verifying results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(static_cast<native_T>(output[i]), static_cast<native_T>(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -246,7 +271,9 @@ TYPED_TEST(HipcubThreadOperationTests, Reduction)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::type;
+    using T        = typename TestFixture::type;
+    using native_T = test_utils::convert_to_native_t<T>;
+
     constexpr uint32_t length = 4;
     constexpr uint32_t block_size = 128 / length;
     constexpr uint32_t grid_size = 128;
@@ -259,7 +286,15 @@ TYPED_TEST(HipcubThreadOperationTests, Reduction)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 100, seed_value);
+        std::vector<native_T> input_native
+            = test_utils::get_random_data<native_T>(size, 2, 100, seed_value);
+        std::vector<T> input(size);
+
+        for(size_t i = 0; i < size; i++)
+        {
+            input[i] = test_utils::convert_to_device<T>(input_native[i]);
+        }
+
         std::vector<T> output(size);
         std::vector<T> expected(size);
 
@@ -277,7 +312,6 @@ TYPED_TEST(HipcubThreadOperationTests, Reduction)
                 expected[offset] = result;
             }
         }
-        //std::vector<T> expected = input;
 
         // Preparing device
         T* device_input;
@@ -307,8 +341,7 @@ TYPED_TEST(HipcubThreadOperationTests, Reduction)
         // Verifying results
         for(size_t i = 0; i < output.size(); i+=length)
         {
-            //std::cout << "i: " << i << " " << expected[i] << " - " << output[i] << std::endl;
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(static_cast<native_T>(output[i]), static_cast<native_T>(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -334,7 +367,9 @@ TYPED_TEST(HipcubThreadOperationTests, Scan)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::type;
+    using T        = typename TestFixture::type;
+    using native_T = test_utils::convert_to_native_t<T>;
+
     constexpr uint32_t length = 4;
     constexpr uint32_t block_size = 128 / length;
     constexpr uint32_t grid_size = 128;
@@ -347,7 +382,15 @@ TYPED_TEST(HipcubThreadOperationTests, Scan)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 100, seed_value);
+        std::vector<native_T> input_native
+            = test_utils::get_random_data<native_T>(size, 2, 100, seed_value);
+        std::vector<T> input(size);
+
+        for(size_t i = 0; i < size; i++)
+        {
+            input[i] = test_utils::convert_to_device<T>(input_native[i]);
+        }
+
         std::vector<T> output(size);
         std::vector<T> expected(size);
 
@@ -395,8 +438,7 @@ TYPED_TEST(HipcubThreadOperationTests, Scan)
         // Verifying results
         for(size_t i = 0; i < output.size(); i++)
         {
-            //std::cout << "i: " << i << " " << input[i] << " - " << expected[i] << " - " << output[i] << std::endl;
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(static_cast<native_T>(output[i]), static_cast<native_T>(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -429,8 +471,10 @@ TYPED_TEST(HipcubThreadOperationTests, Bounds)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::type;
-    using OffsetT = uint32_t;
+    using T        = typename TestFixture::type;
+    using native_T = test_utils::convert_to_native_t<T>;
+    using OffsetT  = uint32_t;
+
     constexpr uint32_t block_size = 256;
     constexpr uint32_t grid_size = 1;
 
@@ -440,7 +484,7 @@ TYPED_TEST(HipcubThreadOperationTests, Bounds)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         uint32_t num_items = test_utils::get_random_value(1, 12, seed_value);
-        T val = test_utils::get_random_value(2, 100, seed_value);
+        T val = test_utils::convert_to_device<T>(test_utils::get_random_value(2, 100, seed_value));
 
         uint32_t size = block_size * grid_size * num_items;
 
@@ -467,7 +511,8 @@ TYPED_TEST(HipcubThreadOperationTests, Bounds)
                 while (local_num_items > 0)
                 {
                     OffsetT half = local_num_items >> 1;
-                    if (input[input_offset + retval + half] < val)
+                    if(static_cast<native_T>(input[input_offset + retval + half])
+                       < static_cast<native_T>(val))
                     {
                         retval = retval + (half + 1);
                         local_num_items = local_num_items - (half + 1);
@@ -485,7 +530,8 @@ TYPED_TEST(HipcubThreadOperationTests, Bounds)
                 while (local_num_items > 0)
                 {
                     OffsetT half = local_num_items >> 1;
-                    if (val < input[input_offset + retval + half])
+                    if(static_cast<native_T>(val)
+                       < static_cast<native_T>(input[input_offset + retval + half]))
                     {
                         local_num_items = half;
                     }
@@ -542,8 +588,10 @@ TYPED_TEST(HipcubThreadOperationTests, Bounds)
         // Verifying results
         for(size_t i = 0; i < output_lower_bound.size(); i++)
         {
-            ASSERT_EQ(output_lower_bound[i], expected_lower_bound[i]);
-            ASSERT_EQ(output_upper_bound[i], expected_upper_bound[i]);
+            ASSERT_EQ(static_cast<native_T>(output_lower_bound[i]),
+                      static_cast<native_T>(expected_lower_bound[i]));
+            ASSERT_EQ(static_cast<native_T>(output_upper_bound[i]),
+                      static_cast<native_T>(expected_upper_bound[i]));
         }
 
         HIP_CHECK(hipFree(device_input));

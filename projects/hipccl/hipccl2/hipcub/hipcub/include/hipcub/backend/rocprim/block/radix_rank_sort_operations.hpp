@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2020, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -35,13 +35,13 @@
  #ifndef HIPCUB_ROCPRIM_BLOCK_RADIX_RANK_SORT_OPERATIONS_HPP_
  #define HIPCUB_ROCPRIM_BLOCK_RADIX_RANK_SORT_OPERATIONS_HPP_
 
-#include <type_traits>
-
 #include "../../../config.hpp"
 
- #include <rocprim/config.hpp>
- #include <rocprim/type_traits.hpp>
- #include <rocprim/detail/various.hpp>
+#include <rocprim/config.hpp>
+#include <rocprim/detail/various.hpp>
+#include <rocprim/type_traits.hpp>
+
+#include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
 

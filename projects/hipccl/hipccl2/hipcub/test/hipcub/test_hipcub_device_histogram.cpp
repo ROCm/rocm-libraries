@@ -135,9 +135,7 @@ typedef ::testing::Types<params1<int, 10, 0, 10>,
                          params1<unsigned char, 10, 20, 240, unsigned char, unsigned int>,
                          params1<unsigned char, 256, 0, 256, short>,
                          params1<test_utils::half, 55, -123, +123, test_utils::half>,
-#ifndef __HIP_PLATFORM_NVIDIA__
                          params1<test_utils::bfloat16, 55, -123, +123, test_utils::bfloat16>,
-#endif
                          params1<double, 10, 0, 1000, double, int>,
                          params1<int, 123, 100, 5635, int>,
                          params1<double, 55, -123, +123, double>>
@@ -347,9 +345,7 @@ typedef ::testing::Types<
     params2<unsigned short, 65536, 0, 1, 1, int>,
     params2<unsigned char, 256, 0, 1, 1, unsigned short>,
     params2<test_utils::half, 3, 10000, 1000, 1000, test_utils::half, unsigned int>,
-#ifndef __HIP_PLATFORM_NVIDIA__
     params2<test_utils::bfloat16, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
-#endif
     params2<float, 456, -100, 1, 123>,
     params2<double, 3, 10000, 1000, 1000, double, unsigned int>>
     Params2;
@@ -574,9 +570,7 @@ typedef ::testing::Types<params3<int, 4, 3, 2000, 0, 2000>,
                          params3<unsigned char, 3, 1, 10, 20, 240, unsigned char, unsigned int>,
                          params3<unsigned char, 2, 2, 256, 0, 256, short>,
                          params3<test_utils::half, 4, 3, 55, -123, +123, test_utils::half>,
-#ifndef __HIP_PLATFORM_NVIDIA__
                          params3<test_utils::bfloat16, 4, 3, 55, -123, +123, test_utils::bfloat16>,
-#endif
                          params3<double, 4, 2, 10, 0, 1000, double, int>,
                          params3<int, 3, 2, 123, 100, 5635, int>,
                          params3<double, 4, 3, 55, -123, +123, double>>
@@ -871,9 +865,7 @@ typedef ::testing::Types<
     params4<unsigned short, 4, 4, 65536, 0, 1, 1, int>,
     params4<unsigned char, 3, 2, 256, 0, 1, 1, unsigned short>,
     params4<test_utils::half, 3, 1, 3, 10000, 1000, 1000, test_utils::half, unsigned int>,
-#ifndef __HIP_PLATFORM_NVIDIA__
     params4<test_utils::bfloat16, 3, 1, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
-#endif
     params4<float, 4, 2, 456, -100, 1, 123>,
     params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>>
     Params4;

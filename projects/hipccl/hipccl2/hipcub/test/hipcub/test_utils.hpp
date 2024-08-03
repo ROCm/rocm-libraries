@@ -139,20 +139,6 @@ struct select_plus_operator_host
     typedef T                acc_type;
 };
 
-template<>
-struct select_plus_operator_host<test_utils::half>
-{
-    typedef test_utils::plus type;
-    typedef double           acc_type;
-};
-
-template<>
-struct select_plus_operator_host<test_utils::bfloat16>
-{
-    typedef test_utils::plus type;
-    typedef double           acc_type;
-};
-
 template<class InputIt, class OutputIt, class BinaryOperation, class acc_type>
 OutputIt host_inclusive_scan_impl(
     InputIt first, InputIt last, OutputIt d_first, BinaryOperation op, acc_type)

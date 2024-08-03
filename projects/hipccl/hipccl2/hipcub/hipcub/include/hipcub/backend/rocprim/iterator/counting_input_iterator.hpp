@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,28 +30,43 @@
 #ifndef HIPCUB_ROCPRIM_ITERATOR_COUNTING_INPUT_ITERATOR_HPP_
 #define HIPCUB_ROCPRIM_ITERATOR_COUNTING_INPUT_ITERATOR_HPP_
 
-#include <iterator>
-#include <iostream>
-
 #include "../../../config.hpp"
+
+#include "iterator_category.hpp"
+#include "iterator_wrapper.hpp"
 
 #include <rocprim/iterator/counting_iterator.hpp>
 
-#if (THRUST_VERSION >= 100700)
-    // This iterator is compatible with Thrust API 1.7 and newer
-    #include <thrust/iterator/iterator_facade.h>
-    #include <thrust/iterator/iterator_traits.h>
-#endif // THRUST_VERSION
+#include <iterator>
 
 BEGIN_HIPCUB_NAMESPACE
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
-template<
-    typename ValueType,
-    typename OffsetT = std::ptrdiff_t
->
-using CountingInputIterator = ::rocprim::counting_iterator<ValueType, OffsetT>;
+template<class Incrementable, class Difference = std::ptrdiff_t>
+class CountingInputIterator
+    : public detail::IteratorWrapper<rocprim::counting_iterator<Incrementable, Difference>,
+                                     CountingInputIterator<Incrementable, Difference>>
+{
+    using Iterator = rocprim::counting_iterator<Incrementable, Difference>;
+    using Base
+        = detail::IteratorWrapper<Iterator, CountingInputIterator<Incrementable, Difference>>;
+
+public:
+    using iterator_category = typename detail::IteratorCategory<typename Iterator::value_type,
+                                                                typename Iterator::reference>::type;
+    using self_type         = typename Iterator::self_type;
+
+    __host__ __device__ __forceinline__ CountingInputIterator(
+        const typename Iterator::value_type value)
+        : Base(Iterator(value))
+    {}
+
+    // Cast from wrapped iterator to class itself
+    __host__ __device__ __forceinline__ explicit CountingInputIterator(Iterator iterator)
+        : Base(iterator)
+    {}
+};
 
 #endif
 

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,19 +30,13 @@
 #ifndef HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
 #define HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
 
-#include <iterator>
-#include <iostream>
-
 #include "../../../config.hpp"
 
-#if (THRUST_VERSION >= 100700)
-    // This iterator is compatible with Thrust API 1.7 and newer
-    #include <thrust/iterator/iterator_facade.h>
-    #include <thrust/iterator/iterator_traits.h>
-#endif // THRUST_VERSION
-
+#include "iterator_category.hpp"
 
 #include <rocprim/iterator/texture_cache_iterator.hpp>
+
+#include <iterator>
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -52,7 +46,12 @@ template<
 >
 class TexObjInputIterator : public ::rocprim::texture_cache_iterator<T, OffsetT>
 {
-    public:
+public:
+    using iterator_category = typename detail::IteratorCategory<
+        typename rocprim::texture_cache_iterator<T, OffsetT>::value_type,
+        typename rocprim::texture_cache_iterator<T, OffsetT>::reference,
+        false>::type; ///< The iterator category
+
     template<class Qualified>
     inline
     hipError_t BindTexture(Qualified* ptr,
@@ -70,17 +69,14 @@ class TexObjInputIterator : public ::rocprim::texture_cache_iterator<T, OffsetT>
     HIPCUB_HOST_DEVICE inline
     ~TexObjInputIterator() = default;
 
-    HIPCUB_HOST_DEVICE inline
-    TexObjInputIterator() : ::rocprim::texture_cache_iterator<T, OffsetT>()
-    {
-    }
+    HIPCUB_HOST_DEVICE inline TexObjInputIterator()
+        : ::rocprim::texture_cache_iterator<T, OffsetT>()
+    {}
 
-    HIPCUB_HOST_DEVICE inline
-    TexObjInputIterator(const ::rocprim::texture_cache_iterator<T, OffsetT> other)
+    HIPCUB_HOST_DEVICE inline TexObjInputIterator(
+        const ::rocprim::texture_cache_iterator<T, OffsetT> other)
         : ::rocprim::texture_cache_iterator<T, OffsetT>(other)
-    {
-    }
-
+    {}
 };
 
 END_HIPCUB_NAMESPACE

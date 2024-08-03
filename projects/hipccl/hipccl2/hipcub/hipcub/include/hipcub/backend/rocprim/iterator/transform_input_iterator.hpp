@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,31 +30,53 @@
 #ifndef HIPCUB_ROCPRIM_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
 #define HIPCUB_ROCPRIM_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
 
-#include <iterator>
-#include <iostream>
-
 #include "../../../config.hpp"
 
+#include "iterator_category.hpp"
+#include "iterator_wrapper.hpp"
+
 #include <rocprim/iterator/transform_iterator.hpp>
+#include <rocprim/type_traits.hpp>
 
-#if (THRUST_VERSION >= 100700)
-    // This iterator is compatible with Thrust API 1.7 and newer
-    #include <thrust/iterator/iterator_facade.h>
-    #include <thrust/iterator/iterator_traits.h>
-#endif // THRUST_VERSION
-
+#include <cstddef>
+#include <iterator>
+#include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
-template<
-    typename ValueType,
-    typename ConversionOp,
-    typename InputIteratorT,
-    typename OffsetT = std::ptrdiff_t // ignored
->
-using TransformInputIterator = ::rocprim::transform_iterator<InputIteratorT, ConversionOp, ValueType>;
+template<class ValueType,
+         class ConversionOp,
+         class InputIteratorT,
+         class OffsetT = std::ptrdiff_t // ignored
+         >
+class TransformInputIterator
+    : public detail::IteratorWrapper<
+          rocprim::transform_iterator<InputIteratorT, ConversionOp, ValueType>,
+          TransformInputIterator<ValueType, ConversionOp, InputIteratorT, OffsetT>>
+{
+    using Iterator = rocprim::transform_iterator<InputIteratorT, ConversionOp, ValueType>;
+    using Base     = detail::IteratorWrapper<
+        Iterator,
+        TransformInputIterator<ValueType, ConversionOp, InputIteratorT, OffsetT>>;
+
+public:
+    using iterator_category = typename detail::IteratorCategory<typename Iterator::value_type,
+                                                                typename Iterator::reference>::type;
+    using self_type         = typename Iterator::self_type;
+    using unary_function = typename Iterator::unary_function;
+
+    __host__ __device__ __forceinline__ TransformInputIterator(InputIteratorT iterator,
+                                                             ConversionOp   transform)
+        : Base(Iterator(iterator, transform))
+    {}
+
+    // Cast from wrapped iterator to class itself
+    __host__ __device__ __forceinline__ explicit TransformInputIterator(Iterator iterator)
+        : Base(iterator)
+    {}
+};
 
 #endif
 

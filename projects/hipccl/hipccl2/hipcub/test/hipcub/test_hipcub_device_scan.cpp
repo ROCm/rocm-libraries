@@ -66,13 +66,9 @@ typedef ::testing::Types<DeviceScanParams<int, long>,
                          DeviceScanParams<unsigned long long, unsigned long long, hipcub::Min>,
                          DeviceScanParams<unsigned long>,
                          DeviceScanParams<short, float, hipcub::Max>,
-                         DeviceScanParams<int, double>
-#ifdef __HIP_PLATFORM_AMD__
-                         ,
+                         DeviceScanParams<int, double>,
                          DeviceScanParams<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max>,
-                         DeviceScanParams<test_utils::half, test_utils::half, hipcub::Max>
-#endif
-                         >
+                         DeviceScanParams<test_utils::half, test_utils::half, hipcub::Max>>
     HipcubDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()

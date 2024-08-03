@@ -30,17 +30,14 @@
 #ifndef HIPCUB_ROCPRIM_ITERATOR_CACHE_MODIFIED_INPUT_ITERATOR_HPP_
 #define HIPCUB_ROCPRIM_ITERATOR_CACHE_MODIFIED_INPUT_ITERATOR_HPP_
 
-#include <iterator>
-#include <iostream>
+#include "../../../config.hpp"
 
 #include "../thread/thread_load.hpp"
 #include "../util_type.hpp"
 
-#if (THRUST_VERSION >= 100700)
-    // This iterator is compatible with Thrust API 1.7 and newer
-    #include <thrust/iterator/iterator_facade.h>
-    #include <thrust/iterator/iterator_traits.h>
-#endif // THRUST_VERSION
+#include "iterator_category.hpp"
+
+#include <iostream>
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -51,14 +48,16 @@ template <
 class CacheModifiedInputIterator
 {
 public:
-
     // Required iterator traits
-    typedef CacheModifiedInputIterator          self_type;              ///< My own type
-    typedef OffsetT                             difference_type;        ///< Type to express the result of subtracting one iterator from another
-    typedef ValueType                           value_type;             ///< The type of the element the iterator can point to
-    typedef ValueType*                          pointer;                ///< The type of a pointer to an element the iterator can point to
-    typedef ValueType                           reference;              ///< The type of a reference to an element the iterator can point to
-    typedef std::random_access_iterator_tag     iterator_category;      ///< The iterator category
+    using self_type = CacheModifiedInputIterator; ///< My own type
+    using difference_type
+        = OffsetT; ///< Type to express the result of subtracting one iterator from another
+    using value_type = ValueType; ///< The type of the element the iterator can point to
+    using pointer = ValueType*; ///< The type of a pointer to an element the iterator can point to
+    using reference
+        = ValueType; ///< The type of a reference to an element the iterator can point to
+    using iterator_category = typename detail::IteratorCategory<value_type, reference, false>::
+        type; ///< The iterator category
 
 public:
 

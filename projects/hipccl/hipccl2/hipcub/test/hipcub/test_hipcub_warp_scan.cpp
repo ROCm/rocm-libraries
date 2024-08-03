@@ -67,6 +67,24 @@ typedef ::testing::Types<
 #ifdef __HIP_PLATFORM_AMD__
     params<float, 64U>,
 #endif
+    // Half
+    params<test_utils::half, 2U>,
+    params<test_utils::half, 4U>,
+    params<test_utils::half, 8U>,
+    params<test_utils::half, 16U>,
+    params<test_utils::half, 32U>,
+#ifdef __HIP_PLATFORM_AMD__
+    params<test_utils::half, 64U>,
+#endif
+    // Bfloat16
+    params<test_utils::bfloat16, 2U>,
+    params<test_utils::bfloat16, 4U>,
+    params<test_utils::bfloat16, 8U>,
+    params<test_utils::bfloat16, 16U>,
+    params<test_utils::bfloat16, 32U>,
+#ifdef __HIP_PLATFORM_AMD__
+    params<test_utils::bfloat16, 64U>,
+#endif
     // shared memory scan
     // Integer
     params<int, 3U>,
@@ -81,10 +99,12 @@ typedef ::testing::Types<
     params<float, 7U>,
     params<float, 15U>
 #ifdef __HIP_PLATFORM_AMD__
-    ,params<float, 37U>,
+    ,
+    params<float, 37U>,
     params<float, 61U>
 #endif
-> HipcubWarpScanTestParams;
+    >
+    HipcubWarpScanTestParams;
 
 TYPED_TEST_SUITE(HipcubWarpScanTests, HipcubWarpScanTestParams);
 
@@ -168,7 +188,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
         std::vector<T> output(size);
-        std::vector<T> expected(output.size(), 0);
+        std::vector<T> expected(output.size());
 
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -332,8 +352,8 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
         std::vector<T> output(size);
         std::vector<T> output_reductions(size / logical_warp_size);
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected(output.size());
+        std::vector<T> expected_reductions(output_reductions.size());
 
         // Calculate expected results on host
         for(size_t i = 0; i < output.size() / logical_warp_size; i++)
@@ -498,8 +518,9 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
         std::vector<T> output(size);
-        std::vector<T> expected(input.size(), 0);
-        const T init = test_utils::get_random_value(0, 100, seed_value + seed_value_addition);
+        std::vector<T> expected(input.size());
+        const T        init = static_cast<T>(
+            test_utils::get_random_value(0, 100, seed_value + seed_value_addition));
 
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -658,9 +679,10 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
         std::vector<T> output(size);
         std::vector<T> output_reductions(size / logical_warp_size);
-        std::vector<T> expected(input.size(), 0);
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
-        const T init = test_utils::get_random_value(0, 100, seed_value + seed_value_addition);
+        std::vector<T> expected(input.size());
+        std::vector<T> expected_reductions(output_reductions.size());
+        const T        init = static_cast<T>(
+            test_utils::get_random_value(0, 100, seed_value + seed_value_addition));
 
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -843,9 +865,10 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
         std::vector<T> output_inclusive(size);
         std::vector<T> output_exclusive(size);
-        std::vector<T> expected_inclusive(output_inclusive.size(), 0);
-        std::vector<T> expected_exclusive(output_exclusive.size(), 0);
-        const T init = test_utils::get_random_value(0, 100, seed_value + seed_value_addition);
+        std::vector<T> expected_inclusive(output_inclusive.size());
+        std::vector<T> expected_exclusive(output_exclusive.size());
+        const T        init = static_cast<T>(
+            test_utils::get_random_value(0, 100, seed_value + seed_value_addition));
 
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -1002,7 +1025,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
         // Generate data
         std::vector<T> input(size);
         std::vector<T> output(size);
-        std::vector<T> expected(output.size(), 0);
+        std::vector<T> expected(output.size());
 
         // Initializing input data
         {
@@ -1018,7 +1041,9 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
         // Calculate expected results on host
         for(size_t i = 0; i < input.size() / logical_warp_size; i++)
         {
-            acc_type accumulator(0);
+            acc_type accumulator;
+            accumulator.x = 0;
+            accumulator.y = 0;
             for(size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;

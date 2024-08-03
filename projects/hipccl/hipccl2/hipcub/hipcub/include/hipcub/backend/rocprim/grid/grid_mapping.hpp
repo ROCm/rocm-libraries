@@ -29,10 +29,10 @@
 #ifndef HIPCUB_ROCPRIM_GRID_GRID_MAPPING_HPP_
 #define HIPCUB_ROCPRIM_GRID_GRID_MAPPING_HPP_
 
-#include <type_traits>
-
 #include "../../../config.hpp"
 #include "../../../thread/thread_load.hpp"
+
+#include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
 

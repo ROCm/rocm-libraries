@@ -30,9 +30,6 @@
 #ifndef HIPCUB_ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HPP_
 #define HIPCUB_ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HPP_
 
-#include <limits>
-#include <iterator>
-
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
 
@@ -43,6 +40,9 @@
 #include "rocprim/type_traits.hpp"
 
 #include <rocprim/device/device_segmented_reduce.hpp>
+
+#include <iterator>
+#include <limits>
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -77,8 +77,11 @@ __global__ __launch_bounds__(
     const unsigned int flat_id    = ::rocprim::detail::block_thread_id<0>();
     const unsigned int segment_id = ::rocprim::detail::block_id<0>();
 
-    const unsigned int begin_offset = begin_offsets[segment_id];
-    const unsigned int end_offset   = end_offsets[segment_id];
+    // Large indices need bigger offset type than unsigned int
+    using offset_type = typename std::iterator_traits<OffsetIterator>::value_type;
+
+    const offset_type begin_offset = begin_offsets[segment_id];
+    const offset_type end_offset   = end_offsets[segment_id];
 
     // transform the segment output
     if(flat_id == 0)

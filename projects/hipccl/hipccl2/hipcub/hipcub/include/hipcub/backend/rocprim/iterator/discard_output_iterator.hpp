@@ -30,17 +30,14 @@
 #ifndef HIPCUB_ROCPRIM_ITERATOR_DISCARD_OUTPUT_ITERATOR_HPP_
 #define HIPCUB_ROCPRIM_ITERATOR_DISCARD_OUTPUT_ITERATOR_HPP_
 
+#include "../../../config.hpp"
+
+#include "iterator_category.hpp"
+
 #include <iterator>
 #include <iostream>
 
-#include "../../../config.hpp"
-
 BEGIN_HIPCUB_NAMESPACE
-#if (THRUST_VERSION >= 100700)
-    // This iterator is compatible with Thrust API 1.7 and newer
-    #include <thrust/iterator/iterator_facade.h>
-    #include <thrust/iterator/iterator_traits.h>
-#endif // THRUST_VERSION
 
 /**
  * \addtogroup UtilIterator
@@ -55,25 +52,15 @@ template <typename OffsetT = ptrdiff_t>
 class DiscardOutputIterator
 {
 public:
-
     // Required iterator traits
-    typedef DiscardOutputIterator   self_type;              ///< My own type
-    typedef OffsetT                 difference_type;        ///< Type to express the result of subtracting one iterator from another
-    typedef void                    value_type;             ///< The type of the element the iterator can point to
-    typedef void                    pointer;                ///< The type of a pointer to an element the iterator can point to
-    typedef void                    reference;              ///< The type of a reference to an element the iterator can point to
-
-#if (THRUST_VERSION >= 100700)
-    // Use Thrust's iterator categories so we can use these iterators in Thrust 1.7 (or newer) methods
-    typedef typename thrust::detail::iterator_facade_category<
-        thrust::any_system_tag,
-        thrust::random_access_traversal_tag,
-        value_type,
-        reference
-      >::type iterator_category;                                        ///< The iterator category
-#else
-    typedef std::random_access_iterator_tag     iterator_category;      ///< The iterator category
-#endif  // THRUST_VERSION
+    using self_type = DiscardOutputIterator; ///< My own type
+    using difference_type
+        = OffsetT; ///< Type to express the result of subtracting one iterator from another
+    using value_type = void; ///< The type of the element the iterator can point to
+    using pointer    = void; ///< The type of a pointer to an element the iterator can point to
+    using reference  = void; ///< The type of a reference to an element the iterator can point to
+    using iterator_category =
+        typename detail::IteratorCategory<value_type, reference>::type; ///< The iterator category
 
 private:
 
