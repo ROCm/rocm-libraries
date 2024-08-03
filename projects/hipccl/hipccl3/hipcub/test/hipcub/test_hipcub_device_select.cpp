@@ -53,13 +53,9 @@ public:
 };
 
 typedef ::testing::Types<DeviceSelectParams<int, long>,
-                         DeviceSelectParams<unsigned char, float>
-#ifdef __HIP_PLATFORM_AMD__
-                         ,
+                         DeviceSelectParams<unsigned char, float>,
                          DeviceSelectParams<test_utils::half, test_utils::half>,
-                         DeviceSelectParams<test_utils::bfloat16, test_utils::bfloat16>
-#endif
-                         >
+                         DeviceSelectParams<test_utils::bfloat16, test_utils::bfloat16>>
     HipcubDeviceSelectTestsParams;
 
 std::vector<size_t> get_sizes()

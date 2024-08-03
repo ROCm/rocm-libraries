@@ -300,10 +300,8 @@ struct custom_op2
 typedef ::testing::Types<params_subtract<unsigned int, int, hipcub::Sum, 64U, 1>,
                          params_subtract<int, bool, custom_op1, 128U, 1>,
                          params_subtract<float, int, custom_op2, 256U, 1>,
-#ifndef __HIP_PLATFORM_NVIDIA__
                          params_subtract<test_utils::half, int, custom_op1, 256U, 1>,
                          params_subtract<test_utils::bfloat16, int, custom_op2, 256U, 1>,
-#endif
                          params_subtract<int, bool, custom_op1, 256U, 1>,
 
                          params_subtract<float, int, hipcub::Sum, 37U, 1>,

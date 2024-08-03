@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -460,6 +460,24 @@ inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
         std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
     }
     return data;
+}
+
+inline std::vector<size_t> get_large_sizes(int seed_value)
+{
+    // clang-format off
+    std::vector<size_t> sizes = {
+        (size_t{1} << 32) - 1, size_t{1} << 32,
+        (size_t{1} << 35) - 1, size_t{1} << 35
+    };
+    // clang-format on
+    const std::vector<size_t> random_sizes
+        = test_utils::get_random_data<size_t>(2,
+                                              (size_t{1} << 30) + 1,
+                                              (size_t{1} << 35) - 2,
+                                              seed_value);
+    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
+    std::sort(sizes.begin(), sizes.end());
+    return sizes;
 }
 
 } // namespace test_utils

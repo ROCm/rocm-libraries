@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,16 +30,17 @@
 #ifndef HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
 #define HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
 
-#include <limits>
-#include <type_traits>
-
 #include "../../config.hpp"
 
 #include <rocprim/detail/various.hpp>
+#include <rocprim/thread/radix_key_codec.hpp>
 #include <rocprim/types/future_value.hpp>
 
 #include <hip/hip_fp16.h>
 #include <hip/hip_bfloat16.h>
+
+#include <limits>
+#include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -454,15 +455,16 @@ struct BaseTraits<UNSIGNED_INTEGER, true, false, _UnsignedBits, T>
         NULL_TYPE       = false,
     };
 
+    using key_codec = rocprim::radix_key_codec<T>;
 
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
     {
-        return key;
+        return key_codec::encode(rocprim::detail::bit_cast<T>(key));
     }
 
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
     {
-        return key;
+        return key_codec::decode(rocprim::detail::bit_cast<T>(key));
     }
 
     static HIPCUB_HOST_DEVICE __forceinline__ T Max()
@@ -502,14 +504,16 @@ struct BaseTraits<SIGNED_INTEGER, true, false, _UnsignedBits, T>
         NULL_TYPE       = false,
     };
 
+    using key_codec = rocprim::radix_key_codec<T>;
+
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
     {
-        return key ^ HIGH_BIT;
+        return key_codec::encode(rocprim::detail::bit_cast<T>(key));
     };
 
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
     {
-        return key ^ HIGH_BIT;
+        return key_codec::decode(rocprim::detail::bit_cast<T>(key));
     };
 
     static HIPCUB_HOST_DEVICE __forceinline__ T Max()
@@ -593,6 +597,8 @@ struct BaseTraits<FLOATING_POINT, true, false, _UnsignedBits, T>
     static const UnsignedBits   LOWEST_KEY  = UnsignedBits(-1);
     static const UnsignedBits   MAX_KEY     = UnsignedBits(-1) ^ HIGH_BIT;
 
+    using key_codec = rocprim::radix_key_codec<T>;
+
     enum
     {
         PRIMITIVE       = true,
@@ -601,14 +607,12 @@ struct BaseTraits<FLOATING_POINT, true, false, _UnsignedBits, T>
 
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
     {
-        UnsignedBits mask = (key & HIGH_BIT) ? UnsignedBits(-1) : HIGH_BIT;
-        return key ^ mask;
+        return key_codec::encode(rocprim::detail::bit_cast<T>(key));
     };
 
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
     {
-        UnsignedBits mask = (key & HIGH_BIT) ? HIGH_BIT : UnsignedBits(-1);
-        return key ^ mask;
+        return key_codec::decode(rocprim::detail::bit_cast<T>(key));
     };
 
     static HIPCUB_HOST_DEVICE __forceinline__ T Max() {
@@ -655,14 +659,16 @@ struct NumericTraits<__uint128_t>
     static constexpr bool PRIMITIVE = false;
     static constexpr bool NULL_TYPE = false;
 
+    using key_codec = rocprim::radix_key_codec<T>;
+
     static __host__ __device__ __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
     {
-        return key;
+        return key_codec::encode(rocprim::detail::bit_cast<T>(key));
     }
 
     static __host__ __device__ __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
     {
-        return key;
+        return key_codec::decode(rocprim::detail::bit_cast<T>(key));
     }
 
     static __host__ __device__ __forceinline__ T Max()
@@ -690,14 +696,16 @@ struct NumericTraits<__int128_t>
     static constexpr bool PRIMITIVE = false;
     static constexpr bool NULL_TYPE = false;
 
+    using key_codec = rocprim::radix_key_codec<T>;
+
     static __host__ __device__ __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
     {
-        return key ^ HIGH_BIT;
+        return key_codec::encode(rocprim::detail::bit_cast<T>(key));
     };
 
     static __host__ __device__ __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
     {
-        return key ^ HIGH_BIT;
+        return key_codec::decode(rocprim::detail::bit_cast<T>(key));
     };
 
     static __host__ __device__ __forceinline__ T Max()

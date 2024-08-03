@@ -27,6 +27,7 @@
 #include "hipcub/iterator/counting_input_iterator.hpp"
 #include "hipcub/iterator/discard_output_iterator.hpp"
 #include "hipcub/iterator/transform_input_iterator.hpp"
+#include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"
 
 template <class InputIteratorT, class OutputIteratorT, class... Args>
@@ -134,14 +135,9 @@ typedef ::testing::Types<params<int>,
                          params<int, double>,
                          params<int8_t, int8_t, true, false>,
                          params<float, float, false, true>,
-                         params<double, double, true, true>
-#ifndef __HIP_PLATFORM_NVIDIA__
-                         ,
-                         // Kernel doesn't work on NVidia.
+                         params<double, double, true, true>,
                          params<test_utils::half, test_utils::half>,
-                         params<test_utils::bfloat16, test_utils::bfloat16>
-#endif
-                         >
+                         params<test_utils::bfloat16, test_utils::bfloat16>>
     Params;
 
 std::vector<size_t> get_sizes()
@@ -149,24 +145,6 @@ std::vector<size_t> get_sizes()
     std::vector<size_t> sizes = { 1, 10, 53, 211, 1024, 2345, 4096, 34567, (1 << 16) - 1220, (1 << 23) - 76543 };
     const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(10, 1, 100000, rand());
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    return sizes;
-}
-
-std::vector<size_t> get_large_sizes(int seed_value)
-{
-    // clang-format off
-    std::vector<size_t> sizes = {
-        (size_t{1} << 32) - 1, size_t{1} << 32,
-        (size_t{1} << 35) - 1, size_t{1} << 35
-    };
-    // clang-format on
-    const std::vector<size_t> random_sizes
-        = test_utils::get_random_data<size_t>(2,
-                                              (size_t{1} << 30) + 1,
-                                              (size_t{1} << 35) - 2,
-                                              seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    std::sort(sizes.begin(), sizes.end());
     return sizes;
 }
 
@@ -386,7 +364,7 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        const std::vector<size_t> sizes = get_large_sizes(seed_value);
+        const std::vector<size_t> sizes = test_utils::get_large_sizes(seed_value);
 
         for(const auto size : sizes)
         {

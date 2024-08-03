@@ -63,6 +63,27 @@ typedef ::testing::Types<
 #ifdef __HIP_PLATFORM_AMD__
     params<float, 64U>,
 #endif
+    // half
+    params<test_utils::half, 1U>,
+    params<test_utils::half, 2U>,
+    params<test_utils::half, 4U>,
+    params<test_utils::half, 8U>,
+    params<test_utils::half, 16U>,
+    params<test_utils::half, 32U>,
+#ifdef __HIP_PLATFORM_AMD__
+    params<test_utils::half, 64U>,
+#endif
+    // bfloat16
+    params<test_utils::bfloat16, 1U>,
+    params<test_utils::bfloat16, 2U>,
+    params<test_utils::bfloat16, 4U>,
+    params<test_utils::bfloat16, 8U>,
+    params<test_utils::bfloat16, 16U>,
+    params<test_utils::bfloat16, 32U>,
+#ifdef __HIP_PLATFORM_AMD__
+    params<test_utils::bfloat16, 64U>,
+#endif
+
     // shared memory reduce
     // Integer
     params<int, 3U>,
@@ -168,8 +189,8 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
-        std::vector<T> output(size / logical_warp_size, 0);
-        std::vector<T> expected(output.size(), 1);
+        std::vector<T> output(size / logical_warp_size);
+        std::vector<T> expected(output.size());
 
         // Calculate expected results on host
         for(size_t i = 0; i < output.size(); i++)
@@ -318,8 +339,8 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
-        std::vector<T> output(size / logical_warp_size, 0);
-        std::vector<T> expected(output.size(), 1);
+        std::vector<T> output(size / logical_warp_size);
+        std::vector<T> expected(output.size());
 
         // Calculate expected results on host
         for(size_t i = 0; i < output.size(); i++)
