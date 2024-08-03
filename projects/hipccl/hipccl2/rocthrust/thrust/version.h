@@ -28,6 +28,12 @@
 
 #pragma once
 
+#include <thrust/detail/config/config.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#include <cuda/version>
+#endif
+
 //  This is the only Thrust header that is guaranteed to
 //  change with every Thrust release.
 //
@@ -41,13 +47,13 @@
 
 /*! \def THRUST_VERSION
  *  \brief The preprocessor macro \p THRUST_VERSION encodes the version
- *         number of the Thrust library.
+ *         number of the Thrust library as MMMmmmpp.
  *
  *         <tt>THRUST_VERSION % 100</tt> is the sub-minor version.
  *         <tt>THRUST_VERSION / 100 % 1000</tt> is the minor version.
  *         <tt>THRUST_VERSION / 100000</tt> is the major version.
  */
-#define THRUST_VERSION 200200
+#define THRUST_VERSION 200302
 
 /*! \def THRUST_MAJOR_VERSION
  *  \brief The preprocessor macro \p THRUST_MAJOR_VERSION encodes the
@@ -73,3 +79,9 @@
  *         Legacy; will be 0 for all future releases.
  */
 #define THRUST_PATCH_NUMBER 0
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+static_assert(THRUST_MAJOR_VERSION == CCCL_MAJOR_VERSION, "");
+static_assert(THRUST_MINOR_VERSION == CCCL_MINOR_VERSION, "");
+static_assert(THRUST_SUBMINOR_VERSION == CCCL_PATCH_VERSION, "");
+#endif

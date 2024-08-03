@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -82,6 +82,3 @@
         auto ptr = function; \
         (void) ptr; \
     } while (0)
-
-#define THRUST_ROCPRIM_NS_PREFIX namespace thrust {   namespace hip_rocprim {
-#define THRUST_ROCPRIM_NS_POSTFIX }  }

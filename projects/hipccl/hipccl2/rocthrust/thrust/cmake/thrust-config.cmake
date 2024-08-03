@@ -78,7 +78,7 @@
 cmake_minimum_required(VERSION 3.15)
 
 # Minimum supported libcudacxx version:
-set(thrust_libcudacxx_version 1.8.0)
+set(thrust_libcudacxx_version "${Thrust_VERSION}")
 
 ################################################################################
 # User variables and APIs. Users can rely on these:
@@ -177,7 +177,7 @@ function(thrust_create_target target_name)
   _thrust_find_backend(${TCT_HOST} REQUIRED)
   _thrust_find_backend(${TCT_DEVICE} REQUIRED)
 
-  # We can just create an INTERFACE IMPORTED targetere instead of going
+  # We can just create an INTERFACE IMPORTED target here instead of going
   # through _thrust_declare_interface_alias as long as we aren't hanging any
   # Thrust/CUB include paths directly on ${target_name}.
   add_library(${target_name} INTERFACE IMPORTED)
@@ -609,7 +609,7 @@ function(thrust_fixup_omp_target omp_target)
   get_target_property(opts ${omp_target} INTERFACE_COMPILE_OPTIONS)
   if (opts MATCHES "\\$<\\$<COMPILE_LANGUAGE:CXX>:([^>]*)>")
     target_compile_options(${omp_target} INTERFACE
-      $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CUDA_COMPILER_ID:NVIDIA>>:-Xcompiler=${CMAKE_MATCH_1}>
+      $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:-Xcompiler=${CMAKE_MATCH_1}>
     )
   endif()
 endfunction()
@@ -699,9 +699,8 @@ if (NOT TARGET Thrust::libcudacxx)
     ${_THRUST_QUIET_FLAG}
     NO_DEFAULT_PATH # Only check the explicit HINTS below:
     HINTS
-      "${_THRUST_INCLUDE_DIR}/dependencies/libcudacxx" # Source layout (GitHub)
-      "${_THRUST_INCLUDE_DIR}/../libcudacxx"           # Source layout (Perforce)
-      "${_THRUST_CMAKE_DIR}/.."                        # Install layout
+      "${_THRUST_INCLUDE_DIR}/../libcudacxx" # Source layout
+      "${_THRUST_CMAKE_DIR}/.."              # Install layout
   )
 
   # A second required search allows externally packaged to be used and fails if

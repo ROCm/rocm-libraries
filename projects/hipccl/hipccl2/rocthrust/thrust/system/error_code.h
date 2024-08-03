@@ -34,6 +34,7 @@ namespace system
 
 
 /*! \addtogroup system_diagnostics
+ *  \ingroup system
  *  \{
  */
 
@@ -519,4 +520,3 @@ THRUST_NAMESPACE_END
 #include <thrust/system/detail/error_category.inl>
 #include <thrust/system/detail/error_code.inl>
 #include <thrust/system/detail/error_condition.inl>
-

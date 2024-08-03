@@ -31,3 +31,5 @@ external_projects_current_project = "rocthrust"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+cpp_id_attributes = ["__device__", "__host__"]

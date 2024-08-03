@@ -126,7 +126,10 @@ public:
     }
 };
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS // skip void specialized implementation
+/*! \cond
+ *  skip void specialized implementation
+ */
+
 template<>
 class memory_resource<void *>
 #ifdef THRUST_STD_MR_NS
@@ -178,7 +181,9 @@ public:
     }
 #endif
 };
-#endif // DOXYGEN_SHOULD_SKIP_THIS
+
+/*! \endcond
+ */
 
 /*! Compares the memory resources for equality, first by identity, then by \p is_equal.
  */
@@ -216,4 +221,3 @@ MR * get_global_resource()
 
 } // end mr
 THRUST_NAMESPACE_END
-

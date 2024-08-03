@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -61,6 +61,56 @@ inline std::string demangle(const char* name)
   return name;
 }
 #endif
+
+/// Safe sign-mixed comparisons, negative values always compare less
+/// than any values of unsigned types (in contrast to the behaviour of the built-in comparison operator)
+/// This is a backport of a C++20 standard library feature to C++14
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<std::is_signed<T>::value == std::is_signed<U>::value || !std::is_integral<T>::value || !std::is_integral<U>::value, bool>
+{
+    return t < u;
+}
+
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<std::is_signed<T>::value && !std::is_signed<U>::value && std::is_integral<T>::value, bool>
+{
+    // U is unsigned
+    return t < 0 || std::make_unsigned_t<T>(t) < u;
+}
+
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<!std::is_signed<T>::value && std::is_signed<U>::value && std::is_integral<U>::value, bool>
+{
+    // T is unsigned U is signed
+    return u >= 0 && t < std::make_unsigned_t<U>(u);
+}
+
+template<class T, class U>
+constexpr bool cmp_greater(T t, U u) noexcept
+{
+    return cmp_less(u, t);
+}
+// Backport of saturate_cast from C++26 to C++14
+// From https://github.com/llvm/llvm-project/blob/52b18430ae105566f26152c0efc63998301b1134/libcxx/include/__numeric/saturation_arithmetic.h#L97
+// licensed under the MIT license
+template<typename Res, typename T>
+constexpr Res saturate_cast(T x) noexcept
+{
+    // Handle overflow
+    if(cmp_less(x , std::numeric_limits<Res>::min()))
+    {
+        return std::numeric_limits<Res>::min();
+    }
+    if(cmp_greater(x, std::numeric_limits<Res>::max()))
+    {
+        return std::numeric_limits<Res>::max();
+    }
+    // No overflow
+    return static_cast<Res>(x);
+}
 
 class UnitTestException
 {
@@ -172,7 +222,7 @@ inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
     std::random_device               rd;
     std::default_random_engine       gen(rd());
     gen.seed(seed);
-    std::uniform_int_distribution<T> distribution(min, max);
+    std::uniform_int_distribution<T> distribution(saturate_cast<T>(min), saturate_cast<T>(max));
     thrust::host_vector<T>           data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
     return data;
@@ -198,7 +248,7 @@ inline thrust::host_vector<unsigned char> get_random_data(size_t size, unsigned 
     std::random_device                 rd;
     std::default_random_engine         gen(rd());
     gen.seed(seed_value);
-    std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
+    std::uniform_int_distribution<int> distribution(static_cast<unsigned int>(min), static_cast<unsigned int>(max));
     thrust::host_vector<unsigned char> data(size);
     std::generate(data.begin(), data.end(), [&]() { return static_cast<unsigned char>(distribution(gen)); });
     return data;

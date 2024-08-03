@@ -30,6 +30,9 @@
 
 #include <utility>
 
+/*! \cond
+ */
+
 /*
 // #include the host system's pointer.h header.
 #define __THRUST_HOST_SYSTEM_POINTER_HEADER <__THRUST_HOST_SYSTEM_ROOT/pointer.h>
@@ -54,7 +57,13 @@
   #include __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
 #undef __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
 
+/*! \endcond
+ */
+
 THRUST_NAMESPACE_BEGIN
+
+/*! \cond
+ */
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -170,6 +179,9 @@ THRUST_INLINE_CONSTANT new_stream_t new_stream{};
 using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::when_all;
 
 ///////////////////////////////////////////////////////////////////////////////
+
+/*! \endcond
+ */
 
 THRUST_NAMESPACE_END
 

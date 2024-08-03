@@ -33,6 +33,7 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
+include(CMakeDependentOption)
 # rocm-cmake contains common cmake code for rocm projects to help
 # setup and install
 include( cmake/FindROCMCmake.cmake )
@@ -82,7 +83,7 @@ option(BUILD_EXAMPLES "Build examples" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
-option(ENABLE_UPSTREAM_TESTS "Enable upstream tests" OFF)
+cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
 #Set the header wrapper OFF by default.
 option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
 
@@ -114,8 +115,6 @@ else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
-
 if (WIN32)
   add_compile_options(-xhip)
   add_compile_definitions(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
@@ -129,7 +128,7 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 # Setup VERSION
-rocm_setup_version(VERSION "3.0.1")
+rocm_setup_version(VERSION "3.3.0")
 
 # Print configuration summary
 include(cmake/Summary.cmake)
@@ -164,6 +163,7 @@ endif()
 
 # Benchmarks
 if(BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
   add_subdirectory(internal/benchmark)
 endif()
 

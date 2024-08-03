@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights meserved.
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -82,6 +82,19 @@ template <class Derived> __host__ __device__
 bool must_perform_optional_synchronization(execution_policy<Derived> &policy)
 {
   return must_perform_optional_stream_synchronization(derived_cast(policy));
+}
+
+template <class Derived>
+__host__ __device__ integral_constant<bool, true> allows_nondeterminism(execution_policy<Derived>&)
+{
+    return {};
+}
+
+template <class Derived>
+__host__ __device__ auto nondeterministic(execution_policy<Derived>& policy)
+    -> decltype(allows_nondeterminism(derived_cast(policy)))
+{
+    return {};
 }
 
 template <class Derived>
@@ -206,7 +219,9 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
     hipStream_t stream = hip_rocprim::stream(policy);
     //
     status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDeviceToDevice, stream);
-    hip_rocprim::synchronize(policy);
+    if(status != hipSuccess)
+        return status;
+    status = hip_rocprim::synchronize(policy);
     return status;
 }
 
@@ -290,9 +305,7 @@ struct transform_input_iterator_t
     {
     }
 
-#if THRUST_CPP_DIALECT >= 2011
   transform_input_iterator_t(const self_t &) = default;
-#endif
 
   // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
   // an explicit copy assignment operator that doesn't try to assign it.

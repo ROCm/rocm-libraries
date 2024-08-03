@@ -94,3 +94,4 @@ template<typename Vector>
   ASSERT_EQUAL(reference, result);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestFunctionalPlaceholdersBitNegate);
+

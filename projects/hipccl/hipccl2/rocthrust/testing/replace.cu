@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,21 +27,21 @@ void TestReplaceSimple(void)
     typedef typename Vector::value_type T;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  2;
+    data[0] =  1; 
+    data[1] =  2; 
     data[2] =  1;
-    data[3] =  3;
-    data[4] =  2;
+    data[3] =  3; 
+    data[4] =  2; 
 
     thrust::replace(data.begin(), data.end(), (T) 1, (T) 4);
     thrust::replace(data.begin(), data.end(), (T) 2, (T) 5);
 
     Vector result(5);
-    result[0] =  4;
-    result[1] =  5;
+    result[0] =  4; 
+    result[1] =  5; 
     result[2] =  4;
-    result[3] =  3;
-    result[4] =  5;
+    result[3] =  3; 
+    result[4] =  5; 
 
     ASSERT_EQUAL(data, result);
 }
@@ -119,11 +119,11 @@ void TestReplaceCopySimple(void)
     typedef typename Vector::value_type T;
 
     Vector data(5);
-    data[0] = 1;
-    data[1] = 2;
+    data[0] = 1; 
+    data[1] = 2; 
     data[2] = 1;
-    data[3] = 3;
-    data[4] = 2;
+    data[3] = 3; 
+    data[4] = 2; 
 
     Vector dest(5);
 
@@ -131,11 +131,11 @@ void TestReplaceCopySimple(void)
     thrust::replace_copy(dest.begin(), dest.end(), dest.begin(), (T) 2, (T) 5);
 
     Vector result(5);
-    result[0] = 4;
-    result[1] = 5;
+    result[0] = 4; 
+    result[1] = 5; 
     result[2] = 4;
-    result[3] = 3;
-    result[4] = 5;
+    result[3] = 3; 
+    result[4] = 5; 
 
     ASSERT_EQUAL(dest, result);
 }
@@ -203,10 +203,10 @@ void TestReplaceCopy(const size_t n)
 {
     thrust::host_vector<T>   h_data = unittest::random_samples<T>(n);
     thrust::device_vector<T> d_data = h_data;
-
+    
     T old_value = 0;
     T new_value = 1;
-
+    
     thrust::host_vector<T>   h_dest(n);
     thrust::device_vector<T> d_dest(n);
 
@@ -224,7 +224,7 @@ void TestReplaceCopyToDiscardIterator(const size_t n)
 {
     thrust::host_vector<T>   h_data = unittest::random_samples<T>(n);
     thrust::device_vector<T> d_data = h_data;
-
+    
     T old_value = 0;
     T new_value = 1;
 
@@ -255,20 +255,20 @@ void TestReplaceIfSimple(void)
     typedef typename Vector::value_type T;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  3;
+    data[0] =  1; 
+    data[1] =  3; 
     data[2] =  4;
-    data[3] =  6;
-    data[4] =  5;
+    data[3] =  6; 
+    data[4] =  5; 
 
     thrust::replace_if(data.begin(), data.end(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  0;
-    result[1] =  0;
+    result[0] =  0; 
+    result[1] =  0; 
     result[2] =  0;
-    result[3] =  6;
-    result[4] =  5;
+    result[3] =  6; 
+    result[4] =  5; 
 
     ASSERT_EQUAL(data, result);
 }
@@ -331,11 +331,11 @@ void TestReplaceIfStencilSimple(void)
     typedef typename Vector::value_type T;
 
     Vector data(5);
-    data[0] =  1;
-    data[1] =  3;
+    data[0] =  1; 
+    data[1] =  3; 
     data[2] =  4;
-    data[3] =  6;
-    data[4] =  5;
+    data[3] =  6; 
+    data[4] =  5; 
 
     Vector stencil(5);
     stencil[0] = 5;
@@ -347,11 +347,11 @@ void TestReplaceIfStencilSimple(void)
     thrust::replace_if(data.begin(), data.end(), stencil.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  1;
-    result[1] =  0;
+    result[0] =  1; 
+    result[1] =  0; 
     result[2] =  4;
-    result[3] =  0;
-    result[4] =  5;
+    result[3] =  0; 
+    result[4] =  5; 
 
     ASSERT_EQUAL(data, result);
 }
@@ -447,24 +447,24 @@ template <class Vector>
 void TestReplaceCopyIfSimple(void)
 {
     typedef typename Vector::value_type T;
-
+    
     Vector data(5);
-    data[0] =  1;
-    data[1] =  3;
+    data[0] =  1; 
+    data[1] =  3; 
     data[2] =  4;
-    data[3] =  6;
-    data[4] =  5;
+    data[3] =  6; 
+    data[4] =  5; 
 
     Vector dest(5);
 
     thrust::replace_copy_if(data.begin(), data.end(), dest.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  0;
-    result[1] =  0;
+    result[0] =  0; 
+    result[1] =  0; 
     result[2] =  0;
-    result[3] =  6;
-    result[4] =  5;
+    result[3] =  6; 
+    result[4] =  5; 
 
     ASSERT_EQUAL(dest, result);
 }
@@ -531,13 +531,13 @@ template <class Vector>
 void TestReplaceCopyIfStencilSimple(void)
 {
     typedef typename Vector::value_type T;
-
+    
     Vector data(5);
-    data[0] =  1;
-    data[1] =  3;
+    data[0] =  1; 
+    data[1] =  3; 
     data[2] =  4;
-    data[3] =  6;
-    data[4] =  5;
+    data[3] =  6; 
+    data[4] =  5; 
 
     Vector stencil(5);
     stencil[0] = 1;
@@ -551,11 +551,11 @@ void TestReplaceCopyIfStencilSimple(void)
     thrust::replace_copy_if(data.begin(), data.end(), stencil.begin(), dest.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  0;
-    result[1] =  3;
+    result[0] =  0; 
+    result[1] =  3; 
     result[2] =  0;
-    result[3] =  6;
-    result[4] =  5;
+    result[3] =  6; 
+    result[4] =  5; 
 
     ASSERT_EQUAL(dest, result);
 }
@@ -701,3 +701,4 @@ void TestReplaceCopyIfStencilToDiscardIterator(const size_t n)
     ASSERT_EQUAL_QUIET(reference, d_result);
 }
 DECLARE_VARIABLE_UNITTEST(TestReplaceCopyIfStencilToDiscardIterator);
+

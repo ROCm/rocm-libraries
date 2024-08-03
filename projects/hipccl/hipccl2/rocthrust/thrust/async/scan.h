@@ -42,6 +42,9 @@ THRUST_NAMESPACE_BEGIN
 namespace async
 {
 
+/*! \cond
+ */
+
 // Fallback implementations used when no overloads are found via ADL:
 namespace unimplemented
 {
@@ -336,6 +339,9 @@ struct exclusive_scan_fn final
 } // namespace exclusive_scan_detail
 
 THRUST_INLINE_CONSTANT exclusive_scan_detail::exclusive_scan_fn exclusive_scan{};
+
+/*! \endcond
+ */
 
 } // namespace async
 

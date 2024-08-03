@@ -33,7 +33,7 @@ namespace mr
 
 /*! \addtogroup memory_management Memory Management
  *  \addtogroup memory_resources Memory Resources
- *  \ingroup memory_resources
+ *  \ingroup memory_management
  *  \{
  */
 

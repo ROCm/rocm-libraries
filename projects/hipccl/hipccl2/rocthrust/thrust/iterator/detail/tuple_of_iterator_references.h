@@ -1,5 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
+ *  Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,12 +21,145 @@
 #include <thrust/tuple.h>
 #include <thrust/pair.h>
 #include <thrust/detail/reference_forward_declaration.h>
+#include <thrust/detail/raw_reference_cast.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+
+#include <cuda/std/type_traits>
+#include <cuda/std/tuple>
 
 THRUST_NAMESPACE_BEGIN
+
 namespace detail
 {
 
-  
+template<
+  typename... Ts
+>
+  class tuple_of_iterator_references : public thrust::tuple<Ts...>
+{
+  public:
+    using super_t = thrust::tuple<Ts...>;
+    using super_t::super_t;
+
+    inline __host__ __device__
+    tuple_of_iterator_references()
+      : super_t()
+    {}
+
+    // allow implicit construction from tuple<refs>
+    inline __host__ __device__
+    tuple_of_iterator_references(const super_t& other)
+      : super_t(other)
+    {}
+
+    inline __host__ __device__
+    tuple_of_iterator_references(super_t&& other)
+      : super_t(::cuda::std::move(other))
+    {}
+
+    // allow assignment from tuples
+    // XXX might be worthwhile to guard this with an enable_if is_assignable
+    __thrust_exec_check_disable__
+    template<typename... Us>
+    inline __host__ __device__
+    tuple_of_iterator_references &operator=(const thrust::tuple<Us...> &other)
+    {
+      super_t::operator=(other);
+      return *this;
+    }
+
+    // allow assignment from pairs
+    // XXX might be worthwhile to guard this with an enable_if is_assignable
+    __thrust_exec_check_disable__
+    template<typename U1, typename U2>
+    inline __host__ __device__
+    tuple_of_iterator_references &operator=(const thrust::pair<U1,U2> &other)
+    {
+      super_t::operator=(other);
+      return *this;
+    }
+
+    // allow assignment from reference<tuple>
+    // XXX perhaps we should generalize to reference<T>
+    //     we could captures reference<pair> this way
+    __thrust_exec_check_disable__
+    template<typename Pointer, typename Derived, typename... Us>
+    inline __host__ __device__
+    tuple_of_iterator_references&
+    operator=(const thrust::reference<thrust::tuple<Us...>, Pointer, Derived> &other)
+    {
+      typedef thrust::tuple<Us...> tuple_type;
+
+      // XXX perhaps this could be accelerated
+      super_t::operator=(tuple_type{other});
+      return *this;
+    }
+
+    template<class... Us, ::cuda::std::__enable_if_t<sizeof...(Us) == sizeof...(Ts), int> = 0>
+    inline __host__ __device__
+    constexpr operator thrust::tuple<Us...>() const {
+      return to_tuple<Us...>(typename ::cuda::std::__make_tuple_indices<sizeof...(Ts)>::type{});
+    }
+
+    // this overload of swap() permits swapping tuple_of_iterator_references returned as temporaries from
+    // iterator dereferences
+    template<class... Us>
+    inline __host__ __device__
+    friend void swap(tuple_of_iterator_references&& x, tuple_of_iterator_references<Us...>&& y)
+    {
+      x.swap(y);
+    }
+
+private:
+    template<class... Us, size_t... Id>
+    inline __host__ __device__
+    constexpr thrust::tuple<Us...> to_tuple(::cuda::std::__tuple_indices<Id...>) const {
+      return {get<Id>(*this)...};
+    }
+};
+
+} // end detail
+
+THRUST_NAMESPACE_END
+
+_LIBCUDACXX_BEGIN_NAMESPACE_STD
+
+// define tuple_size, tuple_element, etc.
+template <class... Ts>
+struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
+    : integral_constant<size_t, sizeof...(Ts)>
+{};
+
+template <size_t Id, class... Ts>
+struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
+    : _CUDA_VSTD::tuple_element<Id, _CUDA_VSTD::tuple<Ts...>>
+{};
+
+_LIBCUDACXX_END_NAMESPACE_STD
+
+// structured bindings suppport
+namespace std {
+
+template <class... Ts>
+struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
+    : integral_constant<size_t, sizeof...(Ts)>
+{};
+
+template <size_t Id, class... Ts>
+struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
+    : _CUDA_VSTD::tuple_element<Id, _CUDA_VSTD::tuple<Ts...>>
+{};
+
+} // namespace std
+
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+
+THRUST_NAMESPACE_BEGIN
+
+namespace detail
+{
+
 template<
   typename... Ts
 >
@@ -71,14 +205,6 @@ template<
     template<typename Pointer, typename Derived,
              typename... Us>
     inline __host__ __device__
-// XXX gcc-4.2 crashes on is_assignable
-//    typename thrust::detail::enable_if<
-//      thrust::detail::is_assignable<
-//        super_t,
-//        const thrust::tuple<Us...>
-//      >::value,
-//      tuple_of_iterator_references &
-//    >::type
     tuple_of_iterator_references &
     operator=(const thrust::reference<thrust::tuple<Us...>, Pointer, Derived> &other)
     {
@@ -144,3 +270,4 @@ struct tuple_element<i, detail::tuple_of_iterator_references<T,Ts...>>
 
 THRUST_NAMESPACE_END
 
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA

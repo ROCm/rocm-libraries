@@ -99,6 +99,27 @@ template<typename T, typename Allocator>
   }
 #endif
 
+  template<typename T, typename Allocator>
+    vector<T,Allocator>
+      ::vector(std::initializer_list<T> il)
+        : super_t(il)
+  {}
+
+  template<typename T, typename Allocator>
+    vector<T,Allocator>
+      ::vector(std::initializer_list<T> il, const Allocator& alloc)
+        : super_t(il, alloc)
+  {}
+
+  template<typename T, typename Allocator>
+    vector<T,Allocator> &
+      vector<T,Allocator>
+        ::operator=(std::initializer_list<T> il)
+  {
+    super_t::operator=(il);
+    return *this;
+  }
+
 template<typename T, typename Allocator>
   template<typename OtherT, typename OtherAllocator>
     vector<T,Allocator> &

@@ -11,8 +11,6 @@ class CUDATestDriver
   public:
     int current_device_architecture() const;
 
-    bool supports_managed_memory() const;
-
   private:
     std::vector<int> target_devices(const ArgumentMap &kwargs);
 

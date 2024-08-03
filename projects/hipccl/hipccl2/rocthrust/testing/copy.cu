@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -203,21 +203,6 @@ void TestCopyVectorBool(void)
 }
 DECLARE_UNITTEST(TestCopyVectorBool);
 
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-
-// Workaround: std::back_insert_iterator has void value_type.
-THRUST_NAMESPACE_BEGIN
-template <> struct access_traits<void>
-{
-  typedef const int& const_type;
-  typedef int& non_const_type;
-
-  typedef const int& parameter_type;
-};
-THRUST_NAMESPACE_END
-
-#endif
 
 template <class Vector>
 void TestCopyListTo(void)

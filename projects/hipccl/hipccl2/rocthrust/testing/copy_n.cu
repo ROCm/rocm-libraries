@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -225,13 +225,13 @@ void TestCopyNZipIterator(void)
 {
     typedef typename Vector::value_type T;
 
-    Vector v1(3); v1[0] = 1; v1[1] = 2; v1[2] = 3;
-    Vector v2(3); v2[0] = 4; v2[1] = 5; v2[2] = 6;
-    Vector v3(3, T(0));
-    Vector v4(3, T(0));
+    Vector v1(4); v1[0] = 1; v1[1] = 2; v1[2] = 3; v1[3] = 4;
+    Vector v2(4); v2[0] = 4; v2[1] = 5; v2[2] = 6; v2[3] = 7;
+    Vector v3(4, T(0));
+    Vector v4(4, T(0));
 
     thrust::copy_n(thrust::make_zip_iterator(thrust::make_tuple(v1.begin(),v2.begin())),
-                   3,
+                   4,
                    thrust::make_zip_iterator(thrust::make_tuple(v3.begin(),v4.begin())));
 
     ASSERT_EQUAL(v1, v3);
@@ -244,8 +244,8 @@ void TestCopyNConstantIteratorToZipIterator(void)
 {
     typedef typename Vector::value_type T;
 
-    Vector v1(3, T(0));
-    Vector v2(3, T(0));
+    Vector v1(4, T(0));
+    Vector v2(4, T(0));
 
     thrust::copy_n(thrust::make_constant_iterator(thrust::tuple<T,T>(4,7)),
                    v1.size(),
@@ -254,9 +254,11 @@ void TestCopyNConstantIteratorToZipIterator(void)
     ASSERT_EQUAL(v1[0], T(4));
     ASSERT_EQUAL(v1[1], T(4));
     ASSERT_EQUAL(v1[2], T(4));
+    ASSERT_EQUAL(v1[3], T(4));
     ASSERT_EQUAL(v2[0], T(7));
     ASSERT_EQUAL(v2[1], T(7));
     ASSERT_EQUAL(v2[2], T(7));
+    ASSERT_EQUAL(v2[3], T(7));
 };
 DECLARE_VECTOR_UNITTEST(TestCopyNConstantIteratorToZipIterator);
 
@@ -300,3 +302,4 @@ void TestCopyNDispatchImplicit()
     ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestCopyNDispatchImplicit);
+

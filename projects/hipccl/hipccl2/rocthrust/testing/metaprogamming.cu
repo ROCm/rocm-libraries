@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 void TestLog2(void)
 {
     unsigned int result;
-
+    
     result = thrust::detail::mpl::math::log2<  1>::value;   ASSERT_EQUAL(result, 0lu);
     result = thrust::detail::mpl::math::log2<  2>::value;   ASSERT_EQUAL(result, 1lu);
     result = thrust::detail::mpl::math::log2<  3>::value;   ASSERT_EQUAL(result, 1lu);
@@ -42,3 +42,4 @@ void TestLog2(void)
     result = thrust::detail::mpl::math::log2<512>::value;   ASSERT_EQUAL(result, 9lu);
 }
 DECLARE_UNITTEST(TestLog2);
+

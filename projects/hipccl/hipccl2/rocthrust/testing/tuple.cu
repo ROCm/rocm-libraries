@@ -1,6 +1,6 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Copyright 2008-2024 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -94,8 +94,7 @@ struct TestTupleConstructor
     ASSERT_EQUAL(data[7], get<7>(t9));
     ASSERT_EQUAL(data[8], get<8>(t9));
 
-    // TODO: tuple cannot handle 10 element
-    /*tuple<T,T,T,T,T,T,T,T,T,T> t10(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
+    tuple<T,T,T,T,T,T,T,T,T,T> t10(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
     ASSERT_EQUAL(data[0], get<0>(t10));
     ASSERT_EQUAL(data[1], get<1>(t10));
     ASSERT_EQUAL(data[2], get<2>(t10));
@@ -105,7 +104,7 @@ struct TestTupleConstructor
     ASSERT_EQUAL(data[6], get<6>(t10));
     ASSERT_EQUAL(data[7], get<7>(t10));
     ASSERT_EQUAL(data[8], get<8>(t10));
-    ASSERT_EQUAL(data[9], get<9>(t10));*/
+    ASSERT_EQUAL(data[9], get<9>(t10));
   }
 };
 SimpleUnitTest<TestTupleConstructor, BuiltinNumericTypes> TestTupleConstructorInstance;
@@ -182,8 +181,7 @@ struct TestMakeTuple
     ASSERT_EQUAL(data[7], get<7>(t9));
     ASSERT_EQUAL(data[8], get<8>(t9));
 
-    // TODO: tuple cannot handle 10 element
-    /*tuple<T,T,T,T,T,T,T,T,T,T> t10 = make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
+    tuple<T,T,T,T,T,T,T,T,T,T> t10 = make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
     ASSERT_EQUAL(data[0], get<0>(t10));
     ASSERT_EQUAL(data[1], get<1>(t10));
     ASSERT_EQUAL(data[2], get<2>(t10));
@@ -193,7 +191,7 @@ struct TestMakeTuple
     ASSERT_EQUAL(data[6], get<6>(t10));
     ASSERT_EQUAL(data[7], get<7>(t10));
     ASSERT_EQUAL(data[8], get<8>(t10));
-    ASSERT_EQUAL(data[9], get<9>(t10));*/
+    ASSERT_EQUAL(data[9], get<9>(t10));
   }
 };
 SimpleUnitTest<TestMakeTuple, BuiltinNumericTypes> TestMakeTupleInstance;
@@ -269,8 +267,7 @@ struct TestTupleGet
     ASSERT_EQUAL(data[7], thrust::get<7>(t9));
     ASSERT_EQUAL(data[8], thrust::get<8>(t9));
 
-    // TODO: tuple cannot handle 10 element
-    /*tuple<T,T,T,T,T,T,T,T,T,T> t10 = make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
+    tuple<T,T,T,T,T,T,T,T,T,T> t10 = make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
     ASSERT_EQUAL(data[0], thrust::get<0>(t10));
     ASSERT_EQUAL(data[1], thrust::get<1>(t10));
     ASSERT_EQUAL(data[2], thrust::get<2>(t10));
@@ -280,7 +277,7 @@ struct TestTupleGet
     ASSERT_EQUAL(data[6], thrust::get<6>(t10));
     ASSERT_EQUAL(data[7], thrust::get<7>(t10));
     ASSERT_EQUAL(data[8], thrust::get<8>(t10));
-    ASSERT_EQUAL(data[9], thrust::get<9>(t10));*/
+    ASSERT_EQUAL(data[9], thrust::get<9>(t10));
   }
 };
 SimpleUnitTest<TestTupleGet, BuiltinNumericTypes> TestTupleGetInstance;
@@ -437,8 +434,7 @@ struct TestTupleTieFunctor
     result &= data[8] == 8;
     clear(data);
 
-    // TODO: tuple cannot handle 10 element
-    /*tie(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]) = make_tuple(0,1,2,3,4,5,6,7,8,9);
+    tie(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]) = make_tuple(17,1,2,3,4,5,6,7,8,9);
     result &= data[0] == 17;
     result &= data[1] == 1;
     result &= data[2] == 2;
@@ -449,7 +445,7 @@ struct TestTupleTieFunctor
     result &= data[7] == 7;
     result &= data[8] == 8;
     result &= data[9] == 9;
-    clear(data);*/
+    clear(data);
 
     return result;
   }
@@ -511,3 +507,31 @@ void TestTupleSwap(void)
   ASSERT_EQUAL_QUIET(ref, (swappable_tuple)d_v1[0]);
 }
 DECLARE_UNITTEST(TestTupleSwap);
+
+#if THRUST_CPP_DIALECT >= 2017
+void TestTupleStructuredBindings(void)
+{
+  const int a = 0;
+  const int b = 42;
+  const int c = 1337;
+  thrust::tuple<int,int,int> t(a,b,c);
+
+  auto [a2, b2, c2] = t;
+  ASSERT_EQUAL(a, a2);
+  ASSERT_EQUAL(b, b2);
+  ASSERT_EQUAL(c, c2);
+}
+DECLARE_UNITTEST(TestTupleStructuredBindings);
+#endif
+
+// Ensure that we are backwards compatible with the old thrust::tuple implementation
+static_assert(thrust::tuple_size<thrust::tuple<thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type>>::value == 0, "");
+static_assert(thrust::tuple_size<thrust::tuple<int,               thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type>>::value == 1, "");
+static_assert(thrust::tuple_size<thrust::tuple<int,               int,               thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type>>::value == 2, "");
+static_assert(thrust::tuple_size<thrust::tuple<int,               int,               int,               thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type>>::value == 3, "");
+static_assert(thrust::tuple_size<thrust::tuple<int,               int,               int,               int,               thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type>>::value == 4, "");
+static_assert(thrust::tuple_size<thrust::tuple<int,               int,               int,               int,               int,               thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type>>::value == 5, "");
+static_assert(thrust::tuple_size<thrust::tuple<int,               int,               int,               int,               int,               int,               thrust::null_type, thrust::null_type, thrust::null_type>>::value == 6, "");
+static_assert(thrust::tuple_size<thrust::tuple<int,               int,               int,               int,               int,               int,               int,               thrust::null_type, thrust::null_type>>::value == 7, "");
+static_assert(thrust::tuple_size<thrust::tuple<int,               int,               int,               int,               int,               int,               int,               int,               thrust::null_type>>::value == 8, "");
+static_assert(thrust::tuple_size<thrust::tuple<int,               int,               int,               int,               int,               int,               int,               int,               int>>::value               == 9, "");

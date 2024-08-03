@@ -69,8 +69,10 @@ namespace __partition
         using value_type = typename iterator_traits<InputIt>::value_type;
         using namespace thrust::system::hip_rocprim::temp_storage;
 
-        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
         size_t      temp_storage_bytes = 0;
+        value_type* d_partition_out    = nullptr;
+        size_type*  d_num_selected_out = nullptr;
+        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
         hipStream_t stream             = hip_rocprim::stream(policy);
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -81,19 +83,17 @@ namespace __partition
         hip_rocprim::throw_on_error(rocprim::partition(nullptr,
                                                        temp_storage_bytes,
                                                        first,
-                                                       (value_type*) {nullptr},
-                                                       (size_type*) {nullptr},
+                                                       d_partition_out,
+                                                       d_num_selected_out,
                                                        num_items,
                                                        predicate,
                                                        stream,
                                                        debug_sync),
                                     "partition failed on 1st step");
 
-        size_t      storage_size;
-        void*       ptr       = nullptr;
-        void*       temp_stor = nullptr;
-        size_type*  d_num_selected_out;
-        value_type* d_partition_out;
+        size_t storage_size;
+        void*  ptr       = nullptr;
+        void*  temp_stor = nullptr;
 
         auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
                                             ptr_aligned_array(&d_num_selected_out, 1),
@@ -146,10 +146,13 @@ namespace __partition
         using value_type = typename iterator_traits<InputIt>::value_type;
         using namespace thrust::system::hip_rocprim::temp_storage;
 
-        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t                                           temp_storage_bytes = 0;
+        thrust::transform_iterator<Predicate, StencilIt> flags {stencil, predicate};
+        value_type*                                      d_partition_out    = nullptr;
+        size_type*                                       d_num_selected_out = nullptr;
+        size_type   num_items  = static_cast<size_type>(thrust::distance(first, last));
+        hipStream_t stream     = hip_rocprim::stream(policy);
+        bool        debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         if(num_items <= 0)
             return thrust::make_pair(selected_result, rejected_result);
@@ -158,19 +161,17 @@ namespace __partition
         hip_rocprim::throw_on_error(rocprim::partition(nullptr,
                                                        temp_storage_bytes,
                                                        first,
-                                                       (bool*) {nullptr},
-                                                       (value_type*) {nullptr},
-                                                       (size_type*) {nullptr},
+                                                       flags,
+                                                       d_partition_out,
+                                                       d_num_selected_out,
                                                        num_items,
                                                        stream,
                                                        debug_sync),
                                     "partition failed on 1st step");
 
-        size_t      storage_size;
-        void*       ptr       = nullptr;
-        void*       temp_stor = nullptr;
-        size_type*  d_num_selected_out;
-        value_type* d_partition_out;
+        size_t storage_size;
+        void*  ptr       = nullptr;
+        void*  temp_stor = nullptr;
 
         auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
                                             ptr_aligned_array(&d_num_selected_out, 1),
@@ -185,8 +186,6 @@ namespace __partition
 
         // Create pointers with alignment
         hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
-
-        thrust::transform_iterator<Predicate, StencilIt> flags {stencil, predicate};
 
         hip_rocprim::throw_on_error(rocprim::partition(ptr,
                                                        temp_storage_bytes,
@@ -269,12 +268,12 @@ namespace __partition
                                                RejectedOutIt              rejected_result,
                                                Predicate                  predicate)
     {
-        using size_type  = typename iterator_traits<InputIt>::difference_type;
-        using value_type = typename iterator_traits<InputIt>::value_type;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
         using namespace thrust::system::hip_rocprim::temp_storage;
 
-        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
         size_t      temp_storage_bytes = 0;
+        size_type*  d_num_selected_out = nullptr;
+        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
         hipStream_t stream             = hip_rocprim::stream(policy);
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -284,19 +283,18 @@ namespace __partition
         hip_rocprim::throw_on_error(rocprim::partition_two_way(nullptr,
                                                                temp_storage_bytes,
                                                                first,
-                                                               (value_type*){nullptr},
-                                                               (value_type*){nullptr},
-                                                               (size_type*){nullptr},
+                                                               selected_result,
+                                                               rejected_result,
+                                                               d_num_selected_out,
                                                                num_items,
                                                                predicate,
                                                                stream,
                                                                debug_sync),
                                     "partition failed on 1st step");
 
-        size_t     storage_size;
-        void*      ptr       = nullptr;
-        void*      temp_stor = nullptr;
-        size_type* d_num_selected_out;
+        size_t storage_size;
+        void*  ptr       = nullptr;
+        void*  temp_stor = nullptr;
 
         auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
                                             ptr_aligned_array(&d_num_selected_out, 1));
@@ -344,14 +342,15 @@ namespace __partition
                                                RejectedOutIt              rejected_result,
                                                Predicate                  predicate)
     {
-        using size_type  = typename iterator_traits<InputIt>::difference_type;
-        using value_type = typename iterator_traits<InputIt>::value_type;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
         using namespace thrust::system::hip_rocprim::temp_storage;
 
-        size_type   num_items          = static_cast<size_type>(thrust::distance(first, last));
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t                                           temp_storage_bytes = 0;
+        thrust::transform_iterator<Predicate, StencilIt> flags {stencil, predicate};
+        size_type*                                       d_num_selected_out = nullptr;
+        size_type   num_items  = static_cast<size_type>(thrust::distance(first, last));
+        hipStream_t stream     = hip_rocprim::stream(policy);
+        bool        debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         if(num_items <= 0)
             return thrust::make_pair(selected_result, rejected_result);
@@ -359,11 +358,11 @@ namespace __partition
         hip_rocprim::throw_on_error(rocprim::partition_two_way(nullptr,
                                                                temp_storage_bytes,
                                                                first,
-                                                               (value_type*) {nullptr},
-                                                               (value_type*) {nullptr},
-                                                               (size_type*) {nullptr},
+                                                               flags,
+                                                               selected_result,
+                                                               rejected_result,
+                                                               d_num_selected_out,
                                                                num_items,
-                                                               predicate,
                                                                stream,
                                                                debug_sync),
                                     "partition failed on 1st step");
@@ -371,7 +370,6 @@ namespace __partition
         size_t     storage_size;
         void*      ptr       = nullptr;
         void*      temp_stor = nullptr;
-        size_type* d_num_selected_out;
 
         auto l_part = make_linear_partition(make_partition(&temp_stor, temp_storage_bytes),
                                             ptr_aligned_array(&d_num_selected_out, 1));
@@ -385,8 +383,6 @@ namespace __partition
 
         // Create pointers with alignment
         hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
-
-        thrust::transform_iterator<Predicate, StencilIt> flags {stencil, predicate};
 
         hip_rocprim::throw_on_error(rocprim::partition_two_way(ptr,
                                                                temp_storage_bytes,

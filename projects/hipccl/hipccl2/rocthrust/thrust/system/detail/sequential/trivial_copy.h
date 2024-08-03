@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -42,6 +42,13 @@ __host__ __device__
                     std::ptrdiff_t n,
                     T *result)
 {
+  if(n == 0)
+  {
+    // If `first` or `result` is an invalid pointer,
+    // the behavior of `std::memmove` is undefined, even if `n` is zero.
+    return result;
+  }
+
   T* return_value = NULL;
 
   NV_IF_TARGET(NV_IS_HOST, (

@@ -30,7 +30,6 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#include <thrust/detail/config/exec_check_disable.h>
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/distance.h>

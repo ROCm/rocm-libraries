@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -131,9 +131,9 @@ void TestUninitializedFillPOD(void)
     ASSERT_EQUAL(v[4], 4);
 
     exemplar = 8;
-
+    
     thrust::uninitialized_fill(v.begin() + 0, v.begin() + 3, exemplar);
-
+    
     ASSERT_EQUAL(v[0], exemplar);
     ASSERT_EQUAL(v[1], exemplar);
     ASSERT_EQUAL(v[2], exemplar);
@@ -141,9 +141,9 @@ void TestUninitializedFillPOD(void)
     ASSERT_EQUAL(v[4], 4);
 
     exemplar = 9;
-
+    
     thrust::uninitialized_fill(v.begin() + 2, v.end(), exemplar);
-
+    
     ASSERT_EQUAL(v[0], 8);
     ASSERT_EQUAL(v[1], 8);
     ASSERT_EQUAL(v[2], exemplar);
@@ -153,7 +153,7 @@ void TestUninitializedFillPOD(void)
     exemplar = 1;
 
     thrust::uninitialized_fill(v.begin(), v.end(), exemplar);
-
+    
     ASSERT_EQUAL(v[0], exemplar);
     ASSERT_EQUAL(v[1], exemplar);
     ASSERT_EQUAL(v[2], exemplar);
@@ -172,7 +172,7 @@ struct CopyConstructTest
   {}
 
   __host__ __device__
-  CopyConstructTest(const CopyConstructTest&)
+  CopyConstructTest(const CopyConstructTest &)
   {
     NV_IF_TARGET(NV_IS_DEVICE, (
       copy_constructed_on_device = true;
@@ -247,9 +247,9 @@ void TestUninitializedFillNPOD(void)
     ASSERT_EQUAL_QUIET(v.begin() + 4, iter);
 
     exemplar = 8;
-
+    
     iter = thrust::uninitialized_fill_n(v.begin() + 0, 3, exemplar);
-
+    
     ASSERT_EQUAL(v[0], exemplar);
     ASSERT_EQUAL(v[1], exemplar);
     ASSERT_EQUAL(v[2], exemplar);
@@ -258,9 +258,9 @@ void TestUninitializedFillNPOD(void)
     ASSERT_EQUAL_QUIET(v.begin() + 3, iter);
 
     exemplar = 9;
-
+    
     iter = thrust::uninitialized_fill_n(v.begin() + 2, 3, exemplar);
-
+    
     ASSERT_EQUAL(v[0], 8);
     ASSERT_EQUAL(v[1], 8);
     ASSERT_EQUAL(v[2], exemplar);
@@ -271,7 +271,7 @@ void TestUninitializedFillNPOD(void)
     exemplar = 1;
 
     iter = thrust::uninitialized_fill_n(v.begin(), v.size(), exemplar);
-
+    
     ASSERT_EQUAL(v[0], exemplar);
     ASSERT_EQUAL(v[1], exemplar);
     ASSERT_EQUAL(v[2], exemplar);
@@ -312,3 +312,4 @@ struct TestUninitializedFillNNonPOD
   }
 };
 DECLARE_UNITTEST(TestUninitializedFillNNonPOD);
+

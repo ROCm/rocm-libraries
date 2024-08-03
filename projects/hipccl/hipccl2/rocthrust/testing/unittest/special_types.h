@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,11 +24,10 @@ template <typename T, unsigned int N>
 struct FixedVector
 {
     T data[N];
-
+    
     __host__ __device__
     FixedVector()
     {
-        #pragma nounroll
         for(unsigned int i = 0; i < N; i++)
             data[i] = T();
     }
@@ -36,7 +35,6 @@ struct FixedVector
     __host__ __device__
     FixedVector(T init)
     {
-        #pragma nounroll
         for(unsigned int i = 0; i < N; i++)
             data[i] = init;
     }
@@ -45,16 +43,14 @@ struct FixedVector
     FixedVector operator+(const FixedVector& bs) const
     {
         FixedVector output;
-        #pragma nounroll
         for(unsigned int i = 0; i < N; i++)
             output.data[i] = data[i] + bs.data[i];
         return output;
     }
-
+    
     __host__ __device__
     bool operator<(const FixedVector& bs) const
     {
-        #pragma nounroll
         for(unsigned int i = 0; i < N; i++)
         {
             if(data[i] < bs.data[i])
@@ -68,13 +64,12 @@ struct FixedVector
     __host__ __device__
     bool operator==(const FixedVector& bs) const
     {
-        #pragma nounroll
         for(unsigned int i = 0; i < N; i++)
         {
             if(!(data[i] == bs.data[i]))
                 return false;
         }
-        return true;
+        return true;                
     }
 };
 
@@ -207,5 +202,6 @@ using THRUST_NS_QUALIFIER::detail::uint16_t;
 using THRUST_NS_QUALIFIER::detail::uint32_t;
 using THRUST_NS_QUALIFIER::detail::uint64_t;
 
-
+  
 }
+

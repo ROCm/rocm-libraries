@@ -27,6 +27,8 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #include <thrust/detail/cstdint.h>
@@ -266,16 +268,17 @@ namespace __set_operations
             }
         }
 
-        template <class T, class It>
+        template <class T, unsigned int OutputSize>
         THRUST_HIP_DEVICE_FUNCTION void
-        reg_to_shared(It output, T (&input)[ITEMS_PER_THREAD])
+        reg_to_shared(rocprim::uninitialized_array<T, OutputSize>& output,
+                      T                                            (&input)[ITEMS_PER_THREAD])
         {
             const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
             #pragma unroll
             for(int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
             {
                 int idx     = BLOCK_THREADS * ITEM + thread_id;
-                output[idx] = input[ITEM];
+                output.emplace(idx, input[ITEM]);
             }
         }
 
@@ -361,11 +364,13 @@ namespace __set_operations
                         // Allocate extra shmem than truely neccessary
                         // This will permit to avoid range checks in
                         // serial set operations, e.g. serial_set_difference
-                        typename ::rocprim::detail::raw_storage<
-                            key_type[BLOCK_THREADS + ITEMS_PER_THREAD * BLOCK_THREADS]>
+                        ::rocprim::uninitialized_array<key_type,
+                                                       BLOCK_THREADS
+                                                           + ITEMS_PER_THREAD * BLOCK_THREADS>
                             keys_shared;
-                        typename ::rocprim::detail::raw_storage<
-                            value_type[BLOCK_THREADS + ITEMS_PER_THREAD * BLOCK_THREADS]>
+                        ::rocprim::uninitialized_array<value_type,
+                                                       BLOCK_THREADS
+                                                           + ITEMS_PER_THREAD * BLOCK_THREADS>
                             values_shared;
                     };
                 };
@@ -390,19 +395,20 @@ namespace __set_operations
             gmem_to_reg<!IS_LAST_TILE>(
                 keys_loc, keys1_in + keys1_beg, keys2_in + keys2_beg, num_keys1, num_keys2);
 
-            reg_to_shared(&storage.keys_shared.get()[0], keys_loc);
+            reg_to_shared(storage.keys_shared, keys_loc);
 
             ::rocprim::syncthreads();
 
             int diag_loc = min<int>(ITEMS_PER_THREAD * threadIdx.x, num_keys1 + num_keys2);
 
-            pair<int, int> partition_loc = balanced_path(&storage.keys_shared.get()[0],
-                                                         &storage.keys_shared.get()[num_keys1],
-                                                         num_keys1,
-                                                         num_keys2,
-                                                         diag_loc,
-                                                         4,
-                                                         compare_op);
+            pair<int, int> partition_loc
+                = balanced_path(&storage.keys_shared.get_unsafe_array()[0],
+                                &storage.keys_shared.get_unsafe_array()[num_keys1],
+                                num_keys1,
+                                num_keys2,
+                                diag_loc,
+                                4,
+                                compare_op);
 
             int keys1_beg_loc = partition_loc.first;
             int keys2_beg_loc = partition_loc.second;
@@ -430,7 +436,7 @@ namespace __set_operations
             //
             int indices[ITEMS_PER_THREAD];
 
-            int active_mask = serial_set_op(&storage.keys_shared.get()[0],
+            int active_mask = serial_set_op(&storage.keys_shared.get_unsafe_array()[0],
                                             keys1_beg_loc,
                                             keys2_beg_loc + num_keys1,
                                             num_keys1_loc,
@@ -487,7 +493,7 @@ namespace __set_operations
             //
             scatter(keys_out,
                     keys_loc,
-                    &storage.keys_shared.get()[0],
+                    &storage.keys_shared.get_unsafe_array()[0],
                     active_mask,
                     thread_output_prefix,
                     tile_output_prefix,
@@ -504,7 +510,7 @@ namespace __set_operations
 
                 ::rocprim::syncthreads();
 
-                reg_to_shared(&storage.values_shared.get()[0], values_loc);
+                reg_to_shared(storage.values_shared, values_loc);
 
                 ::rocprim::syncthreads();
 
@@ -515,7 +521,7 @@ namespace __set_operations
                 {
                     if(active_mask & (1 << ITEM))
                     {
-                        values_loc[ITEM] = storage.values_shared.get()[indices[ITEM]];
+                        values_loc[ITEM] = storage.values_shared.get_unsafe_array()[indices[ITEM]];
                     }
                 }
 
@@ -523,7 +529,7 @@ namespace __set_operations
 
                 scatter(values_out,
                         values_loc,
-                        &storage.values_shared.get()[0],
+                        &storage.values_shared.get_unsafe_array()[0],
                         active_mask,
                         thread_output_prefix,
                         tile_output_prefix,

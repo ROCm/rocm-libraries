@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,9 +29,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp14_required.h>
-
-#if THRUST_CPP_DIALECT >= 2014
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
@@ -78,17 +75,18 @@ namespace hip
             // Determine temporary device storage requirements.
 
             size_t tmp_size = 0;
-            thrust::hip_rocprim::throw_on_error(
-                rocprim::inclusive_scan(nullptr,
-                                        tmp_size,
-                                        first,
-                                        out,
-                                        n,
-                                        op,
-                                        0, // Null stream, just for sizing.
-                                        THRUST_HIP_DEBUG_SYNC_FLAG),
-                "after determining tmp storage "
-                "requirements for inclusive_scan");
+            thrust::hip_rocprim::throw_on_error(thrust::hip_rocprim::__scan::invoke_inclusive_scan(
+                                                    policy,
+                                                    nullptr,
+                                                    tmp_size,
+                                                    first,
+                                                    out,
+                                                    n,
+                                                    op,
+                                                    0, // Null stream, just for sizing.
+                                                    THRUST_HIP_DEBUG_SYNC_FLAG),
+                                                "after determining tmp storage "
+                                                "requirements for inclusive_scan");
 
             // Allocate temporary storage.
 
@@ -118,15 +116,17 @@ namespace hip
             }
 
             // Run reduction.
-            thrust::hip_rocprim::throw_on_error(rocprim::inclusive_scan(tmp_ptr,
-                                                                        tmp_size,
-                                                                        first,
-                                                                        out,
-                                                                        n,
-                                                                        op,
-                                                                        user_raw_stream,
-                                                                        THRUST_HIP_DEBUG_SYNC_FLAG),
-                                                "after dispatching inclusive_scan kernel");
+            thrust::hip_rocprim::throw_on_error(
+                thrust::hip_rocprim::__scan::invoke_inclusive_scan(policy,
+                                                                   tmp_ptr,
+                                                                   tmp_size,
+                                                                   first,
+                                                                   out,
+                                                                   n,
+                                                                   op,
+                                                                   user_raw_stream,
+                                                                   THRUST_HIP_DEBUG_SYNC_FLAG),
+                "after dispatching inclusive_scan kernel");
 
             return ev;
         }
@@ -157,6 +157,3 @@ auto async_inclusive_scan(execution_policy<DerivedPolicy>& policy,
 THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-
-#endif // C++14
-

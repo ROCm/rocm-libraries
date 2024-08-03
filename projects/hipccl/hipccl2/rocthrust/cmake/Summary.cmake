@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -38,6 +38,7 @@ endif()
     message(STATUS "")
     message(STATUS "  DISABLE_WERROR            : ${DISABLE_WERROR}")
     message(STATUS "  DOWNLOAD_ROCPRIM          : ${DOWNLOAD_ROCPRIM}")
+    message(STATUS "  DOWNLOAD_ROCRAND          : ${DOWNLOAD_ROCRAND}")
     message(STATUS "  BUILD_TEST                : ${BUILD_TEST}")
     message(STATUS "  BUILD_EXAMPLES            : ${BUILD_EXAMPLES}")
     message(STATUS "  BUILD_BENCHMARKS          : ${BUILD_BENCHMARKS}")

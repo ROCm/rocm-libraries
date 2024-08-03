@@ -138,13 +138,13 @@ struct binary_function
  *  \{
  */
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-
 #define THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(func, impl)                   \
   template <>                                                                  \
   struct func<void>                                                            \
   {                                                                            \
+    /*! This functor is transparent. */                                        \
     using is_transparent = void;                                               \
+    /*! Function call operator. */                                             \
     __thrust_exec_check_disable__                                              \
     template <typename T>                                                      \
     __host__ __device__                                                        \
@@ -159,7 +159,9 @@ struct binary_function
   template <>                                                                  \
   struct func<void>                                                            \
   {                                                                            \
+    /*! This functor is transparent. */                                        \
     using is_transparent = void;                                               \
+    /*! Function call operator. */                                             \
     __thrust_exec_check_disable__                                              \
     template <typename T1, typename T2>                                        \
     __host__ __device__                                                        \
@@ -173,8 +175,6 @@ struct binary_function
 #define THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(func, op)                 \
   THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION(                                   \
     func, THRUST_FWD(t1) op THRUST_FWD(t2))
-
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 
 /*! \p plus is a function object. Specifically, it is an Adaptable Binary Function.
@@ -1605,6 +1605,7 @@ template<typename Predicate>
  *  There is rarely any reason to construct a <tt>binary_negate</tt> directly;
  *  it is almost always easier to use the helper function not2.
  *
+ *  \see https://en.cppreference.com/w/cpp/utility/functional/binary_negate
  */
 template<typename Predicate>
 struct binary_negate

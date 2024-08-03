@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #include <thrust/detail/type_traits.h>
 
 #include <hip/hip_runtime.h>

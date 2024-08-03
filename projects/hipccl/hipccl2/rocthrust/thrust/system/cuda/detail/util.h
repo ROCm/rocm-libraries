@@ -35,7 +35,7 @@
 #include <thrust/system/cuda/error.h>
 
 #include <cub/detail/device_synchronize.cuh>
-#include <cub/util_arch.cuh>
+#include <cub/config.cuh>
 #include <cub/util_device.cuh>
 
 #include <nv/target>
@@ -318,7 +318,7 @@ struct transform_input_iterator_t
 
   // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
   // an explicit copy assignment operator that doesn't try to assign it.
-  __host__ __device__ 
+  __host__ __device__
   self_t& operator=(const self_t& o)
   {
     input = o.input;

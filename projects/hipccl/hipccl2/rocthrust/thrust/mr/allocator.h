@@ -14,7 +14,7 @@
  *  limitations under the License.
  */
 
-/*! \file 
+/*! \file
  *  \brief Allocator types usable with \ref memory_resources.
  */
 
@@ -23,7 +23,6 @@
 #include <limits>
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/config/exec_check_disable.h>
 #include <thrust/detail/config/memory_resource.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 
@@ -250,6 +249,7 @@ public:
         : base(other) {}
 
 #if THRUST_CPP_DIALECT >= 2011
+    /*! Default copy assignment operator. */
     stateless_resource_allocator & operator=(const stateless_resource_allocator &) = default;
 #endif
 

@@ -36,6 +36,9 @@ THRUST_NAMESPACE_BEGIN
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/*! \brief A factory function for creating `unique_ptr`s to a newly allocated object in device
+ *         memory.
+ */
 template <typename T, typename... Args>
 __host__
 auto device_make_unique(Args&&... args)

@@ -176,4 +176,8 @@ __host__ __device__ void shuffle_copy(RandomIterator first, RandomIterator last,
 THRUST_NAMESPACE_END
 
 #include <thrust/detail/shuffle.inl>
+
+/*! \} // reordering
+ */
+
 #endif
