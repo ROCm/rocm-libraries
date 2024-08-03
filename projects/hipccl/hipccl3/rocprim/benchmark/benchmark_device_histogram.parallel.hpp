@@ -53,7 +53,7 @@ std::vector<T> generate(size_t size, int entropy_reduction, int lower_level, int
     const size_t max_random_size = 1024 * 1024 + 4321;
 
     const unsigned int         seed = 123;
-    std::default_random_engine gen(seed);
+    engine_type                gen(seed);
     std::vector<T>             data(size);
     std::generate(data.begin(),
                   data.begin() + std::min(size, max_random_size),
@@ -175,8 +175,9 @@ struct device_histogram_benchmark : public config_autotune_interface
     static constexpr unsigned int warmup_size = 5;
 
     void run(benchmark::State& state,
-             const std::size_t full_size,
-             const hipStream_t stream) const override
+             size_t            full_size,
+             const managed_seed&,
+             hipStream_t stream) const override
     {
         using counter_type = unsigned int;
         using level_type   = typename std::

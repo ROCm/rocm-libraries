@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,6 +51,24 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int bit_count(unsigned long long x)
 {
     return __popcll(x);
+}
+
+/// \brief Count trailing zeroes
+///
+/// Count the number of consecutive 0-bits, starting from the
+/// least significant bit.
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE unsigned int ctz(unsigned int x)
+{
+    return __builtin_ctz(x);
+}
+
+/// \brief Count trailing zeroes
+///
+/// Count the number of consecutive 0-bits, starting from the
+/// least significant bit.
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE unsigned int ctz(unsigned long long x)
+{
+    return __builtin_ctzll(x);
 }
 
 /// @}

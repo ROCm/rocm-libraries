@@ -5,11 +5,36 @@ Documentation for rocPRIM is available at
 
 ## Unreleased rocPRIM-3.3.0 for ROCm 6.3.0
 
+### Additions
+
+* Option `--seed` to benchmarks to specify a seed for the generation of random inputs. The default behavior is to keep using a random seed per benchmark measurement.
+* Added configuration autotuning to device partition (`rocprim::partition`, `rocprim::partition_two_way`, and `rocprim::partition_three_way`), device select (`rocprim::select`, `rocprim::unique`, and `rocprim::unique_by_key`), and device reduce by key (`rocprim::reduce_by_key`) for improved performance on selected architectures.
+* Added `rocprim::uninitialized_array` which provides uninitialized storage in local memory for user-defined types.
+* Added large segment support for `rocprim:segmented_reduce`.
+* Added a parallel `nth_element` device function similar to `std::nth_element`, this function rearranges elements smaller than the n-th before and bigger than the n-th after the n-th element.
+* Added deterministic (bitwise reproducible) algorithm variants `rocprim::deterministic_inclusive_scan`, `rocprim::deterministic_exclusive_scan`, `rocprim::deterministic_inclusive_scan_by_key`, `rocprim::deterministic_exclusive_scan_by_key`, and `rocprim::deterministic_reduce_by_key`. These provide run-to-run stable results with non-associative operators such as float operations, at the cost of reduced performance.
+* Added a parallel `partial_sort` and `partial_sort_copy` device function similar to `std::partial_sort` and `std::partial_sort_copy`, these functions rearranges elements such that the elements are the same as a sorted list up to and including the middle index.
+
+### Changes
+
+* Modified the input size in device adjacent difference benchmarks. Observed performance with these benchmarks might be different.
+* Changed the default seed for `device_benchmark_segmented_reduce`.
+
 ### Fixes
 
-
 * Fixed an issue where while running rtest.py on windows and passing in an absolute path to `--install_dir` causes a `FileNotFound` error.
+* rocPRIM functions are no longer forcefully inlined on Windows, significantly reducing the build
+  time in debug builds.
+* `block_load`, `block_store`, `block_shuffle`, `block_exchange` and `warp_exchange` now use placement `new` instead of copy
+  assignment (`operator=`) when writing to local memory. This fixes the behavior of custom types with non-trivial copy assignments.
+* Fixed a bug in the generation of input data for benchmarks, which caused incorrect performance to be reported in specific cases. It may affect the reported performance for one-byte types (`uint8_t` and `int8_t`) and instantiations of `custom_type`. Specifically, device binary search, device histogram, device merge and warp sort are affected.
+* Fixed a bug for `rocprim::merge_path_search` where using `unsigned` offsets would output wrong results.
+* Fixed a bug for `rocprim::thread_load` and `rocprim::thread_store` where `float` and `double` were not casted to the correct type resulting in wrong results.
+* Fix tests failing when compiling with `-D_GLIBCXX_ASSERTIONS=ON`.
 
+### Deprecations
+
+* `rocprim::thread_load` and `rocprim::thread_store`, use dereference instead. Not all of those functions are available on every device architecture, and their usage can hurt performance, because inline assembly inhibits optimizations.
 
 ## Unreleased rocPRIM-3.2.0 for ROCm 6.2.0
 
@@ -28,10 +53,10 @@ Documentation for rocPRIM is available at
 * New `rocprim::batch_copy` function added. Similar to `rocprim::batch_memcpy`, but copies by element, not with memcpy.
 * Added more test cases, to better cover supported data types.
 * Updated some tests to work with supported data types.
-* An optional `decomposer` argument for all member functions of `rocprim::block_radix_sort` and all functions of `device_radix_sort`. 
+* An optional `decomposer` argument for all member functions of `rocprim::block_radix_sort` and all functions of `device_radix_sort`.
   To sort keys of an user-defined type, a decomposer functor should be passed. The decomposer should produce a `rocprim::tuple`
   of references to arithmetic types from the key.
-* New `rocprim::predicate_iterator` which acts as a proxy for an underlying iterator based on a predicate. 
+* New `rocprim::predicate_iterator` which acts as a proxy for an underlying iterator based on a predicate.
   It iterates over proxies that holds the references to the underlying values, but only allow reading and writing if the predicate is `true`.
   It can be instantiated with:
   * `rocprim::make_predicate_iterator`
@@ -43,6 +68,7 @@ Documentation for rocPRIM is available at
 
 * Improved the performance of `warp_sort_shuffle` and `block_sort_bitonic`.
 * Created an optimized version of the `warp_exchange` functions `blocked_to_striped_shuffle` and `striped_to_blocked_shuffle` when the warpsize is equal to the items per thread.
+* Improved the performance of `device_transform`.
 
 ### Fixes
 

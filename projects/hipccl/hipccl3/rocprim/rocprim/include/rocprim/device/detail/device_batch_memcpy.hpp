@@ -112,8 +112,7 @@ template<bool IsMemCpy,
          typename std::enable_if<IsMemCpy, int>::type = 0>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static Alias read_item(InputIt buffer_src, Offset offset)
 {
-    return rocprim::thread_load<rocprim::cache_load_modifier::load_cs>(
-        reinterpret_cast<Alias*>(buffer_src) + offset);
+    return *(reinterpret_cast<Alias*>(buffer_src) + offset);
 }
 
 template<bool IsMemCpy,
@@ -123,7 +122,7 @@ template<bool IsMemCpy,
          typename std::enable_if<!IsMemCpy, int>::type = 0>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static Alias read_item(InputIt buffer_src, Offset offset)
 {
-    return rocprim::thread_load<rocprim::cache_load_modifier::load_cs>(buffer_src + offset);
+    return *(buffer_src + offset);
 }
 
 template<bool IsMemCpy,
@@ -134,9 +133,7 @@ template<bool IsMemCpy,
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
     write_item(InputIt buffer_dst, Offset offset, Alias value)
 {
-    rocprim::thread_store<rocprim::cache_store_modifier::store_cs>(
-        reinterpret_cast<Alias*>(buffer_dst) + offset,
-        value);
+    *(reinterpret_cast<Alias*>(buffer_dst) + offset) = value;
 }
 
 template<bool IsMemCpy,
@@ -147,7 +144,7 @@ template<bool IsMemCpy,
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
     write_item(InputIt buffer_dst, Offset offset, Alias value)
 {
-    rocprim::thread_store<rocprim::cache_store_modifier::store_cs>(buffer_dst + offset, value);
+    *(buffer_dst + offset) = value;
 }
 
 template<class VectorType>
@@ -475,8 +472,9 @@ private:
                 } copy_tlev;
             } shared;
         };
-
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
         using storage_type = rocprim::detail::raw_storage<storage>;
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
         ROCPRIM_DEVICE ROCPRIM_INLINE non_blev_memcpy() {}
 

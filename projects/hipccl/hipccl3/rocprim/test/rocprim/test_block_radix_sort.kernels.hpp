@@ -121,8 +121,8 @@ __global__ __launch_bounds__(BlockSize) void sort_key_value_kernel(key_type*   d
 
     rocprim::
         block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type, 1, 1, RadixBitsPerPass>
-                                                                               bsort;
-    test_utils::select_decomposer_t<key_type>                                  decomposer{};
+                                              bsort;
+    test_utils::select_decomposer_t<key_type> decomposer{};
     if(to_striped)
     {
         if(descending)
@@ -184,6 +184,10 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
 
     const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -285,6 +289,10 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
 
     const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -395,46 +403,39 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
 }
 
 // Static for-loop
-template <
-    unsigned int First,
-    unsigned int Last,
-    class T,
-    class U,
-    int Method,
-    unsigned int BlockSize = 256U
->
+template<unsigned int First,
+         unsigned int Last,
+         class T,
+         class U,
+         int          Method,
+         unsigned int BlockSize = 256U>
 struct static_for
 {
     static constexpr unsigned int end = (end_radix[First] == 0) ? sizeof(T) * 8 : end_radix[First];
 
     static void run()
     {
-        test_block_radix_sort<T,
-                              U,
-                              Method,
-                              BlockSize,
-                              items_radix[First],
-                              bits_per_pass_radix[First],
-                              desc_radix[First],
-                              striped_radix[First],
-                              start_radix[First],
-                              end>();
+        {
+            SCOPED_TRACE(testing::Message() << "TestID = " << First);
+            test_block_radix_sort<T,
+                                  U,
+                                  Method,
+                                  BlockSize,
+                                  items_radix[First],
+                                  bits_per_pass_radix[First],
+                                  desc_radix[First],
+                                  striped_radix[First],
+                                  start_radix[First],
+                                  end>();
+        }
         static_for<First + 1, Last, T, U, Method, BlockSize>::run();
     }
 };
 
-template <
-    unsigned int N,
-    class T,
-    class U,
-    int Method,
-    unsigned int BlockSize
->
+template<unsigned int N, class T, class U, int Method, unsigned int BlockSize>
 struct static_for<N, N, T, U, Method, BlockSize>
 {
-    static void run()
-    {
-    }
+    static void run() {}
 };
 
 #endif // TEST_BLOCK_RADIX_SORT_KERNELS_HPP_

@@ -60,7 +60,7 @@ struct DeviceBatchMemcpyParams
 };
 
 template<class Params>
-struct DeviceBatchMemcpyTests : public ::testing::Test
+struct RocprimDeviceBatchMemcpyTests : public ::testing::Test
 {
     using value_type                      = typename Params::value_type;
     using size_type                       = typename Params::size_type;
@@ -108,9 +108,9 @@ typedef ::testing::Types<
     // size_type: int64_t
     DeviceBatchMemcpyParams<uint8_t, int64_t, true, true, 1024, 64 * 1024>,
     DeviceBatchMemcpyParams<uint8_t, int64_t, true, true, 1024, 128 * 1024>>
-    DeviceBatchMemcpyTestsParams;
+    RocprimDeviceBatchMemcpyTestsParams;
 
-TYPED_TEST_SUITE(DeviceBatchMemcpyTests, DeviceBatchMemcpyTestsParams);
+TYPED_TEST_SUITE(RocprimDeviceBatchMemcpyTests, RocprimDeviceBatchMemcpyTestsParams);
 
 // Used for generating offsets. We generate a permutation map and then derive
 // offsets via a sum scan over the sizes in the order of the permutation. This
@@ -310,7 +310,7 @@ void check_result(ContainerMemCpy& /*h_input_for_memcpy*/,
     }
 }
 
-TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
+TYPED_TEST(RocprimDeviceBatchMemcpyTests, SizeAndTypeVariation)
 {
     using value_type         = typename TestFixture::value_type;
     using buffer_size_type   = typename TestFixture::size_type;
@@ -349,13 +349,16 @@ TYPED_TEST(DeviceBatchMemcpyTests, SizeAndTypeVariation)
 
     auto iter = h_buffer_num_elements.begin();
 
-    iter = test_utils::generate_random_data_n(iter, num_tlev, 1, wlev_min_elems - 1, rng);
-    iter = test_utils::generate_random_data_n(iter,
-                                              num_wlev,
-                                              wlev_min_elems,
-                                              blev_min_elems - 1,
-                                              rng);
-    iter = test_utils::generate_random_data_n(iter, num_blev, blev_min_elems, max_elems, rng);
+    if(num_tlev > 0)
+        iter = test_utils::generate_random_data_n(iter, num_tlev, 1, wlev_min_elems - 1, rng);
+    if(num_wlev > 0)
+        iter = test_utils::generate_random_data_n(iter,
+                                                  num_wlev,
+                                                  wlev_min_elems,
+                                                  blev_min_elems - 1,
+                                                  rng);
+    if(num_blev > 0)
+        iter = test_utils::generate_random_data_n(iter, num_blev, blev_min_elems, max_elems, rng);
 
     const byte_offset_type total_num_elements = std::accumulate(h_buffer_num_elements.begin(),
                                                                 h_buffer_num_elements.end(),

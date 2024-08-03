@@ -84,6 +84,9 @@
 #define INSTANTIATE_TYPED_TEST(test_suite_name, ...) \
     INSTANTIATE_TYPED_TEST_EXPANDED(__LINE__, test_suite_name, __VA_ARGS__)
 
+// C++17 or newer
+#define CPP17 __cplusplus >= 201703L
+
 #include <cstdlib>
 #include <string>
 #include <cctype>

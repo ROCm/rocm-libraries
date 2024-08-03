@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -68,7 +68,9 @@ class block_scan_reduce_then_scan
     };
 
 public:
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = detail::raw_storage<storage_type_>;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -504,15 +506,12 @@ private:
         if(flat_tid < warp_size_)
         {
             const unsigned int idx_start = index(flat_tid * thread_reduction_size_);
-            const unsigned int idx_end = idx_start + thread_reduction_size_;
 
             T thread_reduction = storage_.threads[idx_start];
             ROCPRIM_UNROLL
-            for(unsigned int i = idx_start + 1; i < idx_end; i++)
+            for(unsigned int i = 1; i < thread_reduction_size_; i++)
             {
-                thread_reduction = scan_op(
-                    thread_reduction, storage_.threads[i]
-                );
+                thread_reduction = scan_op(thread_reduction, storage_.threads[idx_start + i]);
             }
 
             // Calculate warp prefixes
@@ -528,12 +527,10 @@ private:
 
             storage_.threads[idx_start] = thread_reduction;
             ROCPRIM_UNROLL
-            for(unsigned int i = idx_start + 1; i < idx_end; i++)
+            for(unsigned int i = 1; i < thread_reduction_size_; i++)
             {
-                thread_reduction = scan_op(
-                    thread_reduction, storage_.threads[i]
-                );
-                storage_.threads[i] = thread_reduction;
+                thread_reduction = scan_op(thread_reduction, storage_.threads[idx_start + i]);
+                storage_.threads[idx_start + i] = thread_reduction;
             }
         }
         ::rocprim::syncthreads();

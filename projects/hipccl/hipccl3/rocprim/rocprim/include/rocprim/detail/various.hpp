@@ -182,14 +182,15 @@ struct match_fundamental_type
 };
 
 // A storage-backing wrapper that allows types with non-trivial constructors to be aliased in unions
-template <typename T>
-struct raw_storage
+template<typename T>
+struct [[deprecated("To store non default-constructible types in local memory, use "
+                    "rocprim::uninitialized_array instead")]] raw_storage
 {
     // Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
     typedef typename detail::match_fundamental_type<T>::type device_word;
 
     // Backing storage
-    device_word storage[sizeof(T) / sizeof(device_word)];
+    alignas(device_word) unsigned char storage[sizeof(T)];
 
     // Alias
     ROCPRIM_HOST_DEVICE T& get()

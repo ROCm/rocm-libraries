@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,8 @@
 
 #ifndef ROCPRIM_DETAIL_MERGE_PATH_HPP_
 #define ROCPRIM_DETAIL_MERGE_PATH_HPP_
+
+#include "../intrinsics/thread.hpp"
 
 #include "../config.hpp"
 
@@ -49,12 +51,12 @@ struct range_t
 };
 
 template<class KeysInputIterator1, class KeysInputIterator2, class OffsetT, class BinaryFunction>
-ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT merge_path(KeysInputIterator1 keys_input1,
-                                                 KeysInputIterator2 keys_input2,
-                                                 const OffsetT      input1_size,
-                                                 const OffsetT      input2_size,
-                                                 const OffsetT      diag,
-                                                 BinaryFunction     compare_function)
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE OffsetT merge_path(KeysInputIterator1 keys_input1,
+                                                      KeysInputIterator2 keys_input2,
+                                                      const OffsetT      input1_size,
+                                                      const OffsetT      input2_size,
+                                                      const OffsetT      diag,
+                                                      BinaryFunction     compare_function)
 {
     using key_type_1 = typename std::iterator_traits<KeysInputIterator1>::value_type;
     using key_type_2 = typename std::iterator_traits<KeysInputIterator2>::value_type;

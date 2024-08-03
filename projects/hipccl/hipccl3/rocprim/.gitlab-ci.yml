@@ -27,6 +27,7 @@ include:
       - /defaults.yaml
       - /deps-cmake.yaml
       - /deps-docs.yaml
+      - /deps-format.yaml
       - /deps-rocm.yaml
       - /deps-vcpkg.yaml
       - /deps-windows.yaml
@@ -46,20 +47,7 @@ variables:
 
 clang-format:
   extends:
-    - .deps:rocm
-  stage: lint
-  needs: []
-  tags:
-    - build
-  variables:
-    CLANG_FORMAT: "/opt/rocm/llvm/bin/clang-format"
-    GIT_CLANG_FORMAT: "/opt/rocm/llvm/bin/git-clang-format"
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  script:
-    - cd $CI_PROJECT_DIR
-    - git config --global --add safe.directory $CI_PROJECT_DIR
-    - scripts/code-format/check-format.sh $CI_MERGE_REQUEST_DIFF_BASE_SHA --binary "$CLANG_FORMAT"
+    - .lint:clang-format
 
 copyright-date:
   extends:
@@ -162,15 +150,22 @@ build:cmake-minimum-apt:
   extends:
     - .gpus:rocm-gpus
     - .rules:build
+  variables:
+    EXTRA_CMAKE_CXX_FLAGS: ""
   script:
     - mkdir -p $BUILD_DIR
     - cd $BUILD_DIR
+    - | # Add hardened libc++ assertions for tests only
+        if [[ $BUILD_TARGET == "TEST" ]]; then
+            echo "Configuring with hardened libc++!"
+            EXTRA_CMAKE_CXX_FLAGS+=" -D_GLIBCXX_ASSERTIONS=ON"
+        fi
     - cmake
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
-      -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror $EXTRA_CMAKE_CXX_FLAGS"
       -D CMAKE_BUILD_TYPE="$BUILD_TYPE"
-      -D BUILD_$BUILD_TARGET=ON 
+      -D BUILD_$BUILD_TARGET=ON
       -D BUILD_EXAMPLE=ON
       -D GPU_TARGETS=$GPU_TARGETS
       -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
@@ -197,9 +192,11 @@ build:cmake-latest:
   extends:
     - .cmake-latest
     - .build:common
-  variables:
-    BUILD_TYPE: Release
-    BUILD_TARGET: TEST
+  parallel:
+    # Debug builds disabled due to excessive build times for debug test builds
+    matrix:
+      - BUILD_TYPE: Release
+        BUILD_TARGET: [BENCHMARK, TEST]
 
 build:cmake-minimum:
   needs: []
@@ -246,20 +243,19 @@ build:windows:
     - .deps:visual-studio-devshell
   parallel:
     matrix:
-      # Debug is disabled due to extensive link times, tracked in issue 679.
-      - BUILD_TYPE: [Release]
+      - BUILD_TYPE: [Debug, Release]
         BUILD_TARGET: [BENCHMARK, TEST]
   script:
     - mkdir -p $CI_PROJECT_DIR/build
-    - cmake -G Ninja 
-      -S $CI_PROJECT_DIR 
-      -B $CI_PROJECT_DIR/build 
-      -D BUILD_$BUILD_TARGET=ON 
+    - cmake -G Ninja
+      -S $CI_PROJECT_DIR
+      -B $CI_PROJECT_DIR/build
+      -D BUILD_$BUILD_TARGET=ON
       -D GPU_TARGETS=$GPU_TARGET
-      -D CMAKE_CXX_COMPILER:PATH="${env:HIP_PATH}\bin\clang++.exe" 
-      -D CMAKE_PREFIX_PATH:PATH="${env:HIP_PATH}" 
-      -D CMAKE_BUILD_TYPE="$BUILD_TYPE" 
-    - cmake --build "$CI_PROJECT_DIR/build" 
+      -D CMAKE_CXX_COMPILER:PATH="${env:HIP_PATH}\bin\clang++.exe"
+      -D CMAKE_PREFIX_PATH:PATH="${env:HIP_PATH}"
+      -D CMAKE_BUILD_TYPE="$BUILD_TYPE"
+    - cmake --build "$CI_PROJECT_DIR/build"
   artifacts:
     paths:
       - $CI_PROJECT_DIR/build/test/test_*
@@ -281,6 +277,10 @@ autotune:build:
     - .cmake-minimum
     - .gpus:rocm-gpus
     - .rules:benchmark
+  before_script:
+    - !reference [".cmake-minimum", before_script]
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -qq -y zstd
   variables:
     BENCHMARK_TARGETS: benchmark_config_tuning
   script:
@@ -301,22 +301,13 @@ autotune:build:
       -D GPU_TARGETS=$GPU_TARGETS
     - cmake --build . --target $BENCHMARK_TARGETS
     - 'rm -rf $BUILD_DIR/benchmark/benchmark*.parallel'
-    # remove benchmark executables if their size together is too large for gitlab ci to handle
-    - |
-      total_size_bytes=0
-      while read -r file_size; do
-        total_size_bytes=$((total_size_bytes + file_size))
-      done < <(stat --format="%s" benchmark/benchmark*)
-      total_size_gib="$(numfmt --round=down --to-unit=Gi "$total_size_bytes")"
-      if [ "$total_size_gib" -ge 3 ]; then
-        printf "Total size: %s (%d bytes) > 3GiB, skipping benchmark executables from the artifact.\n" \
-          "$(numfmt --to=iec-i "$total_size_bytes")" "$total_size_bytes"
-        rm benchmark/benchmark*
-      fi
+    # The autotune benchmarks get very large, above GitLabs upload limit. Fortunately they compress well.
+    # We'll put them all in a single archive to compress them to a few hundred MB.
+    - find benchmark -type f -executable -print0 | tar -I zstd -cvf benchmarks.tar.zstd --null -T -
 
   artifacts:
     paths:
-      - $BUILD_DIR/benchmark/benchmark*
+      - $BUILD_DIR/benchmarks.tar.zstd
       - $BUILD_DIR/.ninja_log
       - $BUILD_DIR/deps/googlebenchmark/
     expire_in: 1 week
@@ -360,7 +351,7 @@ test:
     - cd $CI_PROJECT_DIR/build
     - ctest --output-on-failure
 
-# Disabled due to extensive link times. 
+# Disabled due to extensive link times.
 # This is tracked in issue 679
 # test-windows-debug:
 #   extends:
@@ -535,9 +526,13 @@ autotune:execute-tuning:
   artifacts:
     paths:
       - ${AUTOTUNE_RESULT_DIR}/*.json
+  before_script:
+    - !reference [".cmake-minimum", before_script]
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -qq -y zstd
   script:
-    - >
-      cd "${CI_PROJECT_DIR}"
+    - cd "${CI_PROJECT_DIR}"
+    - tar -I zstd -xvf "${BUILD_DIR}/benchmarks.tar.zstd" -C "${BUILD_DIR}/"
     - |
       if [ ! -d "${BUILD_DIR}/benchmark" ]; then
           echo "There are no benchmark executables. Run the build job with a BUILD_TARGET."
@@ -553,6 +548,7 @@ autotune:execute-tuning:
       --benchmark_filter_regex="${AUTOTUNE_ALGORITHM_REGEX}"
       --size="${AUTOTUNE_SIZE}"
       --trials="${AUTOTUNE_TRIALS}"
+      --seed=82589933
 
 autotune:generate-config:
   image: python:3.10.5-buster

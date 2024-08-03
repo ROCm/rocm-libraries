@@ -37,6 +37,12 @@
 #include "iterator.hpp"
 
 #include "thread/radix_key_codec.hpp"
+#include "thread/thread_load.hpp"
+#include "thread/thread_operators.hpp"
+#include "thread/thread_reduce.hpp"
+#include "thread/thread_scan.hpp"
+#include "thread/thread_search.hpp"
+#include "thread/thread_store.hpp"
 
 #include "warp/warp_reduce.hpp"
 #include "warp/warp_scan.hpp"
@@ -59,6 +65,8 @@
 #include "device/device_memcpy.hpp"
 #include "device/device_merge.hpp"
 #include "device/device_merge_sort.hpp"
+#include "device/device_nth_element.hpp"
+#include "device/device_partial_sort.hpp"
 #include "device/device_partition.hpp"
 #include "device/device_radix_sort.hpp"
 #include "device/device_reduce.hpp"

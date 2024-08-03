@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -236,7 +236,9 @@ private:
 public:
     static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
 
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = raw_storage<storage_type_>;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE void sort(Key& thread_key, BinaryFunction compare_function)

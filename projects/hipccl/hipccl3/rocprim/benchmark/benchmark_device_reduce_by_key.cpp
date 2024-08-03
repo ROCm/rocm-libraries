@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "benchmark_device_reduce_by_key.parallel.hpp"
 #include "benchmark_utils.hpp"
 // CmdParser
 #include "cmdparser.hpp"
@@ -30,218 +31,72 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
-#include <rocprim/device/device_reduce_by_key.hpp>
-
-#include <iostream>
-#include <limits>
-#include <locale>
+#include <cstddef>
 #include <string>
 #include <vector>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+#ifndef DEFAULT_BYTES
+constexpr size_t DEFAULT_BYTES = size_t{2} << 30; // 2 GiB
 #endif
 
-namespace rp = rocprim;
-
-const unsigned int batch_size = 10;
-const unsigned int warmup_size = 5;
-
-template<class Key, class Value>
-void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t stream, size_t size)
-{
-    using key_type = Key;
-    using value_type = Value;
-
-    // Generate data
-    std::vector<key_type> keys_input(size);
-
-    unsigned int unique_count = 0;
-    std::vector<size_t> key_counts = get_random_data<size_t>(100000, 1, max_length);
-    size_t offset = 0;
-    while(offset < size)
-    {
-        const size_t key_count = key_counts[unique_count % key_counts.size()];
-        const size_t end = std::min(size, offset + key_count);
-        for(size_t i = offset; i < end; i++)
-        {
-            keys_input[i] = unique_count;
-        }
-
-        unique_count++;
-        offset += key_count;
+#define CREATE_BENCHMARK(KEY, VALUE, MAX_SEGMENT_LENGTH)                               \
+    {                                                                                  \
+        const device_reduce_by_key_benchmark<KEY, VALUE, MAX_SEGMENT_LENGTH> instance; \
+        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance);                  \
     }
 
-    std::vector<value_type> values_input(size);
-    std::iota(values_input.begin(), values_input.end(), 0);
+#define CREATE_BENCHMARK_TYPE(KEY, VALUE) \
+    CREATE_BENCHMARK(KEY, VALUE, 10);     \
+    CREATE_BENCHMARK(KEY, VALUE, 1000)
 
-    key_type * d_keys_input;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_keys_input, keys_input.data(),
-            size * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
+// some of the tuned types
+#define CREATE_BENCHMARK_TYPES(KEY)            \
+    CREATE_BENCHMARK_TYPE(KEY, int8_t);        \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::half); \
+    CREATE_BENCHMARK_TYPE(KEY, int32_t);       \
+    CREATE_BENCHMARK_TYPE(KEY, float);         \
+    CREATE_BENCHMARK_TYPE(KEY, double)
 
-    value_type * d_values_input;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_values_input, values_input.data(),
-            size * sizeof(value_type),
-            hipMemcpyHostToDevice
-        )
-    );
+// all of the tuned types
+#define CREATE_BENCHMARK_TYPE_TUNING(KEY)      \
+    CREATE_BENCHMARK_TYPE(KEY, int8_t);        \
+    CREATE_BENCHMARK_TYPE(KEY, int16_t);       \
+    CREATE_BENCHMARK_TYPE(KEY, int32_t);       \
+    CREATE_BENCHMARK_TYPE(KEY, int64_t);       \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::half); \
+    CREATE_BENCHMARK_TYPE(KEY, float);         \
+    CREATE_BENCHMARK_TYPE(KEY, double)
 
-    key_type * d_unique_output;
-    value_type * d_aggregates_output;
-    unsigned int * d_unique_count_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_unique_output), unique_count * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_aggregates_output), unique_count * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_unique_count_output), sizeof(unsigned int)));
-
-    void * d_temporary_storage = nullptr;
-    size_t temporary_storage_bytes = 0;
-
-    rp::plus<value_type> reduce_op;
-    rp::equal_to<key_type> key_compare_op;
-
-    HIP_CHECK(
-        rp::reduce_by_key(
-            nullptr, temporary_storage_bytes,
-            d_keys_input, d_values_input, size,
-            d_unique_output, d_aggregates_output,
-            d_unique_count_output,
-            reduce_op, key_compare_op,
-            stream
-        )
-    );
-
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
-    {
-        HIP_CHECK(
-            rp::reduce_by_key(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_values_input, size,
-                d_unique_output, d_aggregates_output,
-                d_unique_count_output,
-                reduce_op, key_compare_op,
-                stream
-            )
-        );
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    for (auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            HIP_CHECK(
-                rp::reduce_by_key(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input, d_values_input, size,
-                    d_unique_output, d_aggregates_output,
-                    d_unique_count_output,
-                    reduce_op, key_compare_op,
-                    stream
-                )
-            );
-        }
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-    }
-
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    state.SetBytesProcessed(state.iterations() * batch_size * size * (sizeof(key_type) + sizeof(value_type)));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_keys_input));
-    HIP_CHECK(hipFree(d_values_input));
-    HIP_CHECK(hipFree(d_unique_output));
-    HIP_CHECK(hipFree(d_aggregates_output));
-    HIP_CHECK(hipFree(d_unique_count_output));
-}
-
-#define CREATE_BENCHMARK(Key, Value)                                                     \
-    benchmark::RegisterBenchmark(                                                        \
-        bench_naming::format_name("{lvl:device,algo:reduce_by_key,key_type:" #Key        \
-                                  ",value_type:" #Value ",keys_max_length:"              \
-                                  + std::to_string(max_length) + ",cfg:default_config}") \
-            .c_str(),                                                                    \
-        run_benchmark<Key, Value>,                                                       \
-        max_length,                                                                      \
-        stream,                                                                          \
-        size)
-
-void add_benchmarks(size_t max_length,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hipStream_t stream,
-                    size_t size)
-{
-    using custom_float2 = custom_type<float, float>;
-    using custom_double2 = custom_type<double, double>;
-
-    std::vector<benchmark::internal::Benchmark*> bs =
-    {
-        CREATE_BENCHMARK(int, float),
-        CREATE_BENCHMARK(int, double),
-        CREATE_BENCHMARK(int, custom_float2),
-        CREATE_BENCHMARK(int, custom_double2),
-
-        CREATE_BENCHMARK(int8_t, int8_t),
-        CREATE_BENCHMARK(uint8_t, uint8_t),
-        CREATE_BENCHMARK(rocprim::half, rocprim::half),
-
-        CREATE_BENCHMARK(long long, float),
-        CREATE_BENCHMARK(long long, double),
-        CREATE_BENCHMARK(long long, custom_float2),
-        CREATE_BENCHMARK(long long, custom_double2),
-    };
-
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
-
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
+#ifdef BENCHMARK_CONFIG_TUNING
+    // optionally run an evenly split subset of benchmarks, when making multiple program invocations
+    parser.set_optional<int>("parallel_instance",
+                             "parallel_instance",
+                             0,
+                             "parallel instance index");
+    parser.set_optional<int>("parallel_instances",
+                             "parallel_instances",
+                             1,
+                             "total parallel instances");
+#endif
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t size   = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -249,11 +104,39 @@ int main(int argc, char *argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(1000, benchmarks, stream, size);
-    add_benchmarks(10, benchmarks, stream, size);
+    std::vector<benchmark::internal::Benchmark*> benchmarks = {};
+#ifdef BENCHMARK_CONFIG_TUNING
+    const int parallel_instance  = parser.get<int>("parallel_instance");
+    const int parallel_instances = parser.get<int>("parallel_instances");
+    config_autotune_register::register_benchmark_subset(benchmarks,
+                                                        parallel_instance,
+                                                        parallel_instances,
+                                                        size,
+                                                        seed,
+                                                        stream);
+#else
+    // tuned types
+    CREATE_BENCHMARK_TYPES(int8_t);
+    CREATE_BENCHMARK_TYPES(int16_t);
+    CREATE_BENCHMARK_TYPE_TUNING(int32_t);
+    CREATE_BENCHMARK_TYPE_TUNING(int64_t);
+    CREATE_BENCHMARK_TYPES(rocprim::half);
+    CREATE_BENCHMARK_TYPES(float);
+    CREATE_BENCHMARK_TYPES(double);
+
+    // custom types
+    using custom_float2  = custom_type<float, float>;
+    using custom_double2 = custom_type<double, double>;
+
+    CREATE_BENCHMARK_TYPE(int, custom_float2);
+    CREATE_BENCHMARK_TYPE(int, custom_double2);
+
+    CREATE_BENCHMARK_TYPE(long long, custom_float2);
+    CREATE_BENCHMARK_TYPE(long long, custom_double2);
+#endif
 
     // Use manual timing
     for(auto& b : benchmarks)

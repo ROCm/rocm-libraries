@@ -34,18 +34,18 @@
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_types.hpp"
 
-template<
-    class Key,
-    class Value,
-    class ReduceOp,
-    unsigned int MinSegmentLength,
-    unsigned int MaxSegmentLength,
-    class Aggregate = Value,
-    class KeyCompareFunction = ::rocprim::equal_to<Key>,
-    // Tests output iterator with void value_type (OutputIterator concept)
-    bool UseIdentityIterator = false,
-    bool UseGraphs = false
->
+template<class Key,
+         class Value,
+         class ReduceOp,
+         unsigned int MinSegmentLength,
+         unsigned int MaxSegmentLength,
+         class Aggregate          = Value,
+         class KeyCompareFunction = ::rocprim::equal_to<Key>,
+         // Tests output iterator with void value_type (OutputIterator concept)
+         bool UseIdentityIterator = false,
+         bool UseGraphs           = false,
+         bool Deterministic       = false,
+         typename Config          = rocprim::default_config>
 struct params
 {
     using key_type = Key;
@@ -57,6 +57,8 @@ struct params
     using key_compare_op = KeyCompareFunction;
     static constexpr bool use_identity_iterator = UseIdentityIterator;
     static constexpr bool use_graphs = UseGraphs;
+    static constexpr bool deterministic              = Deterministic;
+    using config                                     = Config;
 };
 
 template<class Params>
@@ -91,11 +93,12 @@ using custom_double2 = test_utils::custom_test_type<double>;
 // clang-format off
 typedef ::testing::Types<
     params<int, int, rocprim::plus<int>, 1, 1, int, rocprim::equal_to<int>, true>,
-    params<double, int, rocprim::plus<int>, 3, 5, long long, custom_key_compare_op1<double>>,
+    params<double, int, rocprim::plus<int>, 3, 5, long long, custom_key_compare_op1<double>, false, false, true>,
     params<float, custom_double2, rocprim::minimum<custom_double2>, 1, 10000>,
     params<custom_double2, custom_int2, rocprim::plus<custom_int2>, 1, 10>,
     params<unsigned long long, float, rocprim::minimum<float>, 1, 30>,
-    params<int, rocprim::half, rocprim::minimum<rocprim::half>, 15, 100>,
+    // with block size different than ROCPRIM_DEFAULT_MAX_BLOCK_SIZE and non-power-of-two items per thread
+    params<int, rocprim::half, rocprim::minimum<rocprim::half>, 15, 100, rocprim::half, rocprim::equal_to<int>, false, false, true, rocprim::reduce_by_key_config<128, 3>>,
     // half should be supported, but is missing some key operators.
     // we should uncomment these, as soon as these are implemented and the tests compile and work as intended.
     //params<rocprim::half, rocprim::half, rocprim::minimum<rocprim::half>, 15, 100>,
@@ -104,7 +107,7 @@ typedef ::testing::Types<
     params<int, unsigned int, rocprim::maximum<unsigned int>, 20, 100>,
     params<float, long long, rocprim::maximum<unsigned long long>, 100, 400, long long, custom_key_compare_op1<float>>,
     params<unsigned int, unsigned char, rocprim::plus<unsigned char>, 200, 600>,
-    params<double, int, rocprim::plus<int>, 100, 2000, double, custom_key_compare_op1<double>>,
+    params<double, int, rocprim::plus<int>, 100, 2000, double, custom_key_compare_op1<double>, false, false, true>,
     params<int8_t, int8_t, rocprim::maximum<int8_t>, 20, 100>,
     params<uint8_t, uint8_t, rocprim::maximum<uint8_t>, 20, 100>,
     params<char, rocprim::half, rocprim::maximum<rocprim::half>, 123, 1234>,
@@ -115,9 +118,22 @@ typedef ::testing::Types<
     params<unsigned int, double, rocprim::minimum<double>, 1000, 50000>,
     params<unsigned long long, unsigned long long, rocprim::plus<unsigned long long>, 100000, 100000>,
     params<test_utils::custom_test_array_type<double, 8>, unsigned long, rocprim::plus<>, 69, 420>,
-    params<int, int, rocprim::plus<int>, 1, 10, int, ::rocprim::equal_to<int>, false, true>    
+    params<int, int, rocprim::plus<int>, 1, 10, int, ::rocprim::equal_to<int>, false, true>
 > Params;
 // clang-format on
+
+template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
+constexpr hipError_t invoke_reduce_by_key(Args&&... args)
+{
+    if(Deterministic)
+    {
+        return rocprim::deterministic_reduce_by_key<Config>(std::forward<Args>(args)...);
+    }
+    else
+    {
+        return rocprim::reduce_by_key<Config>(std::forward<Args>(args)...);
+    }
+}
 
 TYPED_TEST_SUITE(RocprimDeviceReduceByKey, Params);
 
@@ -143,8 +159,10 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
                                       std::uniform_int_distribution<int>,
                                       std::uniform_int_distribution<unsigned int>>::type>::type>::
         type;
+    using config = typename TestFixture::params::config;
 
     constexpr bool use_identity_iterator = TestFixture::params::use_identity_iterator;
+    constexpr bool deterministic         = TestFixture::params::deterministic;
     const bool debug_synchronous = false;
 
     reduce_op_type reduce_op;
@@ -259,7 +277,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
             size_t temporary_storage_bytes;
 
-            HIP_CHECK(rocprim::reduce_by_key(
+            HIP_CHECK((invoke_reduce_by_key<deterministic, config>(
                 nullptr,
                 temporary_storage_bytes,
                 d_keys_input,
@@ -271,7 +289,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
                 reduce_op,
                 key_compare_op,
                 stream,
-                debug_synchronous));
+                debug_synchronous)));
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
@@ -284,16 +302,18 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
                 graph = test_utils::createGraphHelper(stream);
             }
 
-            HIP_CHECK(
-                rocprim::reduce_by_key(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input, d_values_input, size,
-                    d_unique_output, d_aggregates_output,
-                    d_unique_count_output,
-                    reduce_op, key_compare_op,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK((invoke_reduce_by_key<deterministic, config>(d_temporary_storage,
+                                                                   temporary_storage_bytes,
+                                                                   d_keys_input,
+                                                                   d_values_input,
+                                                                   size,
+                                                                   d_unique_output,
+                                                                   d_aggregates_output,
+                                                                   d_unique_count_output,
+                                                                   reduce_op,
+                                                                   key_compare_op,
+                                                                   stream,
+                                                                   debug_synchronous)));
 
             hipGraphExec_t graph_instance;
             if(TestFixture::params::use_graphs)
@@ -339,7 +359,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
                 test_utils::cleanupGraphHelper(graph, graph_instance);
                 HIP_CHECK(hipStreamDestroy(stream));
             }
-            
+
             ASSERT_EQ(unique_count_output[0], unique_count_expected);
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(unique_output, unique_expected));
@@ -348,7 +368,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     }
 }
 
-template<typename value_type, bool use_graphs = false>
+template<typename value_type, bool use_graphs = false, bool Deterministic = false>
 void large_indices_reduce_by_key()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -404,18 +424,18 @@ void large_indices_reduce_by_key()
 
         size_t temporary_storage_bytes;
 
-        HIP_CHECK(rocprim::reduce_by_key(nullptr,
-                                         temporary_storage_bytes,
-                                         d_keys_input,
-                                         d_values_input,
-                                         size,
-                                         d_unique_output,
-                                         d_aggregates_output,
-                                         d_unique_count_output,
-                                         reduce_op,
-                                         key_compare_op,
-                                         stream,
-                                         debug_synchronous));
+        HIP_CHECK(invoke_reduce_by_key<Deterministic>(nullptr,
+                                                      temporary_storage_bytes,
+                                                      d_keys_input,
+                                                      d_values_input,
+                                                      size,
+                                                      d_unique_output,
+                                                      d_aggregates_output,
+                                                      d_unique_count_output,
+                                                      reduce_op,
+                                                      key_compare_op,
+                                                      stream,
+                                                      debug_synchronous));
 
         ASSERT_GT(temporary_storage_bytes, 0);
 
@@ -429,18 +449,18 @@ void large_indices_reduce_by_key()
             graph = test_utils::createGraphHelper(stream);
         }
 
-        HIP_CHECK(rocprim::reduce_by_key(d_temporary_storage,
-                                         temporary_storage_bytes,
-                                         d_keys_input,
-                                         d_values_input,
-                                         size,
-                                         d_unique_output,
-                                         d_aggregates_output,
-                                         d_unique_count_output,
-                                         reduce_op,
-                                         key_compare_op,
-                                         stream,
-                                         debug_synchronous));
+        HIP_CHECK(invoke_reduce_by_key<Deterministic>(d_temporary_storage,
+                                                      temporary_storage_bytes,
+                                                      d_keys_input,
+                                                      d_values_input,
+                                                      size,
+                                                      d_unique_output,
+                                                      d_aggregates_output,
+                                                      d_unique_count_output,
+                                                      reduce_op,
+                                                      key_compare_op,
+                                                      stream,
+                                                      debug_synchronous));
 
         hipGraphExec_t graph_instance;
         if(use_graphs)
@@ -514,7 +534,12 @@ TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeyLargeValueTypeWithGraphs)
     large_indices_reduce_by_key<test_utils::custom_test_type<size_t>, true>();
 }
 
-template<typename value_type, bool use_graphs = false>
+TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeyDeterministic)
+{
+    large_indices_reduce_by_key<double, false, true>();
+}
+
+template<typename value_type, bool use_graphs = false, bool Deterministic = false>
 void large_segment_count_reduce_by_key()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -554,18 +579,18 @@ void large_segment_count_reduce_by_key()
                                                      sizeof(*d_unique_count_output)));
 
         size_t temporary_storage_bytes;
-        HIP_CHECK(rocprim::reduce_by_key(nullptr,
-                                         temporary_storage_bytes,
-                                         d_keys_input,
-                                         d_values_input,
-                                         size,
-                                         d_unique_output,
-                                         d_aggregates_output,
-                                         d_unique_count_output,
-                                         reduce_op,
-                                         key_compare_op,
-                                         stream,
-                                         debug_synchronous));
+        HIP_CHECK(invoke_reduce_by_key<Deterministic>(nullptr,
+                                                      temporary_storage_bytes,
+                                                      d_keys_input,
+                                                      d_values_input,
+                                                      size,
+                                                      d_unique_output,
+                                                      d_aggregates_output,
+                                                      d_unique_count_output,
+                                                      reduce_op,
+                                                      key_compare_op,
+                                                      stream,
+                                                      debug_synchronous));
 
         ASSERT_GT(temporary_storage_bytes, 0);
 
@@ -579,18 +604,18 @@ void large_segment_count_reduce_by_key()
             graph = test_utils::createGraphHelper(stream);
         }
 
-        HIP_CHECK(rocprim::reduce_by_key(d_temporary_storage,
-                                         temporary_storage_bytes,
-                                         d_keys_input,
-                                         d_values_input,
-                                         size,
-                                         d_unique_output,
-                                         d_aggregates_output,
-                                         d_unique_count_output,
-                                         reduce_op,
-                                         key_compare_op,
-                                         stream,
-                                         debug_synchronous));
+        HIP_CHECK(invoke_reduce_by_key<Deterministic>(d_temporary_storage,
+                                                      temporary_storage_bytes,
+                                                      d_keys_input,
+                                                      d_values_input,
+                                                      size,
+                                                      d_unique_output,
+                                                      d_aggregates_output,
+                                                      d_unique_count_output,
+                                                      reduce_op,
+                                                      key_compare_op,
+                                                      stream,
+                                                      debug_synchronous));
 
         hipGraphExec_t graph_instance;
         if(use_graphs)
@@ -634,6 +659,11 @@ TEST(RocprimDeviceReduceByKey, GraphReduceByKey)
     large_segment_count_reduce_by_key<unsigned int, true>();
 }
 
+TEST(RocprimDeviceReduceByKey, LargeSegmentCountReduceByKeyDeterministic)
+{
+    large_segment_count_reduce_by_key<float, false, true>();
+}
+
 TEST(RocprimDeviceReduceByKey, ReduceByNonEqualKeys)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -644,6 +674,7 @@ TEST(RocprimDeviceReduceByKey, ReduceByNonEqualKeys)
     using value_type = unsigned int;
 
     const bool debug_synchronous = false;
+    constexpr bool deterministic     = false;
 
     ::rocprim::plus<value_type> reduce_op;
     auto                        key_compare_op = [](const auto&, const auto&) { return false; };
@@ -679,18 +710,18 @@ TEST(RocprimDeviceReduceByKey, ReduceByNonEqualKeys)
 
             size_t temporary_storage_bytes;
 
-            HIP_CHECK(rocprim::reduce_by_key(nullptr,
-                                             temporary_storage_bytes,
-                                             d_keys_input,
-                                             d_values_input,
-                                             size,
-                                             d_unique_output,
-                                             d_aggregates_output,
-                                             d_unique_count_output,
-                                             reduce_op,
-                                             key_compare_op,
-                                             stream,
-                                             debug_synchronous));
+            HIP_CHECK(invoke_reduce_by_key<deterministic>(nullptr,
+                                                          temporary_storage_bytes,
+                                                          d_keys_input,
+                                                          d_values_input,
+                                                          size,
+                                                          d_unique_output,
+                                                          d_aggregates_output,
+                                                          d_unique_count_output,
+                                                          reduce_op,
+                                                          key_compare_op,
+                                                          stream,
+                                                          debug_synchronous));
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
@@ -698,18 +729,18 @@ TEST(RocprimDeviceReduceByKey, ReduceByNonEqualKeys)
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            HIP_CHECK(rocprim::reduce_by_key(d_temporary_storage,
-                                             temporary_storage_bytes,
-                                             d_keys_input,
-                                             d_values_input,
-                                             size,
-                                             d_unique_output,
-                                             d_aggregates_output,
-                                             d_unique_count_output,
-                                             reduce_op,
-                                             key_compare_op,
-                                             stream,
-                                             debug_synchronous));
+            HIP_CHECK(invoke_reduce_by_key<deterministic>(d_temporary_storage,
+                                                          temporary_storage_bytes,
+                                                          d_keys_input,
+                                                          d_values_input,
+                                                          size,
+                                                          d_unique_output,
+                                                          d_aggregates_output,
+                                                          d_unique_count_output,
+                                                          reduce_op,
+                                                          key_compare_op,
+                                                          stream,
+                                                          debug_synchronous));
 
             HIP_CHECK(hipFree(d_temporary_storage));
 

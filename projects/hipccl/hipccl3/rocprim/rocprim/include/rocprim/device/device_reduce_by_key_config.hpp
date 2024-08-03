@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,106 +21,95 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_REDUCE_BY_KEY_CONFIG_HPP_
 #define ROCPRIM_DEVICE_DEVICE_REDUCE_BY_KEY_CONFIG_HPP_
 
+#include "detail/config/device_reduce_by_key.hpp"
+
 #include "config_types.hpp"
-
-#include "../block/block_load.hpp"
-#include "../block/block_scan.hpp"
-#include "../block/block_store.hpp"
-
-#include "../config.hpp"
-
-#include <algorithm>
 
 /// \addtogroup primitivesmodule_deviceconfigs
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/**
- * \brief Configuration of device-level reduce-by-key operation.
- * 
- * \tparam BlockSize number of threads in a block.
- * \tparam ItemsPerThread number of items processed by each thread per tile. 
- * \tparam LoadKeysMethod method of loading keys
- * \tparam LoadValuesMethod method of loading values
- * \tparam ScanAlgorithm block level scan algorithm to use
- * \tparam TilesPerBlock number of tiles (`BlockSize` * `ItemsPerThread` items) to process per block
- * \tparam SizeLimit limit on the number of items for a single reduce_by_key kernel launch.
- */
-template<unsigned int         BlockSize,
-         unsigned int         ItemsPerThread,
-         block_load_method    LoadKeysMethod   = block_load_method::block_load_transpose,
-         block_load_method    LoadValuesMethod = block_load_method::block_load_transpose,
-         block_scan_algorithm ScanAlgorithm    = block_scan_algorithm::using_warp_scan,
-         unsigned int         TilesPerBlock    = 1,
-         unsigned int         SizeLimit        = ROCPRIM_GRID_SIZE_LIMIT>
-struct reduce_by_key_config
-{
-    /// Number of threads in a block.
-    static constexpr unsigned int         block_size         = BlockSize;
-
-    /// Number of tiles (`BlockSize` * `ItemsPerThread` items) to process per block
-    static constexpr unsigned int         tiles_per_block    = TilesPerBlock;
-
-    /// Number of items processed by each thread per tile. 
-    static constexpr unsigned int         items_per_thread   = ItemsPerThread;
-
-    /// A rocprim::block_load_method emum value indicating how the keys should be loaded.
-    /// Defaults to block_load_method::block_load_transpose
-    static constexpr block_load_method    load_keys_method   = LoadKeysMethod;
-
-    /// A rocprim::block_load_method emum value indicating how the values should be loaded.
-    /// Defaults to block_load_method::block_load_transpose
-    static constexpr block_load_method    load_values_method = LoadValuesMethod;
-
-    /// A rocprim::block_scan_algorithm enum value indicating how the reduction should
-    /// be done. Defaults to block_scan_algorithm::using_warp_scan
-    static constexpr block_scan_algorithm scan_algorithm     = ScanAlgorithm;
-
-    /// Maximum possible number of values. Defaults to ROCPRIM_GRID_SIZE_LIMIT.
-    static constexpr unsigned int         size_limit         = SizeLimit;
-};
-
 namespace detail
 {
 
-namespace reduce_by_key
+// Generic for user-provided config: instantiate user-provided config.
+template<typename ReduceByKeyConfig, typename, typename, typename>
+struct wrapped_reduce_by_key_config
 {
-
-template<typename Key, typename Value>
-struct fallback_config
-{
-    static constexpr unsigned int size_memory_per_item = std::max(sizeof(Key), sizeof(Value));
-
-    static constexpr unsigned int item_scale
-        = static_cast<unsigned int>(ceiling_div(size_memory_per_item, 2 * sizeof(int)));
-
-    static constexpr unsigned int items_per_thread = std::max(1u, 15u / item_scale);
-
-    using type
-        = reduce_by_key_config<detail::limit_block_size<256U,
-                                                        items_per_thread * size_memory_per_item,
-                                                        ROCPRIM_WARP_SIZE_64>::value,
-                               items_per_thread,
-                               block_load_method::block_load_transpose,
-                               block_load_method::block_load_transpose,
-                               block_scan_algorithm::using_warp_scan,
-                               2>;
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr reduce_by_key_config_params params = ReduceByKeyConfig{};
+    };
 };
 
-template<unsigned int TargetArch, class Key, class Value>
-struct default_config
-    : std::conditional_t<std::max(sizeof(Key), sizeof(Value)) <= 16,
-                         rocprim::reduce_by_key_config<256,
-                                                       15,
-                                                       block_load_method::block_load_transpose,
-                                                       block_load_method::block_load_transpose,
-                                                       block_scan_algorithm::using_warp_scan,
-                                                       sizeof(Value) < 16 ? 1 : 2>,
-                         typename reduce_by_key::fallback_config<Key, Value>::type>
+// Generic for default config: instantiate base config.
+template<typename KeyType,
+         typename AccumulatorType,
+         typename BinaryFunction,
+         typename Enable = void>
+struct wrapped_reduce_by_key_impl
+{
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr reduce_by_key_config_params params =
+            typename default_reduce_by_key_config_base<KeyType, AccumulatorType>::type{};
+    };
+};
+
+// Specialization for default config if types are not custom: instantiate the tuned config.
+template<typename KeyType, typename AccumulatorType, typename BinaryFunction>
+struct wrapped_reduce_by_key_impl<
+    KeyType,
+    AccumulatorType,
+    BinaryFunction,
+    std::enable_if_t<is_arithmetic<KeyType>::value && is_arithmetic<AccumulatorType>::value
+                     && is_binary_functional<BinaryFunction>::value>>
+{
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr reduce_by_key_config_params params
+            = default_reduce_by_key_config<static_cast<unsigned int>(Arch),
+                                           KeyType,
+                                           AccumulatorType>{};
+    };
+};
+
+// Specialization for default config.
+template<typename KeyType, typename AccumulatorType, typename BinaryFunction>
+struct wrapped_reduce_by_key_config<default_config, KeyType, AccumulatorType, BinaryFunction>
+    : wrapped_reduce_by_key_impl<KeyType, AccumulatorType, BinaryFunction>
 {};
 
-} // namespace reduce_by_key
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<typename ReduceByKeyConfig,
+         typename KeyType,
+         typename AccumulatorType,
+         typename BinaryFunction>
+template<target_arch Arch>
+constexpr reduce_by_key_config_params
+    wrapped_reduce_by_key_config<ReduceByKeyConfig, KeyType, AccumulatorType, BinaryFunction>::
+        architecture_config<Arch>::params;
+
+template<typename KeyType, typename AccumulatorType, typename BinaryFunction, typename Enable>
+template<target_arch Arch>
+constexpr reduce_by_key_config_params
+    wrapped_reduce_by_key_impl<KeyType, AccumulatorType, BinaryFunction, Enable>::
+        architecture_config<Arch>::params;
+
+template<typename KeyType, typename AccumulatorType, typename BinaryFunction>
+template<target_arch Arch>
+constexpr reduce_by_key_config_params wrapped_reduce_by_key_impl<
+    KeyType,
+    AccumulatorType,
+    BinaryFunction,
+    std::enable_if_t<is_arithmetic<KeyType>::value && is_arithmetic<AccumulatorType>::value
+                     && is_binary_functional<BinaryFunction>::value>>::architecture_config<Arch>::
+    params;
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // end namespace detail
 

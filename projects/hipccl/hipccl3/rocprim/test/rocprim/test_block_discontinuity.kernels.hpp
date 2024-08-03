@@ -221,6 +221,10 @@ auto test_block_discontinuity()
     const size_t size = items_per_block * 20;
     static constexpr size_t grid_size = size / items_per_block;
 
+    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "size = " << size);
+    SCOPED_TRACE(testing::Message() << "grid_size = " << grid_size);
+
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -335,6 +339,10 @@ auto test_block_discontinuity()
     const size_t size = items_per_block * 20;
     static constexpr size_t grid_size = size / items_per_block;
 
+    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "size = " << size);
+    SCOPED_TRACE(testing::Message() << "grid_size = " << grid_size);
+
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -448,6 +456,10 @@ auto test_block_discontinuity()
     static constexpr size_t items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 20;
     static constexpr size_t grid_size = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "size = " << size);
+    SCOPED_TRACE(testing::Message() << "grid_size = " << grid_size);
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -572,11 +584,14 @@ struct static_for
 {
     static void run()
     {
-        int device_id = test_common_utils::obtain_device_from_ctest();
-        SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
-        HIP_CHECK(hipSetDevice(device_id));
+        {
+            SCOPED_TRACE(testing::Message() << "TestID = " << First);
+            int device_id = test_common_utils::obtain_device_from_ctest();
+            SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+            HIP_CHECK(hipSetDevice(device_id));
 
-        test_block_discontinuity<Type, FlagType, FlagOpType, Method, BlockSize, items[First]>();
+            test_block_discontinuity<Type, FlagType, FlagOpType, Method, BlockSize, items[First]>();
+        }
         static_for<First + 1, Last, Type, FlagType, FlagOpType, Method, BlockSize>::run();
     }
 };

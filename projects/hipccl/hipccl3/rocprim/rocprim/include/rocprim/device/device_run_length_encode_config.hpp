@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "detail/device_config_helper.hpp"
 
 #include "config_types.hpp"
 
@@ -54,7 +55,12 @@ struct run_length_encode_config
 namespace detail
 {
 
-using default_run_length_encode_config = run_length_encode_config<default_config, default_config>;
+// The problem size for the selection is the number of runs, which may be much smaller than the
+//   total problem size. The tuning assumption of reasonably large inputs does therefore not hold.
+template<typename T>
+using default_run_length_encode_config
+    = run_length_encode_config<default_config,
+                               typename default_partition_config_base<T, false>::type>;
 
 } // end namespace detail
 

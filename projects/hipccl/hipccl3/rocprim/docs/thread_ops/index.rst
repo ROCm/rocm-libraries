@@ -9,3 +9,9 @@
 ********************************************************************
 
    * :ref:`radix-key-codec`
+   * :ref:`thread_operators`
+   * :ref:`thread_load`
+   * :ref:`thread_reduce`
+   * :ref:`thread_scan`
+   * :ref:`thread_search`
+   * :ref:`thread_store`

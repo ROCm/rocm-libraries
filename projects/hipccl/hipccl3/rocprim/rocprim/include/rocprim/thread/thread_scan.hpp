@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -36,253 +36,191 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
- /**
-  * \addtogroup UtilModule
-  * @{
-  */
+/// \defgroup thread_scan_exclusive Thread Exclusive Scan Functions
+/// \ingroup threadmodule
 
- /**
-  * \name Sequential prefix scan over statically-sized array types
-  * @{
-  */
+/// \addtogroup thread_scan_exclusive
+/// @{
 
-  /// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
-  /// \tparam LENGTH           - Length of \p input and \p output arrays
-  /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
-  /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
-  /// \param inclusive [in]    - Initial value for inclusive aggregate
-  /// \param exclusive [in]    - Initial value for exclusive aggregate
-  /// \param input [in]        - Input array
-  /// \param output [out]      - Output array (may be aliased to \p input)
-  /// \param scan_op [in]      - Binary scan operator
-  /// \return                  - Aggregate of the scan
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- ROCPRIM_DEVICE ROCPRIM_INLINE
- T thread_scan_exclusive(
-     T                   inclusive,              ///< [in] Initial value for inclusive aggregate
-     T                   exclusive,              ///< [in] Initial value for exclusive aggregate
-     T                   *input,                 ///< [in] Input array
-     T                   *output,                ///< [out] Output array (may be aliased to \p input)
-     ScanOp              scan_op,                ///< [in] Binary scan operator
-     Int2Type<LENGTH>    /*length*/)
- {
-     ROCPRIM_UNROLL
-     for (int i = 0; i < LENGTH; ++i)
-     {
-         inclusive = scan_op(exclusive, input[i]);
-         output[i] = exclusive;
-         exclusive = inclusive;
-     }
+/// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+/// \tparam LENGTH           Length of \p input and \p output arrays
+/// \tparam T                <b>[inferred]</b> The data type to be scanned.
+/// \tparam ScanOp           <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+/// \param inclusive [in]    Initial value for inclusive aggregate
+/// \param exclusive [in]    Initial value for exclusive aggregate
+/// \param input [in]        Input array
+/// \param output [out]      Output array (may be aliased to \p input)
+/// \param scan_op [in]      Binary scan operator
+/// \return                  Aggregate of the scan
+template<int LENGTH, typename T, typename ScanOp>
+ROCPRIM_DEVICE ROCPRIM_INLINE T thread_scan_exclusive(
+    T inclusive, T exclusive, T* input, T* output, ScanOp scan_op, Int2Type<LENGTH> /*length*/)
+{
+    ROCPRIM_UNROLL
+    for(int i = 0; i < LENGTH; ++i)
+    {
+        inclusive = scan_op(exclusive, input[i]);
+        output[i] = exclusive;
+        exclusive = inclusive;
+    }
 
-     return inclusive;
- }
+    return inclusive;
+}
 
+/// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+/// \tparam LENGTH           Length of \p input and \p output arrays
+/// \tparam T                <b>[inferred]</b> The data type to be scanned.
+/// \tparam ScanOp           <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+/// \param input [in]        Input array
+/// \param output [out]      Output array (may be aliased to \p input)
+/// \param scan_op [in]      Binary scan operator
+/// \param prefix  [in]      Prefix to seed scan with
+/// \param apply_prefix [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+/// \return                  Aggregate of the scan
+template<int LENGTH, typename T, typename ScanOp>
+ROCPRIM_DEVICE ROCPRIM_INLINE T
+    thread_scan_exclusive(T* input, T* output, ScanOp scan_op, T prefix, bool apply_prefix = true)
+{
+    T inclusive = input[0];
+    if(apply_prefix)
+    {
+        inclusive = scan_op(prefix, inclusive);
+    }
+    output[0]   = prefix;
+    T exclusive = inclusive;
+    return thread_scan_exclusive(inclusive,
+                                 exclusive,
+                                 input + 1,
+                                 output + 1,
+                                 scan_op,
+                                 Int2Type<LENGTH - 1>());
+}
 
- /// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
- /// \tparam LENGTH           - Length of \p input and \p output arrays
- /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
- /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
- /// \param input [in]        - Input array
- /// \param output [out]      - Output array (may be aliased to \p input)
- /// \param scan_op [in]      - Binary scan operator
- /// \param prefix  [in]      - Prefix to seed scan with
- /// \param apply_prefix [in] - Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
- /// \return                  - Aggregate of the scan
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- ROCPRIM_DEVICE ROCPRIM_INLINE
- T thread_scan_exclusive(
-     T           *input,                 ///< [in] Input array
-     T           *output,                ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op,                ///< [in] Binary scan operator
-     T           prefix,                 ///< [in] Prefix to seed scan with
-     bool        apply_prefix = true)    ///< [in] Whether or not the calling thread should apply its prefix.  If not, the first output element is undefined.  (Handy for preventing thread-0 from applying a prefix.)
- {
-     T inclusive = input[0];
-     if (apply_prefix)
-     {
-         inclusive = scan_op(prefix, inclusive);
-     }
-     output[0] = prefix;
-     T exclusive = inclusive;
+/// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+/// \tparam LENGTH           Length of \p input and \p output arrays
+/// \tparam T                <b>[inferred]</b> The data type to be scanned.
+/// \tparam ScanOp           <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+/// \param input [in]        Input array
+/// \param output [out]      Output array (may be aliased to \p input)
+/// \param scan_op [in]      Binary scan operator
+/// \param prefix  [in]      Prefix to seed scan with
+/// \param apply_prefix [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+/// \return                  Aggregate of the scan
+template<int LENGTH, typename T, typename ScanOp>
+ROCPRIM_DEVICE ROCPRIM_INLINE T thread_scan_exclusive(
+    T (&input)[LENGTH], T (&output)[LENGTH], ScanOp scan_op, T prefix, bool apply_prefix = true)
+{
+    return thread_scan_exclusive<LENGTH>((T*)input, (T*)output, scan_op, prefix, apply_prefix);
+}
 
-     return thread_scan_exclusive(inclusive, exclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
- }
+/// @}
+// end group thread_scan_exclusive
 
- /// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
- /// \tparam LENGTH           - Length of \p input and \p output arrays
- /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
- /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
- /// \param input [in]        - Input array
- /// \param output [out]      - Output array (may be aliased to \p input)
- /// \param scan_op [in]      - Binary scan operator
- /// \param prefix  [in]      - Prefix to seed scan with
- /// \param apply_prefix [in] - Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
- /// \return                  - Aggregate of the scan
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- ROCPRIM_DEVICE ROCPRIM_INLINE
- T thread_scan_exclusive(
-     T           (&input)[LENGTH],       ///< [in] Input array
-     T           (&output)[LENGTH],      ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op,                ///< [in] Binary scan operator
-     T           prefix,                 ///< [in] Prefix to seed scan with
-     bool        apply_prefix = true)    ///< [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
- {
-     return thread_scan_exclusive<LENGTH>((T*) input, (T*) output, scan_op, prefix, apply_prefix);
- }
+/// \defgroup thread_scan_inclusive Thread Inclusive Scan Functions
+/// \ingroup threadmodule
 
- /// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
- /// \tparam LENGTH           - Length of \p input and \p output arrays
- /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
- /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
- /// \param inclusive [in]    - Initial value for inclusive aggregate
- /// \param input [in]        - Input array
- /// \param output [out]      - Output array (may be aliased to \p input)
- /// \param scan_op [in]      - Binary scan operator
- /// \return                  - Aggregate of the scan
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- ROCPRIM_DEVICE ROCPRIM_INLINE
- T thread_scan_inclusive(
-     T                   inclusive,              ///< [in] Initial value for inclusive aggregate
-     T                   *input,                 ///< [in] Input array
-     T                   *output,                ///< [out] Output array (may be aliased to \p input)
-     ScanOp              scan_op,                ///< [in] Binary scan operator
-     Int2Type<LENGTH>    /*length*/)
- {
-     ROCPRIM_UNROLL
-     for (int i = 0; i < LENGTH; ++i)
-     {
-         inclusive = scan_op(inclusive, input[i]);
-         output[i] = inclusive;
-     }
+/// \addtogroup thread_scan_inclusive
+/// @{
 
-     return inclusive;
- }
-
+/// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+/// \tparam LENGTH           Length of \p input and \p output arrays
+/// \tparam T                <b>[inferred]</b> The data type to be scanned.
+/// \tparam ScanOp           <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+/// \param inclusive [in]    Initial value for inclusive aggregate
+/// \param input [in]        Input array
+/// \param output [out]      Output array (may be aliased to \p input)
+/// \param scan_op [in]      Binary scan operator
+/// \return                  Aggregate of the scan
+template<int LENGTH, typename T, typename ScanOp>
+ROCPRIM_DEVICE ROCPRIM_INLINE T thread_scan_inclusive(
+    T inclusive, T* input, T* output, ScanOp scan_op, Int2Type<LENGTH> /*length*/)
+{
+    ROCPRIM_UNROLL
+    for(int i = 0; i < LENGTH; ++i)
+    {
+        inclusive = scan_op(inclusive, input[i]);
+        output[i] = inclusive;
+    }
+    return inclusive;
+}
 
 /// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
-/// \tparam LENGTH     - LengthT of \p input and \p output arrays
-/// \tparam T          - <b>[inferred]</b> The data type to be scanned.
-/// \tparam ScanOp     - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
-/// \param input [in] - Input array
-/// \param output [out] - Output array (may be aliased to \p input)
-/// \param scan_op [in] - Binary scan operator
-/// \return - Aggregate of the scan
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- ROCPRIM_DEVICE ROCPRIM_INLINE
- T thread_scan_inclusive(
-     T           *input,
-     T           *output,
-     ScanOp      scan_op)
- {
-     T inclusive = input[0];
-     output[0] = inclusive;
+/// \tparam LENGTH      LengthT of \p input and \p output arrays
+/// \tparam T           <b>[inferred]</b> The data type to be scanned.
+/// \tparam ScanOp      <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+/// \param input [in]   Input array
+/// \param output [out] Output array (may be aliased to \p input)
+/// \param scan_op [in] Binary scan operator
+/// \return             Aggregate of the scan
+template<int LENGTH, typename T, typename ScanOp>
+ROCPRIM_DEVICE ROCPRIM_INLINE T thread_scan_inclusive(T* input, T* output, ScanOp scan_op)
+{
+    T inclusive = input[0];
+    output[0]   = inclusive;
+    // Continue scan
+    return thread_scan_inclusive(inclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
+}
 
-     // Continue scan
-     return thread_scan_inclusive(inclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
- }
+/// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+/// \tparam LENGTH      LengthT of \p input and \p output arrays
+/// \tparam T           <b>[inferred]</b> The data type to be scanned.
+/// \tparam ScanOp      <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+/// \param input [in]   Input array
+/// \param output [out] Output array (may be aliased to \p input)
+/// \param scan_op [in] Binary scan operator
+/// \return             Aggregate of the scan
+template<int LENGTH, typename T, typename ScanOp>
+ROCPRIM_DEVICE ROCPRIM_INLINE T thread_scan_inclusive(T (&input)[LENGTH],
+                                                      T (&output)[LENGTH],
+                                                      ScanOp scan_op)
+{
+    return thread_scan_inclusive<LENGTH>((T*)input, (T*)output, scan_op);
+}
 
+/// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+/// \tparam LENGTH           LengthT of \p input and \p output arrays
+/// \tparam T                <b>[inferred]</b> The data type to be scanned.
+/// \tparam ScanOp           <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+/// \param input [in]        Input array
+/// \param output [out]      Output array (may be aliased to \p input)
+/// \param scan_op [in]      Binary scan operator
+/// \param prefix  [in]      Prefix to seed scan with
+/// \param apply_prefix [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+/// \return                  Aggregate of the scan
+template<int LENGTH, typename T, typename ScanOp>
+ROCPRIM_DEVICE ROCPRIM_INLINE T
+    thread_scan_inclusive(T* input, T* output, ScanOp scan_op, T prefix, bool apply_prefix = true)
+{
+    T inclusive = input[0];
+    if(apply_prefix)
+    {
+        inclusive = scan_op(prefix, inclusive);
+    }
+    output[0] = inclusive;
+    // Continue scan
+    return thread_scan_inclusive(inclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
+}
 
- /// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
- /// \tparam LENGTH     - LengthT of \p input and \p output arrays
- /// \tparam T          - <b>[inferred]</b> The data type to be scanned.
- /// \tparam ScanOp     - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
- /// \param input [in] - Input array
- /// \param output [out] - Output array (may be aliased to \p input)
- /// \param scan_op [in] - Binary scan operator
- /// \return - Aggregate of the scan
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- ROCPRIM_DEVICE ROCPRIM_INLINE
- T thread_scan_inclusive(
-     T           (&input)[LENGTH],       ///< [in] Input array
-     T           (&output)[LENGTH],      ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op)                ///< [in] Binary scan operator
- {
-     return thread_scan_inclusive<LENGTH>((T*) input, (T*) output, scan_op);
- }
+/// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+/// \tparam LENGTH           LengthT of \p input and \p output arrays
+/// \tparam T                <b>[inferred]</b> The data type to be scanned.
+/// \tparam ScanOp           <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+/// \param input [in]        Input array
+/// \param output [out]      Output array (may be aliased to \p input)
+/// \param scan_op [in]      Binary scan operator
+/// \param prefix  [in]      Prefix to seed scan with
+/// \param apply_prefix [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+/// \return                  Aggregate of the scan
+template<int LENGTH, typename T, typename ScanOp>
+ROCPRIM_DEVICE ROCPRIM_INLINE T thread_scan_inclusive(
+    T (&input)[LENGTH], T (&output)[LENGTH], ScanOp scan_op, T prefix, bool apply_prefix = true)
+{
+    return thread_scan_inclusive<LENGTH>((T*)input, (T*)output, scan_op, prefix, apply_prefix);
+}
 
+/// @}
+// end group thread_scan_inclusive
 
- /// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
- /// \tparam LENGTH           - LengthT of \p input and \p output arrays
- /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
- /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
- /// \param input [in]        - Input array
- /// \param output [out]      - Output array (may be aliased to \p input)
- /// \param scan_op [in]      - Binary scan operator
- /// \param prefix  [in]      - Prefix to seed scan with
- /// \param apply_prefix [in] - Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
- /// \return                  - Aggregate of the scan
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- ROCPRIM_DEVICE ROCPRIM_INLINE
- T thread_scan_inclusive(
-     T           *input,                 ///< [in] Input array
-     T           *output,                ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op,                ///< [in] Binary scan operator
-     T           prefix,                 ///< [in] Prefix to seed scan with
-     bool        apply_prefix = true)    ///< [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
- {
-     T inclusive = input[0];
-     if (apply_prefix)
-     {
-         inclusive = scan_op(prefix, inclusive);
-     }
-     output[0] = inclusive;
+END_ROCPRIM_NAMESPACE
 
-     // Continue scan
-     return thread_scan_inclusive(inclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
- }
-
-
- /// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
- /// \tparam LENGTH           - LengthT of \p input and \p output arrays
- /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
- /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
- /// \param input [in]        - Input array
- /// \param output [out]      - Output array (may be aliased to \p input)
- /// \param scan_op [in]      - Binary scan operator
- /// \param prefix  [in]      - Prefix to seed scan with
- /// \param apply_prefix [in] - Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
- /// \return                  - Aggregate of the scan
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- ROCPRIM_DEVICE ROCPRIM_INLINE
- T thread_scan_inclusive(
-     T           (&input)[LENGTH],
-     T           (&output)[LENGTH],
-     ScanOp      scan_op,
-     T           prefix,
-     bool        apply_prefix = true)
- {
-     return thread_scan_inclusive<LENGTH>((T*) input, (T*) output, scan_op, prefix, apply_prefix);
- }
-
-
- //@}  end member group
-
- /** @} */       // end group UtilModule
-
- END_ROCPRIM_NAMESPACE
-
- #endif // ROCPRIM_THREAD_THREAD_SCAN_HPP_
+#endif // ROCPRIM_THREAD_THREAD_SCAN_HPP_

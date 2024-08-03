@@ -61,7 +61,9 @@ class block_sort_bitonic
     };
 
 public:
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = detail::raw_storage<storage_type_<Key, Value>>;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE void

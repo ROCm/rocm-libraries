@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -56,18 +56,14 @@
     #endif
 
     #ifndef DOXYGEN_DOCUMENTATION_BUILD
-        // Currently HIP on Windows has a bug involving inline device functions generating
-        // local memory/register allocation errors during compilation.  Current workaround is to
-        // use __attribute__((always_inline)) for the affected functions
-        #ifdef _WIN32
-            #define ROCPRIM_INLINE inline __attribute__((always_inline))
-        #else
-            #define ROCPRIM_INLINE inline
-        #endif
+        #define ROCPRIM_INLINE inline
+        #define ROCPRIM_LAUNCH_BOUNDS(...) __launch_bounds__(__VA_ARGS__)
     #else
         // Prefer simpler signatures to let Sphinx/Breathe parse them
         #define ROCPRIM_FORCE_INLINE inline
         #define ROCPRIM_INLINE inline
+        // Ignore __launch_bounds__ for doxygen builds
+        #define ROCPRIM_LAUNCH_BOUNDS(...)
     #endif
     #define ROCPRIM_FORCE_INLINE __attribute__((always_inline))
 #endif
@@ -88,6 +84,10 @@
 
 #if defined(ROCPRIM_DETAIL_HAS_DPP) && (defined(__GFX8__) || defined(__GFX9__))
     #define ROCPRIM_DETAIL_HAS_DPP_BROADCAST 1
+#endif
+
+#if defined(ROCPRIM_DETAIL_HAS_DPP) && (defined(__GFX8__) || defined(__GFX9__))
+    #define ROCPRIM_DETAIL_HAS_DPP_WF 1
 #endif
 
 #ifndef ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS
@@ -179,6 +179,49 @@
         static_assert(expression, message)
 #else
     #define ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(expression, message)
+#endif
+
+/// \brief Clang predefined macro for device code on AMD GPU targets, either 32 or 64.
+///   For HIP-CPU with macro is not predefined, and rocPRIM defines it as 64.
+///   It is undefined behavior to use this macro in host code when compiling with Clang.
+#ifndef __AMDGCN_WAVEFRONT_SIZE
+    #define __AMDGCN_WAVEFRONT_SIZE 64
+#endif
+
+/// \brief Wavefront size, either 32 or 64. May be defined by compiler flags when compiling
+///   with Clang if the value is equal to the wavefront size of all AMD GPU architectures
+///   currently being compiled for.
+///
+///   Only defined in device code unless defined by compiler flags as described above.
+#ifndef ROCPRIM_WAVEFRONT_SIZE
+    #define ROCPRIM_WAVEFRONT_SIZE __AMDGCN_WAVEFRONT_SIZE
+#endif
+
+// Helper macros to disable warnings in clang
+#ifdef __clang__
+    #define ROCPRIM_PRAGMA_TO_STR(x) _Pragma(#x)
+    #define ROCPRIM_CLANG_SUPPRESS_WARNING_PUSH _Pragma("clang diagnostic push")
+    #define ROCPRIM_CLANG_SUPPRESS_WARNING(w) ROCPRIM_PRAGMA_TO_STR(clang diagnostic ignored w)
+    #define ROCPRIM_CLANG_SUPPRESS_WARNING_POP _Pragma("clang diagnostic pop")
+    #define ROCPRIM_CLANG_SUPPRESS_WARNING_WITH_PUSH(w) \
+        ROCPRIM_CLANG_SUPPRESS_WARNING_PUSH ROCPRIM_CLANG_SUPPRESS_WARNING(w)
+#else // __clang__
+    #define ROCPRIM_CLANG_SUPPRESS_WARNING_PUSH
+    #define ROCPRIM_CLANG_SUPPRESS_WARNING(w)
+    #define ROCPRIM_CLANG_SUPPRESS_WARNING_POP
+    #define ROCPRIM_CLANG_SUPPRESS_WARNING_WITH_PUSH(w)
+#endif // __clang__
+
+#ifdef ROCPRIM_DONT_SUPPRESS_DEPRECATIONS
+    #define ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
+    #define ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
+#else
+    /// \brief Disables warnings from using deprecated symbols until the next
+    /// `ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP`.
+    /// \note Track the usage of deprecated symbols in the project's issue tracker!
+    #define ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH \
+        ROCPRIM_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated-declarations")
+    #define ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP ROCPRIM_CLANG_SUPPRESS_WARNING_POP
 #endif
 
 #endif // ROCPRIM_CONFIG_HPP_

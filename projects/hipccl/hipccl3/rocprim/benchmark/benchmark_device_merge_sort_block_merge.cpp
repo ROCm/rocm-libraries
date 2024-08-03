@@ -43,7 +43,7 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 #define CREATE_BENCHMARK(...)                                                \
     {                                                                        \
         const device_merge_sort_block_merge_benchmark<__VA_ARGS__> instance; \
-        REGISTER_BENCHMARK(benchmarks, size, stream, instance);              \
+        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance);        \
     }
 
 int main(int argc, char* argv[])
@@ -55,6 +55,7 @@ int main(int argc, char* argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
 #ifdef BENCHMARK_CONFIG_TUNING
     // optionally run an evenly split subset of benchmarks, when making multiple program invocations
     parser.set_optional<int>("parallel_instance",
@@ -73,6 +74,8 @@ int main(int argc, char* argv[])
     const size_t size   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -80,6 +83,7 @@ int main(int argc, char* argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks = {};
@@ -90,6 +94,7 @@ int main(int argc, char* argv[])
                                                         parallel_instance,
                                                         parallel_instances,
                                                         size,
+                                                        seed,
                                                         stream);
 #else // BENCHMARK_CONFIG_TUNING
     CREATE_BENCHMARK(int)

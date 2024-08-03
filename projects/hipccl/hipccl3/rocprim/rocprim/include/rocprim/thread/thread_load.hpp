@@ -31,8 +31,15 @@
 #define ROCPRIM_THREAD_THREAD_LOAD_HPP_
 
 #include "../config.hpp"
+#include "../detail/various.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
+
+/// \defgroup thread_load Thread Load Functions
+/// \ingroup threadmodule
+
+/// \addtogroup thread_load
+/// @{
 
 /// \brief These enum values are used to specify caching behaviour on load
 enum cache_load_modifier : int
@@ -45,6 +52,9 @@ enum cache_load_modifier : int
     load_ldg,       ///< Cache as texture
     load_volatile,  ///< Volatile (any memory space)
 };
+
+/// @}
+// end of group thread_load
 
 namespace detail
 {
@@ -59,26 +69,26 @@ ROCPRIM_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
 
 #if ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS == 1
 
-// Important for syncing. Check section 9.2.2 or 7.3 in the following document
-// http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
-#define ROCPRIM_ASM_THREAD_LOAD(cache_modifier,                                        \
-                               llvm_cache_modifier,                                    \
-                               type,                                                   \
-                               interim_type,                                           \
-                               asm_operator,                                           \
-                               output_modifier,                                        \
-                               wait_inst,                                              \
-                               wait_cmd)                                               \
-    template<>                                                                         \
-    ROCPRIM_DEVICE __forceinline__ type AsmThreadLoad<cache_modifier, type>(void* ptr) \
-    {                                                                                  \
-        interim_type retval;                                                           \
-        asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier "\n\t"               \
-                                   wait_inst wait_cmd "(%2)"                           \
-                     : "=" #output_modifier(retval)                                    \
-                     : "v"(ptr), "I"(0x00));                                           \
-        return retval;                                                                 \
-    }
+    // Important for syncing. Check section 9.2.2 or 7.3 in the following document
+    // http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
+    #define ROCPRIM_ASM_THREAD_LOAD(cache_modifier,                                             \
+                                    llvm_cache_modifier,                                        \
+                                    type,                                                       \
+                                    interim_type,                                               \
+                                    asm_operator,                                               \
+                                    output_modifier,                                            \
+                                    wait_inst,                                                  \
+                                    wait_cmd)                                                   \
+        template<>                                                                              \
+        ROCPRIM_DEVICE __forceinline__ type AsmThreadLoad<cache_modifier, type>(void* ptr)      \
+        {                                                                                       \
+            interim_type retval;                                                                \
+            asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier "\n\t" wait_inst wait_cmd \
+                                       "(%2)"                                                   \
+                         : "=" #output_modifier(retval)                                         \
+                         : "v"(ptr), "I"(0x00));                                                \
+            return *bit_cast<type*>(&retval);                                                   \
+        }
 
 // TODO Add specialization for custom larger data types
 #define ROCPRIM_ASM_THREAD_LOAD_GROUP(cache_modifier, llvm_cache_modifier, wait_inst, wait_cmd)                                  \
@@ -124,33 +134,31 @@ ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cs, "", "s_waitcnt", "");
 
 }
 
+/// \addtogroup thread_load
+/// @{
+
 /// \brief Store data using the default load instruction. No support for cache modified stores yet
-/// \tparam MODIFIER        - Value in enum for determine which type of cache store modifier to be used
-/// \tparam InputIteratorT - Type of Output Iterator
-/// \param itr [in]         - Iterator to location where data is to be stored
+/// \tparam MODIFIER Value in enum for determine which type of cache store modifier to be used
+/// \tparam InputIteratorT Type of Output Iterator
+/// \param itr [in] Iterator to location where data is to be stored
 /// \return Data that is loaded from memory
-template <
-    cache_load_modifier MODIFIER = load_default,
-    typename InputIteratorT>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-typename std::iterator_traits<InputIteratorT>::value_type
-thread_load(InputIteratorT itr)
+template<cache_load_modifier MODIFIER = load_default, typename InputIteratorT>
+[[deprecated("Use a dereference instead.")]] ROCPRIM_DEVICE ROCPRIM_INLINE
+    typename std::iterator_traits<InputIteratorT>::value_type
+    thread_load(InputIteratorT itr)
 {
-    using T = typename std::iterator_traits<InputIteratorT>::value_type;
+    using T  = typename std::iterator_traits<InputIteratorT>::value_type;
     T retval = thread_load<MODIFIER>(&(*itr));
     return *itr;
 }
 
 /// \brief Load data using the default load instruction. No support for cache modified loads yet
-/// \tparam MODIFIER        - Value in enum for determine which type of cache store modifier to be used
-/// \tparam T               - Type of Data to be loaded
+/// \tparam MODIFIER Value in enum for determine which type of cache store modifier to be used
+/// \tparam T Type of Data to be loaded
 /// \param ptr [in] - Pointer to data to be loaded
 /// \return Data that is loaded from memory
-template <
-    cache_load_modifier MODIFIER = load_default,
-    typename T>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-T thread_load(T* ptr)
+template<cache_load_modifier MODIFIER = load_default, typename T>
+[[deprecated("Use a dereference instead.")]] ROCPRIM_DEVICE ROCPRIM_INLINE T thread_load(T* ptr)
 {
 #ifndef __HIP_CPU_RT__
     return detail::AsmThreadLoad<MODIFIER, T>(ptr);
@@ -160,6 +168,9 @@ T thread_load(T* ptr)
     return retval;
 #endif
 }
+
+/// @}
+// end of group thread_load
 
 END_ROCPRIM_NAMESPACE
 

@@ -971,7 +971,9 @@ struct onesweep_iteration_helper
         };
     };
 
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = detail::raw_storage<storage_type_>;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     template<bool IsFull,
              class KeysInputIterator,

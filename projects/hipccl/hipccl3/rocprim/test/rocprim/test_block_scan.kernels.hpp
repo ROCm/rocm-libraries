@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -484,6 +484,10 @@ auto test_block_scan_input_arrays()
     const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
 
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
@@ -567,6 +571,10 @@ auto test_block_scan_input_arrays()
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -683,6 +691,10 @@ auto test_block_scan_input_arrays()
     const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
 
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
@@ -797,10 +809,14 @@ auto test_block_scan_input_arrays()
     }
 
     const size_t items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 19;
-    const size_t grid_size = size / items_per_block;
+    const size_t size            = items_per_block * 19;
+    const size_t grid_size       = size / items_per_block;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -886,6 +902,10 @@ auto test_block_scan_input_arrays()
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -999,6 +1019,10 @@ auto test_block_scan_input_arrays()
     const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
 
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
@@ -1088,23 +1112,28 @@ auto test_block_scan_input_arrays()
 }
 
 // Static for-loop
-template <
-    unsigned int First,
-    unsigned int Last,
-    class T,
-    int Method,
-    unsigned int BlockSize = 256U
->
+template<unsigned int First, unsigned int Last, class T, int Method, unsigned int BlockSize = 256U>
 struct static_for_input_array
 {
     static void run()
     {
-        int device_id = test_common_utils::obtain_device_from_ctest();
-        SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
-        HIP_CHECK(hipSetDevice(device_id));
+        {
+            SCOPED_TRACE(testing::Message() << "TestID = " << First);
+            int device_id = test_common_utils::obtain_device_from_ctest();
+            SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+            HIP_CHECK(hipSetDevice(device_id));
 
-        test_block_scan_input_arrays<T, Method, BlockSize, items[First], rocprim::block_scan_algorithm::using_warp_scan>();
-        test_block_scan_input_arrays<T, Method, BlockSize, items[First], rocprim::block_scan_algorithm::reduce_then_scan>();
+            test_block_scan_input_arrays<T,
+                                         Method,
+                                         BlockSize,
+                                         items[First],
+                                         rocprim::block_scan_algorithm::using_warp_scan>();
+            test_block_scan_input_arrays<T,
+                                         Method,
+                                         BlockSize,
+                                         items[First],
+                                         rocprim::block_scan_algorithm::reduce_then_scan>();
+        }
         static_for_input_array<First + 1, Last, T, Method, BlockSize>::run();
     }
 };

@@ -52,10 +52,9 @@ class block_radix_rank_match
     static constexpr unsigned int block_size   = BlockSizeX * BlockSizeY * BlockSizeZ;
     static constexpr unsigned int radix_digits = 1 << RadixBits;
 
-    static constexpr unsigned int warp_size = warpSize;
     // Force the number of warps to an uneven amount to reduce the number of lds bank conflicts.
     static constexpr unsigned int warps
-        = ::rocprim::detail::ceiling_div(block_size, warp_size) | 1u;
+        = ::rocprim::detail::ceiling_div(block_size, device_warp_size()) | 1u;
     // The number of counters that are actively being used.
     static constexpr unsigned int active_counters = warps * radix_digits;
     // We want to use a regular block scan to scan the per-warp counters. This requires the
@@ -213,7 +212,9 @@ private:
     }
 
 public:
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = ::rocprim::detail::raw_storage<storage_type_>;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     template<typename Key, unsigned ItemsPerThread>
     ROCPRIM_DEVICE void rank_keys(const Key (&keys)[ItemsPerThread],

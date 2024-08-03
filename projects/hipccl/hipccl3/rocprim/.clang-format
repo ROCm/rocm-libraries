@@ -41,7 +41,6 @@ AllowShortLoopsOnASingleLine: false
 AlwaysBreakAfterReturnType: None
 AlwaysBreakBeforeMultilineStrings: false
 AlwaysBreakTemplateDeclarations: Yes
-AttributeMacros: ['ROCPRIM_DEVICE', 'ROCPRIM_HOST', 'ROCPRIM_HOST_DEVICE', 'ROCPRIM_SHARED_MEMORY', 'ROCPRIM_KERNEL', 'ROCPRIM_INLINE']
 BinPackArguments: false
 BinPackParameters: false
 BitFieldColonSpacing: Both
@@ -135,4 +134,40 @@ SpacesInConditionalStatement: false
 SpacesInContainerLiterals: true
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
+
+AttributeMacros:
+    - __host__
+    - __device__
+    - __global__
+    - __forceinline__
+    - __shared__
+    - __launch_bounds__
+    - ROCPRIM_DEVICE
+    - ROCPRIM_HOST
+    - ROCPRIM_HOST_DEVICE
+    - ROCPRIM_SHARED_MEMORY
+    - ROCPRIM_KERNEL
+    - ROCPRIM_INLINE
+    - ROCPRIM_FORCE_INLINE
+    - ROCPRIM_LAUNCH_BOUNDS
+
+# Trick clang into thinking that our C-style attributes are C++-style attributes
+# Make sure that the sizes line up for linebreaks etc
+Macros:
+    - __host__=[[host]]
+    - __device__=[[device]]
+    - __global__=[[global]]
+    - __forceinline__=[[forceinline]]
+    - __shared__=[[shared]]
+    - __launch_bounds__(x)=[[launch_bounds(x)]]
+    - __attribute__(x)=[[attribute(x)]]
+    - ROCPRIM_DEVICE=[[DEVICE____]]
+    - ROCPRIM_HOST=[[HOST____]]
+    - ROCPRIM_HOST_DEVICE=[[HOST_DEVICE____]]
+    - ROCPRIM_SHARED_MEMORY=[[SHARED_MEMORY____]]
+    - ROCPRIM_KERNEL=[[KERNEL____]]
+    - ROCPRIM_INLINE=[[INLINE____]]
+    - ROCPRIM_FORCE_INLINE=[FORCE_INLINE____]]
+    - ROCPRIM_LAUNCH_BOUNDS(x)=[[launch_bounds(x)____]]
+BreakAfterAttributes: Always
 ---

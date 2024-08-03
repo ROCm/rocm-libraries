@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -75,7 +75,22 @@ namespace detail
         return ::atomicExch(address, value);
     }
 
+    ROCPRIM_DEVICE ROCPRIM_INLINE unsigned char atomic_load(const unsigned char* address)
+    {
+        return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE unsigned short atomic_load(const unsigned short* address)
+    {
+        return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
     ROCPRIM_DEVICE ROCPRIM_INLINE unsigned int atomic_load(const unsigned int* address)
+    {
+        return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE unsigned long atomic_load(const unsigned long* address)
     {
         return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
@@ -85,7 +100,22 @@ namespace detail
         return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
 
+    ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned char* address, unsigned char value)
+    {
+        __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned short* address, unsigned short value)
+    {
+        __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned int* address, unsigned int value)
+    {
+        __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned long* address, unsigned long value)
     {
         __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }

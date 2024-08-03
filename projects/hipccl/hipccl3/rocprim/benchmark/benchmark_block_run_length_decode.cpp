@@ -93,7 +93,7 @@ template<class ItemT,
          unsigned RunsPerThread,
          unsigned DecodedItemsPerThread,
          unsigned Trials = 100>
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
+void run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, hipStream_t stream)
 {
     constexpr auto runs_per_block  = BlockSize * RunsPerThread;
     const auto     target_num_runs = 2 * N / (MinRunLength + MaxRunLength);
@@ -103,7 +103,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     std::vector<ItemT>   run_items(num_runs);
     std::vector<OffsetT> run_offsets(num_runs + 1);
 
-    std::default_random_engine prng(std::random_device{}());
+    engine_type prng(seed.get_0());
     using ItemDistribution = std::conditional_t<std::is_integral<ItemT>::value,
                                                 std::uniform_int_distribution<ItemT>,
                                                 std::uniform_real_distribution<ItemT>>;
@@ -171,20 +171,17 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(IT, OT, MINRL, MAXRL, BS, RPT, DIPT)                                   \
-    benchmark::RegisterBenchmark(bench_naming::format_name("{lvl:block,algo:run_length_decode"  \
-                                    ",item_type:" #IT                                           \
-                                    ",offset_type:" #OT                                         \
-                                    ",min_run_length:" #MINRL                                   \
-                                    ",max_run_length:" #MAXRL                                   \
-                                    ",cfg:{block_size:" #BS                                     \
-                                    ",run_per_thread:" #RPT                                     \
-                                    ",decoded_items_per_thread:" #DIPT                          \
-                                    "}}"                                                        \
-                                ).c_str(),                                                      \
-                                 &run_benchmark<IT, OT, MINRL, MAXRL, BS, RPT, DIPT>,           \
-                                 stream,                                                        \
-                                 size)                                                          
+#define CREATE_BENCHMARK(IT, OT, MINRL, MAXRL, BS, RPT, DIPT)                                      \
+    benchmark::RegisterBenchmark(                                                                  \
+        bench_naming::format_name("{lvl:block,algo:run_length_decode"                              \
+                                  ",item_type:" #IT ",offset_type:" #OT ",min_run_length:" #MINRL  \
+                                  ",max_run_length:" #MAXRL ",cfg:{block_size:" #BS                \
+                                  ",run_per_thread:" #RPT ",decoded_items_per_thread:" #DIPT "}}") \
+            .c_str(),                                                                              \
+        &run_benchmark<IT, OT, MINRL, MAXRL, BS, RPT, DIPT>,                                       \
+        size,                                                                                      \
+        seed,                                                                                      \
+        stream)
 
 int main(int argc, char* argv[])
 {
@@ -192,9 +189,10 @@ int main(int argc, char* argv[])
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
-                                    "name_format",
-                                    "human",
-                                    "either: json,human,txt");
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -202,9 +200,16 @@ int main(int argc, char* argv[])
     const size_t size   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
-    // // HIP
-    hipStream_t     stream = 0; // default
+    // HIP
+    hipStream_t stream = 0; // default
+
+    // Benchmark info
+    add_common_benchmark_info();
+    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks{

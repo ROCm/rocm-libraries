@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@
 #include "../../detail/binary_op_wrappers.hpp"
 #include "../../intrinsics/thread.hpp"
 #include "../../types/tuple.hpp"
-#include "rocprim/device/detail/device_config_helper.hpp"
+#include "device_config_helper.hpp"
 
 #include <type_traits>
 
@@ -53,7 +53,7 @@ namespace detail
             = ::rocprim::block_load<key_type, block_size, items_per_thread, load_keys_method>;
 
         using block_discontinuity = ::rocprim::block_discontinuity<key_type, block_size>;
-        
+
         using block_load_values
             = ::rocprim::block_load<result_type, block_size, items_per_thread, load_keys_method>;
 
@@ -67,7 +67,7 @@ namespace detail
 
         // Load flagged values
         // - if the scan is exclusive, the last item of each segment (range where the keys compare equal)
-        //   is flagged and reset to the initial value. Adding the last item of the range to the 
+        //   is flagged and reset to the initial value. Adding the last item of the range to the
         //   second to last using `headflag_scan_op_wrapper` will return the initial_value,
         //   which is exactly what should be saved at the start of the next range.
         // - if the scan is inclusive, then the first item of each segment is marked, and it will
@@ -243,7 +243,8 @@ namespace detail
         }
     };
 
-    template<bool Exclusive,
+    template<lookback_scan_determinism Determinism,
+             bool                      Exclusive,
              typename Config,
              typename KeyInputIterator,
              typename InputIterator,
@@ -252,7 +253,34 @@ namespace detail
              typename CompareFunction,
              typename BinaryFunction,
              typename LookbackScanState>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void device_scan_by_key_kernel_impl(
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
+        device_scan_by_key_kernel_impl(KeyInputIterator,
+                                       InputIterator,
+                                       OutputIterator,
+                                       ResultType,
+                                       const CompareFunction,
+                                       const BinaryFunction,
+                                       LookbackScanState,
+                                       const size_t,
+                                       const size_t,
+                                       const size_t,
+                                       const rocprim::tuple<ResultType, bool>* const)
+            -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
+    {
+        // No need to build the kernel with sleep on a device that does not require it
+    }
+
+    template<lookback_scan_determinism Determinism,
+             bool                      Exclusive,
+             typename Config,
+             typename KeyInputIterator,
+             typename InputIterator,
+             typename OutputIterator,
+             typename ResultType,
+             typename CompareFunction,
+             typename BinaryFunction,
+             typename LookbackScanState>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto device_scan_by_key_kernel_impl(
         KeyInputIterator                              keys,
         InputIterator                                 values,
         OutputIterator                                output,
@@ -264,6 +292,7 @@ namespace detail
         const size_t                                  starting_block,
         const size_t                                  number_of_blocks,
         const rocprim::tuple<ResultType, bool>* const previous_last_value)
+        -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
     {
         using result_type = ResultType;
         static_assert(std::is_same<rocprim::tuple<ResultType, bool>,
@@ -351,10 +380,11 @@ namespace detail
         }
         else
         {
-            auto prefix_op = lookback_scan_prefix_op<wrapped_type,
-                                                     decltype(wrapped_op),
-                                                     decltype(scan_state)> {
-                flat_block_id, wrapped_op, scan_state};
+            auto prefix_op
+                = lookback_scan_prefix_op<wrapped_type,
+                                          decltype(wrapped_op),
+                                          decltype(scan_state),
+                                          Determinism>{flat_block_id, wrapped_op, scan_state};
 
             // Scan of block values
             lookback_block_scan<Exclusive, block_scan_type>(

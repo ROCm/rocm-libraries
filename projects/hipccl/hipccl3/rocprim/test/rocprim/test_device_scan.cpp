@@ -71,7 +71,8 @@ template<class InputType,
          // scan-by-key primitives don't support output iterator with void value_type
          bool UseIdentityIteratorIfSupported = false,
          typename ConfigHelper               = default_config_helper,
-         bool UseGraphs                      = false>
+         bool UseGraphs                      = false,
+         bool Deterministic                  = false>
 struct DeviceScanParams
 {
     using input_type                            = InputType;
@@ -80,7 +81,60 @@ struct DeviceScanParams
     static constexpr bool use_identity_iterator = UseIdentityIteratorIfSupported;
     using config_helper                         = ConfigHelper;
     static constexpr bool use_graphs            = UseGraphs;
+    static constexpr bool deterministic         = Deterministic;
 };
+
+template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
+constexpr hipError_t invoke_inclusive_scan(Args&&... args)
+{
+    if(Deterministic)
+    {
+        return rocprim::deterministic_inclusive_scan<Config>(std::forward<Args>(args)...);
+    }
+    else
+    {
+        return rocprim::inclusive_scan<Config>(std::forward<Args>(args)...);
+    }
+}
+
+template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
+constexpr hipError_t invoke_exclusive_scan(Args&&... args)
+{
+    if(Deterministic)
+    {
+        return rocprim::deterministic_exclusive_scan<Config>(std::forward<Args>(args)...);
+    }
+    else
+    {
+        return rocprim::exclusive_scan<Config>(std::forward<Args>(args)...);
+    }
+}
+
+template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
+constexpr hipError_t invoke_inclusive_scan_by_key(Args&&... args)
+{
+    if(Deterministic)
+    {
+        return rocprim::deterministic_inclusive_scan_by_key<Config>(std::forward<Args>(args)...);
+    }
+    else
+    {
+        return rocprim::inclusive_scan_by_key<Config>(std::forward<Args>(args)...);
+    }
+}
+
+template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
+constexpr hipError_t invoke_exclusive_scan_by_key(Args&&... args)
+{
+    if(Deterministic)
+    {
+        return rocprim::deterministic_exclusive_scan_by_key<Config>(std::forward<Args>(args)...);
+    }
+    else
+    {
+        return rocprim::exclusive_scan_by_key<Config>(std::forward<Args>(args)...);
+    }
+}
 
 // ---------------------------------------------------------
 // Test for scan ops taking single input value
@@ -97,6 +151,7 @@ public:
     static constexpr bool use_identity_iterator = Params::use_identity_iterator;
     using config_helper                         = typename Params::config_helper;
     bool use_graphs                             = Params::use_graphs;
+    static constexpr bool deterministic                          = Params::deterministic;
 };
 
 typedef ::testing::Types<
@@ -108,14 +163,33 @@ typedef ::testing::Types<
     DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config_helper<512>>,
     DeviceScanParams<float, float, rocprim::maximum<float>>,
     DeviceScanParams<float, float, rocprim::plus<float>, false, size_limit_config_helper<1024>>,
+    DeviceScanParams<float,
+                     float,
+                     rocprim::plus<float>,
+                     false,
+                     size_limit_config_helper<1024>,
+                     false,
+                     true>,
     DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config_helper<524288>>,
     DeviceScanParams<int, int, rocprim::plus<int>, false, size_limit_config_helper<1048576>>,
     DeviceScanParams<int8_t, int8_t, rocprim::maximum<int8_t>>,
     DeviceScanParams<uint8_t, uint8_t, rocprim::maximum<uint8_t>, false>,
     DeviceScanParams<rocprim::half, rocprim::half, rocprim::maximum<rocprim::half>>,
-    DeviceScanParams<rocprim::half, float, rocprim::plus<float>>,
+    DeviceScanParams<rocprim::half,
+                     float,
+                     rocprim::plus<float>,
+                     false,
+                     default_config_helper,
+                     false,
+                     true>,
     DeviceScanParams<rocprim::bfloat16, rocprim::bfloat16, rocprim::maximum<rocprim::bfloat16>>,
-    DeviceScanParams<rocprim::bfloat16, float, rocprim::plus<float>>,
+    DeviceScanParams<rocprim::bfloat16,
+                     float,
+                     rocprim::plus<float>,
+                     false,
+                     default_config_helper,
+                     false,
+                     true>,
     // Large
     DeviceScanParams<int, double, rocprim::plus<int>>,
     DeviceScanParams<int, double, rocprim::plus<double>, false>,
@@ -123,12 +197,25 @@ typedef ::testing::Types<
     DeviceScanParams<unsigned int, unsigned long long, rocprim::plus<unsigned long long>>,
     DeviceScanParams<long long, long long, rocprim::maximum<long long>>,
     DeviceScanParams<double, double, rocprim::plus<double>, true>,
+    DeviceScanParams<double,
+                     double,
+                     rocprim::plus<double>,
+                     false,
+                     default_config_helper,
+                     true,
+                     true>,
     DeviceScanParams<signed char, long, rocprim::plus<long>>,
     DeviceScanParams<float, double, rocprim::minimum<double>>,
     DeviceScanParams<test_utils::custom_test_type<int>>,
     DeviceScanParams<test_utils::custom_test_type<double>,
                      test_utils::custom_test_type<double>,
                      rocprim::plus<test_utils::custom_test_type<double>>,
+                     true>,
+    DeviceScanParams<test_utils::custom_test_type<double>,
+                     test_utils::custom_test_type<double>,
+                     rocprim::plus<test_utils::custom_test_type<double>>,
+                     false,
+                     default_config_helper,
                      true>,
     DeviceScanParams<test_utils::custom_test_type<int>>,
     DeviceScanParams<test_utils::custom_test_array_type<long long, 5>>,
@@ -157,6 +244,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     // use float as device-side accumulator and double as host-side accumulator
     using acc_type               = typename accum_type<T, scan_op_type>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
+    const bool deterministic     = TestFixture::deterministic;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -190,14 +278,14 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     size_t temp_storage_size_bytes;
     void * d_temp_storage = nullptr;
     // Get size of d_temp_storage
-    HIP_CHECK(rocprim::inclusive_scan(d_temp_storage,
-                                      temp_storage_size_bytes,
-                                      input_iterator,
-                                      d_checking_output,
-                                      0,
-                                      scan_op,
-                                      stream,
-                                      debug_synchronous));
+    HIP_CHECK(invoke_inclusive_scan<deterministic>(d_temp_storage,
+                                                   temp_storage_size_bytes,
+                                                   input_iterator,
+                                                   d_checking_output,
+                                                   0,
+                                                   scan_op,
+                                                   stream,
+                                                   debug_synchronous));
 
     // allocate temporary storage
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
@@ -209,13 +297,14 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     }
 
     // Run
-    HIP_CHECK(
-        rocprim::inclusive_scan(
-            d_temp_storage, temp_storage_size_bytes,
-            input_iterator, d_checking_output, 
-            0, scan_op, stream, debug_synchronous
-        )
-    );
+    HIP_CHECK(invoke_inclusive_scan<deterministic>(d_temp_storage,
+                                                   temp_storage_size_bytes,
+                                                   input_iterator,
+                                                   d_checking_output,
+                                                   0,
+                                                   scan_op,
+                                                   stream,
+                                                   debug_synchronous));
 
     hipGraphExec_t graph_instance;
     if(TestFixture::use_graphs)
@@ -259,6 +348,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
     constexpr float single_op_precision = is_plus_op::value ? test_utils::precision<acc_type> : 0;
 
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
+    const bool            deterministic         = TestFixture::deterministic;
     using Config = typename TestFixture::config_helper::template type<false>;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -324,7 +414,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::inclusive_scan<Config>(
+            HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 input_iterator,
@@ -332,7 +422,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
                 input.size(),
                 scan_op,
                 stream,
-                TestFixture::debug_synchronous));
+                TestFixture::debug_synchronous)));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -348,7 +438,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
             }
 
             // Run
-            HIP_CHECK(rocprim::inclusive_scan<Config>(
+            HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 input_iterator,
@@ -356,7 +446,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
                 input.size(),
                 scan_op,
                 stream,
-                TestFixture::debug_synchronous));
+                TestFixture::debug_synchronous)));
 
             hipGraphExec_t graph_instance;
             if(TestFixture::use_graphs)
@@ -417,6 +507,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
 
     const bool            debug_synchronous     = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
+    const bool            deterministic         = TestFixture::deterministic;
     using Config = typename TestFixture::config_helper::template type<false>;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -484,7 +575,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::exclusive_scan<Config>(
+            HIP_CHECK((invoke_exclusive_scan<deterministic, Config>(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 input_iterator,
@@ -493,7 +584,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
                 input.size(),
                 scan_op,
                 stream,
-                debug_synchronous));
+                debug_synchronous)));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -509,7 +600,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
             }
 
             // Run
-            HIP_CHECK(rocprim::exclusive_scan<Config>(
+            HIP_CHECK((invoke_exclusive_scan<deterministic, Config>(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 input_iterator,
@@ -518,7 +609,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
                 input.size(),
                 scan_op,
                 stream,
-                debug_synchronous));
+                debug_synchronous)));
 
             hipGraphExec_t graph_instance;
             if(TestFixture::use_graphs)
@@ -572,6 +663,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
     constexpr float single_op_precision = is_plus_op::value ? test_utils::precision<acc_type> : 0;
 
     const bool debug_synchronous = TestFixture::debug_synchronous;
+    const bool deterministic     = TestFixture::deterministic;
     using Config                 = typename TestFixture::config_helper::template type<true>;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -661,16 +753,16 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::inclusive_scan_by_key<Config>(d_temp_storage,
-                                                             temp_storage_size_bytes,
-                                                             d_keys,
-                                                             input_iterator,
-                                                             d_output,
-                                                             input.size(),
-                                                             scan_op,
-                                                             keys_compare_op,
-                                                             stream,
-                                                             debug_synchronous));
+            HIP_CHECK((invoke_inclusive_scan_by_key<deterministic, Config>(d_temp_storage,
+                                                                           temp_storage_size_bytes,
+                                                                           d_keys,
+                                                                           input_iterator,
+                                                                           d_output,
+                                                                           input.size(),
+                                                                           scan_op,
+                                                                           keys_compare_op,
+                                                                           stream,
+                                                                           debug_synchronous)));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -686,16 +778,16 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
             }
 
             // Run
-            HIP_CHECK(rocprim::inclusive_scan_by_key<Config>(d_temp_storage,
-                                                             temp_storage_size_bytes,
-                                                             d_keys,
-                                                             input_iterator,
-                                                             d_output,
-                                                             input.size(),
-                                                             scan_op,
-                                                             keys_compare_op,
-                                                             stream,
-                                                             debug_synchronous));
+            HIP_CHECK((invoke_inclusive_scan_by_key<deterministic, Config>(d_temp_storage,
+                                                                           temp_storage_size_bytes,
+                                                                           d_keys,
+                                                                           input_iterator,
+                                                                           d_output,
+                                                                           input.size(),
+                                                                           scan_op,
+                                                                           keys_compare_op,
+                                                                           stream,
+                                                                           debug_synchronous)));
 
             hipGraphExec_t graph_instance;
             if(TestFixture::use_graphs)
@@ -751,6 +843,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
     constexpr float single_op_precision = is_plus_op::value ? test_utils::precision<acc_type> : 0;
 
     const bool debug_synchronous = TestFixture::debug_synchronous;
+    const bool deterministic     = TestFixture::deterministic;
     using Config                 = typename TestFixture::config_helper::template type<true>;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -842,17 +935,17 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::exclusive_scan_by_key<Config>(d_temp_storage,
-                                                             temp_storage_size_bytes,
-                                                             d_keys,
-                                                             input_iterator,
-                                                             d_output,
-                                                             initial_value,
-                                                             input.size(),
-                                                             scan_op,
-                                                             keys_compare_op,
-                                                             stream,
-                                                             debug_synchronous));
+            HIP_CHECK((invoke_exclusive_scan_by_key<deterministic, Config>(d_temp_storage,
+                                                                           temp_storage_size_bytes,
+                                                                           d_keys,
+                                                                           input_iterator,
+                                                                           d_output,
+                                                                           initial_value,
+                                                                           input.size(),
+                                                                           scan_op,
+                                                                           keys_compare_op,
+                                                                           stream,
+                                                                           debug_synchronous)));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -868,17 +961,17 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             }
 
             // Run
-            HIP_CHECK(rocprim::exclusive_scan_by_key<Config>(d_temp_storage,
-                                                             temp_storage_size_bytes,
-                                                             d_keys,
-                                                             input_iterator,
-                                                             d_output,
-                                                             initial_value,
-                                                             input.size(),
-                                                             scan_op,
-                                                             keys_compare_op,
-                                                             stream,
-                                                             debug_synchronous));
+            HIP_CHECK((invoke_exclusive_scan_by_key<deterministic, Config>(d_temp_storage,
+                                                                           temp_storage_size_bytes,
+                                                                           d_keys,
+                                                                           input_iterator,
+                                                                           d_output,
+                                                                           initial_value,
+                                                                           input.size(),
+                                                                           scan_op,
+                                                                           keys_compare_op,
+                                                                           stream,
+                                                                           debug_synchronous)));
 
             hipGraphExec_t graph_instance;
             if(TestFixture::use_graphs)
@@ -907,7 +1000,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             hipFree(d_input);
             hipFree(d_output);
             hipFree(d_temp_storage);
-            
+
             if (TestFixture::use_graphs)
             {
                 test_utils::cleanupGraphHelper(graph, graph_instance);
@@ -1579,6 +1672,7 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
 
     const bool            debug_synchronous     = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
+    const bool            deterministic         = TestFixture::deterministic;
     using Config = typename TestFixture::config_helper::template type<false>;
 
     const int device_id = test_common_utils::obtain_device_from_ctest();
@@ -1607,7 +1701,7 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
                           << std::endl;
                 break;
             }
-            
+
             hipStream_t stream = 0; // default
             if (TestFixture::use_graphs)
             {
@@ -1664,7 +1758,7 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
             size_t temp_storage_size_bytes;
             char*  d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::exclusive_scan<Config>(
+            HIP_CHECK((invoke_exclusive_scan<deterministic, Config>(
                 nullptr,
                 temp_storage_size_bytes,
                 input_iterator,
@@ -1673,7 +1767,7 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
                 input.size(),
                 scan_op,
                 stream,
-                debug_synchronous));
+                debug_synchronous)));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -1699,11 +1793,11 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
                                       d_future_input,
                                       d_initial_value,
                                       2048,
-                                      rocprim::plus<T>(), 
+                                      rocprim::plus<T>(),
                                       stream));
 
             // Run
-            HIP_CHECK(rocprim::exclusive_scan<Config>(
+            HIP_CHECK((invoke_exclusive_scan<deterministic, Config>(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 input_iterator,
@@ -1712,7 +1806,7 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
                 input.size(),
                 scan_op,
                 stream,
-                debug_synchronous));
+                debug_synchronous)));
             HIP_CHECK(hipGetLastError());
 
             hipGraphExec_t graph_instance;
@@ -1734,7 +1828,7 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
             hipFree(d_future_input);
             hipFree(d_initial_value);
             hipFree(d_temp_storage);
-            
+
             if (TestFixture::use_graphs)
             {
                 test_utils::cleanupGraphHelper(graph, graph_instance);

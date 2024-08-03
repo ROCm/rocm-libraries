@@ -243,32 +243,35 @@ struct Partitioner
                           const hipStream_t           stream,
                           const bool                  debug_synchronous)
     {
+        using input_type = typename std::iterator_traits<InputIterator>::value_type;
         if(three_way_partitioning)
         {
-            return partition_three_way(temporary_storage,
-                                       storage_size,
-                                       input,
-                                       output_first_part,
-                                       output_second_part,
-                                       output_unselected,
-                                       selected_count_output,
-                                       size,
-                                       select_first_part_op,
-                                       select_second_part_op,
-                                       stream,
-                                       debug_synchronous);
+            using config = typename default_partition_config_base<input_type, true>::type;
+            return partition_three_way<config>(temporary_storage,
+                                               storage_size,
+                                               input,
+                                               output_first_part,
+                                               output_second_part,
+                                               output_unselected,
+                                               selected_count_output,
+                                               size,
+                                               select_first_part_op,
+                                               select_second_part_op,
+                                               stream,
+                                               debug_synchronous);
         }
         else
         {
-            return partition(temporary_storage,
-                             storage_size,
-                             input,
-                             output_first_part,
-                             selected_count_output,
-                             size,
-                             select_first_part_op,
-                             stream,
-                             debug_synchronous);
+            using config = typename default_partition_config_base<input_type, false>::type;
+            return partition<config>(temporary_storage,
+                                     storage_size,
+                                     input,
+                                     output_first_part,
+                                     selected_count_output,
+                                     size,
+                                     select_first_part_op,
+                                     stream,
+                                     debug_synchronous);
         }
     }
 };
@@ -637,8 +640,7 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be
-/// \p segmented_radix_sort_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -759,8 +761,7 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be
-/// \p segmented_radix_sort_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -882,8 +883,7 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be
-/// \p segmented_radix_sort_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -1023,8 +1023,7 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be
-/// \p segmented_radix_sort_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -1164,8 +1163,7 @@ hipError_t segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be
-/// \p segmented_radix_sort_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
@@ -1292,8 +1290,7 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be
-/// \p segmented_radix_sort_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
@@ -1420,8 +1417,7 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be
-/// \p segmented_radix_sort_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
@@ -1563,8 +1559,7 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be
-/// \p segmented_radix_sort_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the

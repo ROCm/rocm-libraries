@@ -49,14 +49,17 @@ const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
 
 template<class T>
-void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t stream, size_t size)
+void run_benchmark(benchmark::State&   state,
+                   size_t              desired_segments,
+                   size_t              size,
+                   const managed_seed& seed,
+                   hipStream_t         stream)
 {
     using offset_type = int;
     using value_type = T;
 
     // Generate data
-    const unsigned int seed = 123;
-    std::default_random_engine gen(seed);
+    engine_type gen(seed.get_0());
 
     const double avg_segment_length = static_cast<double>(size) / desired_segments;
     std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
@@ -189,8 +192,9 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
             .c_str(),                                                                  \
         run_benchmark<T>,                                                              \
         SEGMENTS,                                                                      \
-        stream,                                                                        \
-        size)
+        size,                                                                          \
+        seed,                                                                          \
+        stream)
 
 #define BENCHMARK_TYPE(type) \
     CREATE_BENCHMARK(type, 1), \
@@ -200,8 +204,9 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     CREATE_BENCHMARK(type, 10000)
 
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hipStream_t stream,
-                    size_t size)
+                    size_t                                        size,
+                    const managed_seed&                           seed,
+                    hipStream_t                                   stream)
 {
     using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
@@ -230,6 +235,8 @@ int main(int argc, char *argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    // fixed seed as a random seed adds a lot of variance
+    parser.set_optional<std::string>("seed", "seed", "321", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -237,6 +244,8 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -244,10 +253,11 @@ int main(int argc, char *argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmarks, stream, size);
+    add_benchmarks(benchmarks, size, seed, stream);
 
     // Use manual timing
     for(auto& b : benchmarks)

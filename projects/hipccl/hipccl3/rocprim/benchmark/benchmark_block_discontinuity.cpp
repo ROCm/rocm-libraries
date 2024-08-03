@@ -195,20 +195,20 @@ struct flag_heads_and_tails
     }
 };
 
-template<
-    class Benchmark,
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    bool WithTile,
-    unsigned int Trials = 100
->
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
+template<class Benchmark,
+         class T,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         bool         WithTile,
+         unsigned int Trials = 100>
+void run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, hipStream_t stream)
 {
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
 
-    std::vector<T> input = get_random_data<T>(size, T(0), T(10));
+    const auto     random_range = limit_random_range<T>(0, 10);
+    std::vector<T> input
+        = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
@@ -266,8 +266,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
                                     ",with_tile:" #WITH_TILE "}}")                \
             .c_str(),                                                             \
         run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>,                          \
-        stream,                                                                   \
-        size)
+        size,                                                                     \
+        seed,                                                                     \
+        stream)
 
 #define BENCHMARK_TYPE(type, block, bool) \
     CREATE_BENCHMARK(type, block, 1, bool), \
@@ -276,12 +277,12 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     CREATE_BENCHMARK(type, block, 4, bool), \
     CREATE_BENCHMARK(type, block, 8, bool)
 
-
 template<class Benchmark>
-void add_benchmarks(const std::string& name,
+void add_benchmarks(const std::string&                            name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hipStream_t stream,
-                    size_t size)
+                    size_t                                        size,
+                    const managed_seed&                           seed,
+                    hipStream_t                                   stream)
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
@@ -309,6 +310,7 @@ int main(int argc, char *argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -316,6 +318,8 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -323,12 +327,13 @@ int main(int argc, char *argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<flag_heads>("flag_heads", benchmarks, stream, size);
-    add_benchmarks<flag_tails>("flag_tails", benchmarks, stream, size);
-    add_benchmarks<flag_heads_and_tails>("flag_heads_and_tails", benchmarks, stream, size);
+    add_benchmarks<flag_heads>("flag_heads", benchmarks, size, seed, stream);
+    add_benchmarks<flag_tails>("flag_tails", benchmarks, size, seed, stream);
+    add_benchmarks<flag_heads_and_tails>("flag_heads_and_tails", benchmarks, size, seed, stream);
 
     // Use manual timing
     for(auto& b : benchmarks)

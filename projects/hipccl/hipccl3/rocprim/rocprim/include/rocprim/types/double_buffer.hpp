@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,8 +54,8 @@ public:
 
     /// \brief Contructs a double buffer object using the supplied buffer pointers.
     ///
-    /// \param current - Pointer to the buffer to designate as "current" (in use).
-    /// \param alternate - Pointer to the buffer to designate as "alternate" (not in use)
+    /// \param current Pointer to the buffer to designate as "current" (in use).
+    /// \param alternate Pointer to the buffer to designate as "alternate" (not in use)
     ROCPRIM_HOST_DEVICE inline
     double_buffer(T * current, T * alternate)
     {

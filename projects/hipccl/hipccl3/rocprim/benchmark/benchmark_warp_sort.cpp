@@ -87,42 +87,32 @@ void warp_sort_by_key_kernel(K* input_keys, V* input_values, K* output_keys, V* 
     rp::block_store_direct_blocked(flat_tid, output_values + block_offset, values);
 }
 
-template<class Value>
-Value get_max_value()
-{
-    return Value(10000);
-}
-
-template<>
-char get_max_value()
-{
-    return std::numeric_limits<char>::max();
-}
-
-template<>
-custom_type<char, double> get_max_value()
-{
-    return custom_type<char, double>(std::numeric_limits<char>::max());
-}
-
-template<
-    class Key,
-    unsigned int BlockSize,
-    unsigned int WarpSize,
-    unsigned int ItemsPerThread = 1,
-    class Value = Key,
-    bool SortByKey = false,
-    unsigned int Trials = 100
->
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+template<class Key,
+         unsigned int BlockSize,
+         unsigned int WarpSize,
+         unsigned int ItemsPerThread = 1,
+         class Value                 = Key,
+         bool         SortByKey      = false,
+         unsigned int Trials         = 100>
+void run_benchmark(benchmark::State&   state,
+                   size_t              size,
+                   const managed_seed& seed,
+                   hipStream_t         stream)
 {
     // Make sure size is a multiple of items_per_block
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     size = BlockSize * ((size + items_per_block - 1) / items_per_block);
     // Allocate and fill memory
-    std::vector<Key> input_key = get_random_data<Key>(size, 0, get_max_value<Key>());
+    const auto       random_range = limit_random_range<Key>(0, 10'000);
+    std::vector<Key> input_key
+        = get_random_data<Key>(size, random_range.first, random_range.second, seed.get_0());
     std::vector<Value> input_value(size_t(1));
-    if(SortByKey) input_value = get_random_data<Value>(size, 0, get_max_value<Value>());
+    if(SortByKey)
+    {
+        const auto random_range = limit_random_range<Value>(0, 10'000);
+        input_value
+            = get_random_data<Value>(size, random_range.first, random_range.second, seed.get_1());
+    }
     Key * d_input_key = nullptr;
     Key * d_output_key = nullptr;
     Value * d_input_value = nullptr;
@@ -215,8 +205,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
                                   + ",ws:" #WS ",cfg:{bs:" #BS ",ipt:" #IPT "}}")    \
             .c_str(),                                                                \
         run_benchmark<K, BS, WS, IPT>,                                               \
-        stream,                                                                      \
-        size)
+        size,                                                                        \
+        seed,                                                                        \
+        stream)
 
 #define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT)                                         \
     benchmark::RegisterBenchmark(bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K \
@@ -224,8 +215,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
                                                            ",cfg:{bs:" #BS ",ipt:" #IPT "}}") \
                                      .c_str(),                                                \
                                  run_benchmark<K, BS, WS, IPT, V, true>,                      \
-                                 stream,                                                      \
-                                 size)
+                                 size,                                                        \
+                                 seed,                                                        \
+                                 stream)
 
 #define BENCHMARK_TYPE(type) \
     CREATE_SORT_BENCHMARK(type,  64, 64, 1), \
@@ -260,6 +252,7 @@ int main(int argc, char *argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -267,6 +260,8 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -274,6 +269,7 @@ int main(int argc, char *argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     using custom_double2 = custom_type<double, double>;
     using custom_int_double = custom_type<int, double>;

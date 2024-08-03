@@ -26,11 +26,12 @@
 // Meta configuration for rocPRIM
 #include "config.hpp"
 
-#include "types/future_value.hpp"
 #include "types/double_buffer.hpp"
+#include "types/future_value.hpp"
 #include "types/integer_sequence.hpp"
 #include "types/key_value_pair.hpp"
 #include "types/tuple.hpp"
+#include "types/uninitialized_array.hpp"
 
 /// \addtogroup utilsmodule
 /// @{
@@ -153,20 +154,14 @@ using half = ::__half;
 /// \brief bfloat16 floating point type
 using bfloat16 = ::hip_bfloat16;
 
-// The lane_mask_type only exist at device side
-#ifndef __AMDGCN_WAVEFRONT_SIZE
-// When not compiling with hipcc, we're compiling with HIP-CPU
-// TODO: introduce a ROCPRIM-specific macro to query this
-#define __AMDGCN_WAVEFRONT_SIZE 64
-#endif
 /// \brief The lane_mask_type is an integer that contains one bit per thread.
 ///
 /// The total number of bits is equal to the total number of threads in a
 /// warp. Used to for warp-level operations.
-/// \note This is defined only on the device side.
-#if __AMDGCN_WAVEFRONT_SIZE == 32
+/// \note This is defined only on the device side, see `ROCPRIM_WAVEFRONT_SIZE` for details.
+#if ROCPRIM_WAVEFRONT_SIZE == 32
 using lane_mask_type = unsigned int;
-#elif __AMDGCN_WAVEFRONT_SIZE == 64
+#elif ROCPRIM_WAVEFRONT_SIZE == 64
 using lane_mask_type = unsigned long long int;
 #endif
 

@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -93,5 +93,23 @@ KeyType;ValueType;BlockSize;ItemsPerThread;PartitionAllowed" PARENT_SCOPE)
     set(list_across "${TUNING_TYPES};int8_t;64;4 8 16;true false" PARENT_SCOPE)
     set(output_pattern_suffix "\
 @KeyType@_@ValueType@_@BlockSize@_@ItemsPerThread@_@PartitionAllowed@" PARENT_SCOPE)
+  elseif(file STREQUAL "benchmark_device_transform")
+    set(list_across_names "\
+DataType;BlockSize;" PARENT_SCOPE)
+    set(list_across "${TUNING_TYPES};64 128 256 512 1024" PARENT_SCOPE)
+    set(output_pattern_suffix "\
+@DataType@_@BlockSize@" PARENT_SCOPE)
+  elseif(file STREQUAL "benchmark_device_partition")
+    set(list_across_names "DataType;BlockSize" PARENT_SCOPE)
+    set(list_across "${TUNING_TYPES};128 192 256 384 512" PARENT_SCOPE)
+    set(output_pattern_suffix "@DataType@_@BlockSize@" PARENT_SCOPE)
+  elseif(file STREQUAL "benchmark_device_select")
+    set(list_across_names "KeyType;ValueType;BlockSize" PARENT_SCOPE)
+    set(list_across "${TUNING_TYPES};rocprim::empty_type ${LIMITED_TUNING_TYPES};128 192 256 384 512" PARENT_SCOPE)
+    set(output_pattern_suffix "@KeyType@_@ValueType@_@BlockSize@" PARENT_SCOPE)
+  elseif(file STREQUAL "benchmark_device_reduce_by_key")
+    set(list_across_names "KeyType;ValueType;BlockSize;TilesPerBlock" PARENT_SCOPE)
+    set(list_across "${LIMITED_TUNING_TYPES};${TUNING_TYPES};128 192 256 384 512;1 2" PARENT_SCOPE)
+    set(output_pattern_suffix "@KeyType@_@ValueType@_@BlockSize@_@TilesPerBlock@" PARENT_SCOPE)
   endif()
 endfunction()

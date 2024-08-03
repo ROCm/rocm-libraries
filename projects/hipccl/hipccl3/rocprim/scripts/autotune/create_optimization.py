@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -38,10 +38,10 @@ import math
 from enum import Enum
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import Dict, List, Callable
+from typing import Dict, List, Callable, Optional, Tuple
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-TARGET_ARCHITECTURES = ['gfx803', 'gfx900', 'gfx906', 'gfx908', 'gfx90a', 'gfx1030', 'gfx1102']
+TARGET_ARCHITECTURES = ['gfx803', 'gfx900', 'gfx906', 'gfx908', 'gfx90a', 'gfx1030', 'gfx1100', 'gfx1102']
 # C++ typename used for optional types
 EMPTY_TYPENAME = "empty_type"
 
@@ -71,6 +71,11 @@ class SelectionType:
     name: str
     # True if rocprim::empty_type is a valid type in the algorithm's configuration.
     is_optional: bool
+    # True if only the size of the type is relevant. If false, selection also happens based on rocprim::is_floating.
+    #   Only selecting on size will limit the number of tuning benchmarks required and configs generated.
+    # For example, a sort by key will not perform any logic on the value type and only move the data.
+    #   Hence it can select the value type on size only.
+    select_on_size_only: bool
 
 @dataclass
 class SelectionConst:
@@ -79,39 +84,54 @@ class SelectionConst:
     """
     name: str
 
-def translate_settings_to_cpp_metaprogramming(fallback_configuration, const_configuration, config_selection_params) -> str:
+@dataclass
+class FallbackCase:
+    """
+    Data class describing a fallback case: a description for a set of types that
+    use the same tuned configuration.
+    """
+    # Optional regex filter for the algorithm name.
+    algo_regex: Optional[str]
+    # C++ type for which to take the best tuned configuration.
+    based_on_type: str
+    # Inclusive maximum size of the type.
+    sizeof_max: int
+    # Exclusive minimum size of the type.
+    sizeof_min: int
+    # Whether the type has a floating point.
+    is_floating_point: bool
+
+def translate_settings_to_cpp_metaprogramming(
+        fallback_configuration: List[Tuple[SelectionType, FallbackCase]], 
+        const_configuration: List[SelectionConst]) -> str:
     """
     Translates a list of named fallback configuration entries to C++ metaprogramming idioms.
     """
 
     setting_list: List[str] = []
-    for typename, entry in fallback_configuration.items():
-        # The selection type associated with this fallback
-        cfg = list(filter(lambda x: (x.name == typename), config_selection_params))[0]
+    for (config_selection_type, fallback_entry) in fallback_configuration:
+        typename: str = config_selection_type.name
 
-        if entry["based_on"]["datatype"] == EMPTY_TYPENAME:
+        if fallback_entry.based_on_type == EMPTY_TYPENAME:
             # If the entry is based on the empty type
             # (which is not present in the fallback file, but separately inserted)
             setting_list.append(f"(std::is_same<{typename}, rocprim::{EMPTY_TYPENAME}>::value)")
         else:
             # Only add a floating-point check on the first selection type. For the remaining selection types, a limited
             # number of fallbacks are generated, which are based on the integral types.
-            if "floating_point" in entry.keys() and config_selection_params.index(cfg) == 0:
-                negation: str = "" if entry['floating_point'] else "!"
+            if not config_selection_type.select_on_size_only:
+                negation: str = "" if fallback_entry.is_floating_point else "!"
                 output: str = negation + f"bool(rocprim::is_floating_point<{typename}>::value)"
                 setting_list.append(output)
 
-            for config_setting, value in entry['sizeof'].items():
-                if config_setting == "min_exclusive":
-                    setting_list.append(f"(sizeof({typename}) > {value})")
-                elif config_setting == "max_inclusive":
-                    setting_list.append(f"(sizeof({typename}) <= {value})")
-                else:
-                    print(f"WARNING: {config_setting} is not known")
+            setting_list.append(f"(sizeof({typename}) <= {fallback_entry.sizeof_max})")
+            # sizeof(type) will always be greater than zero, can omit the check if min is zero or smaller
+            if fallback_entry.sizeof_min > 0:
+                setting_list.append(f"(sizeof({typename}) > {fallback_entry.sizeof_min})")
 
             # If the fallback entry has a sizeof of one (only true for int8_t) and the associated type is optional,
             # we need an additional check since the empty type also has a sizeof of one
-            if entry["based_on"]["datatype"] == "int8_t" and cfg.is_optional:
+            if fallback_entry.based_on_type == "int8_t" and config_selection_type.is_optional:
                 setting_list.append(f"(!std::is_same<{typename}, rocprim::{EMPTY_TYPENAME}>::value)")
     for name, value in const_configuration.items():
         setting_list.append(f"({name} == {value})")
@@ -122,9 +142,9 @@ class BenchmarksOfArchitecture:
     Stores the benchmark results for a specific architecture and algorithm.
     """
 
-    def __init__(self, arch_name: str, config_selection_params, fallback_entries, config_get_best, algorithm_name):
+    def __init__(self, arch_name: str, config_selection_params, fallback_entries: List[FallbackCase], config_get_best, algorithm_name):
         self.config_selection_params = config_selection_params
-        self.fallback_entries = fallback_entries
+        self.fallback_entries: List[FallbackCase] = fallback_entries
         self.arch_name: str = arch_name
         self.config_get_best: Callable[[Dict], Dict[str, str]] = config_get_best
         self.algorithm_name: str = algorithm_name
@@ -182,7 +202,11 @@ class BenchmarksOfArchitecture:
             output[instance] = self.__get_best_benchmark(instance)
         return output
 
-    def __add_fallback_to_output(self, output, fallback_configuration, const_configurations):
+    def __add_fallback_to_output(
+            self, 
+            output, 
+            fallback_configuration: List[Tuple[SelectionType, FallbackCase]], 
+            const_configurations: List[SelectionConst]):
         """
         searches for specific fallback configuration in benchmark results and adds it to the output
         :param output: list of strings to append to
@@ -190,7 +214,8 @@ class BenchmarksOfArchitecture:
         :param const_configurations: list of constant selection parameters
         :return:
         """
-        search_key = {k : v['based_on']['datatype'] for k, v in fallback_configuration.items()}
+        search_key: Dict[str, str] = {
+            config_selection_type.name : fallback_entry.based_on_type for (config_selection_type, fallback_entry) in fallback_configuration}
         for const_configuration in (const_configurations or [{}]):
             for k, v in const_configuration.items():
                 search_key[k] = v
@@ -203,8 +228,7 @@ class BenchmarksOfArchitecture:
             else:
                 output.append((print_config,
                                translate_settings_to_cpp_metaprogramming(fallback_configuration,
-                                                                         const_configuration,
-                                                                         self.config_selection_params),
+                                                                         const_configuration),
                                best_benchmark_result))
 
     @property
@@ -234,45 +258,67 @@ class BenchmarksOfArchitecture:
             print(f"INFO: not generating fallbacks for {self.algorithm_name} as it has too many types.")
             return output
 
+        # If the type requires selection on size only, the floating-point fallback entries as skipped.
+        #   The decision to skip floating-point entries instead of integral ones is arbitrary.
+        def skip_entry(config_selection_type: SelectionType, fallback_entry: FallbackCase) -> bool:
+            return config_selection_type.select_on_size_only and fallback_entry.is_floating_point
+
         # If there is exactly one type, generate full fallbacks. Note that this type will never be optional
         if len(config_selection_types) == 1:
-            if config_selection_types[0].is_optional:
+            config_selection_type = config_selection_types[0]
+
+            if config_selection_type.is_optional:
                 raise (ValueError(f'Algorithm "{self.algorithm_name}" has a single type that is optional'))
+
             for entry in self.fallback_entries:
+                if skip_entry(config_selection_type, entry):
+                    continue
+
                 # Let the single selection type be based on the current fallback entry
-                fallback_configuration = {config_selection_types[0].name: entry}
+                fallback_configuration = [(config_selection_type, entry)]
 
                 # Find the closest measurement and create the config line
                 self.__add_fallback_to_output(output, fallback_configuration, const_configurations)
 
         # If there are two types, generate full fallbacks for the first type but limited fallbacks for the second type
-        # Assume that the first type is not optional
         if len(config_selection_types) == 2:
+            # Assume that the first type is not optional
             if config_selection_types[0].is_optional:
-                raise (ValueError(f'Algorithm "{self.algorithm_name}" two type but the first is optional'))
+                raise (ValueError(f'Algorithm "{self.algorithm_name}" two types but the first is optional'))
 
-            print(
-                f"INFO: ({self.arch_name}) generating limited fallbacks for "
-                f"{self.algorithm_name}'s \"{config_selection_types[1].name}\" type")
+            # Enforce that only one type selects both on size and number representation (integral or floating)
+            #   to limit the number of generated configs.
+            if not config_selection_types[0].select_on_size_only and not config_selection_types[1].select_on_size_only:
+                raise (ValueError(f'Algorithm "{self.algorithm_name}" two types but neither only selects on size'))
 
-            for fallback_0 in self.fallback_entries:
-                fallback_configuration = {config_selection_types[0].name: fallback_0}
-                for fallback_1 in self.fallback_entries:
+            # Only based_on_type is relevant
+            empty_fallback = FallbackCase(None, EMPTY_TYPENAME, 0, 0, False)
 
-                    # Only generate integral-based fallback cases for the second type to limit the number of
-                    # fallback cases created. The general assumption is that the second type is involved in data
-                    # movement only and that the number representation (integral or floating) contributes less to the
-                    # algorithm's performance.
-                    if fallback_1['floating_point']:
+            # If a type is optional, also generate the fallbacks where the type is empty.
+            fallback_entries_0: List[FallbackCase] = self.fallback_entries
+            if config_selection_types[0].is_optional:
+                fallback_entries_0.append(empty_fallback)
+            fallback_entries_1: List[FallbackCase] = self.fallback_entries
+            if config_selection_types[1].is_optional:
+                fallback_entries_1.append(empty_fallback)
+
+            fallback_configuration: List[Tuple[SelectionType, FallbackCase]] = []
+
+            for fallback_0 in fallback_entries_0:
+                if skip_entry(config_selection_types[0], fallback_0):
+                    continue
+
+                fallback_configuration.append((config_selection_types[0], fallback_0))
+
+                for fallback_1 in fallback_entries_1:
+                    if skip_entry(config_selection_types[1], fallback_1):
                         continue
 
-                    fallback_configuration[config_selection_types[1].name] = fallback_1
+                    fallback_configuration.append((config_selection_types[1], fallback_1))
                     self.__add_fallback_to_output(output, fallback_configuration, const_configurations)
-                # If the second type is optional, also generate the fallbacks where the second type is empty.
-                if config_selection_types[1].is_optional:
-                    fallback_configuration[config_selection_types[1].name] = {
-                        'based_on': {'datatype': EMPTY_TYPENAME}}
-                    self.__add_fallback_to_output(output, fallback_configuration, const_configurations)
+                    fallback_configuration.pop()
+
+                fallback_configuration.pop()
 
         return output
 
@@ -301,9 +347,9 @@ class Algorithm:
     Aggregates the data for an algorithm, including the generation of the configuration file.
     """
 
-    def __init__(self, fallback_entries, config_get_best = default_config_get_best):
+    def __init__(self, fallback_entries: List[FallbackCase], config_get_best = default_config_get_best):
         self.architectures: Dict[str, BenchmarksOfArchitecture] = {}
-        self.fallback_entries = fallback_entries
+        self.fallback_entries: List[FallbackCase] = fallback_entries
         self.config_get_best = config_get_best
 
     def add_measurement(self, single_benchmark_data: Dict[str, str], architecture: str):
@@ -334,23 +380,16 @@ class Algorithm:
         return rendered_template
 
 
-
 """
 Each algorithm uses ninja templates to generate C++ configuration specification.
-The generated configuration file contains configs for four cases:
-- No architecture or instantiation of configuration selection types is provided 
-  (general base case).
-- The architecture and an instantiation of configuration selection types is 
-  provided (specialized case for arch). 
-- The architecture and an instantiation of configuration selection types is 
-  provided, but there is no benchmark with the same instantiation of types.
-  The configuration is based on a fallback (fallback case). 
+The generated configuration file contains configs for two cases:
+- No architecture or instantiation of configuration selection types is provided (general base case).
+- The architecture and configuration selection types are provided, the configuration is based on the
+  benchmark results of similar types (fallback case).
 
 config_selection_params is a list of parameters (types, constants) that are used to select a configuration.
-The fallback file will be used to generate the fallback cases. Generating fallbacks only happens when there are
-two or fewer selection types.
-For the first type, full fallbacks are generated. For the second type, a limited number of fallbacks are generated based 
-on the benchmarks for the integral types.
+The fallback file will be used to generate the fallback cases. If there are two types, one of these will only select 
+on the size of the type (defined by the config selection parameters), limiting the number of fallback cases. 
 
 If the type is optional, additional fallback configurations will be generated that match the case when the optional 
 selection type passed by the user is rocprim::empty_type. The config_selection_params should specify at least 
@@ -362,135 +401,233 @@ the benchmark should also be valid C++ typenames. This is required as these name
 generated C++ code.
 """
 
+
 class AlgorithmDeviceHistogram(Algorithm):
-    algorithm_name = 'device_histogram'
-    cpp_configuration_template_name = 'histogram_config_template'
+    algorithm_name = "device_histogram"
+    cpp_configuration_template_name = "histogram_config_template"
     config_selection_params = [
-        SelectionType(name='value_type', is_optional=False),
-        SelectionConst(name='channels'),
-        SelectionConst(name='active_channels')]
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=False),
+        SelectionConst(name="channels"),
+        SelectionConst(name="active_channels")]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+
 class AlgorithmDeviceMergeSortBlockSort(Algorithm):
-    algorithm_name = 'device_merge_sort_block_sort'
-    cpp_configuration_template_name = 'mergesort_block_sort_config_template'
+    algorithm_name = "device_merge_sort_block_sort"
+    cpp_configuration_template_name = "mergesort_block_sort_config_template"
     config_selection_params = [
-        SelectionType(name='key_type', is_optional=False),
-        SelectionType(name='value_type', is_optional=True)]
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="value_type", is_optional=True, select_on_size_only=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries, block_sort_config_get_best)
 
+
 class AlgorithmDeviceMergeSortBlockMerge(Algorithm):
-    algorithm_name = 'device_merge_sort_block_merge'
-    cpp_configuration_template_name = 'mergesort_block_merge_config_template'
+    algorithm_name = "device_merge_sort_block_merge"
+    cpp_configuration_template_name = "mergesort_block_merge_config_template"
     config_selection_params = [
-        SelectionType(name='key_type', is_optional=False),
-        SelectionType(name='value_type', is_optional=True)]
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="value_type", is_optional=True, select_on_size_only=True)]
     def __init__(self, fallback_entries):
-        Algorithm.__init__(self, fallback_entries, merge_sort_block_merge_config_get_best)
+        Algorithm.__init__(
+            self, fallback_entries, merge_sort_block_merge_config_get_best)
+
 
 class AlgorithmDeviceRadixSortBlockSort(Algorithm):
-    algorithm_name = 'device_radix_sort_block_sort'
-    cpp_configuration_template_name = 'radixsort_block_sort_config_template'
+    algorithm_name = "device_radix_sort_block_sort"
+    cpp_configuration_template_name = "radixsort_block_sort_config_template"
     config_selection_params = [
-        SelectionType(name='key_type', is_optional=False),
-        SelectionType(name='value_type', is_optional=True)]
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="value_type", is_optional=True, select_on_size_only=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries, block_sort_config_get_best)
 
 
 class AlgorithmDeviceRadixSortOnesweep(Algorithm):
-    algorithm_name = 'device_radix_sort_onesweep'
-    cpp_configuration_template_name = 'radixsort_onesweep_config_template'
+    algorithm_name = "device_radix_sort_onesweep"
+    cpp_configuration_template_name = "radixsort_onesweep_config_template"
     config_selection_params = [
-        SelectionType(name='key_type', is_optional=False),
-        SelectionType(name='value_type', is_optional=True)]
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="value_type", is_optional=True, select_on_size_only=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
 class AlgorithmDeviceReduce(Algorithm):
-    algorithm_name = 'device_reduce'
-    config_selection_params = [SelectionType(name='key_type', is_optional=False)]
+    algorithm_name = "device_reduce"
+    config_selection_params = [
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False)]
     cpp_configuration_template_name = "reduce_config_template"
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
 class AlgorithmDeviceScan(Algorithm):
-    algorithm_name = 'device_scan'
+    algorithm_name = "device_scan"
     cpp_configuration_template_name = "scan_config_template"
-    config_selection_params = [SelectionType(name='value_type', is_optional=False)]
+    config_selection_params = [
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=False)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+# TODO select_on_size_only may need to get re-evaluated, it is likely that swapping the value
+#   of select_on_size_only for key and value gives better results
 class AlgorithmDeviceScanByKey(Algorithm):
-    algorithm_name = 'device_scan_by_key'
-    cpp_configuration_template_name = 'scanbykey_config_template'
+    algorithm_name = "device_scan_by_key"
+    cpp_configuration_template_name = "scanbykey_config_template"
     config_selection_params = [
-            SelectionType(name='key_type', is_optional=False),
-            SelectionType(name='value_type', is_optional=False)]
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
 class AlgorithmDeviceBinarySearch(Algorithm):
-    algorithm_name = 'device_binary_search'
-    cpp_configuration_template_name = 'binary_search_config_template'
+    algorithm_name = "device_binary_search"
+    cpp_configuration_template_name = "binary_search_config_template"
     config_selection_params = [
-            SelectionType(name='value_type', is_optional=False),
-            SelectionType(name='output_type', is_optional=False)]
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="output_type", is_optional=False, select_on_size_only=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
 class AlgorithmDeviceUpperBound(Algorithm):
-    algorithm_name = 'device_upper_bound'
-    cpp_configuration_template_name = 'upper_bound_config_template'
+    algorithm_name = "device_upper_bound"
+    cpp_configuration_template_name = "upper_bound_config_template"
     config_selection_params = [
-            SelectionType(name='value_type', is_optional=False),
-            SelectionType(name='output_type', is_optional=False)]
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="output_type", is_optional=False, select_on_size_only=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
 class AlgorithmDeviceLowerBound(Algorithm):
-    algorithm_name = 'device_lower_bound'
-    cpp_configuration_template_name = 'lower_bound_config_template'
+    algorithm_name = "device_lower_bound"
+    cpp_configuration_template_name = "lower_bound_config_template"
     config_selection_params = [
-            SelectionType(name='value_type', is_optional=False),
-            SelectionType(name='output_type', is_optional=False)]
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="output_type", is_optional=False, select_on_size_only=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
 class AlgorithmDeviceAdjacentDifference(Algorithm):
-    algorithm_name = 'device_adjacent_difference'
-    cpp_configuration_template_name = 'adjacent_difference_config_template'
+    algorithm_name = "device_adjacent_difference"
+    cpp_configuration_template_name = "adjacent_difference_config_template"
     config_selection_params = [
-            SelectionType(name='value_type', is_optional=False)]
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=False)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
 class AlgorithmDeviceAdjacentDifferenceInplace(Algorithm):
-    algorithm_name = 'device_adjacent_difference_inplace'
-    cpp_configuration_template_name = 'adjacent_difference_inplace_config_template'
+    algorithm_name = "device_adjacent_difference_inplace"
+    cpp_configuration_template_name = "adjacent_difference_inplace_config_template"
     config_selection_params = [
-            SelectionType(name='value_type', is_optional=False)]
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=False)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
 class AlgorithmDeviceSegmentedRadixSort(Algorithm):
-    algorithm_name = 'device_segmented_radix_sort'
-    cpp_configuration_template_name = 'segmented_radix_sort_config_template'
+    algorithm_name = "device_segmented_radix_sort"
+    cpp_configuration_template_name = "segmented_radix_sort_config_template"
     config_selection_params = [
-            SelectionType(name='key_type', is_optional=False),
-            SelectionType(name='value_type', is_optional=True)]
-
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="value_type", is_optional=True, select_on_size_only=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
-def filt_algo_regex(e, algorithm_name):
-    if 'algo_regex' in e:
-        return re.match(e['algo_regex'], algorithm_name) is not None
+class AlgorithmDeviceTransform(Algorithm):
+    algorithm_name = "device_transform"
+    cpp_configuration_template_name = "transform_config_template"
+    config_selection_params = [
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDevicePartitionTwoWayPredicate(Algorithm):
+    algorithm_name = "device_partition_two_way_predicate"
+    cpp_configuration_template_name = "partition_two_way_predicate_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDevicePartitionTwoWayFlag(Algorithm):
+    algorithm_name = "device_partition_two_way_flag"
+    cpp_configuration_template_name = "partition_two_way_flag_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDevicePartitionFlag(Algorithm):
+    algorithm_name = "device_partition_flag"
+    cpp_configuration_template_name = "partition_flag_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDevicePartitionPredicate(Algorithm):
+    algorithm_name = "device_partition_predicate"
+    cpp_configuration_template_name = "partition_predicate_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDevicePartitionThreeWay(Algorithm):
+    algorithm_name = "device_partition_three_way"
+    cpp_configuration_template_name = "partition_three_way_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDeviceSelectFlag(Algorithm):
+    algorithm_name = "device_select_flag"
+    cpp_configuration_template_name = "select_flag_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDeviceSelectPredicate(Algorithm):
+    algorithm_name = "device_select_predicate"
+    cpp_configuration_template_name = "select_predicate_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDeviceSelectUnique(Algorithm):
+    algorithm_name = "device_select_unique"
+    cpp_configuration_template_name = "select_unique_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDeviceSelectUniqueByKey(Algorithm):
+    algorithm_name = "device_select_unique_by_key"
+    cpp_configuration_template_name = "select_unique_by_key_config_template"
+    config_selection_params = [
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDeviceReduceByKey(Algorithm):
+    algorithm_name = "device_reduce_by_key"
+    cpp_configuration_template_name = "reduce_by_key_config_template"
+    config_selection_params = [
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=True),
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+def filt_algo_regex(e: FallbackCase, algorithm_name):
+    if e.algo_regex:
+        return re.match(e.algo_regex, algorithm_name) is not None
     return True
 
-def create_algorithm(algorithm_name: str, fallback_entries):
+def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
     fallback_entries = list(filter(lambda e: filt_algo_regex(e, algorithm_name), fallback_entries))
     if algorithm_name == 'device_histogram':
         return AlgorithmDeviceHistogram(fallback_entries)
@@ -520,6 +657,28 @@ def create_algorithm(algorithm_name: str, fallback_entries):
         return AlgorithmDeviceAdjacentDifferenceInplace(fallback_entries)
     elif algorithm_name == 'device_segmented_radix_sort':
         return AlgorithmDeviceSegmentedRadixSort(fallback_entries)
+    elif algorithm_name == 'device_transform':
+        return AlgorithmDeviceTransform(fallback_entries)
+    elif algorithm_name == 'device_partition_two_way_predicate':
+        return AlgorithmDevicePartitionTwoWayPredicate(fallback_entries)
+    elif algorithm_name == 'device_partition_two_way_flag':
+        return AlgorithmDevicePartitionTwoWayFlag(fallback_entries)
+    elif algorithm_name == 'device_partition_flag':
+        return AlgorithmDevicePartitionFlag(fallback_entries)
+    elif algorithm_name == 'device_partition_predicate':
+        return AlgorithmDevicePartitionPredicate(fallback_entries)
+    elif algorithm_name == 'device_partition_three_way':
+        return AlgorithmDevicePartitionThreeWay(fallback_entries)
+    elif algorithm_name == 'device_select_flag':
+        return AlgorithmDeviceSelectFlag(fallback_entries)
+    elif algorithm_name == 'device_select_predicate':
+        return AlgorithmDeviceSelectPredicate(fallback_entries)
+    elif algorithm_name == 'device_select_unique':
+        return AlgorithmDeviceSelectUnique(fallback_entries)
+    elif algorithm_name == 'device_select_unique_by_key':
+        return AlgorithmDeviceSelectUniqueByKey(fallback_entries)
+    elif algorithm_name == 'device_reduce_by_key':
+        return AlgorithmDeviceReduceByKey(fallback_entries)
     else:
         raise(NotSupportedError(f'Algorithm "{algorithm_name}" is not supported (yet)'))
 
@@ -534,21 +693,29 @@ class BenchmarkDataManager:
         abs_path_to_script_dir: str = os.path.dirname(os.path.abspath(__file__))
         self.abs_path_to_template: str = os.path.join(abs_path_to_script_dir, 'config_template')
         self.fallback_config_file: str = fallback_config_file
-        self.fallback_entries = self.__load_fallback_entries()
+        self.fallback_entries: List[FallbackCase] = self.__load_fallback_entries()
 
-    def __load_fallback_entries(self):
+    def __load_fallback_entries(self) -> List[FallbackCase]:
         """
         Reads in fallback json file to list of dictionaries
-        Removes all fallback cases that are not based on a datatype
         """
 
         raw_fallback_entries = json.load(self.fallback_config_file)['fallback_cases']
-        fallback_entries: List[Dict] = []
+        fallback_entries: List[FallbackCase] = []
         for fallback_settings_entry in raw_fallback_entries:
-            if 'datatype' in fallback_settings_entry['based_on'].keys():
-                fallback_entries.append(fallback_settings_entry)
-            else:
-                print(f"WARNING: Currently only fallbacks based on datatype are implemented, ignoring \"{fallback_settings_entry['based_on']}\"")
+            if "based_on_type" not in fallback_settings_entry \
+                or "sizeof_max_inclusive" not in fallback_settings_entry \
+                or "sizeof_min_exclusive" not in fallback_settings_entry \
+                or "is_floating_point" not in fallback_settings_entry:
+                raise (ValueError(f'Fallback entry "{raw_fallback_entries}" does not have all required fields'))
+
+            fallback_entries.append(FallbackCase(
+                    None if "algo_regex" not in fallback_settings_entry else fallback_settings_entry["algo_regex"],
+                    fallback_settings_entry["based_on_type"],
+                    fallback_settings_entry["sizeof_max_inclusive"],
+                    fallback_settings_entry["sizeof_min_exclusive"],
+                    fallback_settings_entry["is_floating_point"]))
+
         return fallback_entries
 
     def __get_target_architecture_from_context(self, benchmark_run):
@@ -583,10 +750,11 @@ class BenchmarkDataManager:
         In case the Algorithm object does not exist, a new object will be created.
         """
         algorithm_name: str = single_benchmark['lvl'] + "_" + single_benchmark['algo']
+        if 'subalgo' in single_benchmark:
+            algorithm_name += "_" + single_benchmark['subalgo']
         if algorithm_name not in self.algorithms:
             self.algorithms[algorithm_name] = create_algorithm(algorithm_name, self.fallback_entries)
         self.algorithms[algorithm_name].add_measurement(single_benchmark, arch)
-
 
     def add_run(self, benchmark_run_file_path: str):
         """

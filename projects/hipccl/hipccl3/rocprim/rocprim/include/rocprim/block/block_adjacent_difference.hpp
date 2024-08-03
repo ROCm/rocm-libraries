@@ -1,7 +1,7 @@
 /******************************************************************************
 * Copyright (c) 2011, Duane Merrill.  All rights reserved.
 * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2022, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2022-2024, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -114,7 +114,9 @@ public:
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = detail::raw_storage<storage_type_>;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
     #else
     using storage_type = storage_type_;
     #endif

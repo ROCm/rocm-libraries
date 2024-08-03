@@ -191,6 +191,10 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     const size_t size = items_per_block * 113;
+
+    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "size = " << size);
+
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
@@ -276,6 +280,10 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     const size_t size = items_per_block * 113;
+
+    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "size = " << size);
+
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
@@ -361,6 +369,10 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 2>:
     }
 
     const size_t size = items_per_block * 113;
+
+    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "size = " << size);
+
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
@@ -461,6 +473,10 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 3>:
     }
 
     const size_t size = items_per_block * 113;
+
+    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "size = " << size);
+
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
@@ -552,6 +568,7 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     static constexpr size_t block_size = BlockSize;
     static constexpr size_t items_per_thread = ItemsPerThread;
     static constexpr size_t items_per_block = block_size * items_per_thread;
+
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -559,6 +576,10 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     const size_t size = items_per_block * 113;
+
+    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "size = " << size);
+
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
@@ -655,6 +676,7 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     static constexpr size_t block_size = BlockSize;
     static constexpr size_t items_per_thread = ItemsPerThread;
     static constexpr size_t items_per_block = block_size * items_per_thread;
+
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -662,6 +684,10 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     const size_t size = items_per_block * 113;
+
+    SCOPED_TRACE(testing::Message() << "items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "size = " << size);
+
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
@@ -749,39 +775,32 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
 }
 
 // Static for-loop
-template <
-    unsigned int First,
-    unsigned int Last,
-    class T,
-    class U,
-    int Method,
-    unsigned int BlockSize = 256U
->
+template<unsigned int First,
+         unsigned int Last,
+         class T,
+         class U,
+         int          Method,
+         unsigned int BlockSize = 256U>
 struct static_for
 {
     static void run()
     {
-        int device_id = test_common_utils::obtain_device_from_ctest();
-        SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
-        HIP_CHECK(hipSetDevice(device_id));
+        {
+            SCOPED_TRACE(testing::Message() << "TestID = " << First);
+            int device_id = test_common_utils::obtain_device_from_ctest();
+            SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+            HIP_CHECK(hipSetDevice(device_id));
 
-        test_block_exchange<T, U, Method, BlockSize, items[First]>(device_id);
+            test_block_exchange<T, U, Method, BlockSize, items[First]>(device_id);
+        }
         static_for<First + 1, Last, T, U, Method, BlockSize>::run();
     }
 };
 
-template <
-    unsigned int N,
-    class T,
-    class U,
-    int Method,
-    unsigned int BlockSize
->
+template<unsigned int N, class T, class U, int Method, unsigned int BlockSize>
 struct static_for<N, N, T, U, Method, BlockSize>
 {
-    static void run()
-    {
-    }
+    static void run() {}
 };
 
 #endif // TEST_BLOCK_EXCHANGE_KERNELS_HPP_

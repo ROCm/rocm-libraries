@@ -121,9 +121,10 @@ struct device_binary_search_benchmark : public config_autotune_interface
                                          + "}}");
     }
 
-    void run(benchmark::State& state,
-             const std::size_t haystack_size,
-             const hipStream_t stream) const override
+    void run(benchmark::State&   state,
+             size_t              haystack_size,
+             const managed_seed& seed,
+             hipStream_t         stream) const override
     {
         using compare_op_t        = rocprim::less<T>;
         const auto   needles_size = haystack_size / 10;
@@ -132,7 +133,11 @@ struct device_binary_search_benchmark : public config_autotune_interface
         std::vector<T> haystack(haystack_size);
         std::iota(haystack.begin(), haystack.end(), 0);
 
-        std::vector<T> needles = get_random_data<T>(needles_size, T(0), T(haystack_size));
+        const auto     random_range = limit_random_range<T>(0, haystack_size);
+        std::vector<T> needles      = get_random_data<T>(needles_size,
+                                                    random_range.first,
+                                                    random_range.second,
+                                                    seed.get_0());
         T*             d_haystack;
         T*             d_needles;
         OutputType*    d_output;

@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,8 +33,9 @@
 #include "../iterator/discard_iterator.hpp"
 #include "../iterator/zip_iterator.hpp"
 
-#include "device_run_length_encode_config.hpp"
+#include "detail/device_config_helper.hpp"
 #include "device_reduce_by_key.hpp"
+#include "device_run_length_encode_config.hpp"
 #include "device_select.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -76,7 +77,7 @@ namespace detail
 /// * Ranges specified by \p unique_output and \p counts_output must have at least
 /// <tt>*runs_count_output</tt> (i.e. the number of runs) elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p run_length_encode_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `run_length_encode_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam UniqueOutputIterator - random-access iterator type of the output range. Must meet the
@@ -161,10 +162,13 @@ hipError_t run_length_encode(void * temporary_storage,
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using count_type = unsigned int;
 
+    // run_length_encode does not use a tuned reduce by key config, as using a constant iterator
+    //   instead of a device array has different performance characteristics
     using config = detail::default_or_custom_config<
         Config,
-        detail::default_run_length_encode_config
-    >;
+        run_length_encode_config<
+            typename detail::default_reduce_by_key_config_base<input_type, count_type>::type,
+            default_config>>;
 
     return ::rocprim::reduce_by_key<typename config::reduce_by_key>(
         temporary_storage, storage_size,
@@ -191,7 +195,7 @@ hipError_t run_length_encode(void * temporary_storage,
 /// * Ranges specified by \p offsets_output and \p counts_output must have at least
 /// <tt>*runs_count_output</tt> (i.e. the number of non-trivial runs) elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p run_length_encode_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `run_length_encode_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OffsetsOutputIterator - random-access iterator type of the output range. Must meet the
@@ -280,8 +284,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
 
     using config = detail::default_or_custom_config<
         Config,
-        detail::default_run_length_encode_config
-    >;
+        detail::default_run_length_encode_config<tuple<offset_type, count_type>>>;
 
     hipError_t error;
 

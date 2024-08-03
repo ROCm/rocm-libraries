@@ -39,7 +39,8 @@ template<class InputType,
          bool   UseIdentityIterator = false,
          size_t SizeLimit           = ROCPRIM_GRID_SIZE_LIMIT,
          bra    Algo                = bra::default_algorithm,
-         bool   UseGraphs           = false>
+         bool   UseGraphs           = false,
+         bool   Deterministic       = false>
 struct DeviceReduceParams
 {
     static constexpr bra algo = Algo;
@@ -108,6 +109,34 @@ typedef ::testing::Types<
     DeviceReduceParams<rocprim::bfloat16, rocprim::bfloat16>,
     DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
     DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>,
+    DeviceReduceParams<rocprim::half,
+                       rocprim::half,
+                       false,
+                       ROCPRIM_GRID_SIZE_LIMIT,
+                       bra::default_algorithm,
+                       false,
+                       true>,
+    DeviceReduceParams<float,
+                       float,
+                       false,
+                       ROCPRIM_GRID_SIZE_LIMIT,
+                       bra::default_algorithm,
+                       false,
+                       true>,
+    DeviceReduceParams<double,
+                       double,
+                       false,
+                       ROCPRIM_GRID_SIZE_LIMIT,
+                       bra::default_algorithm,
+                       false,
+                       true>,
+    DeviceReduceParams<test_utils::custom_test_type<double>,
+                       test_utils::custom_test_type<double>,
+                       false,
+                       ROCPRIM_GRID_SIZE_LIMIT,
+                       bra::default_algorithm,
+                       false,
+                       true>,
     DeviceReduceParams<int, int, false, ROCPRIM_GRID_SIZE_LIMIT, bra::default_algorithm, true>>
     RocprimDeviceReduceTestsParams;
 
@@ -195,7 +224,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
 
     hipFree(d_output);
     hipFree(d_temp_storage);
-    
+
     if (TestFixture::use_graphs)
     {
         test_utils::cleanupGraphHelper(graph, graph_instance);
@@ -328,7 +357,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceSum)
             hipFree(d_input);
             hipFree(d_output);
             hipFree(d_temp_storage);
-            
+
             if (TestFixture::use_graphs)
             {
                 test_utils::cleanupGraphHelper(graph, graph_instance);

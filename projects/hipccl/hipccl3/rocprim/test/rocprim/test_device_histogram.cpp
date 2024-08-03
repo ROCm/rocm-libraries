@@ -130,7 +130,7 @@ using custom_config1 = rocprim::histogram_config<rocprim::kernel_config<128, 5>>
 
 typedef ::testing::Types<params1<int, 10, 0, 10>,
                          params1<float, 10, 0, 10>,
-                         //params1<rocprim::half, 10, 0, 10>,
+                         params1<rocprim::half, 10, 0, 10>,
                          params1<rocprim::bfloat16, 10, 0, 10>,
                          params1<int8_t, 10, 0, 10>,
                          params1<int, 128, 0, 256, int, int, custom_config1>,
@@ -176,6 +176,22 @@ void testHistogramEvenIncorrectInput()
 TEST(RocprimDeviceHistogramEven, IncorrectInput)
 {
     testHistogramEvenIncorrectInput();
+}
+
+template<class T>
+using is_half = std::is_same<rocprim::half, typename std::remove_cv<T>::type>;
+
+template<class T>
+using is_bfloat16 = std::is_same<rocprim::bfloat16, typename std::remove_cv<T>::type>;
+
+template<class T>
+using convert_to_fundamental_t
+    = std::conditional_t<is_half<T>::value || is_bfloat16<T>::value, float, T>;
+
+template<class T>
+inline auto convert_to_fundamental(T value)
+{
+    return static_cast<convert_to_fundamental_t<T>>(value);
 }
 
 TYPED_TEST(RocprimDeviceHistogramEven, Even)
@@ -236,17 +252,23 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
             );
 
             // Calculate expected results on host
+            // native host types - used for low-precision floating-point types
+            // to provide correct arithmetics (rocprim::half have no host-side operators on 5.7.1)
+            using native_level_type               = convert_to_fundamental_t<level_type>;
+            const native_level_type n_lower_level = static_cast<native_level_type>(lower_level);
+            const native_level_type n_upper_level = static_cast<native_level_type>(upper_level);
+
             std::vector<counter_type> histogram_expected(bins, 0);
-            const level_type scale = static_cast<level_type>((upper_level - lower_level) / bins);
+            const native_level_type   scale = (n_upper_level - n_lower_level) / bins;
             for(size_t row = 0; row < rows; row++)
             {
                 for(size_t column = 0; column < columns; column++)
                 {
-                    const sample_type sample = input[row * row_stride + column];
-                    const level_type s = static_cast<level_type>(sample);
-                    if(s >= lower_level && s < upper_level)
+                    const sample_type       sample   = input[row * row_stride + column];
+                    const native_level_type n_sample = static_cast<native_level_type>(sample);
+                    if(n_sample >= n_lower_level && n_sample < n_upper_level)
                     {
-                        const level_type bin = (s - lower_level) / scale;
+                        const unsigned int bin = (n_sample - n_lower_level) / scale;
                         histogram_expected[bin]++;
                     }
                 }

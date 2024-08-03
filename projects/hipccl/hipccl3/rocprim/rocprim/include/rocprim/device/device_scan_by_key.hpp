@@ -45,7 +45,8 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<bool Exclusive,
+template<lookback_scan_determinism Determinism,
+         bool                      Exclusive,
          typename Config,
          typename KeyInputIterator,
          typename InputIterator,
@@ -68,7 +69,7 @@ void __global__ __launch_bounds__(device_params<Config>().kernel_config.block_si
                               const size_t                                 number_of_blocks,
                               const ::rocprim::tuple<AccType, bool>* const previous_last_value)
 {
-    device_scan_by_key_kernel_impl<Exclusive, Config>(
+    device_scan_by_key_kernel_impl<Determinism, Exclusive, Config>(
         keys,
         values,
         output,
@@ -100,7 +101,8 @@ void __global__ __launch_bounds__(device_params<Config>().kernel_config.block_si
         }                                                                                        \
     } while(false)
 
-template<bool Exclusive,
+template<lookback_scan_determinism Determinism,
+         bool                      Exclusive,
          typename Config,
          typename KeysInputIterator,
          typename InputIterator,
@@ -183,7 +185,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     }
 
     bool use_sleep;
-    if(const hipError_t error = is_sleep_scan_state_used(use_sleep))
+    if(const hipError_t error = is_sleep_scan_state_used(stream, use_sleep))
     {
         return error;
     }
@@ -202,7 +204,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     }
 
     // Call the provided function with either scan_state or scan_state_with_sleep based on
-    // the value of use_sleep_scan_state
+    // the value of use_sleep
     auto with_scan_state
         = [use_sleep, scan_state, scan_state_with_sleep](auto&& func) mutable -> decltype(auto)
     {
@@ -277,22 +279,23 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         with_scan_state(
             [&](auto& scan_state)
             {
-                hipLaunchKernelGGL(HIP_KERNEL_NAME(device_scan_by_key_kernel<Exclusive, config>),
-                                   dim3(scan_blocks),
-                                   dim3(block_size),
-                                   0,
-                                   stream,
-                                   keys + offset,
-                                   input + offset,
-                                   output + offset,
-                                   initial_value,
-                                   compare,
-                                   scan_op,
-                                   scan_state,
-                                   size,
-                                   i * number_of_blocks,
-                                   total_number_of_blocks,
-                                   i > 0 ? as_const_ptr(previous_last_value) : nullptr);
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(device_scan_by_key_kernel<Determinism, Exclusive, config>),
+                    dim3(scan_blocks),
+                    dim3(block_size),
+                    0,
+                    stream,
+                    keys + offset,
+                    input + offset,
+                    output + offset,
+                    initial_value,
+                    compare,
+                    scan_op,
+                    scan_state,
+                    size,
+                    i * number_of_blocks,
+                    total_number_of_blocks,
+                    i > 0 ? as_const_ptr(previous_last_value) : nullptr);
             });
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_scan_by_key_kernel",
                                                     current_size,
@@ -319,12 +322,14 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 ///    - the results may be non-deterministic and/or vary in precision,
 ///    - and bit-wise reproducibility is not guaranteed, that is, results from multiple runs
 ///      using the same input values on the same device may not be bit-wise identical.
+///   If deterministic behavior is required, Use \link deterministic_inclusive_scan_by_key()
+///   rocprim::deterministic_inclusive_scan_by_key \endlink instead.
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive, has to be \p scan_by_key_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_by_key_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam ValuesInputIterator - random-access iterator type of the input range. It can be
@@ -423,7 +428,60 @@ inline hipError_t inclusive_scan_by_key(void* const                temporary_sto
                                         const bool        debug_synchronous = false)
 {
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    return detail::scan_by_key_impl<false,
+    return detail::scan_by_key_impl<detail::lookback_scan_determinism::default_determinism,
+                                    false,
+                                    Config,
+                                    KeysInputIterator,
+                                    ValuesInputIterator,
+                                    ValuesOutputIterator,
+                                    value_type,
+                                    BinaryFunction,
+                                    KeyCompareFunction,
+                                    AccType>(temporary_storage,
+                                             storage_size,
+                                             keys_input,
+                                             values_input,
+                                             values_output,
+                                             value_type(),
+                                             size,
+                                             scan_op,
+                                             key_compare_op,
+                                             stream,
+                                             debug_synchronous);
+}
+
+/// \brief Bitwise-reproducible parallel inclusive scan-by-key primitive for device level.
+///
+/// This function behaves the same as <tt>inclusive_scan_by_key()</tt>, except that unlike
+/// <tt>inclusive_scan_by_key()</tt>, it provides run-to-run deterministic behavior for
+/// non-associative scan operators like floating point arithmetic operations.
+/// Refer to the documentation for \link inclusive_scan_by_key() rocprim::inclusive_scan_by_key \endlink
+/// for a detailed description of this function.
+template<typename Config = default_config,
+         typename KeysInputIterator,
+         typename ValuesInputIterator,
+         typename ValuesOutputIterator,
+         typename BinaryFunction
+         = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>,
+         typename KeyCompareFunction
+         = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>,
+         typename AccType = typename std::iterator_traits<ValuesInputIterator>::value_type>
+inline hipError_t deterministic_inclusive_scan_by_key(void* const                temporary_storage,
+                                                      size_t&                    storage_size,
+                                                      const KeysInputIterator    keys_input,
+                                                      const ValuesInputIterator  values_input,
+                                                      const ValuesOutputIterator values_output,
+                                                      const size_t               size,
+                                                      const BinaryFunction       scan_op
+                                                      = BinaryFunction(),
+                                                      const KeyCompareFunction key_compare_op
+                                                      = KeyCompareFunction(),
+                                                      const hipStream_t stream            = 0,
+                                                      const bool        debug_synchronous = false)
+{
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+    return detail::scan_by_key_impl<detail::lookback_scan_determinism::deterministic,
+                                    false,
                                     Config,
                                     KeysInputIterator,
                                     ValuesInputIterator,
@@ -456,12 +514,14 @@ inline hipError_t inclusive_scan_by_key(void* const                temporary_sto
 ///    - the results may be non-deterministic and/or vary in precision,
 ///    - and bit-wise reproducibility is not guaranteed, that is, results from multiple runs
 ///      using the same input values on the same device may not be bit-wise identical.
+///   If deterministic behavior is required, Use \link deterministic_exclusive_scan_by_key()
+///   rocprim::deterministic_exclusive_scan_by_key \endlink instead.
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive, has to be \p scan_by_key_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_by_key_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam ValuesInputIterator - random-access iterator type of the input range. It can be
@@ -565,7 +625,61 @@ inline hipError_t exclusive_scan_by_key(void* const                temporary_sto
                                         const hipStream_t stream            = 0,
                                         const bool        debug_synchronous = false)
 {
-    return detail::scan_by_key_impl<true,
+    return detail::scan_by_key_impl<detail::lookback_scan_determinism::default_determinism,
+                                    true,
+                                    Config,
+                                    KeysInputIterator,
+                                    ValuesInputIterator,
+                                    ValuesOutputIterator,
+                                    InitialValueType,
+                                    BinaryFunction,
+                                    KeyCompareFunction,
+                                    AccType>(temporary_storage,
+                                             storage_size,
+                                             keys_input,
+                                             values_input,
+                                             values_output,
+                                             initial_value,
+                                             size,
+                                             scan_op,
+                                             key_compare_op,
+                                             stream,
+                                             debug_synchronous);
+}
+
+/// \brief Bitwise-reproducible parallel exclusive scan-by-key primitive for device level.
+///
+/// This function behaves the same as <tt>exclusive_scan_by_key()</tt>, except that unlike
+/// <tt>exclusive_scan_by_key()</tt>, it provides run-to-run deterministic behavior for
+/// non-associative scan operators like floating point arithmetic operations.
+/// Refer to the documentation for \link exclusive_scan_by_key() rocprim::exclusive_scan_by_key \endlink
+/// for a detailed description of this function.
+template<typename Config = default_config,
+         typename KeysInputIterator,
+         typename ValuesInputIterator,
+         typename ValuesOutputIterator,
+         typename InitialValueType,
+         typename BinaryFunction
+         = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>,
+         typename KeyCompareFunction
+         = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>,
+         typename AccType = detail::input_type_t<InitialValueType>>
+inline hipError_t deterministic_exclusive_scan_by_key(void* const                temporary_storage,
+                                                      size_t&                    storage_size,
+                                                      const KeysInputIterator    keys_input,
+                                                      const ValuesInputIterator  values_input,
+                                                      const ValuesOutputIterator values_output,
+                                                      const InitialValueType     initial_value,
+                                                      const size_t               size,
+                                                      const BinaryFunction       scan_op
+                                                      = BinaryFunction(),
+                                                      const KeyCompareFunction key_compare_op
+                                                      = KeyCompareFunction(),
+                                                      const hipStream_t stream            = 0,
+                                                      const bool        debug_synchronous = false)
+{
+    return detail::scan_by_key_impl<detail::lookback_scan_determinism::deterministic,
+                                    true,
                                     Config,
                                     KeysInputIterator,
                                     ValuesInputIterator,

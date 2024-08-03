@@ -34,7 +34,7 @@ BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Copy `sizes[i]` elements from `sources[i]` to `destinations[i]` for all `i` in the range [0, `num_copies`].
 ///
-/// \tparam Config [optional] configuration of  the primitive. It has to be \p batch_mcopy_config .
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `batch_copy_config`.
 /// \tparam InputBufferItType type of iterator to source pointers.
 /// \tparam OutputBufferItType type of iterator to desetination pointers.
 /// \tparam BufferSizeItType type of iterator to sizes.

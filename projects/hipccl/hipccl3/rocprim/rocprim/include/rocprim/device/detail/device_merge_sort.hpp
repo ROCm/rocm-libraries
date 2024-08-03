@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -254,7 +254,9 @@ struct block_permute_values_impl<Value,
         Value values[items_per_block];
     };
 
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = raw_storage<storage_type_>;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     template<typename ValuesInputIterator, typename ValuesOutputIterator>
     ROCPRIM_DEVICE void permute(unsigned int (&ranks)[ItemsPerThread],

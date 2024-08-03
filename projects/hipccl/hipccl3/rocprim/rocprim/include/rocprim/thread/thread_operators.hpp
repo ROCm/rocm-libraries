@@ -36,6 +36,12 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \defgroup thread_operators Thread Operators
+/// \ingroup threadmodule
+
+/// \addtogroup thread_operators
+/// @{
+
 /// \brief Functor that tests for equality.
 struct equality
 {
@@ -67,7 +73,7 @@ struct inequality_wrapper
     EqualityOp op; ///< A binary equality comparator (see constructor for details).
 
     /// \brief Constructs the wrapper using the provided equality comparator.
-    /// \param op - a binary equality comparator.
+    /// \param op a binary equality comparator.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -160,6 +166,9 @@ struct arg_min
         return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
     }
 };
+
+/// @}
+// end group thread_operators
 
 namespace detail
 {

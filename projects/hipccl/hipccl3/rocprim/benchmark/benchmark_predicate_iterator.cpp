@@ -115,11 +115,16 @@ struct write_predicate_it
 };
 
 template<class IteratorBenchmark>
-void run_benchmark(benchmark::State& state, size_t size, const hipStream_t stream)
+void run_benchmark(benchmark::State&   state,
+                   size_t              size,
+                   const managed_seed& seed,
+                   hipStream_t         stream)
 {
     using T = typename IteratorBenchmark::value_type;
 
-    std::vector<T> input = get_random_data<T>(size, T(0), T(99));
+    const auto     random_range = limit_random_range<T>(0, 99);
+    std::vector<T> input
+        = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
     T*             d_input;
     T*             d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
@@ -175,17 +180,27 @@ void run_benchmark(benchmark::State& state, size_t size, const hipStream_t strea
                                      .c_str(),                                                     \
                                  run_benchmark<B<T, less_than<T, C>, increment<T, 5>>>,            \
                                  size,                                                             \
+                                 seed,                                                             \
                                  stream)
 
-#define CREATE_TYPED_BENCHMARK(T)                                                                \
-    CREATE_BENCHMARK(transform_it, T, 0), CREATE_BENCHMARK(read_predicate_it, T, 0),             \
-        CREATE_BENCHMARK(write_predicate_it, T, 0), CREATE_BENCHMARK(transform_it, T, 25),       \
-        CREATE_BENCHMARK(read_predicate_it, T, 25), CREATE_BENCHMARK(write_predicate_it, T, 25), \
-        CREATE_BENCHMARK(transform_it, T, 50), CREATE_BENCHMARK(read_predicate_it, T, 50),       \
-        CREATE_BENCHMARK(write_predicate_it, T, 50), CREATE_BENCHMARK(transform_it, T, 75),      \
-        CREATE_BENCHMARK(read_predicate_it, T, 75), CREATE_BENCHMARK(write_predicate_it, T, 75), \
-        CREATE_BENCHMARK(transform_it, T, 100), CREATE_BENCHMARK(read_predicate_it, T, 100),     \
-        CREATE_BENCHMARK(write_predicate_it, T, 100)
+// clang-format off
+#define CREATE_TYPED_BENCHMARK(T)                \
+    CREATE_BENCHMARK(transform_it, T, 0),        \
+    CREATE_BENCHMARK(read_predicate_it, T, 0),   \
+    CREATE_BENCHMARK(write_predicate_it, T, 0),  \
+    CREATE_BENCHMARK(transform_it, T, 25),       \
+    CREATE_BENCHMARK(read_predicate_it, T, 25),  \
+    CREATE_BENCHMARK(write_predicate_it, T, 25), \
+    CREATE_BENCHMARK(transform_it, T, 50),       \
+    CREATE_BENCHMARK(read_predicate_it, T, 50),  \
+    CREATE_BENCHMARK(write_predicate_it, T, 50), \
+    CREATE_BENCHMARK(transform_it, T, 75),       \
+    CREATE_BENCHMARK(read_predicate_it, T, 75),  \
+    CREATE_BENCHMARK(write_predicate_it, T, 75), \
+    CREATE_BENCHMARK(transform_it, T, 100),      \
+    CREATE_BENCHMARK(read_predicate_it, T, 100), \
+    CREATE_BENCHMARK(write_predicate_it, T, 100)
+// clang-format on
 
 int main(int argc, char* argv[])
 {
@@ -196,6 +211,7 @@ int main(int argc, char* argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -203,6 +219,8 @@ int main(int argc, char* argv[])
     const size_t size   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -210,6 +228,7 @@ int main(int argc, char* argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     using custom_128 = custom_type<int64_t, int64_t>;
 

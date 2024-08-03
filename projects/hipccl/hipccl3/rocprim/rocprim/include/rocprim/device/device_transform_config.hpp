@@ -27,6 +27,7 @@
 #include "../functional.hpp"
 #include "../detail/various.hpp"
 
+#include "detail/config/device_transform.hpp"
 #include "detail/device_config_helper.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
@@ -36,11 +37,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-// device transform does not have config tuning
-template<unsigned int arch, class value_type>
-struct default_transform_config : default_transform_config_base<value_type>::type
-{};
 
 template<typename TransformConfig, typename>
 struct wrapped_transform_config

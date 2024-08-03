@@ -51,7 +51,10 @@ const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
 
 template<class Key>
-void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+void run_merge_keys_benchmark(benchmark::State&   state,
+                              size_t              size,
+                              const managed_seed& seed,
+                              hipStream_t         stream)
 {
     using key_type = Key;
     using compare_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, half_less, rocprim::less<key_type>>::type;
@@ -62,8 +65,12 @@ void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_
     compare_op_type compare_op;
 
     // Generate data
-    std::vector<key_type> keys_input1 = get_random_data<key_type>(size1, 0, size);
-    std::vector<key_type> keys_input2 = get_random_data<key_type>(size2, 0, size);
+    const auto random_range = limit_random_range<key_type>(0, size);
+
+    std::vector<key_type> keys_input1
+        = get_random_data<key_type>(size1, random_range.first, random_range.second, seed.get_0());
+    std::vector<key_type> keys_input2
+        = get_random_data<key_type>(size2, random_range.first, random_range.second, seed.get_1());
     std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
     std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
 
@@ -157,7 +164,10 @@ void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_
 }
 
 template<class Key, class Value>
-void run_merge_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+void run_merge_pairs_benchmark(benchmark::State&   state,
+                               size_t              size,
+                               const managed_seed& seed,
+                               hipStream_t         stream)
 {
     using key_type = Key;
     using value_type = Value;
@@ -169,8 +179,11 @@ void run_merge_pairs_benchmark(benchmark::State& state, hipStream_t stream, size
     compare_op_type compare_op;
 
     // Generate data
-    std::vector<key_type> keys_input1 = get_random_data<key_type>(size1, 0, size);
-    std::vector<key_type> keys_input2 = get_random_data<key_type>(size2, 0, size);
+    const auto            random_range = limit_random_range<key_type>(0, size);
+    std::vector<key_type> keys_input1
+        = get_random_data<key_type>(size1, random_range.first, random_range.second, seed.get_0());
+    std::vector<key_type> keys_input2
+        = get_random_data<key_type>(size2, random_range.first, random_range.second, seed.get_1());
     std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
     std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
     std::vector<value_type> values_input1(size1);
@@ -287,15 +300,16 @@ void run_merge_pairs_benchmark(benchmark::State& state, hipStream_t stream, size
     benchmark::RegisterBenchmark(                                                                 \
         bench_naming::format_name("{lvl:device,algo:merge,key_type:" #Key ",cfg:default_config}") \
             .c_str(),                                                                             \
-        [=](benchmark::State& state) { run_merge_keys_benchmark<Key>(state, stream, size); })
+        [=](benchmark::State& state)                                                              \
+        { run_merge_keys_benchmark<Key>(state, size, seed, stream); })
 
-#define CREATE_MERGE_PAIRS_BENCHMARK(Key, Value)                                                   \
-    benchmark::RegisterBenchmark(bench_naming::format_name("{lvl:device,algo:merge,key_type:" #Key \
-                                                           ",value_type:" #Value                   \
-                                                           ",cfg:default_config}")                 \
-                                     .c_str(),                                                     \
-                                 [=](benchmark::State& state)                                      \
-                                 { run_merge_pairs_benchmark<Key, Value>(state, stream, size); })
+#define CREATE_MERGE_PAIRS_BENCHMARK(Key, Value)                                                \
+    benchmark::RegisterBenchmark(                                                               \
+        bench_naming::format_name("{lvl:device,algo:merge,key_type:" #Key ",value_type:" #Value \
+                                  ",cfg:default_config}")                                       \
+            .c_str(),                                                                           \
+        [=](benchmark::State& state)                                                            \
+        { run_merge_pairs_benchmark<Key, Value>(state, size, seed, stream); })
 
 int main(int argc, char *argv[])
 {
@@ -306,6 +320,7 @@ int main(int argc, char *argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -313,6 +328,8 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -320,6 +337,7 @@ int main(int argc, char *argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     using custom_int2 = custom_type<int, int>;
     using custom_double2 = custom_type<double, double>;

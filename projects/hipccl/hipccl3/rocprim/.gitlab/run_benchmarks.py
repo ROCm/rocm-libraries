@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ import stat
 import subprocess
 import sys
 
-BenchmarkContext = namedtuple('BenchmarkContext', ['gpu_architecture', 'benchmark_output_dir', 'benchmark_dir', 'benchmark_filename_regex', 'benchmark_filter_regex', 'size', 'trials'])
+BenchmarkContext = namedtuple('BenchmarkContext', ['gpu_architecture', 'benchmark_output_dir', 'benchmark_dir', 'benchmark_filename_regex', 'benchmark_filter_regex', 'size', 'trials', 'seed'])
 
 def run_benchmarks(benchmark_context):
     def is_benchmark_executable(filename):
@@ -61,6 +61,8 @@ def run_benchmarks(benchmark_context):
             args += ['--size', benchmark_context.size]
         if benchmark_context.trials:
             args += ['--trials', benchmark_context.trials]
+        if benchmark_context.seed:
+            args += ['--seed', benchmark_context.seed]
         try:
             subprocess.check_call(args)
         except subprocess.CalledProcessError as error:
@@ -97,6 +99,10 @@ def main():
         help='Controls the number of trial iterations for each benchmark case',
         default='',
         required=False)
+    parser.add_argument('--seed',
+        help='Controls the seed for random number generation for each benchmark case',
+        default='',
+        required=False)
 
     args = parser.parse_args()
 
@@ -107,7 +113,8 @@ def main():
         args.benchmark_filename_regex,
         args.benchmark_filter_regex,
         args.size,
-        args.trials)
+        args.trials,
+        args.seed)
 
     benchmark_run_successful = run_benchmarks(benchmark_context)
 

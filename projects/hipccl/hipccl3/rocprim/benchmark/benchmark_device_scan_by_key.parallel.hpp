@@ -61,6 +61,7 @@ template<bool Exclusive                = false,
          class ScanOp                  = rocprim::plus<Value>,
          class CompareOp               = rocprim::equal_to<Key>,
          unsigned int MaxSegmentLength = 1024,
+         bool         Deterministic    = false,
          class Config                  = rocprim::default_config>
 struct device_scan_by_key_benchmark : public config_autotune_interface
 {
@@ -88,17 +89,34 @@ struct device_scan_by_key_benchmark : public config_autotune_interface
                                 const bool        debug = false) const ->
         typename std::enable_if<excl, hipError_t>::type
     {
-        return rocprim::exclusive_scan_by_key<Config>(temporary_storage,
-                                                      storage_size,
-                                                      keys,
-                                                      input,
-                                                      output,
-                                                      initial_value,
-                                                      input_size,
-                                                      scan_op,
-                                                      compare_op,
-                                                      stream,
-                                                      debug);
+        if ROCPRIM_IF_CONSTEXPR(!Deterministic)
+        {
+            return rocprim::exclusive_scan_by_key<Config>(temporary_storage,
+                                                          storage_size,
+                                                          keys,
+                                                          input,
+                                                          output,
+                                                          initial_value,
+                                                          input_size,
+                                                          scan_op,
+                                                          compare_op,
+                                                          stream,
+                                                          debug);
+        }
+        else
+        {
+            return rocprim::deterministic_exclusive_scan_by_key<Config>(temporary_storage,
+                                                                        storage_size,
+                                                                        keys,
+                                                                        input,
+                                                                        output,
+                                                                        initial_value,
+                                                                        input_size,
+                                                                        scan_op,
+                                                                        compare_op,
+                                                                        stream,
+                                                                        debug);
+        }
     }
 
     template<bool excl = Exclusive>
@@ -115,26 +133,48 @@ struct device_scan_by_key_benchmark : public config_autotune_interface
                                 const bool        debug = false) const ->
         typename std::enable_if<!excl, hipError_t>::type
     {
-        return rocprim::inclusive_scan_by_key<Config>(temporary_storage,
-                                                      storage_size,
-                                                      keys,
-                                                      input,
-                                                      output,
-                                                      input_size,
-                                                      scan_op,
-                                                      compare_op,
-                                                      stream,
-                                                      debug);
+        if ROCPRIM_IF_CONSTEXPR(!Deterministic)
+        {
+            return rocprim::inclusive_scan_by_key<Config>(temporary_storage,
+                                                          storage_size,
+                                                          keys,
+                                                          input,
+                                                          output,
+                                                          input_size,
+                                                          scan_op,
+                                                          compare_op,
+                                                          stream,
+                                                          debug);
+        }
+        else
+        {
+            return rocprim::deterministic_inclusive_scan_by_key<Config>(temporary_storage,
+                                                                        storage_size,
+                                                                        keys,
+                                                                        input,
+                                                                        output,
+                                                                        input_size,
+                                                                        scan_op,
+                                                                        compare_op,
+                                                                        stream,
+                                                                        debug);
+        }
     }
 
-    void run(benchmark::State& state, size_t size, hipStream_t stream) const override
+    void run(benchmark::State&   state,
+             size_t              size,
+             const managed_seed& seed,
+             hipStream_t         stream) const override
     {
         constexpr bool debug = false;
 
         const std::vector<Key> keys
-            = get_random_segments<Key>(size, MaxSegmentLength, std::random_device{}());
+            = get_random_segments<Key>(size, MaxSegmentLength, seed.get_0());
 
-        const std::vector<Value> input = get_random_data<Value>(size, Value(0), Value(1000));
+        const auto random_range = limit_random_range<Value>(0, 1000);
+
+        const std::vector<Value> input
+            = get_random_data<Value>(size, random_range.first, random_range.second, seed.get_1());
 
         ScanOp    scan_op{};
         CompareOp compare_op{};
@@ -260,6 +300,7 @@ struct device_scan_by_key_benchmark_generator
                                              rocprim::plus<ValueType>,
                                              rocprim::equal_to<KeyType>,
                                              1024,
+                                             false,
                                              rocprim::scan_by_key_config<
                                                  block_size,
                                                  ItemsPerThread,

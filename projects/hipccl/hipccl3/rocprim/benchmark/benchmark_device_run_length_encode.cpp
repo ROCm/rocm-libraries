@@ -39,23 +39,31 @@
 #include <string>
 #include <vector>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+#ifndef DEFAULT_BYTES
+constexpr size_t DEFAULT_BYTES = size_t{2} << 30; // 2 GiB
 #endif
 
 namespace rp = rocprim;
 
 template<class T>
-void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_t stream, size_t size)
+void run_encode_benchmark(benchmark::State&   state,
+                          size_t              max_length,
+                          size_t              bytes,
+                          const managed_seed& seed,
+                          hipStream_t         stream)
 {
     using key_type = T;
     using count_type = unsigned int;
+
+    const size_t size = bytes / sizeof(T);
 
     // Generate data
     std::vector<key_type> input(size);
 
     unsigned int runs_count = 0;
-    std::vector<size_t> key_counts = get_random_data<size_t>(100000, 1, max_length);
+    const auto          random_range = limit_random_range<size_t>(1, max_length);
+    std::vector<size_t> key_counts
+        = get_random_data<size_t>(100000, random_range.first, random_range.second, seed.get_0());
     size_t offset = 0;
     while(offset < size)
     {
@@ -161,17 +169,25 @@ void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_
 }
 
 template<class T>
-void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, hipStream_t stream, size_t size)
+void run_non_trivial_runs_benchmark(benchmark::State&   state,
+                                    size_t              max_length,
+                                    size_t              bytes,
+                                    const managed_seed& seed,
+                                    hipStream_t         stream)
 {
     using key_type = T;
     using offset_type = unsigned int;
     using count_type = unsigned int;
 
+    const size_t size = bytes / sizeof(T);
+
     // Generate data
     std::vector<key_type> input(size);
 
     unsigned int runs_count = 0;
-    std::vector<size_t> key_counts = get_random_data<size_t>(100000, 1, max_length);
+    const auto          random_range = limit_random_range<size_t>(1, max_length);
+    std::vector<size_t> key_counts
+        = get_random_data<size_t>(100000, random_range.first, random_range.second, seed.get_0());
     size_t offset = 0;
     while(offset < size)
     {
@@ -284,26 +300,29 @@ void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, 
             .c_str(),                                                                             \
         run_encode_benchmark<T>,                                                                  \
         max_length,                                                                               \
-        stream,                                                                                   \
-        size)
+        size,                                                                                     \
+        seed,                                                                                     \
+        stream)
 
-void add_encode_benchmarks(size_t max_length,
+void add_encode_benchmarks(size_t                                        max_length,
                            std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                           hipStream_t stream,
-                           size_t size)
+                           size_t                                        size,
+                           const managed_seed&                           seed,
+                           hipStream_t                                   stream)
 {
     using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
 
-    std::vector<benchmark::internal::Benchmark*> bs =
-    {
-        CREATE_ENCODE_BENCHMARK(int),
-        CREATE_ENCODE_BENCHMARK(long long),
-
+    std::vector<benchmark::internal::Benchmark*> bs = {
+        // all tuned types
         CREATE_ENCODE_BENCHMARK(int8_t),
-        CREATE_ENCODE_BENCHMARK(uint8_t),
+        CREATE_ENCODE_BENCHMARK(int16_t),
+        CREATE_ENCODE_BENCHMARK(int32_t),
+        CREATE_ENCODE_BENCHMARK(int64_t),
         CREATE_ENCODE_BENCHMARK(rocprim::half),
-
+        CREATE_ENCODE_BENCHMARK(float),
+        CREATE_ENCODE_BENCHMARK(double),
+        // custom types
         CREATE_ENCODE_BENCHMARK(custom_float2),
         CREATE_ENCODE_BENCHMARK(custom_double2),
     };
@@ -320,13 +339,15 @@ void add_encode_benchmarks(size_t max_length,
             .c_str(),                                                             \
         run_non_trivial_runs_benchmark<T>,                                        \
         max_length,                                                               \
-        stream,                                                                   \
-        size)
+        size,                                                                     \
+        seed,                                                                     \
+        stream)
 
-void add_non_trivial_runs_benchmarks(size_t max_length,
+void add_non_trivial_runs_benchmarks(size_t                                        max_length,
                                      std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                     hipStream_t stream,
-                                     size_t size)
+                                     size_t                                        size,
+                                     const managed_seed&                           seed,
+                                     hipStream_t                                   stream)
 {
     using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
@@ -350,12 +371,13 @@ void add_non_trivial_runs_benchmarks(size_t max_length,
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -363,6 +385,8 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -370,13 +394,14 @@ int main(int argc, char *argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_encode_benchmarks(1000, benchmarks, stream, size);
-    add_encode_benchmarks(10, benchmarks, stream, size);
-    add_non_trivial_runs_benchmarks(1000, benchmarks, stream, size);
-    add_non_trivial_runs_benchmarks(10, benchmarks, stream, size);
+    add_encode_benchmarks(1000, benchmarks, size, seed, stream);
+    add_encode_benchmarks(10, benchmarks, size, seed, stream);
+    add_non_trivial_runs_benchmarks(1000, benchmarks, size, seed, stream);
+    add_non_trivial_runs_benchmarks(10, benchmarks, size, seed, stream);
 
     // Use manual timing
     for(auto& b : benchmarks)

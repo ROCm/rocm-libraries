@@ -20,7 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "benchmark_device_transform.parallel.hpp"
 #include "benchmark_utils.hpp"
+
 // CmdParser
 #include "cmdparser.hpp"
 
@@ -45,104 +47,11 @@
 const size_t DEFAULT_N = 1024 * 1024 * 128;
 #endif
 
-const unsigned int batch_size = 10;
-const unsigned int warmup_size = 5;
-
-template<class T>
-struct transform
-{
-    __device__ __host__
-    constexpr T operator()(const T& a) const
-    {
-        return a + T(5);
+#define CREATE_BENCHMARK(T)                                           \
+    {                                                                 \
+        const device_transform_benchmark<T> instance{};               \
+        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance); \
     }
-};
-
-template<
-    class T,
-    class BinaryFunction
->
-void run_benchmark(benchmark::State& state,
-                   size_t size,
-                   const hipStream_t stream,
-                   BinaryFunction transform_op)
-{
-    std::vector<T> input = get_random_data<T>(size, T(0), T(1000));
-
-    T * d_input;
-    T * d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
-    {
-        HIP_CHECK(
-            rocprim::transform(
-                d_input, d_output, size,
-                transform_op, stream
-            )
-        );
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    for(auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            HIP_CHECK(
-                rocprim::transform(
-                    d_input, d_output, size,
-                    transform_op, stream
-                )
-            );
-        }
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-    }
-
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-}
-
-#define CREATE_BENCHMARK(T, TRANSFORM_OP)                                                \
-    benchmark::RegisterBenchmark(                                                        \
-        bench_naming::format_name("{lvl:device,algo:transform,key_type:" #T              \
-                                  ",transform_op:" #TRANSFORM_OP ",cfg:default_config}") \
-            .c_str(),                                                                    \
-        run_benchmark<T, TRANSFORM_OP>,                                                  \
-        size,                                                                            \
-        stream,                                                                          \
-        TRANSFORM_OP())
 
 int main(int argc, char *argv[])
 {
@@ -153,6 +62,18 @@ int main(int argc, char *argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
+#ifdef BENCHMARK_CONFIG_TUNING
+    // optionally run an evenly split subset of benchmarks, when making multiple program invocations
+    parser.set_optional<int>("parallel_instance",
+                             "parallel_instance",
+                             0,
+                             "parallel instance index");
+    parser.set_optional<int>("parallel_instances",
+                             "parallel_instances",
+                             1,
+                             "total parallel instances");
+#endif // BENCHMARK_CONFIG_TUNING
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -160,6 +81,8 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -167,26 +90,35 @@ int main(int argc, char *argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
-
-    using custom_float2 = custom_type<float, float>;
-    using custom_double2 = custom_type<double, double>;
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks =
-    {
-        CREATE_BENCHMARK(int, transform<int>),
-        CREATE_BENCHMARK(long long, transform<long long>),
+    std::vector<benchmark::internal::Benchmark*> benchmarks = {};
+#ifdef BENCHMARK_CONFIG_TUNING
+    const int parallel_instance  = parser.get<int>("parallel_instance");
+    const int parallel_instances = parser.get<int>("parallel_instances");
+    config_autotune_register::register_benchmark_subset(benchmarks,
+                                                        parallel_instance,
+                                                        parallel_instances,
+                                                        size,
+                                                        seed,
+                                                        stream);
+#else // BENCHMARK_CONFIG_TUNING
+    using custom_float2  = custom_type<float, float>;
+    using custom_double2 = custom_type<double, double>;
+    CREATE_BENCHMARK(int)
+    CREATE_BENCHMARK(long long)
 
-        CREATE_BENCHMARK(int8_t, transform<int8_t>),
-        CREATE_BENCHMARK(uint8_t, transform<uint8_t>),
-        CREATE_BENCHMARK(rocprim::half, transform<rocprim::half>),
+    CREATE_BENCHMARK(int8_t)
+    CREATE_BENCHMARK(uint8_t)
+    CREATE_BENCHMARK(rocprim::half)
 
-        CREATE_BENCHMARK(float, transform<float>),
-        CREATE_BENCHMARK(double, transform<double>),
+    CREATE_BENCHMARK(float)
+    CREATE_BENCHMARK(double)
 
-        CREATE_BENCHMARK(custom_float2, transform<custom_float2>),
-        CREATE_BENCHMARK(custom_double2, transform<custom_double2>),
-    };
+    CREATE_BENCHMARK(custom_float2)
+    CREATE_BENCHMARK(custom_double2)
+#endif // BENCHMARK_CONFIG_TUNING
 
     // Use manual timing
     for(auto& b : benchmarks)

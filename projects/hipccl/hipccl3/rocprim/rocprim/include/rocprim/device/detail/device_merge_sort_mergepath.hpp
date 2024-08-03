@@ -1,6 +1,6 @@
 /******************************************************************************
 * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2022, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2022-2024, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -121,8 +121,10 @@ namespace detail
 
         ROCPRIM_SHARED_MEMORY union {
             typename block_store::storage_type   store;
+            ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
             detail::raw_storage<keys_storage_>   keys;
             detail::raw_storage<values_storage_> values;
+            ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
         } storage;
 
         auto& keys_shared = storage.keys.get();
@@ -266,8 +268,10 @@ namespace detail
 
         ROCPRIM_SHARED_MEMORY union {
             typename block_store::storage_type   store;
+            ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
             detail::raw_storage<keys_storage_>   keys;
             detail::raw_storage<values_storage_> values;
+            ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
         } storage;
 
         auto& keys_shared = storage.keys.get();

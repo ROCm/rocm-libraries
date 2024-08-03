@@ -166,8 +166,8 @@ struct operation<atomics_inter_warp_collision, T, ItemsPerThread, BlockSize>
         (void) shared_storage;
         (void) shared_storage_size;
         (void) input;
-        unsigned int index = (threadIdx.x % warpSize) * ItemsPerThread +
-                             blockIdx.x * blockDim.x * ItemsPerThread;
+        unsigned int index = (threadIdx.x % rocprim::device_warp_size()) * ItemsPerThread
+                             + blockIdx.x * blockDim.x * ItemsPerThread;
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
@@ -325,30 +325,28 @@ void operation_kernel(T* input, T* output, CustomOp op)
     store.store(output + offset, items, storage.store);
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    memory_operation_method MemOp,
-    kernel_operation KernelOp = no_operation
->
-void run_benchmark(benchmark::State& state,
-                   size_t size,
-                   const hipStream_t stream)
+template<class T,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         memory_operation_method MemOp,
+         kernel_operation        KernelOp = no_operation>
+void run_benchmark(benchmark::State&   state,
+                   size_t              size,
+                   const managed_seed& seed,
+                   const hipStream_t   stream)
 {
     const size_t grid_size = size / (BlockSize * ItemsPerThread);
     std::vector<T> input;
     if(std::is_floating_point<T>::value)
     {
-        input = get_random_data<T>(size, (T)-1000, (T)+1000);
+        input = get_random_data<T>(size, static_cast<T>(-1000), static_cast<T>(1000), seed.get_0());
     }
     else
     {
-        input = get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
+        input = get_random_data<T>(size,
+                                   std::numeric_limits<T>::min(),
+                                   std::numeric_limits<T>::max(),
+                                   seed.get_0());
     }
     T * d_input;
     T * d_output;
@@ -418,8 +416,9 @@ void run_benchmark(benchmark::State& state,
 
 template<class T>
 void run_benchmark_memcpy(benchmark::State& state,
-                           size_t size,
-                           const hipStream_t stream)
+                          size_t            size,
+                          const managed_seed&,
+                          const hipStream_t stream)
 {
     // Allocate device buffers
     // Note: since this benchmark only tests performance by memcpying between device buffers,
@@ -480,6 +479,7 @@ void run_benchmark_memcpy(benchmark::State& state,
             .c_str(),                                                                     \
         run_benchmark<T, BLOCK_SIZE, IPT, METHOD, OPERATION>,                             \
         SIZE,                                                                             \
+        seed,                                                                             \
         stream)
 
 #define CREATE_BENCHMARK_MEMCPY(T, SIZE)                                              \
@@ -489,6 +489,7 @@ void run_benchmark_memcpy(benchmark::State& state,
             .c_str(),                                                                 \
         run_benchmark_memcpy<T>,                                                      \
         SIZE,                                                                         \
+        seed,                                                                         \
         stream)
 
 template<class T>
@@ -505,18 +506,22 @@ int main(int argc, char *argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
 
     // Benchmark info
     add_common_benchmark_info();
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
