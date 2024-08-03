@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,6 +37,7 @@
 
 #include "../functional.hpp"
 #include "../intrinsics.hpp"
+#include "../types/uninitialized_array.hpp"
 
 #include "detail/block_reduce_raking_reduce.hpp"
 #include "detail/block_reduce_warp_reduce.hpp"
@@ -92,26 +93,21 @@ class block_shuffle
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
 
-    // Struct used for creating a raw_storage object for this primitive's temporary storage.
     struct storage_type_
     {
-        T buffer[BlockSize];
+        uninitialized_array<T, BlockSize> buffer;
     };
 
 public:
-/// \brief Struct used to allocate a temporary memory that is required for thread
-/// communication during operations provided by related parallel primitive.
-///
-/// Depending on the implemention the operations exposed by parallel primitive may
-/// require a temporary storage for thread communication. The storage should be allocated
-/// using keywords <tt>__shared__</tt>. It can be aliased to
-/// an externally allocated memory, or be a part of a union type with other storage types
-/// to increase shared memory reusability.
-#ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
-    using storage_type = detail::raw_storage<storage_type_>;
-#else
+    /// \brief Struct used to allocate a temporary memory that is required for thread
+    /// communication during operations provided by related parallel primitive.
+    ///
+    /// Depending on the implementation the operations exposed by parallel primitive may
+    /// require a temporary storage for thread communication. The storage should be allocated
+    /// using keywords <tt>__shared__</tt>. It can be aliased to
+    /// an externally allocated memory, or be a part of a union type with other storage types
+    /// to increase shared memory reusability.
     using storage_type = storage_type_; // only for Doxygen
-#endif
 
     /// \brief Shuffles data across threads in a block, offseted by the distance value.
     ///
@@ -175,16 +171,16 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE void
         offset(const size_t& flat_id, T input, T& output, int distance, storage_type& storage)
     {
-        storage_type_& storage_  = storage.get();
-        storage_.buffer[flat_id] = input;
+        storage.buffer.emplace(flat_id, input);
 
         const int offset_tid = static_cast<int>(flat_id) + distance;
 
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         if((offset_tid >= 0) && (offset_tid < (int)BlockSize))
         {
-            output = storage_.buffer[static_cast<size_t>(offset_tid)];
+            output = storage_buffer[static_cast<size_t>(offset_tid)];
         }
     }
 
@@ -250,8 +246,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE void
         rotate(const size_t& flat_id, T input, T& output, int distance, storage_type& storage)
     {
-        storage_type_& storage_  = storage.get();
-        storage_.buffer[flat_id] = input;
+        storage.buffer.emplace(flat_id, input);
 
         int offset = static_cast<int>(flat_id) + distance;
         if(offset >= (int)BlockSize)
@@ -264,8 +259,9 @@ public:
         }
 
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
-        output = storage_.buffer[offset];
+        output = storage_buffer[offset];
     }
 
     /// \brief The thread block rotates a blocked arrange of input items,
@@ -329,8 +325,7 @@ public:
                                           T (&prev)[ItemsPerThread],
                                           storage_type& storage)
     {
-        storage_type_& storage_  = storage.get();
-        storage_.buffer[flat_id] = input[ItemsPerThread - 1];
+        storage.buffer.emplace(flat_id, input[ItemsPerThread - 1]);
 
         ROCPRIM_UNROLL
         for(unsigned int i = ItemsPerThread - 1; i > 0; --i)
@@ -339,10 +334,11 @@ public:
         }
 
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         if(flat_id > 0)
         {
-            prev[0] = storage_.buffer[flat_id - 1];
+            prev[0] = storage_buffer[flat_id - 1];
         }
     }
 
@@ -403,7 +399,7 @@ public:
         up(flat_id, input, prev, storage);
 
         // Update block prefix
-        block_suffix = storage->buffer[BlockSize - 1];
+        block_suffix = storage->buffer.get_unsafe_array()[BlockSize - 1];
     }
 
     /// \brief The thread block rotates a blocked arrange of input items,
@@ -467,8 +463,7 @@ public:
                                             T (&next)[ItemsPerThread],
                                             storage_type& storage)
     {
-        storage_type_& storage_  = storage.get();
-        storage_.buffer[flat_id] = input[0];
+        storage.buffer.emplace(flat_id, input[0]);
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < (ItemsPerThread - 1); ++i)
@@ -477,10 +472,11 @@ public:
         }
 
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         if(flat_id < (BlockSize - 1))
         {
-            next[ItemsPerThread - 1] = storage_.buffer[flat_id + 1];
+            next[ItemsPerThread - 1] = storage_buffer[flat_id + 1];
         }
     }
 

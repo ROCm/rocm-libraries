@@ -140,22 +140,22 @@ auto execute_warp_reduce_kernel(T* input, T* output, Flag* flags,
     HIP_CHECK(hipGetLastError());
 }
 
-template<
-    bool AllReduce,
-    bool Segmented,
-    class T,
-    unsigned int WarpSize,
-    unsigned int BlockSize,
-    unsigned int Trials = 100
->
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
+template<bool AllReduce,
+         bool Segmented,
+         class T,
+         unsigned int WarpSize,
+         unsigned int BlockSize,
+         unsigned int Trials = 100>
+void run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, hipStream_t stream)
 {
     using flag_type = unsigned char;
 
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
 
-    std::vector<T> input = get_random_data<T>(size, T(0), T(10));
-    std::vector<flag_type> flags = get_random_data<flag_type>(size, 0, 1);
+    const auto     random_range = limit_random_range<T>(0, 10);
+    std::vector<T> input
+        = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
+    std::vector<flag_type> flags = get_random_data<flag_type>(size, 0, 1, seed.get_1());
     T * d_input;
     flag_type * d_flags;
     T * d_output;
@@ -223,8 +223,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
                                   + ",ws:" #WS ",cfg:{bs:" #BS "}}")                          \
             .c_str(),                                                                         \
         run_benchmark<AllReduce, Segmented, T, WS, BS>,                                       \
-        stream,                                                                               \
-        size)
+        size,                                                                                 \
+        seed,                                                                                 \
+        stream)
 
 #define BENCHMARK_TYPE(type) \
     CREATE_BENCHMARK(type, 32, 64), \
@@ -234,8 +235,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 template<bool AllReduce, bool Segmented>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hipStream_t                                   stream,
-                    size_t                                        size)
+                    size_t                                        size,
+                    const managed_seed&                           seed,
+                    hipStream_t                                   stream)
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
@@ -259,6 +261,7 @@ int main(int argc, char *argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -266,6 +269,8 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -273,12 +278,13 @@ int main(int argc, char *argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<false, false>(benchmarks, stream, size);
-    add_benchmarks<true, false>(benchmarks, stream, size);
-    add_benchmarks<false, true>(benchmarks, stream, size);
+    add_benchmarks<false, false>(benchmarks, size, seed, stream);
+    add_benchmarks<true, false>(benchmarks, size, seed, stream);
+    add_benchmarks<false, true>(benchmarks, size, seed, stream);
 
     // Use manual timing
     for(auto& b : benchmarks)

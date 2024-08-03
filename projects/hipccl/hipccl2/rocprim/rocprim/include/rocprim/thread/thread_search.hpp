@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,8 +27,10 @@
  *
  ******************************************************************************/
 
-#ifndef ROCPRIM_THREAD_THREAD_SCAN_HPP_
-#define ROCPRIM_THREAD_THREAD_SCAN_HPP_
+#ifndef ROCPRIM_THREAD_THREAD_SEARCH_HPP_
+#define ROCPRIM_THREAD_THREAD_SEARCH_HPP_
+
+#include "../detail/merge_path.hpp"
 
 #include "../config.hpp"
 #include "../functional.hpp"
@@ -37,52 +39,40 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/**
- * Computes the begin offsets into A and B for the specific diagonal
- */
-template <
-    typename AIteratorT,
-    typename BIteratorT,
-    typename OffsetT,
-    typename CoordinateT>
-ROCPRIM_HOST_DEVICE inline void merge_path_search(
-    OffsetT         diagonal,
-    AIteratorT      a,
-    BIteratorT      b,
-    OffsetT         a_len,
-    OffsetT         b_len,
-    CoordinateT&    path_coordinate)
+/// \defgroup thread_search Thread Search Functions
+/// \ingroup threadmodule
+
+/// \addtogroup thread_search
+/// @{
+
+/// \brief Computes the begin offsets into A and B for the specific diagonal
+template<class AIteratorT,
+         class BIteratorT,
+         class OffsetT,
+         class CoordinateT,
+         class BinaryFunction
+         = rocprim::less<typename std::iterator_traits<AIteratorT>::value_type>>
+ROCPRIM_HOST_DEVICE inline void merge_path_search(OffsetT        diagonal,
+                                                  AIteratorT     a,
+                                                  BIteratorT     b,
+                                                  OffsetT        a_len,
+                                                  OffsetT        b_len,
+                                                  CoordinateT&   path_coordinate,
+                                                  BinaryFunction compare_function
+                                                  = BinaryFunction())
 {
-    OffsetT split_min = ::rocprim::max(diagonal - b_len, static_cast<OffsetT>(0));
-    OffsetT split_max = ::rocprim::min(diagonal, a_len);
-
-    while (split_min < split_max)
-    {
-        OffsetT split_pivot = (split_min + split_max) >> 1;
-        if (a[split_pivot] <= b[diagonal - split_pivot - 1])
-        {
-            // Move candidate split range up A, down B
-            split_min = split_pivot + 1;
-        }
-        else
-        {
-            // Move candidate split range up B, down A
-            split_max = split_pivot;
-        }
-    }
-
-    path_coordinate.x = ::rocprim::min(split_min, a_len);
-    path_coordinate.y = diagonal - split_min;
+    path_coordinate.x = rocprim::detail::merge_path(a, b, a_len, b_len, diagonal, compare_function);
+    path_coordinate.y = diagonal - path_coordinate.x;
 }
 
 /// \brief Returns the offset of the first value within \p input which does not compare less than \p val
-/// \tparam InputIteratorT   - <b>[inferred]</b> Type of iterator for the input data to be searched
-/// \tparam OffsetT          - <b>[inferred]</b> The data type of num_items
-/// \tparam T                - <b>[inferred]</b> The data type of the input sequence elements
-/// \param input     [in]    - Input sequence
-/// \param num_items [in]    - Input sequence length
-/// \param val       [in]    - Search Key
-/// \return                  - Offset at which val was found
+/// \tparam InputIteratorT   <b>[inferred]</b> Type of iterator for the input data to be searched
+/// \tparam OffsetT          <b>[inferred]</b> The data type of num_items
+/// \tparam T                <b>[inferred]</b> The data type of the input sequence elements
+/// \param input     [in]    Input sequence
+/// \param num_items [in]    Input sequence length
+/// \param val       [in]    Search Key
+/// \return                  Offset at which val was found
 template<typename InputIteratorT, typename OffsetT, typename T>
 ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT lower_bound(InputIteratorT input, OffsetT num_items, T val)
 {
@@ -105,13 +95,13 @@ ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT lower_bound(InputIteratorT input, OffsetT 
 }
 
 /// \brief Returns the offset of the first value within \p input which compares greater than \p val
-/// \tparam InputIteratorT   - <b>[inferred]</b> Type of iterator for the input data to be searched
-/// \tparam OffsetT          - <b>[inferred]</b> The data type of num_items
-/// \tparam T                - <b>[inferred]</b> The data type of the input sequence elements
-/// \param input     [in]    - Input sequence
-/// \param num_items [in]    - Input sequence length
-/// \param val       [in]    - Search Key
-/// \return                  - Offset at which val was found
+/// \tparam InputIteratorT   <b>[inferred]</b> Type of iterator for the input data to be searched
+/// \tparam OffsetT          <b>[inferred]</b> The data type of num_items
+/// \tparam T                <b>[inferred]</b> The data type of the input sequence elements
+/// \param input     [in]    Input sequence
+/// \param num_items [in]    Input sequence length
+/// \param val       [in]    Search Key
+/// \return                  Offset at which val was found
 template<typename InputIteratorT, typename OffsetT, typename T>
 ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT upper_bound(InputIteratorT input, OffsetT num_items, T val)
 {
@@ -135,14 +125,14 @@ ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT upper_bound(InputIteratorT input, OffsetT 
 
 /// \brief Returns the offset of the first value within \p input which compares greater than \p val
 /// computed as a statically unrolled loop
-/// \tparam MaxNumItems      - The maximum number of items.
-/// \tparam InputIteratorT   - <b>[inferred]</b> Type of iterator for the input data to be searched
-/// \tparam OffsetT          - <b>[inferred]</b> The data type of num_items
-/// \tparam T                - <b>[inferred]</b> The data type of the input sequence elements
-/// \param input     [in]    - Input sequence
-/// \param num_items [in]    - Input sequence length
-/// \param val       [in]    - Search Key
-/// \return                  - Offset at which val was found
+/// \tparam MaxNumItems      The maximum number of items.
+/// \tparam InputIteratorT   <b>[inferred]</b> Type of iterator for the input data to be searched
+/// \tparam OffsetT          <b>[inferred]</b> The data type of num_items
+/// \tparam T                <b>[inferred]</b> The data type of the input sequence elements
+/// \param input     [in]    Input sequence
+/// \param num_items [in]    Input sequence length
+/// \param val       [in]    Search Key
+/// \return                  Offset at which val was found
 template<int MaxNumItems, typename InputIteratorT, typename OffsetT, typename T>
 ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT static_upper_bound(InputIteratorT input,
                                                          OffsetT        num_items,
@@ -169,6 +159,9 @@ ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT static_upper_bound(InputIteratorT input,
     return lower_bound;
 }
 
+/// @}
+// end of group thread_search
+
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_THREAD_THREAD_SCAN_HPP_
+#endif // ROCPRIM_THREAD_THREAD_SEARCH_HPP_

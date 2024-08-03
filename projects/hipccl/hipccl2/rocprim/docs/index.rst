@@ -20,6 +20,7 @@ The rocPRIM documentation is structured as follows:
 
     * :ref:`rocprim-intro`
     * :ref:`glossary`
+    * :ref:`tuning`
     * :ref:`developer`
 
   .. grid-item-card:: API reference
@@ -30,7 +31,6 @@ The rocPRIM documentation is structured as follows:
     * :ref:`block-index`
     * :ref:`warp-index` 
     * :ref:`thread-index`
-    * :ref:`thread_ops` 
     * :ref:`iterators` 
     * :ref:`intrinsics` 
 

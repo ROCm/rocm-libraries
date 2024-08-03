@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -96,27 +96,24 @@ class block_exchange
     static constexpr unsigned int bank_conflicts_padding =
         has_bank_conflicts ? (BlockSize * ItemsPerThread / banks_no) : 0;
 
-    // Struct used for creating a raw_storage object for this primitive's temporary storage.
+    static constexpr unsigned int storage_count
+        = BlockSize * ItemsPerThread + bank_conflicts_padding;
+
     struct storage_type_
     {
-        T buffer[BlockSize * ItemsPerThread + bank_conflicts_padding];
+        uninitialized_array<T, storage_count, 16> buffer;
     };
 
 public:
-
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
     ///
-    /// Depending on the implemention the operations exposed by parallel primitive may
+    /// Depending on the implementation the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
     /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
-    #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
-    using storage_type = detail::raw_storage<storage_type_>;
-    #else
-    using storage_type = storage_type_; // only for Doxygen
-    #endif
+    using storage_type = storage_type_;
 
     /// \brief Transposes a blocked arrangement of items to a striped arrangement
     /// across the thread block.
@@ -169,18 +166,19 @@ public:
                             U (&output)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage_type_& storage_ = storage.get();
+        const unsigned int flat_id
+            = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage_.buffer[index(flat_id * ItemsPerThread + i)] = input[i];
+            storage.buffer.emplace(index(flat_id * ItemsPerThread + i), input[i]);
         }
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_.buffer[index(i * BlockSize + flat_id)];
+            output[i] = storage_buffer[index(i * BlockSize + flat_id)];
         }
     }
 
@@ -235,18 +233,19 @@ public:
                             U (&output)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage_type_& storage_ = storage.get();
+        const unsigned int flat_id
+            = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage_.buffer[index(i * BlockSize + flat_id)] = input[i];
+            storage.buffer.emplace(index(i * BlockSize + flat_id), input[i]);
         }
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_.buffer[index(flat_id * ItemsPerThread + i)];
+            output[i] = storage_buffer[index(flat_id * ItemsPerThread + i)];
         }
     }
 
@@ -305,19 +304,19 @@ public:
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int current_warp_size = get_current_warp_size();
-        const unsigned int offset = warp_id * items_per_warp;
-        storage_type_& storage_ = storage.get();
+        const unsigned int     offset            = warp_id * items_per_warp;
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage_.buffer[index(offset + lane_id * ItemsPerThread + i)] = input[i];
+            storage.buffer.emplace(index(offset + lane_id * ItemsPerThread + i), input[i]);
         }
 
         ::rocprim::wave_barrier();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_.buffer[index(offset + i * current_warp_size + lane_id)];
+            output[i] = storage_buffer[index(offset + i * current_warp_size + lane_id)];
         }
     }
 
@@ -376,19 +375,19 @@ public:
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int current_warp_size = get_current_warp_size();
-        const unsigned int offset = warp_id * items_per_warp;
-        storage_type_& storage_ = storage.get();
+        const unsigned int     offset            = warp_id * items_per_warp;
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage_.buffer[index(offset + i * current_warp_size + lane_id)] = input[i];
+            storage.buffer.emplace(index(offset + i * current_warp_size + lane_id), input[i]);
         }
 
         ::rocprim::wave_barrier();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_.buffer[index(offset + lane_id * ItemsPerThread + i)];
+            output[i] = storage_buffer[index(offset + lane_id * ItemsPerThread + i)];
         }
     }
 
@@ -469,19 +468,20 @@ public:
                             const Offset (&ranks)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage_type_& storage_ = storage.get();
+        const unsigned int flat_id
+            = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             const Offset rank = ranks[i];
-            storage_.buffer[index(rank)] = input[i];
+            storage.buffer.emplace(index(rank), input[i]);
         }
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_.buffer[index(flat_id * ItemsPerThread + i)];
+            output[i] = storage_buffer[index(flat_id * ItemsPerThread + i)];
         }
     }
 
@@ -502,19 +502,20 @@ public:
                              const Offset (&ranks)[ItemsPerThread],
                              storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage_type_& storage_ = storage.get();
+        const unsigned int flat_id
+            = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage_.buffer[index(i * BlockSize + flat_id)] = input[i];
+            storage.buffer.emplace(index(i * BlockSize + flat_id), input[i]);
         }
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             const Offset rank = ranks[i];
-            output[i] = storage_.buffer[index(rank)];
+            output[i]         = storage_buffer[index(rank)];
         }
     }
 
@@ -576,19 +577,20 @@ public:
                             const Offset (&ranks)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage_type_& storage_ = storage.get();
+        const unsigned int flat_id
+            = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             const Offset rank = ranks[i];
-            storage_.buffer[rank] = input[i];
+            storage.buffer.emplace(rank, input[i]);
         }
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_.buffer[i * BlockSize + flat_id];
+            output[i] = storage_buffer[i * BlockSize + flat_id];
         }
     }
 
@@ -656,22 +658,23 @@ public:
                                     const Offset (&ranks)[ItemsPerThread],
                                     storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage_type_& storage_ = storage.get();
+        const unsigned int flat_id
+            = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             const Offset rank = ranks[i];
             if(rank >= 0)
             {
-                storage_.buffer[rank] = input[i];
+                storage.buffer.emplace(rank, input[i]);
             }
         }
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_.buffer[i * BlockSize + flat_id];
+            output[i] = storage_buffer[i * BlockSize + flat_id];
         }
     }
 
@@ -741,22 +744,23 @@ public:
                                     const ValidFlag (&is_valid)[ItemsPerThread],
                                     storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage_type_& storage_ = storage.get();
+        const unsigned int flat_id
+            = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             const Offset rank = ranks[i];
             if(is_valid[i])
             {
-                storage_.buffer[rank] = input[i];
+                storage.buffer.emplace(rank, input[i]);
             }
         }
         ::rocprim::syncthreads();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_.buffer[i * BlockSize + flat_id];
+            output[i] = storage_buffer[i * BlockSize + flat_id];
         }
     }
 

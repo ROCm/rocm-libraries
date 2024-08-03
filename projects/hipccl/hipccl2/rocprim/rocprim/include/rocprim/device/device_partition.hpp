@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,7 @@
 
 #include "detail/device_partition.hpp"
 #include "detail/device_scan_common.hpp"
-#include "device_select_config.hpp"
+#include "device_partition_config.hpp"
 #include "device_transform.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -58,20 +58,21 @@ template<select_method SelectMethod,
          class InequalityOp,
          class OffsetLookbackScanState,
          class... UnaryPredicates>
-ROCPRIM_KERNEL __launch_bounds__(Config::block_size) void partition_kernel(
-    KeyIterator             keys_input,
-    ValueIterator           values_input,
-    FlagIterator            flags,
-    OutputKeyIterator       keys_output,
-    OutputValueIterator     values_output,
-    size_t*                 selected_count,
-    size_t*                 prev_selected_count,
-    size_t                  prev_processed,
-    const size_t            total_size,
-    InequalityOp            inequality_op,
-    OffsetLookbackScanState offset_scan_state,
-    const unsigned int      number_of_blocks,
-    UnaryPredicates... predicates)
+ROCPRIM_KERNEL
+    __launch_bounds__(device_params<Config>().kernel_config.block_size) void partition_kernel(
+        KeyIterator             keys_input,
+        ValueIterator           values_input,
+        FlagIterator            flags,
+        OutputKeyIterator       keys_output,
+        OutputValueIterator     values_output,
+        size_t*                 selected_count,
+        size_t*                 prev_selected_count,
+        size_t                  prev_processed,
+        const size_t            total_size,
+        InequalityOp            inequality_op,
+        OffsetLookbackScanState offset_scan_state,
+        const unsigned int      number_of_blocks,
+        UnaryPredicates... predicates)
 {
     partition_kernel_impl<SelectMethod, OnlySelected, Config>(keys_input,
                                                               values_input,
@@ -114,64 +115,74 @@ ROCPRIM_KERNEL __launch_bounds__(Config::block_size) void partition_kernel(
         } \
     }
 
-template<
-    // Method of selection: flag, predicate, unique
-    select_method SelectMethod,
-     // if true, it doesn't copy rejected values to output
-    bool OnlySelected,
-    class Config,
-    class OffsetT,
-    class KeyIterator,
-    class ValueIterator, // can be rocprim::empty_type* for key only
-    class FlagIterator,
-    class OutputKeyIterator,
-    class OutputValueIterator, // can be rocprim::empty_type* for key only
-    class InequalityOp,
-    class SelectedCountOutputIterator,
-    class... UnaryPredicates
->
-inline
-hipError_t partition_impl(void * temporary_storage,
-                          size_t& storage_size,
-                          KeyIterator keys_input,
-                          ValueIterator values_input,
-                          FlagIterator flags,
-                          OutputKeyIterator keys_output,
-                          OutputValueIterator values_output,
-                          SelectedCountOutputIterator selected_count_output,
-                          const size_t size,
-                          InequalityOp inequality_op,
-                          const hipStream_t stream,
-                          bool debug_synchronous,
-                          UnaryPredicates... predicates)
+template<partition_subalgo SubAlgo,
+         class Config,
+         class OffsetT,
+         class KeyIterator,
+         class ValueIterator, // can be rocprim::empty_type* for key only
+         class FlagIterator,
+         class OutputKeyIterator,
+         class OutputValueIterator, // can be rocprim::empty_type* for key only
+         class InequalityOp,
+         class SelectedCountOutputIterator,
+         class... UnaryPredicates>
+inline hipError_t partition_impl(void*                       temporary_storage,
+                                 size_t&                     storage_size,
+                                 KeyIterator                 keys_input,
+                                 ValueIterator               values_input,
+                                 FlagIterator                flags,
+                                 OutputKeyIterator           keys_output,
+                                 OutputValueIterator         values_output,
+                                 SelectedCountOutputIterator selected_count_output,
+                                 const size_t                size,
+                                 InequalityOp                inequality_op,
+                                 const hipStream_t           stream,
+                                 bool                        debug_synchronous,
+                                 UnaryPredicates... predicates)
 {
     using offset_type = OffsetT;
     using key_type = typename std::iterator_traits<KeyIterator>::value_type;
     using value_type = typename std::iterator_traits<ValueIterator>::value_type;
 
+    using config = wrapped_partition_config<Config, SubAlgo, key_type, value_type>;
+
+    constexpr bool write_only_selected = SubAlgo == partition_subalgo::select_flag
+                                         || SubAlgo == partition_subalgo::select_predicate
+                                         || SubAlgo == partition_subalgo::select_unique
+                                         || SubAlgo == partition_subalgo::select_unique_by_key;
+
+    constexpr bool is_unique = SubAlgo == partition_subalgo::select_unique
+                               || SubAlgo == partition_subalgo::select_unique_by_key;
+    constexpr bool is_flag = SubAlgo == partition_subalgo::partition_two_way_flag
+                             || SubAlgo == partition_subalgo::partition_flag
+                             || SubAlgo == partition_subalgo::select_flag;
+    constexpr select_method method
+        = is_unique ? select_method::unique
+                    : (is_flag ? select_method::flag : select_method::predicate);
+
+    detail::target_arch target_arch;
+    hipError_t          result = host_target_arch(stream, target_arch);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+    const partition_config_params params = dispatch_target_arch<config>(target_arch);
+
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
     using offset_scan_state_with_sleep_type = detail::lookback_scan_state<offset_type, true>;
 
-    // Get default config if Config is default_config
-    using config = default_or_custom_config<
-        Config,
-        // Note: the partition algorithm requires some extra shared memory space for an instance of 
-        // offset_scan_state_type. Pass it's size to default_select_config here so that it can select
-        // an appropriate block size (one that ensures that we don't run out of shared memory).
-        default_select_config<ROCPRIM_TARGET_ARCH, key_type, value_type, sizeof(offset_scan_state_type)>
-    >;
-
-    static constexpr unsigned int block_size = config::block_size;
-    static constexpr unsigned int items_per_thread = config::items_per_thread;
-    static constexpr auto items_per_block = block_size * items_per_thread;
+    const unsigned int block_size       = params.kernel_config.block_size;
+    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
+    const auto         items_per_block  = block_size * items_per_thread;
 
     static constexpr bool is_three_way = sizeof...(UnaryPredicates) == 2;
     static constexpr const size_t selected_count_size = is_three_way ? 2 : 1;
 
-    static constexpr size_t size_limit = config::size_limit;
-    static constexpr size_t aligned_size_limit = ::rocprim::max<size_t>(size_limit - (size_limit % items_per_block), items_per_block);
-    const size_t limited_size = std::min<size_t>(size, aligned_size_limit);
-    const bool use_limited_size = limited_size == aligned_size_limit;
+    const size_t size_limit = params.kernel_config.size_limit;
+    const size_t aligned_size_limit
+        = ::rocprim::max<size_t>(size_limit - (size_limit % items_per_block), items_per_block);
+    const size_t limited_size     = std::min<size_t>(size, aligned_size_limit);
+    const bool   use_limited_size = limited_size == aligned_size_limit;
 
     const unsigned int number_of_blocks
         = static_cast<unsigned int>(::rocprim::detail::ceiling_div(limited_size, items_per_block));
@@ -182,14 +193,13 @@ hipError_t partition_impl(void * temporary_storage,
     size_t*                         prev_selected_count;
 
     detail::temp_storage::layout layout{};
-    const hipError_t             layout_result
-        = offset_scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout);
-    if(layout_result != hipSuccess)
+    result = offset_scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout);
+    if(result != hipSuccess)
     {
-        return layout_result;
+        return result;
     }
 
-    const hipError_t partition_result = detail::temp_storage::partition(
+    result = detail::temp_storage::partition(
         temporary_storage,
         storage_size,
         detail::temp_storage::make_linear_partition(
@@ -200,50 +210,65 @@ hipError_t partition_impl(void * temporary_storage,
             // They have the same base type, so there is no padding between the types.
             detail::temp_storage::ptr_aligned_array(&selected_count, selected_count_size),
             detail::temp_storage::ptr_aligned_array(&prev_selected_count, selected_count_size)));
-    if(partition_result != hipSuccess || temporary_storage == nullptr)
+    if(result != hipSuccess || temporary_storage == nullptr)
     {
-        return partition_result;
+        return result;
     }
 
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
 
-    // Create and initialize lookback_scan_state obj
-    offset_scan_state_type            offset_scan_state{};
-    hipError_t                        result = offset_scan_state_type::create(offset_scan_state,
-                                                       offset_scan_state_storage,
-                                                       number_of_blocks,
-                                                       stream);
-    offset_scan_state_with_sleep_type offset_scan_state_with_sleep{};
-    result = offset_scan_state_with_sleep_type::create(offset_scan_state_with_sleep,
-                                                       offset_scan_state_storage,
-                                                       number_of_blocks,
-                                                       stream);
-
+    bool use_sleep;
+    result = is_sleep_scan_state_used(stream, use_sleep);
     if(result != hipSuccess)
     {
         return result;
     }
 
-    hipError_t error;
+    // Create and initialize lookback_scan_state obj
+    offset_scan_state_type offset_scan_state{};
+    result = offset_scan_state_type::create(offset_scan_state,
+                                            offset_scan_state_storage,
+                                            number_of_blocks,
+                                            stream);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+    offset_scan_state_with_sleep_type offset_scan_state_with_sleep{};
+    result = offset_scan_state_with_sleep_type::create(offset_scan_state_with_sleep,
+                                                       offset_scan_state_storage,
+                                                       number_of_blocks,
+                                                       stream);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+
+    // Call the provided function with either offset_scan_state or offset_scan_state_with_sleep based on
+    // the value of use_sleep
+    auto with_scan_state = [use_sleep, offset_scan_state, offset_scan_state_with_sleep](
+                               auto&& func) mutable -> decltype(auto)
+    {
+        if(use_sleep)
+        {
+            return func(offset_scan_state_with_sleep);
+        }
+        else
+        {
+            return func(offset_scan_state);
+        }
+    };
 
     // Memset selected_count and prev_selected_count at once
-    error = hipMemsetAsync(selected_count,
-                           0,
-                           sizeof(*selected_count) * 2 * selected_count_size,
-                           stream);
-    if (error != hipSuccess) return error;
-
-    hipDeviceProp_t prop;
-    int deviceId;
-    static_cast<void>(hipGetDevice(&deviceId));
-    static_cast<void>(hipGetDeviceProperties(&prop, deviceId));
-
-#if HIP_VERSION >= 307
-    int asicRevision = prop.asicRevision;
-#else
-    int asicRevision = 0;
-#endif
+    result = hipMemsetAsync(selected_count,
+                            0,
+                            sizeof(*selected_count) * 2 * selected_count_size,
+                            stream);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
 
     const size_t number_of_launches = ::rocprim::detail::ceiling_div(size, aligned_size_limit);
 
@@ -266,8 +291,6 @@ hipError_t partition_impl(void * temporary_storage,
 
         const unsigned int current_number_of_blocks = ::rocprim::detail::ceiling_div(current_size, items_per_block);
 
-        auto grid_size = ::rocprim::detail::ceiling_div(number_of_blocks, block_size);
-
         if(debug_synchronous)
         {
             std::cout << "current size " << current_size << '\n';
@@ -276,90 +299,56 @@ hipError_t partition_impl(void * temporary_storage,
             start = std::chrono::high_resolution_clock::now();
         }
 
-        if(std::string(prop.gcnArchName).find("908") != std::string::npos && asicRevision < 2)
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(init_lookback_scan_state_kernel<offset_scan_state_with_sleep_type>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                offset_scan_state_with_sleep,
-                current_number_of_blocks);
-        } else
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(init_lookback_scan_state_kernel<offset_scan_state_type>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                offset_scan_state,
-                current_number_of_blocks);
-        }
-
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel", current_number_of_blocks, start)
+        with_scan_state(
+            [&](const auto scan_state)
+            {
+                const unsigned int block_size = ROCPRIM_DEFAULT_MAX_BLOCK_SIZE;
+                const unsigned int grid_size
+                    = ::rocprim::detail::ceiling_div(current_number_of_blocks, block_size);
+                init_lookback_scan_state_kernel<decltype(scan_state)>
+                    <<<dim3(grid_size), dim3(block_size), 0, stream>>>(scan_state,
+                                                                       current_number_of_blocks);
+            });
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel",
+                                                    current_number_of_blocks,
+                                                    start)
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
 
-        grid_size = current_number_of_blocks;
-
-        if(std::string(prop.gcnArchName).find("908") != std::string::npos && asicRevision < 2)
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(partition_kernel<SelectMethod, OnlySelected, config>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                keys_input + prev_processed,
-                values_input + prev_processed,
-                flags + prev_processed,
-                keys_output,
-                values_output,
-                selected_count,
-                prev_selected_count,
-                prev_processed,
-                size,
-                inequality_op,
-                offset_scan_state_with_sleep,
-                current_number_of_blocks,
-                predicates...);
-        } else
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(partition_kernel<SelectMethod, OnlySelected, config>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                keys_input + prev_processed,
-                values_input + prev_processed,
-                flags + prev_processed,
-                keys_output,
-                values_output,
-                selected_count,
-                prev_selected_count,
-                prev_processed,
-                size,
-                inequality_op,
-                offset_scan_state,
-                current_number_of_blocks,
-                predicates...);
-        }
-
+        with_scan_state(
+            [&](const auto scan_state)
+            {
+                partition_kernel<method, write_only_selected, config>
+                    <<<dim3(current_number_of_blocks), dim3(block_size), 0, stream>>>(
+                        keys_input + prev_processed,
+                        values_input + prev_processed,
+                        flags + prev_processed,
+                        keys_output,
+                        values_output,
+                        selected_count,
+                        prev_selected_count,
+                        prev_processed,
+                        size,
+                        inequality_op,
+                        scan_state,
+                        current_number_of_blocks,
+                        predicates...);
+            });
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
 
         std::swap(selected_count, prev_selected_count);
     }
 
-    error = ::rocprim::transform(prev_selected_count,
-                                 selected_count_output,
-                                 (is_three_way ? 2 : 1),
-                                 ::rocprim::identity<>{},
-                                 stream,
-                                 debug_synchronous);
-    if (error != hipSuccess) return error;
+    result = ::rocprim::transform(prev_selected_count,
+                                  selected_count_output,
+                                  (is_three_way ? 2 : 1),
+                                  ::rocprim::identity<>{},
+                                  stream,
+                                  debug_synchronous);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
 
     return hipSuccess;
 }
@@ -385,7 +374,7 @@ hipError_t partition_impl(void * temporary_storage,
 /// * Range specified by \p selected_count_output must have at least 1 element.
 /// * Relative order is preserved.
 ///
-/// \tparam Config - [optional] configuration of the primitive. If has to be an instance of \p select_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be a simple
 /// pointer type.
 /// \tparam SelectedOutputIterator - random-access iterator type of the selected output range. It
@@ -496,20 +485,21 @@ inline hipError_t partition_two_way(void*                       temporary_storag
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::select_method::predicate, false, Config, offset_type>(
-        temporary_storage,
-        storage_size,
-        input,
-        no_input_values,
-        flags,
-        output,
-        no_output_values,
-        selected_count_output,
-        size,
-        inequality_op_type(),
-        stream,
-        debug_synchronous,
-        predicate);
+    return detail::partition_impl<detail::partition_subalgo::partition_two_way_predicate,
+                                  Config,
+                                  offset_type>(temporary_storage,
+                                               storage_size,
+                                               input,
+                                               no_input_values,
+                                               flags,
+                                               output,
+                                               no_output_values,
+                                               selected_count_output,
+                                               size,
+                                               inequality_op_type(),
+                                               stream,
+                                               debug_synchronous,
+                                               predicate);
 }
 
 /// \brief Two-way parallel select primitive for device level using range of flags.
@@ -531,7 +521,7 @@ inline hipError_t partition_two_way(void*                       temporary_storag
 /// * Values of \p flag range should be implicitly convertible to `bool` type.
 /// * The relative order of elements in both output ranges matches the input range.
 ///
-/// \tparam Config - [optional] configuration of the primitive. If has to be an instance of \p select_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam FlagIterator - random-access iterator type of the flag range. It can be
@@ -633,20 +623,21 @@ inline hipError_t partition_two_way(void*                       temporary_storag
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::select_method::flag, false, Config, offset_type>(
-        temporary_storage,
-        storage_size,
-        input,
-        no_input_values,
-        flags,
-        keys_output,
-        no_output_values,
-        selected_count_output,
-        size,
-        inequality_op_type(),
-        stream,
-        debug_synchronous,
-        unary_predicate_type());
+    return detail::partition_impl<detail::partition_subalgo::partition_two_way_flag,
+                                  Config,
+                                  offset_type>(temporary_storage,
+                                               storage_size,
+                                               input,
+                                               no_input_values,
+                                               flags,
+                                               keys_output,
+                                               no_output_values,
+                                               selected_count_output,
+                                               size,
+                                               inequality_op_type(),
+                                               stream,
+                                               debug_synchronous,
+                                               unary_predicate_type());
 }
 
 /// \brief Parallel select primitive for device level using range of flags.
@@ -665,7 +656,7 @@ inline hipError_t partition_two_way(void*                       temporary_storag
 /// * Relative order is preserved for the elements for which the corresponding values from \p flags
 /// are \p true. Other elements are copied in reverse order.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p select_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam FlagIterator - random-access iterator type of the flag range. It can be
@@ -757,7 +748,7 @@ hipError_t partition(void * temporary_storage,
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::select_method::flag, false, Config, offset_type>(
+    return detail::partition_impl<detail::partition_subalgo::partition_flag, Config, offset_type>(
         temporary_storage,
         storage_size,
         input,
@@ -786,7 +777,7 @@ hipError_t partition(void * temporary_storage,
 /// * Relative order is preserved for the elements for which the \p predicate returns \p true. Other
 /// elements are copied in reverse order.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p select_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. It can be
@@ -890,20 +881,21 @@ hipError_t partition(void * temporary_storage,
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::select_method::predicate, false, Config, offset_type>(
-        temporary_storage,
-        storage_size,
-        input,
-        no_input_values,
-        flags,
-        keys_output,
-        no_output_values,
-        selected_count_output,
-        size,
-        inequality_op_type(),
-        stream,
-        debug_synchronous,
-        predicate);
+    return detail::partition_impl<detail::partition_subalgo::partition_predicate,
+                                  Config,
+                                  offset_type>(temporary_storage,
+                                               storage_size,
+                                               input,
+                                               no_input_values,
+                                               flags,
+                                               keys_output,
+                                               no_output_values,
+                                               selected_count_output,
+                                               size,
+                                               inequality_op_type(),
+                                               stream,
+                                               debug_synchronous,
+                                               predicate);
 }
 
 /// \brief Parallel select primitive for device level using two selection predicates.
@@ -930,7 +922,7 @@ hipError_t partition(void * temporary_storage,
 /// minus the number of elements written to \p output_first_part minus the number of elements written
 /// to \p output_second_part.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p select_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam FirstOutputIterator - random-access iterator type of the first output range. It can be
@@ -1071,11 +1063,22 @@ hipError_t partition_three_way(void * temporary_storage,
 
     output_key_iterator_tuple output{ output_first_part, output_second_part, output_unselected };
 
-    return detail::partition_impl<detail::select_method::predicate, false, Config, offset_type>(
-        temporary_storage, storage_size, input, no_input_values, flags, output, no_output_values, selected_count_output,
-        size, inequality_op_type(), stream, debug_synchronous,
-        select_first_part_op, select_second_part_op
-    );
+    return detail::partition_impl<detail::partition_subalgo::partition_three_way,
+                                  Config,
+                                  offset_type>(temporary_storage,
+                                               storage_size,
+                                               input,
+                                               no_input_values,
+                                               flags,
+                                               output,
+                                               no_output_values,
+                                               selected_count_output,
+                                               size,
+                                               inequality_op_type(),
+                                               stream,
+                                               debug_synchronous,
+                                               select_first_part_op,
+                                               select_second_part_op);
 }
 
 /// @}

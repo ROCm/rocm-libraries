@@ -21,6 +21,7 @@
 #ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_REDUCE_BY_KEY_HPP_
 #define ROCPRIM_DEVICE_DETAIL_DEVICE_REDUCE_BY_KEY_HPP_
 
+#include "device_config_helper.hpp"
 #include "lookback_scan_state.hpp"
 #include "ordered_block_id.hpp"
 
@@ -35,6 +36,7 @@
 #include "../../config.hpp"
 
 #include <iterator>
+#include <type_traits>
 #include <utility>
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -193,7 +195,9 @@ struct discontinuity_helper
 template<typename ValueType, unsigned int BlockSize, unsigned int ItemsPerThread>
 struct scatter_helper
 {
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = detail::raw_storage<ValueType[BlockSize * ItemsPerThread]>;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     template<typename ValueIterator, typename Flag, typename ValueFunction, typename IndexFunction>
     ROCPRIM_DEVICE void scatter(ValueIterator   tile_values,
@@ -237,11 +241,12 @@ struct scatter_helper
 
 template<typename KeyType,
          typename AccumulatorType,
-         unsigned int         BlockSize,
-         unsigned int         ItemsPerThread,
-         block_load_method    load_keys_method,
-         block_load_method    load_values_method,
-         block_scan_algorithm scan_algorithm>
+         unsigned int              BlockSize,
+         unsigned int              ItemsPerThread,
+         block_load_method         load_keys_method,
+         block_load_method         load_values_method,
+         block_scan_algorithm      scan_algorithm,
+         lookback_scan_determinism Determinism>
 class tile_helper
 {
 private:
@@ -390,11 +395,11 @@ public:
         }
         else
         {
-            auto lookback_op = detail::lookback_scan_prefix_op<wrapped_type,
-                                                               decltype(wrapped_op),
-                                                               decltype(scan_state)>{tile_id,
-                                                                                     wrapped_op,
-                                                                                     scan_state};
+            auto lookback_op
+                = detail::lookback_scan_prefix_op<wrapped_type,
+                                                  decltype(wrapped_op),
+                                                  decltype(scan_state),
+                                                  Determinism>{tile_id, wrapped_op, scan_state};
 
             auto offset_lookback_op = prefix_op_factory::create(lookback_op, storage.scan.prefix);
 
@@ -470,7 +475,8 @@ public:
     }
 };
 
-template<typename Config,
+template<lookback_scan_determinism Determinism,
+         typename Config,
          typename AccumulatorType,
          typename KeyIterator,
          typename ValueIterator,
@@ -480,7 +486,38 @@ template<typename Config,
          typename CompareFunction,
          typename BinaryOp,
          typename LookbackScanState>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto kernel_impl(KeyIterator,
+                                                     ValueIterator,
+                                                     const UniqueIterator,
+                                                     const ReductionIterator,
+                                                     const UniqueCountIterator,
+                                                     const BinaryOp,
+                                                     const CompareFunction,
+                                                     const LookbackScanState,
+                                                     ordered_block_id<unsigned int>,
+                                                     const std::size_t,
+                                                     const std::size_t,
+                                                     const std::size_t,
+                                                     const std::size_t* const,
+                                                     const AccumulatorType* const,
+                                                     const std::size_t)
+    -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
+{
+    // No need to build the kernel with sleep on a device that does not require it
+}
+
+template<lookback_scan_determinism Determinism,
+         typename Config,
+         typename AccumulatorType,
+         typename KeyIterator,
+         typename ValueIterator,
+         typename UniqueIterator,
+         typename ReductionIterator,
+         typename UniqueCountIterator,
+         typename CompareFunction,
+         typename BinaryOp,
+         typename LookbackScanState>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     kernel_impl(KeyIterator                    keys_input,
                 ValueIterator                  values_input,
                 const UniqueIterator           unique_keys,
@@ -496,13 +533,16 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                 const std::size_t* const       global_head_count,
                 const AccumulatorType* const   previous_accumulated,
                 const std::size_t              number_of_tiles_launch)
+        -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
-    static constexpr unsigned int         block_size         = Config::block_size;
-    static constexpr unsigned int         items_per_thread   = Config::items_per_thread;
-    static constexpr unsigned int         tiles_per_block    = Config::tiles_per_block;
-    static constexpr block_load_method    load_keys_method   = Config::load_keys_method;
-    static constexpr block_load_method    load_values_method = Config::load_values_method;
-    static constexpr block_scan_algorithm scan_algorithm     = Config::scan_algorithm;
+    static constexpr reduce_by_key_config_params params = device_params<Config>();
+
+    static constexpr unsigned int         block_size       = params.kernel_config.block_size;
+    static constexpr unsigned int         items_per_thread = params.kernel_config.items_per_thread;
+    static constexpr unsigned int         tiles_per_block  = params.tiles_per_block;
+    static constexpr block_load_method    load_keys_method = params.load_keys_method;
+    static constexpr block_load_method    load_values_method = params.load_values_method;
+    static constexpr block_scan_algorithm scan_algorithm     = params.scan_algorithm;
     static constexpr unsigned int         items_per_tile     = block_size * items_per_thread;
 
     using key_type = reduce_by_key::value_type_t<KeyIterator>;
@@ -513,7 +553,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                        items_per_thread,
                                        load_keys_method,
                                        load_values_method,
-                                       scan_algorithm>;
+                                       scan_algorithm,
+                                       Determinism>;
 
     ROCPRIM_SHARED_MEMORY union
     {

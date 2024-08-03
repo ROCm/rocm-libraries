@@ -165,7 +165,7 @@ hipError_t segmented_scan_impl(void * temporary_storage,
 /// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
 /// <tt>offsets + 1</tt> for \p end_offsets.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p scan_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -279,7 +279,7 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
 /// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
 /// <tt>offsets + 1</tt> for \p end_offsets.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p scan_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -396,7 +396,7 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
 /// * Ranges specified by \p input, \p output, and \p flags must have at least \p size elements.
 /// * \p value_type of \p HeadFlagIterator iterator should be convertible to \p bool type.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p scan_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -508,7 +508,7 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
 /// * Ranges specified by \p input, \p output, and \p flags must have at least \p size elements.
 /// * \p value_type of \p HeadFlagIterator iterator should be convertible to \p bool type.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p scan_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the

@@ -24,9 +24,15 @@
 
 // required rocprim headers
 #include <rocprim/device/device_segmented_reduce.hpp>
+#include <rocprim/iterator/counting_iterator.hpp>
 
 // required test headers
 #include "test_utils_types.hpp"
+
+#include <algorithm>
+#include <iostream>
+#include <random>
+#include <vector>
 
 using bra = ::rocprim::block_reduce_algorithm;
 
@@ -153,7 +159,8 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     const bool       debug_synchronous = false;
 
     std::random_device                    rd;
-    std::default_random_engine            gen(rd());
+    const size_t                          seed = rd();
+    std::default_random_engine            gen(seed);
     std::uniform_int_distribution<size_t> segment_length_dis(
         TestFixture::params::min_segment_length,
         TestFixture::params::max_segment_length);
@@ -303,9 +310,170 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
                 test_utils::cleanupGraphHelper(graph, graph_instance);
                 HIP_CHECK(hipStreamDestroy(stream));
             }
-            
+            SCOPED_TRACE(testing::Message() << "with seed = " << seed);
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(aggregates_output, aggregates_expected, precision));
         }
     }
+}
+
+template<bool use_graphs = false>
+void testLargeIndices()
+{
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T              = std::size_t;
+    using Iterator       = rocprim::counting_iterator<T>;
+    using reduce_op_type = rocprim::plus<T>;
+
+    const reduce_op_type reduce_op{};
+    const T              init{0};
+    const bool           debug_synchronous = false;
+
+    hipStream_t stream = 0; // default
+    if(use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
+
+    for(auto size : test_utils::get_large_sizes(42))
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data and calculate expected results
+        const T large_segment_size = size_t{1} << 31;
+        const T min_segment_length
+            = size < large_segment_size
+                  ? (size_t{1} << 30) - 1 /*smallest size in get_large_sizes()*/
+                  : large_segment_size;
+        const T max_segment_length = size;
+
+        std::random_device                    rd;
+        const size_t                          seed = rd();
+        std::default_random_engine            gen(seed);
+        std::uniform_int_distribution<size_t> segment_length_dis(min_segment_length,
+                                                                 max_segment_length);
+
+        const auto gauss_sum
+            = [&](T n) { return (n % 2 == 0) ? (n / 2) * (n - 1) : n * ((n - 1) / 2); };
+
+        std::vector<T> aggregates_expected;
+        std::vector<T> offsets;
+
+        int    num_segments = 0;
+        size_t offset       = 0;
+        while(offset < size)
+        {
+            const size_t segment_length = segment_length_dis(gen);
+            offsets.push_back(offset);
+
+            const T end       = std::min(size, offset + segment_length);
+            T       aggregate = reduce_op(init, gauss_sum(end) - gauss_sum(offset));
+            aggregates_expected.push_back(aggregate);
+
+            num_segments++;
+            offset += segment_length;
+        }
+        offsets.push_back(size);
+
+        // Device inputs
+        const Iterator values_input{0};
+        T*             d_offsets = nullptr;
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, sizeof(T) * (num_segments + 1)));
+        HIP_CHECK(hipMemcpy(d_offsets,
+                            offsets.data(),
+                            sizeof(T) * (num_segments + 1),
+                            hipMemcpyHostToDevice));
+
+        // Device outputs
+        T* d_aggregates_output = nullptr;
+        HIP_CHECK(
+            test_common_utils::hipMallocHelper(&d_aggregates_output, sizeof(T) * num_segments));
+
+        // temp storage
+        size_t temp_storage_size_bytes = 0;
+        void*  d_temp_storage          = nullptr;
+        // Get size of d_temp_storage
+        HIP_CHECK(rocprim::segmented_reduce(nullptr,
+                                            temp_storage_size_bytes,
+                                            values_input,
+                                            d_aggregates_output,
+                                            num_segments,
+                                            d_offsets,
+                                            d_offsets + 1,
+                                            reduce_op,
+                                            init,
+                                            stream,
+                                            debug_synchronous));
+
+        // Allocate temporary storage
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        hipGraph_t graph;
+        if(use_graphs)
+        {
+            graph = test_utils::createGraphHelper(stream);
+        }
+
+        // Run
+        HIP_CHECK(rocprim::segmented_reduce(d_temp_storage,
+                                            temp_storage_size_bytes,
+                                            values_input,
+                                            d_aggregates_output,
+                                            num_segments,
+                                            d_offsets,
+                                            d_offsets + 1,
+                                            reduce_op,
+                                            init,
+                                            stream,
+                                            debug_synchronous));
+
+        hipGraphExec_t graph_instance;
+        if(use_graphs)
+        {
+            graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+        }
+
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Copy output to host
+        std::vector<T> aggregates_output(num_segments);
+        HIP_CHECK(hipMemcpy(aggregates_output.data(),
+                            d_aggregates_output,
+                            sizeof(T) * num_segments,
+                            hipMemcpyDeviceToHost));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(aggregates_output, aggregates_expected));
+
+        hipFree(d_offsets);
+        hipFree(d_temp_storage);
+        hipFree(d_aggregates_output);
+
+        if(use_graphs)
+        {
+            test_utils::cleanupGraphHelper(graph, graph_instance);
+        }
+    }
+
+    if(use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
+}
+
+TEST(RocprimDeviceSegmentedReduce, LargeIndices)
+{
+    testLargeIndices<>();
+}
+
+TEST(RocprimDeviceSegmentedReduce, LargeIndicesWithGraphs)
+{
+    testLargeIndices<true>();
 }

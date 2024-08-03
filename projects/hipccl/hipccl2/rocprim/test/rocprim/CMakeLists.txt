@@ -217,6 +217,16 @@ ${TEST_TYPE_SLICE_COUNT} test type slice(s) for test target ${TEST_TARGET}")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${SOURCES})
 endfunction()
 
+function(add_rocprim_cpp17_test TEST_NAME TEST_SOURCES)
+  add_rocprim_test(${TEST_NAME} ${TEST_SOURCES})
+  get_rocprim_test_target(${TEST_SOURCES} TEST_TARGET)
+  # Request C++ standard 17, but decay to a previous version if not available:
+  set_target_properties(${TEST_TARGET}
+    PROPERTIES
+    CXX_STANDARD 17)
+endfunction()
+
+
 # ****************************************************************************
 # Tests
 # ****************************************************************************
@@ -226,8 +236,11 @@ add_rocprim_test("rocprim.basic_test" "test_basic.cpp;detail/get_rocprim_version
 
 add_rocprim_test("rocprim.arg_index_iterator" test_arg_index_iterator.cpp)
 add_rocprim_test("rocprim.temporary_storage_partitioning" test_temporary_storage_partitioning.cpp)
-add_rocprim_test_parallel("rocprim.block_adjacent_difference" test_block_adjacent_difference.cpp.in)
-add_rocprim_test_parallel("rocprim.block_discontinuity" test_block_discontinuity.cpp.in)
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+  # clang++ from ROCm 6.1+ takes too long to build these tests in Debug mode (which passes -O0)
+  add_rocprim_test_parallel("rocprim.block_adjacent_difference" test_block_adjacent_difference.cpp.in)
+  add_rocprim_test_parallel("rocprim.block_discontinuity" test_block_discontinuity.cpp.in)
+endif()
 add_rocprim_test("rocprim.block_exchange" test_block_exchange.cpp)
 add_rocprim_test("rocprim.block_histogram" test_block_histogram.cpp)
 add_rocprim_test("rocprim.block_load_store" test_block_load_store.cpp)
@@ -249,6 +262,8 @@ add_rocprim_test("rocprim.device_adjacent_difference" test_device_adjacent_diffe
 add_rocprim_test("rocprim.device_histogram" test_device_histogram.cpp)
 add_rocprim_test("rocprim.device_merge" test_device_merge.cpp)
 add_rocprim_test("rocprim.device_merge_sort" test_device_merge_sort.cpp)
+add_rocprim_cpp17_test("rocprim.nth_element" test_device_nth_element.cpp)
+add_rocprim_cpp17_test("rocprim.device_partial_sort" test_device_partial_sort.cpp)
 add_rocprim_test("rocprim.device_partition" test_device_partition.cpp)
 add_rocprim_test_parallel("rocprim.device_radix_sort" test_device_radix_sort.cpp.in)
 add_rocprim_test("rocprim.device_reduce_by_key" test_device_reduce_by_key.cpp)
@@ -261,6 +276,7 @@ add_rocprim_test("rocprim.device_segmented_scan" test_device_segmented_scan.cpp)
 add_rocprim_test("rocprim.device_select" test_device_select.cpp)
 add_rocprim_test("rocprim.device_transform" test_device_transform.cpp)
 add_rocprim_test("rocprim.discard_iterator" test_discard_iterator.cpp)
+add_rocprim_test("rocprim.lookback_reproducibility" test_lookback_reproducibility.cpp)
 add_rocprim_test("rocprim.radix_key_codec" test_radix_key_codec.cpp)
 add_rocprim_test("rocprim.predicate_iterator" test_predicate_iterator.cpp)
 add_rocprim_test("rocprim.reverse_iterator" test_reverse_iterator.cpp)
@@ -280,3 +296,4 @@ add_rocprim_test("rocprim.warp_scan" test_warp_scan.cpp)
 add_rocprim_test("rocprim.warp_sort" test_warp_sort.cpp)
 add_rocprim_test("rocprim.warp_store" test_warp_store.cpp)
 add_rocprim_test("rocprim.zip_iterator" test_zip_iterator.cpp)
+

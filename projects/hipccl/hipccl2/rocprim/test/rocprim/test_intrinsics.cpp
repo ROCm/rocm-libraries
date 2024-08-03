@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -109,7 +109,10 @@ struct test_type_helper
     /// Initialize some random data for this type, of \p n elements and with random seed <tt>seed</tt>.
     static std::vector<T> get_random_data(size_t n, seed_type seed)
     {
-        return test_utils::get_random_data<T>(n, static_cast<T>(-100), static_cast<T>(100), seed);
+        return test_utils::get_random_data<T>(n,
+                                              test_utils::saturate_cast<T>(-100),
+                                              test_utils::saturate_cast<T>(100),
+                                              seed);
     }
 };
 
@@ -561,7 +564,7 @@ __global__ void masked_bit_count_kernel(unsigned int*             out,
                                         const max_lane_mask_type  active_lanes)
 {
     const unsigned int out_index = blockIdx.x * blockDim.x + threadIdx.x;
-    const unsigned int in_index  = out_index / rocprim::warp_size();
+    const unsigned int in_index  = out_index / rocprim::device_warp_size();
 
     const auto   value  = static_cast<rocprim::lane_mask_type>(in[in_index]);
     unsigned int result = test_type_helper<unsigned int>::uninitialized();
@@ -682,7 +685,8 @@ __global__ void warp_any_all_kernel(unsigned int*             out,
                                     max_lane_mask_type        active_lanes)
 {
     const unsigned int index     = blockIdx.x * blockDim.x + threadIdx.x;
-    const unsigned int predicate = (in[index / rocprim::warp_size()] >> rocprim::lane_id()) & 1;
+    const unsigned int predicate
+        = (in[index / rocprim::device_warp_size()] >> rocprim::lane_id()) & 1;
 
     unsigned int result = test_type_helper<unsigned int>::uninitialized();
     if(is_lane_active(active_lanes, rocprim::lane_id()))

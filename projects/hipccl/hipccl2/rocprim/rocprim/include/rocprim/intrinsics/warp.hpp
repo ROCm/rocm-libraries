@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,28 +50,28 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int masked_bit_count(lane_mask_type x, unsigned int add = 0)
 {
     int c;
-    #ifndef __HIP_CPU_RT__
-        #if __AMDGCN_WAVEFRONT_SIZE == 32
-            #ifdef __HIP__
-            c = ::__builtin_amdgcn_mbcnt_lo(x, add);
-            #else
-            c = ::__mbcnt_lo(x, add);
-            #endif
+#ifndef __HIP_CPU_RT__
+    #if ROCPRIM_WAVEFRONT_SIZE == 32
+        #ifdef __HIP__
+    c = ::__builtin_amdgcn_mbcnt_lo(x, add);
         #else
-            #ifdef __HIP__
-            c = ::__builtin_amdgcn_mbcnt_lo(static_cast<int>(x), add);
-            c = ::__builtin_amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
-            #else
-            c = ::__mbcnt_lo(static_cast<int>(x), add);
-            c = ::__mbcnt_hi(static_cast<int>(x >> 32), c);
-            #endif
+    c = ::__mbcnt_lo(x, add);
         #endif
     #else
-        using namespace hip::detail;
-        const auto tidx{id(Fiber::this_fiber()) % warpSize};
-        std::bitset<warpSize> bits{x >> (warpSize - tidx)};
-        c = static_cast<unsigned int>(bits.count()) + add;
+        #ifdef __HIP__
+    c = ::__builtin_amdgcn_mbcnt_lo(static_cast<int>(x), add);
+    c = ::__builtin_amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+        #else
+    c = ::__mbcnt_lo(static_cast<int>(x), add);
+    c = ::__mbcnt_hi(static_cast<int>(x >> 32), c);
+        #endif
     #endif
+#else
+    using namespace hip::detail;
+    const auto                      tidx{id(Fiber::this_fiber()) % device_warp_size()};
+    std::bitset<device_warp_size()> bits{x >> (device_warp_size() - tidx)};
+    c = static_cast<unsigned int>(bits.count()) + add;
+#endif
     return c;
 }
 
@@ -85,8 +85,8 @@ int warp_any(int predicate)
     return ::__any(predicate);
 #else
     using namespace hip::detail;
-    const auto tidx{id(Fiber::this_fiber()) % warpSize};
-    auto& lds{Tile::scratchpad<std::bitset<warpSize>, 1>()[0]};
+    const auto tidx{id(Fiber::this_fiber()) % device_warp_size()};
+    auto&      lds{Tile::scratchpad<std::bitset<device_warp_size()>, 1>()[0]};
 
     lds[tidx] = static_cast<bool>(predicate);
 
@@ -103,8 +103,8 @@ int warp_all(int predicate)
     return ::__all(predicate);
 #else
     using namespace hip::detail;
-    const auto tidx{id(Fiber::this_fiber()) % warpSize};
-    auto& lds{Tile::scratchpad<std::bitset<warpSize>, 1>()[0]};
+    const auto tidx{id(Fiber::this_fiber()) % device_warp_size()};
+    auto&      lds{Tile::scratchpad<std::bitset<device_warp_size()>, 1>()[0]};
 
     lds[tidx] = static_cast<bool>(predicate);
 
@@ -116,14 +116,16 @@ int warp_all(int predicate)
 
 } // end detail namespace
 
+/// \overload
 /// \brief Group active lanes having the same bits of \p label
 ///
-/// Threads that have the same least significant \p LabelBits bits are grouped into the same group.
+/// Threads that have the same least significant \p label_bits bits are grouped into the same group.
 /// Every lane in the warp receives a mask of all active lanes participating in its group.
 ///
-/// \tparam LabelBits number of bits to compare between labels
+/// This overload does not accept a template parameter for label bits. It is passed as a function parameter instead.
 ///
 /// \param [in] label the label for the calling lane
+/// \param [in] label_bits number of bits to compare between labels
 /// \param [in] valid lanes passing <tt>false</tt> will be ignored for comparisons,
 /// such lanes will not be part of any group, and will always return an empty mask (0)
 ///
@@ -131,15 +133,15 @@ int warp_all(int predicate)
 /// lane <tt>i</tt>'s result includes bit <tt>j</tt> in the lane mask if lane <tt>j</tt> is part
 /// of the same group as lane <tt>i</tt>, i.e. lane <tt>i</tt> and <tt>j</tt> called with the
 /// same value for label.
-template<unsigned int LabelBits>
-ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label, bool valid = true)
+ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label,
+                                                       unsigned int label_bits,
+                                                       bool         valid = true)
 {
     // Obtain a mask with the threads which are currently active.
     lane_mask_type peer_mask = ballot(valid);
 
     // Compute the final value iteratively by testing each bit separately.
-    ROCPRIM_UNROLL
-    for(unsigned int bit = 0; bit < LabelBits; ++bit)
+    for(unsigned int bit = 0; bit < label_bits; ++bit)
     {
         static constexpr int lane_width = std::numeric_limits<lane_mask_type>::digits;
         using lane_mask_type_s          = std::make_signed_t<lane_mask_type>;
@@ -163,6 +165,29 @@ ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label, bool 
     }
 
     return -lane_mask_type{valid} & peer_mask;
+}
+
+/// \brief Group active lanes having the same bits of \p label
+///
+/// Threads that have the same least significant \p LabelBits bits are grouped into the same group.
+/// Every lane in the warp receives a mask of all active lanes participating in its group.
+///
+/// \tparam LabelBits number of bits to compare between labels
+///
+/// \param [in] label the label for the calling lane
+/// \param [in] valid lanes passing <tt>false</tt> will be ignored for comparisons,
+/// such lanes will not be part of any group, and will always return an empty mask (0)
+///
+/// \return A bit mask of lanes sharing the same bits for \p label. The bit at index
+/// lane <tt>i</tt>'s result includes bit <tt>j</tt> in the lane mask if lane <tt>j</tt> is part
+/// of the same group as lane <tt>i</tt>, i.e. lane <tt>i</tt> and <tt>j</tt> called with the
+/// same value for label.
+
+template<unsigned int LabelBits>
+ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label, bool valid = true)
+{
+    // Dispatch to runtime version
+    return match_any(label, LabelBits, valid);
 }
 
 /// \brief Elect a single lane for each group in \p mask

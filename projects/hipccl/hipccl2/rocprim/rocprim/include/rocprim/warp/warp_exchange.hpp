@@ -89,10 +89,9 @@ class warp_exchange
         WarpSize <= ::rocprim::device_warp_size(),
         "Logical warp size cannot be larger than physical warp size.");
 
-    // Struct used for creating a raw_storage object for this primitive's temporary storage.
     struct storage_type_
     {
-        T buffer[WarpSize * ItemsPerThread];
+        uninitialized_array<T, WarpSize * ItemsPerThread> buffer;
     };
 
     template<int NumEntries, int IdX, class U>
@@ -238,20 +237,15 @@ class warp_exchange
     }
 
 public:
-
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by the related parallel primitive.
     ///
-    /// Depending on the implemention the operations exposed by parallel primitive may
+    /// Depending on the implementation the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
     /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
-    #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
-    using storage_type = detail::raw_storage<storage_type_>;
-    #else
     using storage_type = storage_type_; // only for Doxygen
-    #endif
 
     /// \brief Transposes a blocked arrangement of items to a striped arrangement
     /// across the warp, using temporary storage.
@@ -294,19 +288,18 @@ public:
                             storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
-        storage_type_& storage_ = storage.get();
-
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage_.buffer[flat_id * ItemsPerThread + i] = input[i];
+            storage.buffer.emplace(flat_id * ItemsPerThread + i, input[i]);
         }
         ::rocprim::wave_barrier();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_.buffer[i * WarpSize + flat_id];
+            output[i] = storage_buffer[i * WarpSize + flat_id];
         }
     }
 
@@ -398,19 +391,19 @@ public:
                             storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
-        storage_type_& storage_ = storage.get();
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage_.buffer[i * WarpSize + flat_id] = input[i];
+            storage.buffer.emplace(i * WarpSize + flat_id, input[i]);
         }
         ::rocprim::wave_barrier();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage_.buffer[flat_id * ItemsPerThread + i];
+            output[i] = storage_buffer[flat_id * ItemsPerThread + i];
         }
     }
 
@@ -510,20 +503,20 @@ public:
             storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
-        storage_type_& storage_ = storage.get();
 
         ROCPRIM_UNROLL
         for (unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage_.buffer[ranks[i]] = input[i];
+            storage.buffer.emplace(ranks[i], input[i]);
         }
         ::rocprim::wave_barrier();
+        const auto& storage_buffer = storage.buffer.get_unsafe_array();
 
         ROCPRIM_UNROLL
         for (unsigned int i = 0; i < ItemsPerThread; i++)
         {
             unsigned int item_offset = (i * WarpSize) + flat_id;
-            output[i] = storage_.buffer[item_offset];
+            output[i]                = storage_buffer[item_offset];
         }
     }
 };

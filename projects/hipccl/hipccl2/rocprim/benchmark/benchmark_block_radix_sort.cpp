@@ -127,10 +127,11 @@ template<class T,
          unsigned int RadixBitsPerPass,
          unsigned int ItemsPerThread,
          unsigned int Trials = 10>
-void run_benchmark(benchmark::State& state,
-                   benchmark_kinds   benchmark_kind,
-                   hipStream_t       stream,
-                   size_t            N)
+void run_benchmark(benchmark::State&   state,
+                   benchmark_kinds     benchmark_kind,
+                   size_t              N,
+                   const managed_seed& seed,
+                   hipStream_t         stream)
 {
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
@@ -138,15 +139,14 @@ void run_benchmark(benchmark::State& state,
     std::vector<T> input;
     if(std::is_floating_point<T>::value)
     {
-        input = get_random_data<T>(size, (T)-1000, (T)+1000);
+        input = get_random_data<T>(size, static_cast<T>(-1000), static_cast<T>(1000), seed.get_0());
     }
     else
     {
-        input = get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
+        input = get_random_data<T>(size,
+                                   std::numeric_limits<T>::min(),
+                                   std::numeric_limits<T>::max(),
+                                   seed.get_0());
     }
     T * d_input;
     T * d_output;
@@ -224,19 +224,21 @@ void run_benchmark(benchmark::State& state,
             .c_str(),                                                                          \
         run_benchmark<T, BS, RB, IPT>,                                                         \
         benchmark_kind,                                                                        \
-        stream,                                                                                \
-        size)
+        size,                                                                                  \
+        seed,                                                                                  \
+        stream)
 
 #define BENCHMARK_TYPE(type, block, radix_bits)                                                 \
     CREATE_BENCHMARK(type, block, radix_bits, 1), CREATE_BENCHMARK(type, block, radix_bits, 2), \
         CREATE_BENCHMARK(type, block, radix_bits, 3),                                           \
         CREATE_BENCHMARK(type, block, radix_bits, 4), CREATE_BENCHMARK(type, block, radix_bits, 8)
 
-void add_benchmarks(benchmark_kinds benchmark_kind,
-                    const std::string& name,
+void add_benchmarks(benchmark_kinds                               benchmark_kind,
+                    const std::string&                            name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hipStream_t stream,
-                    size_t size)
+                    size_t                                        size,
+                    const managed_seed&                           seed,
+                    hipStream_t                                   stream)
 {
     using custom_int_type = custom_type<int, int>;
 
@@ -314,6 +316,7 @@ int main(int argc, char *argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -321,6 +324,8 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -328,11 +333,12 @@ int main(int argc, char *argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmark_kinds::sort_keys, "keys", benchmarks, stream, size);
-    add_benchmarks(benchmark_kinds::sort_pairs, "pairs", benchmarks, stream, size);
+    add_benchmarks(benchmark_kinds::sort_keys, "keys", benchmarks, size, seed, stream);
+    add_benchmarks(benchmark_kinds::sort_pairs, "pairs", benchmarks, size, seed, stream);
 
     // Use manual timing
     for(auto& b : benchmarks)

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -237,6 +237,10 @@ void test_block_reduce_input_arrays()
     const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
 
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
@@ -322,7 +326,10 @@ struct static_for_input_array
 {
     static void run()
     {
-        test_block_reduce_input_arrays<T, BlockSize, items[First], Algorithm>();
+        {
+            SCOPED_TRACE(testing::Message() << "TestID = " << First);
+            test_block_reduce_input_arrays<T, BlockSize, items[First], Algorithm>();
+        }
         static_for_input_array<First + 1, Last, T, BlockSize, Algorithm>::run();
     }
 };

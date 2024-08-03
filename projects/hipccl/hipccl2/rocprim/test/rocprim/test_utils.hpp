@@ -41,21 +41,6 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_hipgraphs.hpp"
 
-// Helper macros to disable warnings in clang
-#ifdef __clang__
-#define ROCPRIM_PRAGMA_TO_STR(x) _Pragma(#x)
-#define ROCPRIM_CLANG_SUPPRESS_WARNING_PUSH _Pragma("clang diagnostic push")
-#define ROCPRIM_CLANG_SUPPRESS_WARNING(w) ROCPRIM_PRAGMA_TO_STR(clang diagnostic ignored w)
-#define ROCPRIM_CLANG_SUPPRESS_WARNING_POP _Pragma("clang diagnostic pop")
-#define ROCPRIM_CLANG_SUPPRESS_WARNING_WITH_PUSH(w) \
-    ROCPRIM_CLANG_SUPPRESS_WARNING_PUSH ROCPRIM_CLANG_SUPPRESS_WARNING(w)
-#else // __clang__
-#define ROCPRIM_CLANG_SUPPRESS_WARNING_PUSH
-#define ROCPRIM_CLANG_SUPPRESS_WARNING(w)
-#define ROCPRIM_CLANG_SUPPRESS_WARNING_POP
-#define ROCPRIM_CLANG_SUPPRESS_WARNING_WITH_PUSH(w)
-#endif // __clang__
-
 namespace test_utils
 {
 

@@ -51,11 +51,12 @@ const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
 
 template<class T, class AlgorithmSelectorTag>
-void run_benchmark(benchmark::State& state,
-                   hipStream_t       stream,
-                   size_t            haystack_size,
-                   size_t            needles_size,
-                   bool              sorted_needles)
+void run_benchmark(benchmark::State&   state,
+                   size_t              haystack_size,
+                   const managed_seed& seed,
+                   hipStream_t         stream,
+                   size_t              needles_size,
+                   bool                sorted_needles)
 {
     using haystack_type = T;
     using needle_type = T;
@@ -67,9 +68,12 @@ void run_benchmark(benchmark::State& state,
     std::vector<haystack_type> haystack(haystack_size);
     std::iota(haystack.begin(), haystack.end(), 0);
 
-    std::vector<needle_type> needles = get_random_data<needle_type>(
-        needles_size, needle_type(0), needle_type(haystack_size)
-    );
+    const auto random_range = limit_random_range<needle_type>(0, haystack_size);
+
+    std::vector<needle_type> needles = get_random_data<needle_type>(needles_size,
+                                                                    random_range.first,
+                                                                    random_range.second,
+                                                                    seed.get_0());
     if(sorted_needles)
     {
         std::sort(needles.begin(), needles.end(), compare_op);
@@ -181,7 +185,7 @@ void run_benchmark(benchmark::State& state,
             + std::string(SORTED ? "sorted" : "random") + "_needles,cfg:default_config}")        \
             .c_str(),                                                                            \
         [=](benchmark::State& state)                                                             \
-        { run_benchmark<T, ALGO_TAG>(state, stream, size, size * K / 100, SORTED); })
+        { run_benchmark<T, ALGO_TAG>(state, size, seed, stream, size * K / 100, SORTED); })
 
 #define BENCHMARK_ALGORITHMS(T, K, SORTED)                        \
     CREATE_BENCHMARK(T, K, SORTED, binary_search_subalgorithm),   \
@@ -200,6 +204,7 @@ int main(int argc, char *argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
 #ifdef BENCHMARK_CONFIG_TUNING
     // optionally run an evenly split subset of benchmarks, when making multiple program invocations
     parser.set_optional<int>("parallel_instance",
@@ -218,6 +223,8 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -225,6 +232,7 @@ int main(int argc, char *argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
@@ -238,6 +246,7 @@ int main(int argc, char *argv[])
                                                         parallel_instance,
                                                         parallel_instances,
                                                         size,
+                                                        seed,
                                                         stream);
 #else // BENCHMARK_CONFIG_TUNING
     benchmarks = {BENCHMARK_TYPE(float),

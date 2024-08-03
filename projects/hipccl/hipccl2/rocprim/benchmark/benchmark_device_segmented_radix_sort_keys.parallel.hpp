@@ -86,11 +86,12 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
     static constexpr unsigned int batch_size  = 10;
     static constexpr unsigned int warmup_size = 5;
 
-    void run_benchmark(benchmark::State& state,
-                       size_t            num_segments,
-                       size_t            mean_segment_length,
-                       size_t            target_size,
-                       hipStream_t       stream) const
+    void run_benchmark(benchmark::State&   state,
+                       size_t              num_segments,
+                       size_t              mean_segment_length,
+                       size_t              target_size,
+                       const managed_seed& seed,
+                       hipStream_t         stream) const
     {
         using offset_type = int;
         using key_type    = Key;
@@ -98,8 +99,8 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
         std::vector<offset_type> offsets;
         offsets.push_back(0);
 
-        static constexpr int       seed = 716;
-        std::default_random_engine gen(seed);
+        static constexpr int iseed = 716;
+        engine_type          gen(iseed);
 
         std::normal_distribution<double> segment_length_dis(
             static_cast<double>(mean_segment_length),
@@ -126,13 +127,15 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
         {
             keys_input = get_random_data<key_type>(size,
                                                    static_cast<key_type>(-1000),
-                                                   static_cast<key_type>(1000));
+                                                   static_cast<key_type>(1000),
+                                                   seed.get_0());
         }
         else
         {
             keys_input = get_random_data<key_type>(size,
                                                    std::numeric_limits<key_type>::min(),
-                                                   std::numeric_limits<key_type>::max());
+                                                   std::numeric_limits<key_type>::max(),
+                                                   seed.get_0());
         }
         size_t batch_size = 1;
         if(size < target_size)
@@ -240,7 +243,10 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
         HIP_CHECK(hipFree(d_keys_output));
     }
 
-    void run(benchmark::State& state, size_t size, hipStream_t stream) const override
+    void run(benchmark::State&   state,
+             size_t              size,
+             const managed_seed& seed,
+             hipStream_t         stream) const override
     {
         constexpr std::array<size_t, 8>
             segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
@@ -256,7 +262,7 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
                     continue;
                 }
 
-                run_benchmark(state, segment_count, segment_length, size, stream);
+                run_benchmark(state, segment_count, segment_length, size, seed, stream);
             }
         }
     }

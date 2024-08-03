@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -114,8 +114,7 @@ struct is_default_or_has_tag<default_config, Tag>
 /// in the semi-open interval `[lower_output[i], upper_output[i])` of `haystack,` in case of
 /// being present at all.
 ///
-///  \tparam Config - [optional] Configuration of the primitive. It has to be `lower_bound_config` or
-/// a class derived from it. Default is `default_config.`
+///  \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `lower_bound_config`.
 ///  \tparam HaystackIterator - [inferred] Random-access iterator type of the search range. Must meet
 /// the requirements of a C++ InputIterator concept. It can be a simple pointer type.
 ///  \tparam NeedlesIterator - [inferred] Random-access iterator type of the input range. Must meet
@@ -252,8 +251,7 @@ hipError_t lower_bound(void * temporary_storage,
 /// in the semi-open interval `[lower_output[i], upper_output[i])` of `haystack,` in case of
 /// being present at all.
 ///
-///  \tparam Config - [optional] Configuration of the primitive. It can be `upper_bound_config` or
-/// a class derived from it. Default is `default_config.`
+///  \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `upper_bound_config`.
 ///  \tparam HaystackIterator - [inferred] Random-access iterator type of the search range. Must meet
 /// the requirements of a C++ InputIterator concept. It can be a simple pointer type.
 ///  \tparam NeedlesIterator - [inferred] Random-access iterator type of the input range. Must meet
@@ -384,8 +382,7 @@ hipError_t upper_bound(void * temporary_storage,
 /// * When a null pointer is passed as `temporary_storage`, the required allocation size (in bytes)
 /// is written to `storage_size` and the function returns without performing the search operation.
 ///
-///  \tparam Config - [optional] Configuration of the primitive. It can be `binary_search_config` or
-/// a class derived from it. Default is `default_config`.
+///  \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `binary_search_config`.
 ///  \tparam HaystackIterator - [inferred] Random-access iterator type of the search range. Must meet
 /// the requirements of a C++ InputIterator concept. It can be a simple pointer type.
 ///  \tparam NeedlesIterator - [inferred] Random-access iterator type of the input range. Must meet

@@ -137,16 +137,20 @@ struct device_adjacent_difference_benchmark : public config_autotune_interface
                                                                     std::forward<Args>(args)...);
     }
 
-    void run(benchmark::State& state,
-             const std::size_t size,
-             const hipStream_t stream) const override
+    void run(benchmark::State&   state,
+             const std::size_t   bytes,
+             const managed_seed& seed,
+             hipStream_t         stream) const override
     {
         using output_type = T;
 
         static constexpr bool debug_synchronous = false;
 
         // Generate data
-        const std::vector<T> input = get_random_data<T>(size, 1, 100);
+        const size_t         size         = bytes / sizeof(T);
+        const auto           random_range = limit_random_range<T>(1, 100);
+        const std::vector<T> input
+            = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
 
         T*           d_input;
         output_type* d_output = nullptr;

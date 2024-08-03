@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,7 +58,9 @@ class block_sort_merge
     union storage_type_
     {
         typename warp_sort_type::storage_type   warp_sort;
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
         detail::raw_storage<Key[ItemsPerBlock]> keys;
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
     };
 
     template<>
@@ -67,8 +69,10 @@ class block_sort_merge
         typename warp_sort_type::storage_type warp_sort;
         struct
         {
+            ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
             detail::raw_storage<Key[ItemsPerBlock]>   keys;
             detail::raw_storage<Value[ItemsPerBlock]> values;
+            ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
         };
     };
 

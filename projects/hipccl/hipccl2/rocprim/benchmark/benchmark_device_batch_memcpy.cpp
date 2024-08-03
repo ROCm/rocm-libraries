@@ -231,9 +231,10 @@ struct BatchMemcpyData
 };
 
 template<class ValueType, class BufferSizeType, bool IsMemCpy>
-BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_buffers = 1024,
-                                                        const int32_t num_wlev_buffers = 1024,
-                                                        const int32_t num_blev_buffers = 1024)
+BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const managed_seed& seed,
+                                                        const int32_t       num_tlev_buffers = 1024,
+                                                        const int32_t       num_wlev_buffers = 1024,
+                                                        const int32_t       num_blev_buffers = 1024)
 {
     const bool shuffle_buffers = false;
 
@@ -247,7 +248,7 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_b
     constexpr int32_t max_elems = max_size / sizeof(ValueType);
 
     // Generate data
-    std::mt19937_64 rng(std::random_device{}());
+    std::mt19937_64 rng(seed.get_0());
 
     // Number of elements in each buffer.
     std::vector<BufferSizeType> h_buffer_num_elements(num_buffers);
@@ -355,11 +356,12 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const int32_t num_tlev_b
 }
 
 template<class ValueType, class BufferSizeType, bool IsMemCpy>
-void run_benchmark(benchmark::State& state,
-                   hipStream_t       stream,
-                   const int32_t     num_tlev_buffers = 1024,
-                   const int32_t     num_wlev_buffers = 1024,
-                   const int32_t     num_blev_buffers = 1024)
+void run_benchmark(benchmark::State&   state,
+                   const managed_seed& seed,
+                   hipStream_t         stream,
+                   const int32_t       num_tlev_buffers = 1024,
+                   const int32_t       num_wlev_buffers = 1024,
+                   const int32_t       num_blev_buffers = 1024)
 {
     const size_t num_buffers = num_tlev_buffers + num_wlev_buffers + num_blev_buffers;
 
@@ -376,7 +378,8 @@ void run_benchmark(benchmark::State& state,
     void* d_temp_storage = nullptr;
     HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
 
-    data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(num_tlev_buffers,
+    data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(seed,
+                                                             num_tlev_buffers,
                                                              num_wlev_buffers,
                                                              num_blev_buffers);
 
@@ -429,8 +432,7 @@ void run_benchmark(benchmark::State& state,
 }
 
 // Naive implementation used for comparison
-#define BENCHMARK_BATCH_MEMCPY_NAIVE
-#ifdef BENCHMARK_BATCH_MEMCPY_NAIVE
+#ifdef BUILD_NAIVE_BENCHMARK
 
 template<typename OffsetType, int32_t BlockSize>
 __launch_bounds__(BlockSize) __global__
@@ -469,15 +471,17 @@ __launch_bounds__(BlockSize) __global__
 }
 
 template<class ValueType, class BufferSizeType, bool IsMemCpy>
-void run_naive_benchmark(benchmark::State& state,
-                         hipStream_t       stream,
-                         const int32_t     num_tlev_buffers = 1024,
-                         const int32_t     num_wlev_buffers = 1024,
-                         const int32_t     num_blev_buffers = 1024)
+void run_naive_benchmark(benchmark::State&   state,
+                         const managed_seed& seed,
+                         hipStream_t         stream,
+                         const int32_t       num_tlev_buffers = 1024,
+                         const int32_t       num_wlev_buffers = 1024,
+                         const int32_t       num_blev_buffers = 1024)
 {
     const size_t num_buffers = num_tlev_buffers + num_wlev_buffers + num_blev_buffers;
 
-    const auto data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(num_tlev_buffers,
+    const auto data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(seed,
+                                                                        num_tlev_buffers,
                                                                         num_wlev_buffers,
                                                                         num_blev_buffers);
 
@@ -521,26 +525,26 @@ void run_naive_benchmark(benchmark::State& state,
     HIP_CHECK(hipEventDestroy(stop));
 }
 
-    #define CREATE_NAIVE_BENCHMARK(item_size,                                           \
-                                   item_alignment,                                      \
-                                   size_type,                                           \
-                                   num_tlev,                                            \
-                                   num_wlev,                                            \
-                                   num_blev)                                            \
-        benchmark::RegisterBenchmark(                                                   \
-            bench_naming::format_name(                                                  \
-                "{lvl:device,item_size:" #item_size ",item_alignment:" #item_alignment  \
-                ",size_type:" #size_type ",algo:naive_memcpy,num_tlev:" #num_tlev       \
-                ",num_wlev:" #num_wlev ",num_blev:" #num_blev ",cfg:default_config}")   \
-                .c_str(),                                                               \
-            [=](benchmark::State& state)                                                \
-            {                                                                           \
-                run_naive_benchmark<custom_aligned_type<item_size, item_alignment>,     \
-                                    size_type,                                          \
-                                    true>(state, stream, num_tlev, num_wlev, num_blev); \
+    #define CREATE_NAIVE_BENCHMARK(item_size,                                                 \
+                                   item_alignment,                                            \
+                                   size_type,                                                 \
+                                   num_tlev,                                                  \
+                                   num_wlev,                                                  \
+                                   num_blev)                                                  \
+        benchmark::RegisterBenchmark(                                                         \
+            bench_naming::format_name(                                                        \
+                "{lvl:device,item_size:" #item_size ",item_alignment:" #item_alignment        \
+                ",size_type:" #size_type ",algo:naive_memcpy,num_tlev:" #num_tlev             \
+                ",num_wlev:" #num_wlev ",num_blev:" #num_blev ",cfg:default_config}")         \
+                .c_str(),                                                                     \
+            [=](benchmark::State& state)                                                      \
+            {                                                                                 \
+                run_naive_benchmark<custom_aligned_type<item_size, item_alignment>,           \
+                                    size_type,                                                \
+                                    true>(state, seed, stream, num_tlev, num_wlev, num_blev); \
             })
 
-#endif
+#endif // BUILD_NAIVE_BENCHMARK
 
 #define CREATE_BENCHMARK(item_size, item_alignment, size_type, num_tlev, num_wlev, num_blev)      \
     benchmark::RegisterBenchmark(                                                                 \
@@ -553,19 +557,21 @@ void run_naive_benchmark(benchmark::State& state,
         {                                                                                         \
             run_benchmark<custom_aligned_type<item_size, item_alignment>, size_type, true>(       \
                 state,                                                                            \
+                seed,                                                                             \
                 stream,                                                                           \
                 num_tlev,                                                                         \
                 num_wlev,                                                                         \
                 num_blev);                                                                        \
             run_benchmark<custom_aligned_type<item_size, item_alignment>, size_type, false>(      \
                 state,                                                                            \
+                seed,                                                                             \
                 stream,                                                                           \
                 num_tlev,                                                                         \
                 num_wlev,                                                                         \
                 num_blev);                                                                        \
         })
 
-#ifndef BENCHMARK_BATCH_MEMCPY_NAIVE
+#ifndef BUILD_NAIVE_BENCHMARK
     #define BENCHMARK_TYPE(item_size, item_alignment)                            \
         CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0),     \
             CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0), \
@@ -581,7 +587,7 @@ void run_naive_benchmark(benchmark::State& state,
             CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0), \
             CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000),   \
             CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)
-#endif
+#endif //BUILD_NAIVE_BENCHMARK
 
 int32_t main(int32_t argc, char* argv[])
 {
@@ -592,7 +598,7 @@ int32_t main(int32_t argc, char* argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
-
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -600,6 +606,8 @@ int32_t main(int32_t argc, char* argv[])
     const size_t  size   = parser.get<size_t>("size");
     const int32_t trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = hipStreamDefault; // default
@@ -607,6 +615,7 @@ int32_t main(int32_t argc, char* argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;

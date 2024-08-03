@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,29 +28,24 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/**
- * \brief Allows passing values that are not yet known at launch time as paramters to device algorithms.
- *
- * \note It is the users responsibility to ensure that value is available when the algorithm executes.
- * This can be guaranteed with stream dependencies or explicit external synchronization.
- *
- * \code
- * int* intermediate_result = nullptr;
- * hipMalloc(reinterpret_cast<void**>(&intermediate_result), sizeof(intermediate_result));
- * hipLaunchKernelGGL(compute_intermediate, blocks, threads, 0, stream, arg1, arg2, itermediate_result);
- * const auto initial_value = rocprim::future_value<int>{intermediate_result};
- * rocprim::exclusive_scan(temporary_storage,
- *                         storage_size,
- *                         input,
- *                         output,
- *                         initial_value,
- *                         size);
- * hipFree(intermediate_result)
- * \endcode
- *
- * \tparam T
- * \tparam Iter
- */
+/// \brief Allows passing values that are not yet known at launch time as parameters to device algorithms.
+/// \note It is the users responsibility to ensure that value is available when the algorithm executes.
+/// This can be guaranteed with stream dependencies or explicit external synchronization.
+/// \code
+/// int* intermediate_result = nullptr;
+/// hipMalloc(reinterpret_cast<void**>(&intermediate_result), sizeof(intermediate_result));
+/// hipLaunchKernelGGL(compute_intermediate, blocks, threads, 0, stream, arg1, arg2, intermediate_result);
+/// const auto initial_value = rocprim::future_value<int>{intermediate_result};
+/// rocprim::exclusive_scan(temporary_storage,
+///                         storage_size,
+///                         input,
+///                         output,
+///                         initial_value,
+///                         size);
+/// hipFree(intermediate_result)
+/// \endcode
+/// \tparam T
+/// \tparam Iter
 template <typename T, typename Iter = T*>
 class future_value
 {
@@ -59,7 +54,7 @@ public:
     using iterator_type = Iter; ///< An iterator type that can point at the \p value_type.
 
     /// \brief Constructs a future value
-    /// \param iter - An iterator that will point to the value when it becomes available.
+    /// \param iter An iterator that will point to the value when it becomes available.
     explicit ROCPRIM_HOST_DEVICE future_value(const Iter iter)
         : iter_ {iter}
     {

@@ -73,7 +73,10 @@ struct device_radix_sort_block_sort_benchmark : public config_autotune_interface
 
     // keys benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State& state, size_t size, const hipStream_t stream) const ->
+    auto do_run(benchmark::State&   state,
+                size_t              size,
+                const managed_seed& seed,
+                hipStream_t         stream) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         using key_type = Key;
@@ -84,13 +87,15 @@ struct device_radix_sort_block_sort_benchmark : public config_autotune_interface
         {
             keys_input = get_random_data<key_type>(size,
                                                    static_cast<key_type>(-1000),
-                                                   static_cast<key_type>(1000));
+                                                   static_cast<key_type>(1000),
+                                                   seed.get_0());
         }
         else
         {
             keys_input = get_random_data<key_type>(size,
                                                    std::numeric_limits<key_type>::min(),
-                                                   std::numeric_limits<key_type>::max());
+                                                   std::numeric_limits<key_type>::max(),
+                                                   seed.get_0());
         }
 
         key_type* d_keys_input;
@@ -169,7 +174,10 @@ struct device_radix_sort_block_sort_benchmark : public config_autotune_interface
 
     // pairs benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State& state, size_t size, const hipStream_t stream) const ->
+    auto do_run(benchmark::State&   state,
+                size_t              size,
+                const managed_seed& seed,
+                hipStream_t         stream) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         using key_type   = Key;
@@ -181,13 +189,15 @@ struct device_radix_sort_block_sort_benchmark : public config_autotune_interface
         {
             keys_input = get_random_data<key_type>(size,
                                                    static_cast<key_type>(-1000),
-                                                   static_cast<key_type>(1000));
+                                                   static_cast<key_type>(1000),
+                                                   seed.get_0());
         }
         else
         {
             keys_input = get_random_data<key_type>(size,
                                                    std::numeric_limits<key_type>::min(),
-                                                   std::numeric_limits<key_type>::max());
+                                                   std::numeric_limits<key_type>::max(),
+                                                   seed.get_0());
         }
 
         std::vector<value_type> values_input(size);
@@ -284,9 +294,12 @@ struct device_radix_sort_block_sort_benchmark : public config_autotune_interface
         HIP_CHECK(hipFree(d_values_output));
     }
 
-    void run(benchmark::State& state, size_t size, hipStream_t stream) const override
+    void run(benchmark::State&   state,
+             size_t              size,
+             const managed_seed& seed,
+             hipStream_t         stream) const override
     {
-        do_run(state, size, stream);
+        do_run(state, size, seed, stream);
     }
 };
 

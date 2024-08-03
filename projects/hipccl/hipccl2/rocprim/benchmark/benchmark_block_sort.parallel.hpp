@@ -227,20 +227,27 @@ public:
                            d_output);
     }
 
-    void run(benchmark::State& state, const std::size_t N, const hipStream_t stream) const override
+    void run(benchmark::State&   state,
+             size_t              N,
+             const managed_seed& seed,
+             hipStream_t         stream) const override
     {
         const auto size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
         std::vector<KeyType> input;
         if(std::is_floating_point<KeyType>::value)
         {
-            input = get_random_data<KeyType>(size, (KeyType)-1000, (KeyType) + 1000);
+            input = get_random_data<KeyType>(size,
+                                             static_cast<KeyType>(-1000),
+                                             static_cast<KeyType>(1000),
+                                             seed.get_0());
         }
         else
         {
             input = get_random_data<KeyType>(size,
                                              std::numeric_limits<KeyType>::min(),
-                                             std::numeric_limits<KeyType>::max());
+                                             std::numeric_limits<KeyType>::max(),
+                                             seed.get_0());
         }
         KeyType* d_input;
         KeyType* d_output;

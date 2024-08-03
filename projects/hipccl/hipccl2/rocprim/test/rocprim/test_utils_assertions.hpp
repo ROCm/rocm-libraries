@@ -43,7 +43,7 @@ namespace test_utils {
 template<class T>
 bool inline bit_equal(const T& a, const T& b)
 {
-    return std::memcmp(&a,  &b, sizeof(T))==0;
+    return std::memcmp(&a, &b, sizeof(T)) == 0;
 }
 
 /// Checks if `vector<T> result` matches `vector<T> expected`.
@@ -54,12 +54,16 @@ bool inline bit_equal(const T& a, const T& b)
 /// \param expected
 /// \param max_length
 template<class T>
-void assert_eq(const std::vector<T>& result, const std::vector<T>& expected, const size_t max_length = SIZE_MAX)
+void assert_eq(const std::vector<T>& result,
+               const std::vector<T>& expected,
+               const size_t          max_length = SIZE_MAX)
 {
-    if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
+    if(max_length == SIZE_MAX || max_length > expected.size())
+        ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < std::min(result.size(), max_length); i++)
     {
-        if(bit_equal(result[i], expected[i])) continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+        if(bit_equal(result[i], expected[i]))
+            continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
         ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
     }
 }
@@ -82,31 +86,40 @@ void assert_eq(const std::vector<custom_test_type<T>>& result,
 }
 
 template<>
-inline void assert_eq<rocprim::half>(const std::vector<rocprim::half>& result, const std::vector<rocprim::half>& expected, const size_t max_length)
+inline void assert_eq<rocprim::half>(const std::vector<rocprim::half>& result,
+                                     const std::vector<rocprim::half>& expected,
+                                     const size_t                      max_length)
 {
-    if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
+    if(max_length == SIZE_MAX || max_length > expected.size())
+        ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < std::min(result.size(), max_length); i++)
     {
-        if(bit_equal(result[i], expected[i])) continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+        if(bit_equal(result[i], expected[i]))
+            continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
         ASSERT_EQ(half_to_native(result[i]), half_to_native(expected[i])) << "where index = " << i;
     }
 }
 
 template<>
-inline void assert_eq<rocprim::bfloat16>(const std::vector<rocprim::bfloat16>& result, const std::vector<rocprim::bfloat16>& expected, const size_t max_length)
+inline void assert_eq<rocprim::bfloat16>(const std::vector<rocprim::bfloat16>& result,
+                                         const std::vector<rocprim::bfloat16>& expected,
+                                         const size_t                          max_length)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < std::min(result.size(), max_length); i++)
     {
-        if(bit_equal(result[i], expected[i])) continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-        ASSERT_EQ(bfloat16_to_native(result[i]), bfloat16_to_native(expected[i])) << "where index = " << i;
+        if(bit_equal(result[i], expected[i]))
+            continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+        ASSERT_EQ(bfloat16_to_native(result[i]), bfloat16_to_native(expected[i]))
+            << "where index = " << i;
     }
 }
 
 template<class T>
 void assert_eq(const T& result, const T& expected)
 {
-    if(bit_equal(result, expected)) return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+    if(bit_equal(result, expected))
+        return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
     ASSERT_EQ(result, expected);
 }
 
@@ -121,14 +134,17 @@ void assert_eq(const custom_test_type<T>& result, const custom_test_type<T>& exp
 template<>
 inline void assert_eq<rocprim::half>(const rocprim::half& result, const rocprim::half& expected)
 {
-    if(bit_equal(result, expected)) return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+    if(bit_equal(result, expected))
+        return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
     ASSERT_EQ(half_to_native(result), half_to_native(expected));
 }
 
 template<>
-inline void assert_eq<rocprim::bfloat16>(const rocprim::bfloat16& result, const rocprim::bfloat16& expected)
+inline void assert_eq<rocprim::bfloat16>(const rocprim::bfloat16& result,
+                                         const rocprim::bfloat16& expected)
 {
-    if(bit_equal(result, expected)) return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+    if(bit_equal(result, expected))
+        return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
     ASSERT_EQ(bfloat16_to_native(result), bfloat16_to_native(expected));
 }
 
@@ -158,7 +174,7 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
     for(size_t i = 0; i < result.size(); i++)
     {
         if(bit_equal(result[i], expected[i])) continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-        auto diff = std::abs(percent * expected[i]);
+        auto diff = std::abs(percent * std::max(result[i], expected[i]));
         ASSERT_NEAR(result[i], expected[i], diff) << "where index = " << i;
     }
 }
@@ -305,7 +321,30 @@ auto operator<<(std::ostream& os, const T& value)
 
 #endif
 
-template<class IterA, class IterB>
+template<typename T>
+testing::AssertionResult
+    bitwise_equal(const char* a_expr, const char* b_expr, const T& a, const T& b)
+{
+    if(bit_equal(a, b))
+    {
+        return testing::AssertionSuccess();
+    }
+
+    // googletest's operator<< doesn't see the above overload for int128_t
+    std::stringstream a_str;
+    std::stringstream b_str;
+    a_str << std::hexfloat << a;
+    b_str << std::hexfloat << b;
+
+    return testing::AssertionFailure()
+           << "Expected strict/bitwise equality of these values: " << std::endl
+           << "     " << a_expr << ": " << std::hexfloat << a_str.str() << std::endl
+           << "     " << b_expr << ": " << std::hexfloat << b_str.str() << std::endl;
+}
+
+#define ASSERT_BITWISE_EQ(a, b) ASSERT_PRED_FORMAT2(bitwise_equal, a, b)
+
+template<typename IterA, typename IterB>
 void assert_bit_eq(IterA result_begin, IterA result_end, IterB expected_begin, IterB expected_end)
 {
     using value_a_t = typename std::iterator_traits<IterA>::value_type;
@@ -321,18 +360,14 @@ void assert_bit_eq(IterA result_begin, IterA result_end, IterB expected_begin, I
         const auto result   = static_cast<value_a_t>(*result_it);
         const auto expected = static_cast<value_b_t>(*expected_it);
 
-        if(!bit_equal(result, expected))
-        {
-            std::stringstream result_str;
-            std::stringstream expected_str;
-            result_str << result;
-            expected_str << expected;
-            FAIL() << "Expected strict/bitwise equality of these values: " << std::endl
-                   << "     result[i]: " << result_str.str() << std::endl
-                   << "     expected[i]: " << expected_str.str() << std::endl
-                   << "where index = " << index;
-        }
+        ASSERT_BITWISE_EQ(result, expected) << "where index = " << index;
     }
+}
+
+template<typename T>
+void assert_bit_eq(const std::vector<T>& result, const std::vector<T>& expected)
+{
+    assert_bit_eq(result.begin(), result.end(), expected.begin(), expected.end());
 }
 }
 

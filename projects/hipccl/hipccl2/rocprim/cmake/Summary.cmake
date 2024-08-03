@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -43,6 +43,7 @@ function(print_configuration_summary)
   message(STATUS "  ONLY_INSTALL              : ${ONLY_INSTALL}")
   message(STATUS "  BUILD_TEST                : ${BUILD_TEST}")
   message(STATUS "  BUILD_BENCHMARK           : ${BUILD_BENCHMARK}")
+  message(STATUS "  BUILD_NAIVE_BENCHMARK     : ${BUILD_NAIVE_BENCHMARK}")
   message(STATUS "  BUILD_EXAMPLE             : ${BUILD_EXAMPLE}")
   message(STATUS "  BUILD_DOCS                : ${BUILD_DOCS}")
   message(STATUS "  USE_HIP_CPU               : ${USE_HIP_CPU}")

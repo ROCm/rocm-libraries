@@ -59,11 +59,12 @@ constexpr std::array<size_t, 4> segment_lengths{30, 256, 3000, 300000};
 // This happens partially, because of the algorithm has 4 kernels, and decides at runtime which one to call.
 
 template<class Key>
-void run_sort_keys_benchmark(benchmark::State& state,
-                             size_t            num_segments,
-                             size_t            mean_segment_length,
-                             size_t            target_size,
-                             hipStream_t       stream)
+void run_sort_keys_benchmark(benchmark::State&   state,
+                             size_t              num_segments,
+                             size_t              mean_segment_length,
+                             size_t              target_size,
+                             const managed_seed& seed,
+                             hipStream_t         stream)
 {
     using offset_type = int;
     using key_type    = Key;
@@ -71,8 +72,8 @@ void run_sort_keys_benchmark(benchmark::State& state,
     std::vector<offset_type> offsets;
     offsets.push_back(0);
 
-    static constexpr int       seed = 716;
-    std::default_random_engine gen(seed);
+    static constexpr int iseed = 716;
+    engine_type          gen(iseed);
 
     std::normal_distribution<double> segment_length_dis(static_cast<double>(mean_segment_length),
                                                         0.1 * mean_segment_length);
@@ -98,13 +99,15 @@ void run_sort_keys_benchmark(benchmark::State& state,
     {
         keys_input = get_random_data<key_type>(size,
                                                static_cast<key_type>(-1000),
-                                               static_cast<key_type>(1000));
+                                               static_cast<key_type>(1000),
+                                               seed.get_0());
     }
     else
     {
         keys_input = get_random_data<key_type>(size,
                                                std::numeric_limits<key_type>::min(),
-                                               std::numeric_limits<key_type>::max());
+                                               std::numeric_limits<key_type>::max(),
+                                               seed.get_0());
     }
     size_t batch_size = 1;
     if(size < target_size)
@@ -212,10 +215,11 @@ void run_sort_keys_benchmark(benchmark::State& state,
 
 template<class KeyT>
 void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                              hipStream_t                                   stream,
                               size_t                                        max_size,
                               size_t                                        min_size,
-                              size_t                                        target_size)
+                              size_t                                        target_size,
+                              const managed_seed&                           seed,
+                              hipStream_t                                   stream)
 {
     std::string key_name   = Traits<KeyT>::name();
     std::string value_name = Traits<rocprim::empty_type>::name();
@@ -234,11 +238,13 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
                     + value_name + ",segment_count:" + std::to_string(segment_count)
                     + ",segment_length:" + std::to_string(segment_length) + ",cfg:default_config}")
                     .c_str(),
-                [=](benchmark::State& state) {
+                [=](benchmark::State& state)
+                {
                     run_sort_keys_benchmark<KeyT>(state,
                                                   segment_count,
                                                   segment_length,
                                                   target_size,
+                                                  seed,
                                                   stream);
                 }));
         }
@@ -254,6 +260,7 @@ int main(int argc, char* argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
 
 #ifdef BENCHMARK_CONFIG_TUNING
     // optionally run an evenly split subset of benchmarks, when making multiple program invocations
@@ -274,6 +281,8 @@ int main(int argc, char* argv[])
     const size_t size   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -281,6 +290,7 @@ int main(int argc, char* argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
@@ -292,14 +302,15 @@ int main(int argc, char* argv[])
                                                         parallel_instance,
                                                         parallel_instances,
                                                         size,
+                                                        seed,
                                                         stream);
 #else
-    add_sort_keys_benchmarks<float>(benchmarks, stream, size, min_size, size / 2);
-    add_sort_keys_benchmarks<double>(benchmarks, stream, size, min_size, size / 2);
-    add_sort_keys_benchmarks<int8_t>(benchmarks, stream, size, min_size, size / 2);
-    add_sort_keys_benchmarks<uint8_t>(benchmarks, stream, size, min_size, size / 2);
-    add_sort_keys_benchmarks<rocprim::half>(benchmarks, stream, size, min_size, size / 2);
-    add_sort_keys_benchmarks<int>(benchmarks, stream, size, min_size, size / 2);
+    add_sort_keys_benchmarks<float>(benchmarks, size, min_size, size / 2, seed, stream);
+    add_sort_keys_benchmarks<double>(benchmarks, size, min_size, size / 2, seed, stream);
+    add_sort_keys_benchmarks<int8_t>(benchmarks, size, min_size, size / 2, seed, stream);
+    add_sort_keys_benchmarks<uint8_t>(benchmarks, size, min_size, size / 2, seed, stream);
+    add_sort_keys_benchmarks<rocprim::half>(benchmarks, size, min_size, size / 2, seed, stream);
+    add_sort_keys_benchmarks<int>(benchmarks, size, min_size, size / 2, seed, stream);
 #endif
 
     // Use manual timing

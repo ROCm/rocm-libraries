@@ -240,7 +240,9 @@ private:
     }
 
 public:
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = ::rocprim::detail::raw_storage<storage_type_>;
+    ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
     template<typename Key, unsigned ItemsPerThread>
     ROCPRIM_DEVICE void rank_keys(const Key (&keys)[ItemsPerThread],

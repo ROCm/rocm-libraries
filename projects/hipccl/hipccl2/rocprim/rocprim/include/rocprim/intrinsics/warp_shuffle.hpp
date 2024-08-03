@@ -24,8 +24,8 @@
 #include <type_traits>
 
 #include "../config.hpp"
-    #include "../detail/various.hpp"
-    #include "thread.hpp"
+#include "../detail/various.hpp"
+#include "thread.hpp"
 
 /// \addtogroup warpmodule
 /// @{
@@ -304,9 +304,44 @@ ROCPRIM_DEVICE ROCPRIM_INLINE T warp_permute(const T&  input,
         { return __builtin_amdgcn_ds_permute(index, v); });
 }
 
-END_ROCPRIM_NAMESPACE
+/// \brief Broadcast the first lane to all threads.
+///
+/// Each thread in the warp obtains \p input from the first active thread in a warp.
+/// This function always operates on all <tt>device_warp_size()</tt> threads in the warp.
+///
+/// \remark This operation is significantly faster than \p warp_shuffle.
+///
+/// \param input - the value to broadcast
+template<typename T>
+ROCPRIM_DEVICE ROCPRIM_INLINE T warp_readfirstlane(const T& input)
+{
+    return detail::warp_shuffle_op(input,
+                                   [](int v) -> int { return __builtin_amdgcn_readfirstlane(v); });
+}
 
-#endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_
+/// \brief Broadcast a particular lane to all threads.
+///
+/// Each thread in the warp obtains \p input from the <tt>src_lane</tt>-th thread
+/// in the warp. \p src_lane must be the same value for all threads in the warp.
+/// This function does not distinguish between active threads and non-active
+/// threads: all threads must participate in the broadcast. This function also
+/// always operates on all <tt>device_warp_size()</tt> threads in the warp.
+///
+/// \remark This operation is significantly faster than \p warp_shuffle.
+///
+/// \param input - the value to broadcast
+/// \param src_lane - the lane whose value to broadcast to other threads in the warp
+template<typename T>
+ROCPRIM_DEVICE ROCPRIM_INLINE T warp_readlane(const T& input, const int src_lane)
+{
+    return detail::warp_shuffle_op(input,
+                                   [=](int v) -> int
+                                   { return __builtin_amdgcn_readlane(v, src_lane); });
+}
+
+END_ROCPRIM_NAMESPACE
 
 /// @}
 // end of group warpmodule
+
+#endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_

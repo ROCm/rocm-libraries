@@ -389,6 +389,85 @@ struct invoke_result_binary_op
 template<class T, class F>
 using invoke_result_binary_op_t = typename invoke_result_binary_op<T, F>::type;
 
+namespace detail
+{
+
+/// \brief If `T` is a rocPRIM binary functional type, provides the member constant `value` equal `true`.
+///   For any other type, `value` is `false`.
+template<typename T>
+struct is_binary_functional
+{
+    static constexpr bool value = false;
+};
+
+template<typename T>
+struct is_binary_functional<less<T>>
+{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+struct is_binary_functional<less_equal<T>>
+{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+struct is_binary_functional<greater<T>>
+{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+struct is_binary_functional<greater_equal<T>>
+{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+struct is_binary_functional<equal_to<T>>
+{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+struct is_binary_functional<not_equal_to<T>>
+{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+struct is_binary_functional<plus<T>>
+{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+struct is_binary_functional<minus<T>>
+{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+struct is_binary_functional<multiplies<T>>
+{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+struct is_binary_functional<maximum<T>>
+{
+    static constexpr bool value = true;
+};
+
+template<typename T>
+struct is_binary_functional<minimum<T>>
+{
+    static constexpr bool value = true;
+};
+
+} // namespace detail
+
 END_ROCPRIM_NAMESPACE
 
 /// @}

@@ -57,21 +57,18 @@ struct is_valid_for_int_distribution :
                            > {};
 namespace detail
 {
-    template<class T>
-    struct numeric_limits_custom_test_type : public std::numeric_limits<typename T::value_type>
-    {
-    };
-}
-
-// Numeric limits which also supports custom_test_type<U> classes
 template<class T>
-struct numeric_limits : public std::conditional<
-                            is_custom_test_type<T>::value,
-                            detail::numeric_limits_custom_test_type<T>,
-                            std::numeric_limits<T>
-                            >::type
-{
-};
+struct numeric_limits_custom_test_type : public std::numeric_limits<typename T::value_type>
+{};
+} // namespace detail
+
+// Numeric limits which also supports custom_test_type<U> and custom_test_array_type<U> classes
+template<class T>
+struct numeric_limits
+    : public std::conditional<is_custom_test_type<T>::value || is_custom_test_array_type<T>::value,
+                              detail::numeric_limits_custom_test_type<T>,
+                              std::numeric_limits<T>>::type
+{};
 
 template<> struct numeric_limits<test_utils::half> : public std::numeric_limits<test_utils::half> {
 public:
@@ -193,6 +190,57 @@ void add_special_values(OutputIter it, const size_t size, Generator&& gen)
     }
 }
 
+/// Safe sign-mixed comparisons, negative values always compare less
+/// than any values of unsigned types (in contrast to the behaviour of the built-in comparison operator)
+/// This is a backport of a C++20 standard library feature to C++14
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<std::is_signed<T>::value == std::is_signed<U>::value, bool>
+{
+    return t < u;
+}
+
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<std::is_signed<T>::value && !std::is_signed<U>::value, bool>
+{
+    // U is unsigned
+    return t < 0 || std::make_unsigned_t<T>(t) < u;
+}
+
+template<class T, class U>
+constexpr auto cmp_less(T t, U u) noexcept
+    -> std::enable_if_t<!std::is_signed<T>::value && std::is_signed<U>::value, bool>
+{
+    // T is unsigned U is signed
+    return u >= 0 && t < std::make_unsigned_t<U>(u);
+}
+
+template<class T, class U>
+constexpr bool cmp_greater(T t, U u) noexcept
+{
+    return cmp_less(u, t);
+}
+
+// Backport of saturate_cast from C++26 to C++14
+// From https://github.com/llvm/llvm-project/blob/52b18430ae105566f26152c0efc63998301b1134/libcxx/include/__numeric/saturation_arithmetic.h#L97
+// licensed under the MIT license
+template<typename Res, typename T>
+constexpr Res saturate_cast(T x) noexcept
+{
+    // Handle overflow
+    if(test_utils::cmp_less(x, std::numeric_limits<Res>::min()))
+    {
+        return std::numeric_limits<Res>::min();
+    }
+    if(test_utils::cmp_greater(x, std::numeric_limits<Res>::max()))
+    {
+        return std::numeric_limits<Res>::max();
+    }
+    // No overflow
+    return static_cast<Res>(x);
+}
+
 template<class OutputIter, class Generator>
 inline OutputIter segmented_generate_n(OutputIter it, size_t size, Generator&& gen)
 {
@@ -230,8 +278,8 @@ inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Gen
         is_valid_for_int_distribution<T>::value,
         T,
         typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
-    std::uniform_int_distribution<dis_type> distribution(static_cast<dis_type>(min),
-                                                         static_cast<dis_type>(max));
+    std::uniform_int_distribution<dis_type> distribution(test_utils::saturate_cast<dis_type>(min),
+                                                         test_utils::saturate_cast<dis_type>(max));
 
     return segmented_generate_n(it, size, [&]() { return static_cast<T>(distribution(gen)); });
 }
@@ -246,8 +294,8 @@ inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Gen
         is_valid_for_int_distribution<T>::value,
         T,
         typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
-    std::uniform_int_distribution<dis_type> distribution(static_cast<dis_type>(min),
-                                                         static_cast<dis_type>(max));
+    std::uniform_int_distribution<dis_type> distribution(test_utils::saturate_cast<dis_type>(min),
+                                                         test_utils::saturate_cast<dis_type>(max));
 
     return segmented_generate_n(it, size, [&]() { return static_cast<T>(distribution(gen)); });
 }
@@ -265,8 +313,8 @@ inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Gen
                                   int,
                                   unsigned int>::type
         >::type;
-    std::uniform_int_distribution<dis_type> distribution(static_cast<dis_type>(min),
-                                                         static_cast<dis_type>(max));
+    std::uniform_int_distribution<dis_type> distribution(test_utils::saturate_cast<dis_type>(min),
+                                                         test_utils::saturate_cast<dis_type>(max));
 
     return segmented_generate_n(it, size, [&]() { return static_cast<T>(distribution(gen)); });
 }
@@ -306,8 +354,9 @@ inline auto generate_random_data_n(OutputIter             it,
                              value_t,
                              std::conditional_t<std::is_signed<value_t>::value, int, unsigned int>>;
 
-    std::uniform_int_distribution<distribution_t> distribution(static_cast<distribution_t>(min.x),
-                                                               static_cast<distribution_t>(max.x));
+    std::uniform_int_distribution<distribution_t> distribution(
+        test_utils::saturate_cast<distribution_t>(min.x),
+        test_utils::saturate_cast<distribution_t>(max.x));
 
     return segmented_generate_n(it,
                                 size,

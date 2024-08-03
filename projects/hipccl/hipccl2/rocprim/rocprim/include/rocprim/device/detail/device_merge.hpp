@@ -295,7 +295,9 @@ void merge_kernel_impl(IndexIterator indices,
 
     ROCPRIM_SHARED_MEMORY union
     {
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
         typename detail::raw_storage<key_type[input_block_size]> keys_shared;
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
         typename keys_store_type::storage_type keys_store;
     } storage;
 

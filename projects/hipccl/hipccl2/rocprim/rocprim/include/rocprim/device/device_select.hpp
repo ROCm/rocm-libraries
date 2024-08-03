@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,7 +58,7 @@ namespace detail
 /// * Range specified by \p selected_count_output must have at least 1 element.
 /// * Values of \p flag range should be implicitly convertible to `bool` type.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p select_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam FlagIterator - random-access iterator type of the flag range. It can be
@@ -151,7 +151,7 @@ hipError_t select(void * temporary_storage,
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::select_method::flag, true, Config, offset_type>(
+    return detail::partition_impl<detail::partition_subalgo::select_flag, Config, offset_type>(
         temporary_storage,
         storage_size,
         input,
@@ -181,7 +181,7 @@ hipError_t select(void * temporary_storage,
 /// values can be copied into it.
 /// * Range specified by \p selected_count_output must have at least 1 element.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p select_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. It can be
@@ -280,7 +280,7 @@ hipError_t select(void * temporary_storage,
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::select_method::predicate, true, Config, offset_type>(
+    return detail::partition_impl<detail::partition_subalgo::select_predicate, Config, offset_type>(
         temporary_storage,
         storage_size,
         input,
@@ -311,6 +311,7 @@ hipError_t select(void * temporary_storage,
 /// * By default <tt>InputIterator::value_type</tt>'s equality operator is used to check
 /// if elements are equivalent.
 ///
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. It can be
@@ -405,7 +406,7 @@ hipError_t unique(void * temporary_storage,
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::select_method::unique, true, Config, offset_type>(
+    return detail::partition_impl<detail::partition_subalgo::select_unique, Config, offset_type>(
         temporary_storage,
         storage_size,
         input,
@@ -437,6 +438,7 @@ hipError_t unique(void * temporary_storage,
 /// * By default <tt>InputIterator::value_type</tt>'s equality operator is used to check
 /// if elements are equivalent.
 ///
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
 /// \tparam KeyIterator - random-access iterator type of the input key range. It can be
 /// a simple pointer type.
 /// \tparam ValueIterator - random-access iterator type of the input value range. It can be
@@ -499,22 +501,23 @@ inline hipError_t unique_by_key(void*                           temporary_storag
     output_key_iterator_tuple output_key_tuple{keys_output, ::rocprim::empty_type()};
 
     using output_value_iterator_tuple = tuple<OutputValueIterator, ::rocprim::empty_type*>;
-    const output_value_iterator_tuple output_value_tuple{values_output, nullptr}; // key only
+    const output_value_iterator_tuple output_value_tuple{values_output, nullptr};
 
-    return detail::partition_impl<detail::select_method::unique, true, Config, offset_type>(
-        temporary_storage,
-        storage_size,
-        keys_input,
-        values_input,
-        no_flags,
-        output_key_tuple,
-        output_value_tuple,
-        unique_count_output,
-        size,
-        inequality_op,
-        stream,
-        debug_synchronous,
-        no_predicate);
+    return detail::partition_impl<detail::partition_subalgo::select_unique_by_key,
+                                  Config,
+                                  offset_type>(temporary_storage,
+                                               storage_size,
+                                               keys_input,
+                                               values_input,
+                                               no_flags,
+                                               output_key_tuple,
+                                               output_value_tuple,
+                                               unique_count_output,
+                                               size,
+                                               inequality_op,
+                                               stream,
+                                               debug_synchronous,
+                                               no_predicate);
 }
 
 /// @}

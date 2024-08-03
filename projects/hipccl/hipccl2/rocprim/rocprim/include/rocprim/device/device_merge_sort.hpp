@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -645,6 +645,7 @@ inline hipError_t merge_sort_impl(
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for sorting across the device.
 ///
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `merge_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -736,6 +737,7 @@ hipError_t merge_sort(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for sorting across the device.
 ///
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `merge_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the

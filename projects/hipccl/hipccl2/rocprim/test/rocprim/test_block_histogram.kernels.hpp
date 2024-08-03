@@ -72,6 +72,24 @@ void histogram_kernel(T* device_output, BinType* device_output_bin)
     }
 }
 
+/// \brief Reduce the value of `maxval` such that it can be represented by `T`.
+template<typename T>
+auto get_safe_maxval(size_t maxval) -> std::enable_if_t<rocprim::is_floating_point<T>::value, bool>
+{
+    // Assert that the cast is defined behavior, based on the assumption that all floating-point
+    //   types can be represented by a double
+    EXPECT_LT(static_cast<double>(maxval),
+              static_cast<double>(test_utils::numeric_limits<T>::max()));
+    return static_cast<T>(maxval);
+}
+
+/// \brief Reduce the value of `maxval` such that it can be represented by `T`.
+template<typename T>
+auto get_safe_maxval(size_t maxval) -> std::enable_if_t<!rocprim::is_floating_point<T>::value, bool>
+{
+    return test_utils::saturate_cast<T>(maxval);
+}
+
 // Test for histogram
 template<
     class T,
@@ -98,6 +116,11 @@ void test_block_histogram_input_arrays()
     const size_t bin_sizes = bin * 37;
     const size_t grid_size = size / items_per_block;
 
+    SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with bin_sizes = " << bin_sizes);
+    SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
+
     // TODO: Use assert near for bin_type.
     if (std::is_same<BinType, ::rocprim::bfloat16>::value) {
         GTEST_SKIP() << "Temporary skipped test";
@@ -110,11 +133,9 @@ void test_block_histogram_input_arrays()
         SCOPED_TRACE(testing::Message() << "with ItemsPerThread = " << items_per_thread);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(
-            size,
-            0,
-            std::min<size_t>(std::numeric_limits<T>::max(), bin - 1),
-            seed_value);
+        const size_t   max_value = bin - 1;
+        std::vector<T> output
+            = test_utils::get_random_data<T>(size, 0, get_safe_maxval<T>(max_value), seed_value);
 
         // Output histogram results
         std::vector<BinType> output_bin(bin_sizes, 0);
@@ -191,11 +212,14 @@ struct static_for_input_array
 {
     static void run()
     {
-        int device_id = test_common_utils::obtain_device_from_ctest();
-        SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
-        HIP_CHECK(hipSetDevice(device_id));
+        {
+            SCOPED_TRACE(testing::Message() << "TestID = " << First);
+            int device_id = test_common_utils::obtain_device_from_ctest();
+            SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+            HIP_CHECK(hipSetDevice(device_id));
 
-        test_block_histogram_input_arrays<T, BinType, BlockSize, items[First], Algorithm>();
+            test_block_histogram_input_arrays<T, BinType, BlockSize, items[First], Algorithm>();
+        }
         static_for_input_array<First + 1, Last, T, BinType, BlockSize, Algorithm>::run();
     }
 };

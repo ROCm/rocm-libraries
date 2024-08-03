@@ -206,7 +206,7 @@ inline hipError_t transform(InputIterator     input,
 /// \par Overview
 /// * Ranges specified by \p input1, \p input2, and \p output must have at least \p size elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p transform_config or a class derived from it.
+/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `transform_config`.
 /// \tparam InputIterator1 - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam InputIterator2 - random-access iterator type of the input range. Must meet the

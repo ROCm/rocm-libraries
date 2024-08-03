@@ -11,3 +11,4 @@
 * :ref:`rocprim-intro`
 * :ref:`glossary`
 * :ref:`developer`
+* :ref:`tuning`

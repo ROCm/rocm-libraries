@@ -55,10 +55,11 @@ inline std::string config_name<rocprim::default_config>()
     return "default_config";
 }
 
-template<bool Exclusive = false,
-         class T        = int,
-         class ScanOp   = rocprim::plus<T>,
-         class Config   = rocprim::default_config>
+template<bool Exclusive     = false,
+         class T            = int,
+         class ScanOp       = rocprim::plus<T>,
+         bool Deterministic = false,
+         class Config       = rocprim::default_config>
 struct device_scan_benchmark : public config_autotune_interface
 {
     std::string name() const override
@@ -81,15 +82,30 @@ struct device_scan_benchmark : public config_autotune_interface
                          const bool        debug = false) const ->
         typename std::enable_if<excl, hipError_t>::type
     {
-        return rocprim::exclusive_scan<Config>(temporary_storage,
-                                               storage_size,
-                                               input,
-                                               output,
-                                               initial_value,
-                                               input_size,
-                                               scan_op,
-                                               stream,
-                                               debug);
+        if ROCPRIM_IF_CONSTEXPR(!Deterministic)
+        {
+            return rocprim::exclusive_scan<Config>(temporary_storage,
+                                                   storage_size,
+                                                   input,
+                                                   output,
+                                                   initial_value,
+                                                   input_size,
+                                                   scan_op,
+                                                   stream,
+                                                   debug);
+        }
+        else
+        {
+            return rocprim::deterministic_exclusive_scan<Config>(temporary_storage,
+                                                                 storage_size,
+                                                                 input,
+                                                                 output,
+                                                                 initial_value,
+                                                                 input_size,
+                                                                 scan_op,
+                                                                 stream,
+                                                                 debug);
+        }
     }
 
     template<bool excl = Exclusive>
@@ -105,22 +121,39 @@ struct device_scan_benchmark : public config_autotune_interface
         typename std::enable_if<!excl, hipError_t>::type
     {
         (void)initial_value;
-        return rocprim::inclusive_scan<Config>(temporary_storage,
-                                               storage_size,
-                                               input,
-                                               output,
-                                               input_size,
-                                               scan_op,
-                                               stream,
-                                               debug);
+        if ROCPRIM_IF_CONSTEXPR(!Deterministic)
+        {
+            return rocprim::inclusive_scan<Config>(temporary_storage,
+                                                   storage_size,
+                                                   input,
+                                                   output,
+                                                   input_size,
+                                                   scan_op,
+                                                   stream,
+                                                   debug);
+        }
+        else
+        {
+            return rocprim::deterministic_inclusive_scan<Config>(temporary_storage,
+                                                                 storage_size,
+                                                                 input,
+                                                                 output,
+                                                                 input_size,
+                                                                 scan_op,
+                                                                 stream,
+                                                                 debug);
+        }
     }
 
-    void run_benchmark(benchmark::State& state,
-                       size_t            size,
-                       const hipStream_t stream,
-                       ScanOp            scan_op) const
+    void run(benchmark::State&   state,
+             size_t              size,
+             const managed_seed& seed,
+             hipStream_t         stream) const override
     {
-        std::vector<T> input         = get_random_data<T>(size, T(0), T(1000));
+        ScanOp         scan_op{};
+        const auto     random_range = limit_random_range<T>(0, 1000);
+        std::vector<T> input
+            = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
         T              initial_value = T(123);
         T*             d_input;
         T*             d_output;
@@ -201,11 +234,6 @@ struct device_scan_benchmark : public config_autotune_interface
         HIP_CHECK(hipFree(d_output));
         HIP_CHECK(hipFree(d_temp_storage));
     }
-
-    void run(benchmark::State& state, size_t size, hipStream_t stream) const override
-    {
-        run_benchmark(state, size, stream, ScanOp());
-    }
 };
 
 #ifdef BENCHMARK_CONFIG_TUNING
@@ -229,6 +257,7 @@ struct device_scan_benchmark_generator
                             false,
                             T,
                             rocprim::plus<T>,
+                            false,
                             rocprim::scan_config<block_size,
                                                  ItemsPerThread,
                                                  rocprim::block_load_method::block_load_transpose,

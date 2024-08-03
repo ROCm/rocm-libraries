@@ -14,6 +14,6 @@
 * :ref:`block-index`
 * :ref:`warp-index` 
 * :ref:`thread-index` 
-* :ref:`thread_ops` 
 * :ref:`iterators` 
 * :ref:`intrinsics` 
+* :ref:`types`

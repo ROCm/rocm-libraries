@@ -82,7 +82,7 @@ int main(int argc, char** argv)
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<int>("trials", "trials", 100, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                     "name_format",
                                     "human",
@@ -91,10 +91,8 @@ int main(int argc, char** argv)
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
-
 
     // HIP
 
@@ -102,9 +100,10 @@ int main(int argc, char** argv)
         CREATE_BENCHMARK(default_stream, stream_kind::default_stream),
         CREATE_BENCHMARK(per_thread_stream, stream_kind::per_thread_stream),
         CREATE_BENCHMARK(explicit_stream, stream_kind::explicit_stream),
-        CREATE_BENCHMARK(async_stream, stream_kind::async_stream)
-    };
-
+        CREATE_BENCHMARK(async_stream, stream_kind::async_stream),
+        benchmark::RegisterBenchmark(
+            bench_naming::format_name("{lvl:na,algo:empty_kernel,cfg:default_config}").c_str(),
+            BM_kernel_launch)};
 
     // Use manual timing
     for(auto& b : benchmarks)

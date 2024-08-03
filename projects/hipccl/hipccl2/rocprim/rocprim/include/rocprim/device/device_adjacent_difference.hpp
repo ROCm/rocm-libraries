@@ -249,8 +249,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 /// }
 /// \endcode
 ///
-/// \tparam Config [optional] configuration of the primitive. It has to be
-/// `adjacent_difference_config` or a class derived from it.
+/// \tparam Config [optional] configuration of the primitive, must be `default_config` or `adjacent_difference_config`.
 /// \tparam InputIt [inferred] random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIt [inferred] random-access iterator type of the output range. Must meet the
@@ -345,8 +344,7 @@ hipError_t adjacent_difference(void* const          temporary_storage,
 /// }
 /// \endcode
 ///
-/// \tparam Config [optional] configuration of the primitive. It has to be
-/// `adjacent_difference_config` or a class derived from it.
+/// \tparam Config [optional] configuration of the primitive, must be `default_config` or `adjacent_difference_config`.
 /// \tparam InputIt [inferred] random-access iterator type of the value range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam BinaryFunction [inferred] binary operation function object that will be applied to
@@ -387,8 +385,7 @@ hipError_t adjacent_difference_inplace(void* const          temporary_storage,
 /// \brief Parallel primitive for applying a binary operation across pairs of consecutive elements
 /// in device accessible memory. Writes the output to the position of the left item.
 ///
-/// \tparam Config [optional] configuration of the primitive. It has to be
-/// `adjacent_difference_config` or a class derived from it.
+/// \tparam Config [optional] configuration of the primitive, must be `default_config` or `adjacent_difference_config`.
 /// \tparam InputIt [inferred] random-access iterator type of the value range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIt [inferred] random-access iterator type of the output range. Must meet the
@@ -457,8 +454,7 @@ hipError_t adjacent_difference_inplace(void* const          temporary_storage,
 /// }
 /// \endcode
 ///
-/// \tparam Config [optional] configuration of the primitive. It has to be
-/// `adjacent_difference_config` or a class derived from it.
+/// \tparam Config [optional] configuration of the primitive, must be `default_config` or `adjacent_difference_config`.
 /// \tparam InputIt [inferred] random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIt [inferred] random-access iterator type of the output range. Must meet the
@@ -553,8 +549,7 @@ hipError_t adjacent_difference_right(void* const          temporary_storage,
 /// }
 /// \endcode
 ///
-/// \tparam Config [optional] configuration of the primitive. It has to be
-/// `adjacent_difference_config` or a class derived from it.
+/// \tparam Config [optional] configuration of the primitive, must be `default_config` or `adjacent_difference_config`.
 /// \tparam InputIt [inferred] random-access iterator type of the value range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam BinaryFunction [inferred] binary operation function object that will be applied to
@@ -595,8 +590,7 @@ hipError_t adjacent_difference_right_inplace(void* const          temporary_stor
 /// \brief Parallel primitive for applying a binary operation across pairs of consecutive elements
 /// in device accessible memory. Writes the output to the position of the right item.
 ///
-/// \tparam Config [optional] configuration of the primitive. It has to be
-/// `adjacent_difference_config` or a class derived from it.
+/// \tparam Config [optional] configuration of the primitive, must be `default_config` or `adjacent_difference_config`.
 /// \tparam InputIt [inferred] random-access iterator type of the value range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIt [inferred] random-access iterator type of the output range. Must meet the

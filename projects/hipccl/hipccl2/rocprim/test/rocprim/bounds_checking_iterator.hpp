@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -158,19 +158,19 @@ class out_of_bounds_flag
 public:
     out_of_bounds_flag()
     {
-        hipMalloc(reinterpret_cast<void**>(&device_pointer_), sizeof(bool));
-        hipMemset(device_pointer_, 0, sizeof(bool));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_pointer_), sizeof(bool)));
+        HIP_CHECK(hipMemset(device_pointer_, 0, sizeof(bool)));
     }
 
     ~out_of_bounds_flag()
     {
-        hipFree(device_pointer_);
+        HIP_CHECK(hipFree(device_pointer_));
     }
 
     bool get() const
     {
         bool value;
-        hipMemcpy(&value, device_pointer_, sizeof(bool), hipMemcpyDeviceToHost);
+        HIP_CHECK(hipMemcpy(&value, device_pointer_, sizeof(bool), hipMemcpyDeviceToHost));
         return value;
     }
 

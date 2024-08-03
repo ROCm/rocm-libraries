@@ -88,7 +88,7 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
     static constexpr unsigned int batch_size  = 10;
     static constexpr unsigned int warmup_size = 5;
 
-    static std::vector<Key> generate_keys(size_t size)
+    static std::vector<Key> generate_keys(size_t size, unsigned int seed)
     {
         using key_type = Key;
 
@@ -97,6 +97,7 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
             return get_random_data<key_type>(size,
                                              static_cast<key_type>(-1000),
                                              static_cast<key_type>(1000),
+                                             seed,
                                              size);
         }
         else
@@ -104,16 +105,20 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
             return get_random_data<key_type>(size,
                                              std::numeric_limits<key_type>::min(),
                                              std::numeric_limits<key_type>::max(),
+                                             seed,
                                              size);
         }
     }
 
     // keys benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State& state, size_t size, const hipStream_t stream) const ->
+    auto do_run(benchmark::State&   state,
+                size_t              size,
+                const managed_seed& seed,
+                hipStream_t         stream) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
-        auto keys_input = generate_keys(size);
+        auto keys_input = generate_keys(size, seed.get_0());
 
         using key_type = Key;
 
@@ -226,10 +231,13 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
 
     // pairs benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State& state, size_t size, const hipStream_t stream) const ->
+    auto do_run(benchmark::State&   state,
+                size_t              size,
+                const managed_seed& seed,
+                hipStream_t         stream) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
-        auto keys_input = generate_keys(size);
+        auto keys_input = generate_keys(size, seed.get_0());
 
         using key_type   = Key;
         using value_type = Value;
@@ -357,9 +365,12 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
         HIP_CHECK(hipFree(d_values_output));
     }
 
-    void run(benchmark::State& state, size_t size, hipStream_t stream) const override
+    void run(benchmark::State&   state,
+             size_t              size,
+             const managed_seed& seed,
+             hipStream_t         stream) const override
     {
-        do_run(state, size, stream);
+        do_run(state, size, seed, stream);
     }
 };
 
@@ -374,6 +385,9 @@ struct device_radix_sort_onesweep_benchmark_generator
     template<unsigned int ItemsPerThread, rocprim::block_radix_rank_algorithm RadixRankAlgorithm>
     static constexpr bool is_buildable()
     {
+        // Calculation uses `rocprim::device_warp_size()`, which is 64 on host side unless overridden.
+        //   However, this does not affect the total size of shared memory for the current configuration space.
+        //   Were the implementation to change, causing retuning, this needs to be re-evaluated and possibly taken into account.
         using sharedmem_storage =
             typename rp::detail::onesweep_iteration_helper<Key,
                                                            Value,
@@ -443,12 +457,13 @@ struct device_radix_sort_onesweep_benchmark_generator
     #define CREATE_RADIX_SORT_BENCHMARK(...)                                  \
         {                                                                     \
             const device_radix_sort_onesweep_benchmark<__VA_ARGS__> instance; \
-            REGISTER_BENCHMARK(benchmarks, size, stream, instance);           \
+            REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance);     \
         }
 
 inline void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                     hipStream_t                                   stream,
-                                     size_t                                        size)
+                                     size_t                                        size,
+                                     const managed_seed&                           seed,
+                                     hipStream_t                                   stream)
 {
     CREATE_RADIX_SORT_BENCHMARK(int)
     CREATE_RADIX_SORT_BENCHMARK(float)
@@ -460,8 +475,9 @@ inline void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*
 }
 
 inline void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                      hipStream_t                                   stream,
-                                      size_t                                        size)
+                                      size_t                                        size,
+                                      const managed_seed&                           seed,
+                                      hipStream_t                                   stream)
 {
     using custom_float2  = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;

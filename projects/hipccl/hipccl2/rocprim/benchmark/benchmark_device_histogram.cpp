@@ -67,11 +67,12 @@ const int entropy_reductions[] = {0, 2, 4, 6};
 
 template<class T>
 void run_even_benchmark(benchmark::State& state,
-                        size_t            bins,
-                        size_t            scale,
-                        int               entropy_reduction,
-                        hipStream_t       stream,
-                        size_t            size)
+                        size_t            size,
+                        const managed_seed&,
+                        hipStream_t stream,
+                        size_t      bins,
+                        size_t      scale,
+                        int         entropy_reduction)
 {
     using counter_type = unsigned int;
     using level_type =
@@ -168,11 +169,12 @@ void run_even_benchmark(benchmark::State& state,
 
 template<class T, unsigned int Channels, unsigned int ActiveChannels>
 void run_multi_even_benchmark(benchmark::State& state,
-                              size_t            bins,
-                              size_t            scale,
-                              int               entropy_reduction,
-                              hipStream_t       stream,
-                              size_t            size)
+                              size_t            size,
+                              const managed_seed&,
+                              hipStream_t stream,
+                              size_t      bins,
+                              size_t      scale,
+                              int         entropy_reduction)
 {
     using counter_type = unsigned int;
     using level_type =
@@ -282,14 +284,17 @@ void run_multi_even_benchmark(benchmark::State& state,
 }
 
 template<class T>
-void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t stream, size_t size)
+void run_range_benchmark(
+    benchmark::State& state, size_t size, const managed_seed& seed, hipStream_t stream, size_t bins)
 {
     using counter_type = unsigned int;
     using level_type =
         typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
     // Generate data
-    std::vector<T> input = get_random_data<T>(size, 0, bins);
+    const auto     random_range = limit_random_range<T>(0, bins);
+    std::vector<T> input
+        = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
 
     std::vector<level_type> levels(bins + 1);
     for(size_t i = 0; i < levels.size(); i++)
@@ -383,10 +388,8 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
 }
 
 template<class T, unsigned int Channels, unsigned int ActiveChannels>
-void run_multi_range_benchmark(benchmark::State& state,
-                               size_t            bins,
-                               hipStream_t       stream,
-                               size_t            size)
+void run_multi_range_benchmark(
+    benchmark::State& state, size_t size, const managed_seed& seed, hipStream_t stream, size_t bins)
 {
     using counter_type = unsigned int;
     using level_type =
@@ -406,7 +409,11 @@ void run_multi_range_benchmark(benchmark::State& state,
     }
 
     // Generate data
-    std::vector<T> input = get_random_data<T>(size * Channels, 0, bins);
+    const auto     random_range = limit_random_range<T>(0, bins);
+    std::vector<T> input        = get_random_data<T>(size * Channels,
+                                              random_range.first,
+                                              random_range.second,
+                                              seed.get_0());
 
     T*            d_input;
     level_type*   d_levels[ActiveChannels];
@@ -512,7 +519,7 @@ void run_multi_range_benchmark(benchmark::State& state,
                                   + ",bins:" + std::to_string(BINS) + ",cfg:default_config}")  \
             .c_str(),                                                                          \
         [=](benchmark::State& state)                                                           \
-        { run_even_benchmark<T>(state, BINS, SCALE, entropy_reduction, stream, size); }));
+        { run_even_benchmark<T>(state, size, seed, stream, BINS, SCALE, entropy_reduction); }));
 
 #define BENCHMARK_EVEN_TYPE(VECTOR, T, S)      \
     CREATE_EVEN_BENCHMARK(VECTOR, T, 10, S);   \
@@ -521,8 +528,9 @@ void run_multi_range_benchmark(benchmark::State& state,
     CREATE_EVEN_BENCHMARK(VECTOR, T, 10000, S);
 
 void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                         hipStream_t                                   stream,
-                         size_t                                        size)
+                         size_t                                        size,
+                         const managed_seed&                           seed,
+                         hipStream_t                                   stream)
 {
     for(int entropy_reduction : entropy_reductions)
     {
@@ -548,21 +556,26 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
         [=](benchmark::State& state)                                                          \
         {                                                                                     \
             run_multi_even_benchmark<T, CHANNELS, ACTIVE_CHANNELS>(state,                     \
+                                                                   size,                      \
+                                                                   seed,                      \
+                                                                   stream,                    \
                                                                    BINS,                      \
                                                                    SCALE,                     \
-                                                                   entropy_reduction,         \
-                                                                   stream,                    \
-                                                                   size);                     \
+                                                                   entropy_reduction);        \
         })
 
-#define BENCHMARK_MULTI_EVEN_TYPE(C, A, T, S)                                                  \
-    CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 10, S), CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 100, S), \
-        CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 1000, S),                                         \
-        CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 10000, S)
+// clang-format off
+#define BENCHMARK_MULTI_EVEN_TYPE(C, A, T, S)      \
+    CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 10, S),   \
+    CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 100, S),  \
+    CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 1000, S), \
+    CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 10000, S)
+// clang-format on
 
 void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                               hipStream_t                                   stream,
-                               size_t                                        size)
+                               size_t                                        size,
+                               const managed_seed&                           seed,
+                               hipStream_t                                   stream)
 {
     for(int entropy_reduction : entropy_reductions)
     {
@@ -582,15 +595,20 @@ void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
         bench_naming::format_name("{lvl:device,algo:histogram_range,value_type:" #T ",bins:" \
                                   + std::to_string(BINS) + ",cfg:default_config}")           \
             .c_str(),                                                                        \
-        [=](benchmark::State& state) { run_range_benchmark<T>(state, BINS, stream, size); })
+        [=](benchmark::State& state) { run_range_benchmark<T>(state, size, seed, stream, BINS); })
 
-#define BENCHMARK_RANGE_TYPE(T)                                    \
-    CREATE_RANGE_BENCHMARK(T, 10), CREATE_RANGE_BENCHMARK(T, 100), \
-        CREATE_RANGE_BENCHMARK(T, 1000), CREATE_RANGE_BENCHMARK(T, 10000)
+// clang-format off
+#define BENCHMARK_RANGE_TYPE(T)      \
+    CREATE_RANGE_BENCHMARK(T, 10),   \
+    CREATE_RANGE_BENCHMARK(T, 100),  \
+    CREATE_RANGE_BENCHMARK(T, 1000), \
+    CREATE_RANGE_BENCHMARK(T, 10000)
+// clang-format on
 
 void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                          hipStream_t                                   stream,
-                          size_t                                        size)
+                          size_t                                        size,
+                          const managed_seed&                           seed,
+                          hipStream_t                                   stream)
 {
     std::vector<benchmark::internal::Benchmark*> bs = {
         BENCHMARK_RANGE_TYPE(long long),
@@ -612,16 +630,26 @@ void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmar
                                   ",bins:"                                                    \
                                   + std::to_string(BINS) + ",cfg:default_config}")            \
             .c_str(),                                                                         \
-        [=](benchmark::State& state)                                                          \
-        { run_multi_range_benchmark<T, CHANNELS, ACTIVE_CHANNELS>(state, BINS, stream, size); })
+        [=](benchmark::State& state) {                                                        \
+            run_multi_range_benchmark<T, CHANNELS, ACTIVE_CHANNELS>(state,                    \
+                                                                    size,                     \
+                                                                    seed,                     \
+                                                                    stream,                   \
+                                                                    BINS);                    \
+        })
 
-#define BENCHMARK_MULTI_RANGE_TYPE(C, A, T)                                                \
-    CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 10), CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 100), \
-        CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 1000), CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 10000)
+// clang-format off
+#define BENCHMARK_MULTI_RANGE_TYPE(C, A, T)      \
+    CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 10),   \
+    CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 100),  \
+    CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 1000), \
+    CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 10000)
+// clang-format on
 
 void add_multi_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                hipStream_t                                   stream,
-                                size_t                                        size)
+                                size_t                                        size,
+                                const managed_seed&                           seed,
+                                hipStream_t                                   stream)
 {
     std::vector<benchmark::internal::Benchmark*> bs = {
         BENCHMARK_MULTI_RANGE_TYPE(4, 4, int),
@@ -643,6 +671,7 @@ int main(int argc, char* argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
 #ifdef BENCHMARK_CONFIG_TUNING
     // optionally run an evenly split subset of benchmarks, when making multiple program invocations
     parser.set_optional<int>("parallel_instance",
@@ -661,6 +690,8 @@ int main(int argc, char* argv[])
     const size_t size   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
+    const std::string  seed_type = parser.get<std::string>("seed");
+    const managed_seed seed(seed_type);
 
     // HIP
     hipStream_t stream = 0; // default
@@ -668,6 +699,7 @@ int main(int argc, char* argv[])
     // Benchmark info
     add_common_benchmark_info();
     benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
@@ -678,12 +710,13 @@ int main(int argc, char* argv[])
                                                         parallel_instance,
                                                         parallel_instances,
                                                         size,
+                                                        seed,
                                                         stream);
 #else // BENCHMARK_CONFIG_TUNING
-    add_even_benchmarks(benchmarks, stream, size);
-    add_multi_even_benchmarks(benchmarks, stream, size);
-    add_range_benchmarks(benchmarks, stream, size);
-    add_multi_range_benchmarks(benchmarks, stream, size);
+    add_even_benchmarks(benchmarks, size, seed, stream);
+    add_multi_even_benchmarks(benchmarks, size, seed, stream);
+    add_range_benchmarks(benchmarks, size, seed, stream);
+    add_multi_range_benchmarks(benchmarks, size, seed, stream);
 #endif // BENCHMARK_CONFIG_TUNING
 
     // Use manual timing

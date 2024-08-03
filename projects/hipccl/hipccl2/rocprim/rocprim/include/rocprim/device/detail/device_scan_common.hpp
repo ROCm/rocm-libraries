@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,7 +48,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
     if((number_of_blocks <= save_index && flat_thread_id == 0) || flat_thread_id == save_index)
     {
         typename LookBackScanState::value_type value;
-        typename LookBackScanState::flag_type  dummy_flag;
+        prefix_flag                            dummy_flag;
         lookback_scan_state.get(save_index, dummy_flag, value);
         access_function(value);
     }

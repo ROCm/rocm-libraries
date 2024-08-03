@@ -32,18 +32,18 @@
 #include "test_utils_types.hpp"
 
 // Params for tests
-template<
-    class InputType,
-    class OutputType = InputType,
-    class FlagType = unsigned int,
-    bool UseIdentityIterator = false,
-    bool UseGraphs = false
->
+template<class InputType,
+         class OutputType         = InputType,
+         class FlagType           = unsigned int,
+         class Config             = rocprim::default_config,
+         bool UseIdentityIterator = false,
+         bool UseGraphs           = false>
 struct DevicePartitionParams
 {
     using input_type = InputType;
     using output_type = OutputType;
     using flag_type = FlagType;
+    using config                                = Config;
     static constexpr bool use_identity_iterator = UseIdentityIterator;
     static constexpr bool use_graphs = UseGraphs;
 };
@@ -55,22 +55,31 @@ public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
     using flag_type = typename Params::flag_type;
+    using config                                = typename Params::config;
     const bool debug_synchronous = false;
     static constexpr bool use_identity_iterator = Params::use_identity_iterator;
     static constexpr bool use_graphs = Params::use_graphs;
 };
 
-typedef ::testing::Types<DevicePartitionParams<int, int, unsigned char, true>,
-                         DevicePartitionParams<unsigned int, unsigned long>,
-                         DevicePartitionParams<unsigned char, float>,
-                         DevicePartitionParams<float, float>,
-                         DevicePartitionParams<double, double>,
-                         DevicePartitionParams<int8_t, int8_t>,
-                         DevicePartitionParams<uint8_t, uint8_t>,
-                         DevicePartitionParams<rocprim::half, rocprim::half>,
-                         DevicePartitionParams<rocprim::bfloat16, rocprim::bfloat16>,
-                         DevicePartitionParams<test_utils::custom_test_type<long long>>,
-                         DevicePartitionParams<int, int, unsigned int, false, true>>
+using config = rocprim::select_config<512,
+                                      1,
+                                      ::rocprim::block_load_method::block_load_transpose,
+                                      ::rocprim::block_load_method::block_load_transpose,
+                                      ::rocprim::block_load_method::block_load_transpose,
+                                      ::rocprim::block_scan_algorithm::using_warp_scan>;
+
+typedef ::testing::Types<
+    DevicePartitionParams<int, int, unsigned char, rocprim::default_config, true>,
+    DevicePartitionParams<unsigned int, unsigned long>,
+    DevicePartitionParams<unsigned char, float>,
+    DevicePartitionParams<float, float, unsigned int, config>,
+    DevicePartitionParams<double, double>,
+    DevicePartitionParams<int8_t, int8_t>,
+    DevicePartitionParams<uint8_t, uint8_t>,
+    DevicePartitionParams<rocprim::half, rocprim::half>,
+    DevicePartitionParams<rocprim::bfloat16, rocprim::bfloat16>,
+    DevicePartitionParams<test_utils::custom_test_type<long long>>,
+    DevicePartitionParams<int, int, unsigned int, rocprim::default_config, false, true>>
     RocprimDevicePartitionTestsParams;
 
 TYPED_TEST_SUITE(RocprimDevicePartitionTests, RocprimDevicePartitionTestsParams);
@@ -84,6 +93,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
+    using config                                = typename TestFixture::config;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
@@ -141,7 +151,8 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::partition(
+
+            HIP_CHECK(rocprim::partition<config>(
                 nullptr,
                 temp_storage_size_bytes,
                 d_input,
@@ -166,7 +177,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
             }
 
             // Run
-            HIP_CHECK(rocprim::partition(
+            HIP_CHECK(rocprim::partition<config>(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 d_input,
@@ -234,6 +245,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using config                 = typename TestFixture::config;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
@@ -267,15 +279,15 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
     // temp storage
     size_t temp_storage_size_bytes;
     // Get size of d_temp_storage
-    HIP_CHECK(rocprim::partition(nullptr,
-                                 temp_storage_size_bytes,
-                                 rocprim::make_constant_iterator<T>(T(345)),
-                                 d_checking_output,
-                                 d_selected_count_output,
-                                 0,
-                                 select_op,
-                                 stream,
-                                 debug_synchronous));
+    HIP_CHECK(rocprim::partition<config>(nullptr,
+                                         temp_storage_size_bytes,
+                                         rocprim::make_constant_iterator<T>(T(345)),
+                                         d_checking_output,
+                                         d_selected_count_output,
+                                         0,
+                                         select_op,
+                                         stream,
+                                         debug_synchronous));
 
     // allocate temporary storage
     void* d_temp_storage = nullptr;
@@ -288,15 +300,15 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
     }
 
     // Run
-    HIP_CHECK(rocprim::partition(d_temp_storage,
-                                 temp_storage_size_bytes,
-                                 rocprim::make_constant_iterator<T>(T(345)),
-                                 d_checking_output,
-                                 d_selected_count_output,
-                                 0,
-                                 select_op,
-                                 stream,
-                                 debug_synchronous));
+    HIP_CHECK(rocprim::partition<config>(d_temp_storage,
+                                         temp_storage_size_bytes,
+                                         rocprim::make_constant_iterator<T>(T(345)),
+                                         d_checking_output,
+                                         d_selected_count_output,
+                                         0,
+                                         select_op,
+                                         stream,
+                                         debug_synchronous));
 
     hipGraphExec_t graph_instance;
     if(TestFixture::use_graphs)
@@ -336,6 +348,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using config                                = typename TestFixture::config;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
@@ -394,7 +407,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::partition(
+            HIP_CHECK(rocprim::partition<config>(
                 nullptr,
                 temp_storage_size_bytes,
                 d_input,
@@ -419,7 +432,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
             }
 
             // Run
-            HIP_CHECK(rocprim::partition(
+            HIP_CHECK(rocprim::partition<config>(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 d_input,
@@ -488,6 +501,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
 
     using T                                     = typename TestFixture::input_type;
     using U                                     = typename TestFixture::output_type;
+    using config                                = typename TestFixture::config;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool            debug_synchronous     = TestFixture::debug_synchronous;
 
@@ -552,11 +566,12 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::partition(
+            HIP_CHECK(rocprim::partition_two_way<config>(
                 nullptr,
                 temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_selected),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_rejected),
                 d_selected_count_output,
                 input.size(),
                 select_op,
@@ -577,7 +592,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
             }
 
             // Run
-            HIP_CHECK(rocprim::partition_two_way(
+            HIP_CHECK(rocprim::partition_two_way<config>(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 d_input,
@@ -661,6 +676,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using config                                = typename TestFixture::config;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
@@ -741,7 +757,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
                 // temp storage
                 size_t temp_storage_size_bytes;
                 // Get size of d_temp_storage
-                HIP_CHECK(rocprim::partition_three_way(
+                HIP_CHECK(rocprim::partition_three_way<config>(
                     nullptr,
                     temp_storage_size_bytes,
                     d_input,
@@ -770,7 +786,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
                 }
 
                 // Run
-                HIP_CHECK(rocprim::partition_three_way(
+                HIP_CHECK(rocprim::partition_three_way<config>(
                     d_temp_storage,
                     temp_storage_size_bytes,
                     d_input,

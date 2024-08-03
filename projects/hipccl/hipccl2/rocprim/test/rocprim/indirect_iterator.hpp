@@ -78,11 +78,13 @@ public:
 
     using iterator_category = std::random_access_iterator_tag;
 
-    ROCPRIM_HOST_DEVICE inline indirect_iterator(T* ptr) : ptr_(ptr) {}
+    ROCPRIM_HOST_DEVICE inline explicit indirect_iterator(T* ptr) : ptr_(ptr) {}
 
     ROCPRIM_HOST_DEVICE inline ~indirect_iterator() = default;
 
-    ROCPRIM_HOST_DEVICE inline indirect_iterator& operator++()
+    ROCPRIM_HOST_DEVICE
+    inline indirect_iterator&
+        operator++()
     {
         ++ptr_;
         return *this;
