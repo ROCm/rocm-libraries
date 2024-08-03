@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
  */
 
 #pragma once
+
+// Internal config header that is only included through thrust/detail/config/config.h
 
 // reserve 0 for undefined
 #define THRUST_DEVICE_SYSTEM_CUDA    1

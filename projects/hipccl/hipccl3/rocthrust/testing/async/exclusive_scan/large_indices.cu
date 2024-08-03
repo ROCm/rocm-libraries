@@ -15,6 +15,7 @@
 #include <thrust/iterator/detail/iterator_facade_category.h>
 
 #include <cstdint>
+#include <cinttypes>
 
 // This test is an adaptation of TestInclusiveScanWithBigIndices from scan.cu.
 
@@ -82,7 +83,7 @@ struct assert_sequence_iterator
   {
     if (val != expected)
     {
-      printf("Error: expected %ld, got %ld\n", expected, val);
+      printf("Error: expected %" PRId64", got %" PRId64"\n", expected, val);
       *unexpected_value = true;
     }
     else if (val == max)

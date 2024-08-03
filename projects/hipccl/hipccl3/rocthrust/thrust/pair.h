@@ -1,5 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -21,6 +22,67 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+
+#include <cuda/std/utility>
+
+THRUST_NAMESPACE_BEGIN
+
+/*! \addtogroup utility
+ *  \{
+ */
+
+/*! \addtogroup pair
+ *  \{
+ */
+
+/*! This convenience metafunction is included for compatibility with
+ *  \p tuple. It returns either the type of a \p pair's
+ *  \c first_type or \c second_type in its nested type, \c type.
+ *
+ *  \tparam N This parameter selects the member of interest.
+ *  \tparam T A \c pair type of interest.
+ */
+template <size_t N, class T>
+using tuple_element = ::cuda::std::tuple_element<N, T>;
+
+/*! This convenience metafunction is included for compatibility with
+ *  \p tuple. It returns \c 2, the number of elements of a \p pair,
+ *  in its nested data member, \c value.
+ *
+ *  \tparam Pair A \c pair type of interest.
+ */
+template <class T>
+using tuple_size = ::cuda::std::tuple_size<T>;
+
+/*! \p pair is a generic data structure encapsulating a heterogeneous
+ *  pair of values.
+ *
+ *  \tparam T1 The type of \p pair's first object type.  There are no
+ *          requirements on the type of \p T1. <tt>T1</tt>'s type is
+ *          provided by <tt>pair::first_type</tt>.
+ *
+ *  \tparam T2 The type of \p pair's second object type.  There are no
+ *          requirements on the type of \p T2. <tt>T2</tt>'s type is
+ *          provided by <tt>pair::second_type</tt>.
+ */
+template <class T, class U>
+using pair = ::cuda::std::pair<T, U>;
+
+using ::cuda::std::get;
+using ::cuda::std::make_pair;
+
+/*! \} // pair
+ */
+
+/*! \} // utility
+ */
+
+THRUST_NAMESPACE_END
+
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+
 #include <utility>
 
 THRUST_NAMESPACE_BEGIN
@@ -279,3 +341,5 @@ template<typename Pair> struct tuple_size;
 THRUST_NAMESPACE_END
 
 #include <thrust/detail/pair.inl>
+
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA

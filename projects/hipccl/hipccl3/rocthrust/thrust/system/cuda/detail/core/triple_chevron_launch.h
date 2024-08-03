@@ -29,15 +29,15 @@
 #include <thrust/detail/config.h>
 #include <thrust/system/cuda/detail/core/alignment.h>
 #include <thrust/system/cuda/detail/guarded_cuda_runtime_api.h>
-#include <cassert>
 
+#include <cassert>
 
 THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub {
 namespace launcher {
 
-  struct triple_chevron
+  struct _CCCL_ATTRIBUTE_HIDDEN triple_chevron
   {
     typedef size_t Size;
     dim3 const grid;
@@ -125,7 +125,7 @@ namespace launcher {
                               shared_mem,
                               stream);
     }
-    #else 
+    #else
     template<class K, class... Args>
     cudaError_t __device__
     doit_device(K, Args const&... ) const

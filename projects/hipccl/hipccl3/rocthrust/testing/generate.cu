@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -194,10 +194,10 @@ void TestGenerateNToDiscardIterator(const size_t n)
     T value = 13;
     return_value<T> f(value);
 
-    thrust::discard_iterator<thrust::host_system_tag> h_result =
+    thrust::discard_iterator<thrust::host_system_tag> h_result = 
       thrust::generate_n(thrust::discard_iterator<thrust::host_system_tag>(), n, f);
 
-    thrust::discard_iterator<thrust::device_system_tag> d_result =
+    thrust::discard_iterator<thrust::device_system_tag> d_result = 
       thrust::generate_n(thrust::discard_iterator<thrust::device_system_tag>(), n, f);
 
     thrust::discard_iterator<> reference(n);

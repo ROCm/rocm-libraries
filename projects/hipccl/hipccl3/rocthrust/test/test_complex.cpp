@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ TYPED_TEST(ComplexTests, TestComplexConstructors)
     {
         SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        thrust::host_vector<T> data = get_random_data<T>(2, T(-1000), T(1000), seed);
+        thrust::host_vector<T> data = get_random_data<T>(2, saturate_cast<T>(-1000), saturate_cast<T>(1000), seed);
 
         thrust::complex<T>     a(data[0], data[1]);
         thrust::complex<T>     b(a);
@@ -150,7 +150,7 @@ TYPED_TEST(ComplexTests, TestComplexBasicArithmetic)
     {
         SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        thrust::host_vector<T> data = get_random_data<T>(2, T(-100), T(100), seed);
+        thrust::host_vector<T> data = get_random_data<T>(2, saturate_cast<T>(-100), saturate_cast<T>(100), seed);
 
         thrust::complex<T> a(data[0], data[1]);
         std::complex<T>    b(a);
@@ -285,7 +285,7 @@ TYPED_TEST(ComplexTests, TestComplexTrigonometricFunctions)
     {
         SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        thrust::host_vector<T> data_a = get_random_data<T>(2, T(-1), T(1), seed);
+        thrust::host_vector<T> data_a = get_random_data<T>(2, saturate_cast<T>(-1), saturate_cast<T>(1), seed);
 
         thrust::complex<T> a(data_a[0], data_a[1]);
         std::complex<T>    c(a);
@@ -316,7 +316,7 @@ TYPED_TEST(ComplexTests, TestComplexStreamOperators)
     {
         SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        thrust::host_vector<T> data_a = get_random_data<T>(2, T(-1000), T(1000), seed);
+        thrust::host_vector<T> data_a = get_random_data<T>(2, saturate_cast<T>(-1000), saturate_cast<T>(1000), seed);
 
         thrust::complex<T> a(data_a[0], data_a[1]);
         std::stringstream  out;

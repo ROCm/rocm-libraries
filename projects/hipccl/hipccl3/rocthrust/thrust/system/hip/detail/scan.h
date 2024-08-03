@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -75,8 +75,41 @@ exclusive_scan(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
 
 namespace hip_rocprim
 {
+
 namespace __scan
 {
+    template <typename Derived, typename InputIt, typename OutputIt, typename Size, typename ScanOp>
+    THRUST_HIP_RUNTIME_FUNCTION auto invoke_inclusive_scan(execution_policy<Derived>& policy,
+                                                           void*             temporary_storage,
+                                                           size_t&           storage_size,
+                                                           InputIt           input,
+                                                           OutputIt          output,
+                                                           const Size        num_items,
+                                                           ScanOp            scan_op,
+                                                           const hipStream_t stream,
+                                                           bool              debug_sync)
+        -> std::enable_if_t<decltype(nondeterministic(policy))::value, hipError_t>
+    {
+        return rocprim::inclusive_scan(
+            temporary_storage, storage_size, input, output, num_items, scan_op, stream, debug_sync);
+    }
+
+    template <typename Derived, typename InputIt, typename OutputIt, typename Size, typename ScanOp>
+    THRUST_HIP_RUNTIME_FUNCTION auto invoke_inclusive_scan(execution_policy<Derived>& policy,
+                                                           void*             temporary_storage,
+                                                           size_t&           storage_size,
+                                                           InputIt           input,
+                                                           OutputIt          output,
+                                                           const Size        num_items,
+                                                           ScanOp            scan_op,
+                                                           const hipStream_t stream,
+                                                           bool              debug_sync)
+        -> std::enable_if_t<!decltype(nondeterministic(policy))::value, hipError_t>
+    {
+        return rocprim::deterministic_inclusive_scan(
+            temporary_storage, storage_size, input, output, num_items, scan_op, stream, debug_sync);
+    }
+
     template <typename Derived, typename InputIt, typename OutputIt, typename Size, typename ScanOp>
     THRUST_HIP_RUNTIME_FUNCTION OutputIt
     inclusive_scan(execution_policy<Derived>& policy,
@@ -93,14 +126,15 @@ namespace __scan
         bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::inclusive_scan(NULL,
-                                                            storage_size,
-                                                            input_it,
-                                                            output_it,
-                                                            num_items,
-                                                            scan_op,
-                                                            stream,
-                                                            debug_sync),
+        hip_rocprim::throw_on_error(invoke_inclusive_scan(policy,
+                                                          NULL,
+                                                          storage_size,
+                                                          input_it,
+                                                          output_it,
+                                                          num_items,
+                                                          scan_op,
+                                                          stream,
+                                                          debug_sync),
                                     "scan failed on 1st step");
 
         // Allocate temporary storage.
@@ -109,14 +143,15 @@ namespace __scan
         void *ptr = static_cast<void*>(tmp.data().get());
 
         // Run scan.
-        hip_rocprim::throw_on_error(rocprim::inclusive_scan(ptr,
-                                                            storage_size,
-                                                            input_it,
-                                                            output_it,
-                                                            num_items,
-                                                            scan_op,
-                                                            stream,
-                                                            debug_sync),
+        hip_rocprim::throw_on_error(invoke_inclusive_scan(policy,
+                                                          ptr,
+                                                          storage_size,
+                                                          input_it,
+                                                          output_it,
+                                                          num_items,
+                                                          scan_op,
+                                                          stream,
+                                                          debug_sync),
                                     "scan failed on 2nd step");
 
         hip_rocprim::throw_on_error(
@@ -125,6 +160,64 @@ namespace __scan
         );
 
         return output_it + num_items;
+    }
+
+    template <typename Derived,
+              typename InputIt,
+              typename OutputIt,
+              typename T,
+              typename Size,
+              typename ScanOp>
+    THRUST_HIP_RUNTIME_FUNCTION auto invoke_exclusive_scan(execution_policy<Derived>& policy,
+                                                           void*             temporary_storage,
+                                                           size_t&           storage_size,
+                                                           InputIt           input,
+                                                           OutputIt          output,
+                                                           T                 init,
+                                                           const Size        num_items,
+                                                           ScanOp            scan_op,
+                                                           const hipStream_t stream,
+                                                           bool              debug_sync)
+        -> std::enable_if_t<decltype(nondeterministic(policy))::value, hipError_t>
+    {
+        return rocprim::exclusive_scan(temporary_storage,
+                                       storage_size,
+                                       input,
+                                       output,
+                                       init,
+                                       num_items,
+                                       scan_op,
+                                       stream,
+                                       debug_sync);
+    }
+
+    template <typename Derived,
+              typename InputIt,
+              typename OutputIt,
+              typename T,
+              typename Size,
+              typename ScanOp>
+    THRUST_HIP_RUNTIME_FUNCTION auto invoke_exclusive_scan(execution_policy<Derived>& policy,
+                                                           void*             temporary_storage,
+                                                           size_t&           storage_size,
+                                                           InputIt           input,
+                                                           OutputIt          output,
+                                                           T                 init,
+                                                           const Size        num_items,
+                                                           ScanOp            scan_op,
+                                                           const hipStream_t stream,
+                                                           bool              debug_sync)
+        -> std::enable_if_t<!decltype(nondeterministic(policy))::value, hipError_t>
+    {
+        return rocprim::deterministic_exclusive_scan(temporary_storage,
+                                                     storage_size,
+                                                     input,
+                                                     output,
+                                                     init,
+                                                     num_items,
+                                                     scan_op,
+                                                     stream,
+                                                     debug_sync);
     }
 
     template <typename Derived, typename InputIt, typename OutputIt, typename Size, typename T, typename ScanOp>
@@ -144,15 +237,16 @@ namespace __scan
         bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::exclusive_scan(NULL,
-                                                            storage_size,
-                                                            input_it,
-                                                            output_it,
-                                                            init,
-                                                            num_items,
-                                                            scan_op,
-                                                            stream,
-                                                            debug_sync),
+        hip_rocprim::throw_on_error(invoke_exclusive_scan(policy,
+                                                          NULL,
+                                                          storage_size,
+                                                          input_it,
+                                                          output_it,
+                                                          init,
+                                                          num_items,
+                                                          scan_op,
+                                                          stream,
+                                                          debug_sync),
                                     "scan failed on 1st step");
 
         // Allocate temporary storage.
@@ -161,15 +255,16 @@ namespace __scan
         void *ptr = static_cast<void*>(tmp.data().get());
 
         // Run scan.
-        hip_rocprim::throw_on_error(rocprim::exclusive_scan(ptr,
-                                                            storage_size,
-                                                            input_it,
-                                                            output_it,
-                                                            init,
-                                                            num_items,
-                                                            scan_op,
-                                                            stream,
-                                                            debug_sync),
+        hip_rocprim::throw_on_error(invoke_exclusive_scan(policy,
+                                                          ptr,
+                                                          storage_size,
+                                                          input_it,
+                                                          output_it,
+                                                          init,
+                                                          num_items,
+                                                          scan_op,
+                                                          stream,
+                                                          debug_sync),
                                     "scan failed on 2nd step");
 
         hip_rocprim::throw_on_error(

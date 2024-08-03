@@ -43,7 +43,7 @@ namespace mr
  *  \tparam Upstream the type of memory resources that will be used for allocating memory
  */
 template<typename Upstream>
-struct synchronized_pool_resource : public memory_resource<typename Upstream::pointer>
+class synchronized_pool_resource : public memory_resource<typename Upstream::pointer>
 {
     typedef unsynchronized_pool_resource<Upstream> unsync_pool;
     typedef std::lock_guard<std::mutex> lock_t;
@@ -111,4 +111,3 @@ private:
 THRUST_NAMESPACE_END
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

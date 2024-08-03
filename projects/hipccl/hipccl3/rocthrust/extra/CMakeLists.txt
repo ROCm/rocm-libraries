@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2023 Advanced Micro Devices, Inc.
+# Copyright 2019-2024 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
@@ -71,8 +71,8 @@ function(add_rocthrust_test TEST_NAME TEST_SOURCES)
         PRIVATE
           --offload-arch=${gpu_target}
       )
+    endforeach()
   endif()
-  endforeach()
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
 

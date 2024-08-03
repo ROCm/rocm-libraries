@@ -41,35 +41,42 @@ template<typename T> class device_reference;
 namespace detail
 {
  /// helper classes [4.3].
- template<typename T, T v>
-   struct integral_constant
-   {
-     THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT T value = v;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template<typename T, T v>
+using integral_constant = ::cuda::std::integral_constant<T, v>;
+using true_type  = ::cuda::std::true_type;
+using false_type = ::cuda::std::false_type;
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+template<typename T, T v>
+  struct integral_constant
+  {
+    THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT T value = v;
 
-     typedef T                       value_type;
-     typedef integral_constant<T, v> type;
+    typedef T                       value_type;
+    typedef integral_constant<T, v> type;
 
-     // We don't want to switch to std::integral_constant, because we want access
-     // to the C++14 operator(), but we'd like standard traits to interoperate
-     // with our version when tag dispatching.
-     integral_constant() = default;
+    // We don't want to switch to std::integral_constant, because we want access
+    // to the C++14 operator(), but we'd like standard traits to interoperate
+    // with our version when tag dispatching.
+    integral_constant() = default;
 
-     integral_constant(integral_constant const&) = default;
+    integral_constant(integral_constant const&) = default;
 
-     integral_constant& operator=(integral_constant const&) = default;
+    integral_constant& operator=(integral_constant const&) = default;
 
-     constexpr __host__ __device__
-     integral_constant(std::integral_constant<T, v>) noexcept {}
+    constexpr __host__ __device__
+    integral_constant(std::integral_constant<T, v>) noexcept {}
 
-     constexpr __host__ __device__ operator value_type() const noexcept { return value; }
-     constexpr __host__ __device__ value_type operator()() const noexcept { return value; }
-   };
+    constexpr __host__ __device__ operator value_type() const noexcept { return value; }
+    constexpr __host__ __device__ value_type operator()() const noexcept { return value; }
+  };
 
- /// typedef for true_type
- typedef integral_constant<bool, true>  true_type;
+/// typedef for true_type
+typedef integral_constant<bool, true>  true_type;
 
- /// typedef for true_type
- typedef integral_constant<bool, false> false_type;
+/// typedef for true_type
+typedef integral_constant<bool, false> false_type;
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 //template<typename T> struct is_integral : public std::tr1::is_integral<T> {};
 template<typename T> struct is_integral                           : public false_type {};
@@ -141,6 +148,19 @@ template<typename T> struct is_pod
  {};
 
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template <typename T>
+struct has_trivial_constructor
+  : public integral_constant<bool, is_pod<T>::value || ::cuda::std::is_trivially_constructible<T>::value>
+{};
+
+template<typename T>
+struct has_trivial_copy_constructor
+  : public integral_constant<bool, is_pod<T>::value || ::cuda::std::is_trivially_copyable<T>::value>
+{};
+
+template<typename T> struct has_trivial_destructor : public is_pod<T> {};
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 template<typename T> struct has_trivial_constructor
   : public integral_constant<
       bool,
@@ -177,6 +197,7 @@ template <typename T>
 struct has_trivial_destructor : public is_pod<T>
 {
 };
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 template<typename T> struct is_const          : public false_type {};
 template<typename T> struct is_const<const T> : public true_type {};
@@ -305,7 +326,12 @@ template<typename T1, typename T2>
 
 #if THRUST_CPP_DIALECT >= 2011
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template<class From, class To>
+using is_convertible = ::cuda::std::is_convertible<From, To>;
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 using std::is_convertible;
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 #else
 
@@ -589,7 +615,12 @@ template<typename T1, typename T2>
 
 #if THRUST_CPP_DIALECT >= 2011
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template<class Base, class Derived>
+using is_base_of = ::cuda::std::is_base_of<Base, Derived>;
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 using std::is_base_of;
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 #else
 
@@ -683,7 +714,7 @@ template<typename T1, typename T2, typename Enable = void> struct promoted_numer
 
 template<typename T1, typename T2>
   struct promoted_numerical_type<T1,T2,typename enable_if<and_
-  <typename is_floating_point<T1>::type,typename is_floating_point<T2>::type>
+  <typename is_floating_point<T1>::type, typename is_floating_point<T2>::type>
   ::value>::type>
   {
   typedef typename larger_type<T1,T2>::type type;
@@ -691,7 +722,7 @@ template<typename T1, typename T2>
 
 template<typename T1, typename T2>
   struct promoted_numerical_type<T1,T2,typename enable_if<and_
-  <typename is_integral<T1>::type,typename is_floating_point<T2>::type>
+  <typename is_integral<T1>::type, typename is_floating_point<T2>::type>
   ::value>::type>
   {
   typedef T2 type;
@@ -724,7 +755,7 @@ template<typename T>
 template <typename Invokable, typename... Args>
 using invoke_result_t =
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-      typename ::rocprim::invoke_result<Invokable, Args...>::type;
+  typename ::rocprim::invoke_result<Invokable, Args...>::type;
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #if THRUST_CPP_DIALECT < 2017
   typename ::cuda::std::result_of<Invokable(Args...)>::type;
@@ -732,7 +763,11 @@ using invoke_result_t =
   ::cuda::std::invoke_result_t<Invokable, Args...>;
 #endif
 #else
+#if THRUST_CPP_DIALECT < 2017
+  std::result_of_t<Invokable(Args...)>;
+#else // 2017+
   std::invoke_result_t<Invokable, Args...>;
+#endif
 #endif
 
 template <class F, class... Us>

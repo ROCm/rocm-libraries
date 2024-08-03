@@ -1,5 +1,5 @@
 // Copyright (c) 2018 NVIDIA Corporation
-// Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
 // Author: Bryce Adelstein Lelbach <brycelelbach@gmail.com>
 //
 // Distributed under the Boost Software License v1.0 (boost.org/LICENSE_1_0.txt)
@@ -7,10 +7,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp14_required.h>
-
-#if THRUST_CPP_DIALECT >= 2014
-
 #include <thrust/system/hip/pointer.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
@@ -69,5 +65,3 @@ unique_eager_future_type(
 THRUST_NAMESPACE_END
 
 #include <thrust/system/hip/detail/future.inl>
-
-#endif // C++14

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Start of configuration
-preamble="Copyright +(\([cC]\) +)?"
+preamble="Copyright *(\([cC]\)|©)? *"
 postamble=",? +Advanced +Micro +Devices, +Inc\."
 find_pattern="$preamble([0-9]{4}-)?[0-9]{4}$postamble"
 # printf format string, receives the current year as a parameter

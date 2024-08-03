@@ -27,10 +27,11 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #include <thrust/detail/alignment.h>
-#include <thrust/detail/config.h>
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/raw_reference_cast.h>
@@ -73,6 +74,80 @@ namespace __reduce_by_key
     template <typename Derived,
               typename KeysInputIt,
               typename ValuesInputIt,
+              typename UniqueOutputIt,
+              typename AggregatesOutputIt,
+              typename UniqueCountOutputIt,
+              typename BinaryFunction,
+              typename KeyCompareFunction>
+    THRUST_HIP_RUNTIME_FUNCTION auto invoke_reduce_by_key(execution_policy<Derived>& policy,
+                                                          void*               temporary_storage,
+                                                          size_t&             storage_size,
+                                                          KeysInputIt         keys_input,
+                                                          ValuesInputIt       values_input,
+                                                          const size_t        size,
+                                                          UniqueOutputIt      unique_output,
+                                                          AggregatesOutputIt  aggregates_output,
+                                                          UniqueCountOutputIt unique_count_output,
+                                                          BinaryFunction      reduce_op,
+                                                          KeyCompareFunction  key_compare_op,
+                                                          const hipStream_t   stream,
+                                                          bool                debug_sync)
+        -> std::enable_if_t<decltype(nondeterministic(policy))::value, hipError_t>
+    {
+        return rocprim::reduce_by_key(temporary_storage,
+                                      storage_size,
+                                      keys_input,
+                                      values_input,
+                                      size,
+                                      unique_output,
+                                      aggregates_output,
+                                      unique_count_output,
+                                      reduce_op,
+                                      key_compare_op,
+                                      stream,
+                                      debug_sync);
+    }
+
+    template <typename Derived,
+              typename KeysInputIt,
+              typename ValuesInputIt,
+              typename UniqueOutputIt,
+              typename AggregatesOutputIt,
+              typename UniqueCountOutputIt,
+              typename BinaryFunction,
+              typename KeyCompareFunction>
+    THRUST_HIP_RUNTIME_FUNCTION auto invoke_reduce_by_key(execution_policy<Derived>& policy,
+                                                          void*               temporary_storage,
+                                                          size_t&             storage_size,
+                                                          KeysInputIt         keys_input,
+                                                          ValuesInputIt       values_input,
+                                                          const size_t        size,
+                                                          UniqueOutputIt      unique_output,
+                                                          AggregatesOutputIt  aggregates_output,
+                                                          UniqueCountOutputIt unique_count_output,
+                                                          BinaryFunction      reduce_op,
+                                                          KeyCompareFunction  key_compare_op,
+                                                          const hipStream_t   stream,
+                                                          bool                debug_sync)
+        -> std::enable_if_t<!decltype(nondeterministic(policy))::value, hipError_t>
+    {
+        return rocprim::deterministic_reduce_by_key(temporary_storage,
+                                                    storage_size,
+                                                    keys_input,
+                                                    values_input,
+                                                    size,
+                                                    unique_output,
+                                                    aggregates_output,
+                                                    unique_count_output,
+                                                    reduce_op,
+                                                    key_compare_op,
+                                                    stream,
+                                                    debug_sync);
+    }
+
+    template <typename Derived,
+              typename KeysInputIt,
+              typename ValuesInputIt,
               typename KeysOutputIt,
               typename ValuesOutputIt,
               typename EqualityOp,
@@ -99,18 +174,19 @@ namespace __reduce_by_key
         if(num_items == 0)
             return thrust::make_pair(keys_output, values_output);
 
-        hip_rocprim::throw_on_error(rocprim::reduce_by_key(NULL,
-                                                           temp_storage_bytes,
-                                                           keys_first,
-                                                           values_first,
-                                                           num_items,
-                                                           keys_output,
-                                                           values_output,
-                                                           reinterpret_cast<size_type*>(NULL),
-                                                           reduction_op,
-                                                           equality_op,
-                                                           stream,
-                                                           debug_sync),
+        hip_rocprim::throw_on_error(invoke_reduce_by_key(policy,
+                                                         NULL,
+                                                         temp_storage_bytes,
+                                                         keys_first,
+                                                         values_first,
+                                                         num_items,
+                                                         keys_output,
+                                                         values_output,
+                                                         reinterpret_cast<size_type*>(NULL),
+                                                         reduction_op,
+                                                         equality_op,
+                                                         stream,
+                                                         debug_sync),
                                     "reduce_by_key failed on 1st step");
 
         size_t     storage_size;
@@ -131,18 +207,19 @@ namespace __reduce_by_key
         // Create pointers with alignment
         hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
-        hip_rocprim::throw_on_error(rocprim::reduce_by_key(ptr,
-                                                           temp_storage_bytes,
-                                                           keys_first,
-                                                           values_first,
-                                                           num_items,
-                                                           keys_output,
-                                                           values_output,
-                                                           d_num_runs_out,
-                                                           reduction_op,
-                                                           equality_op,
-                                                           stream,
-                                                           debug_sync),
+        hip_rocprim::throw_on_error(invoke_reduce_by_key(policy,
+                                                         ptr,
+                                                         temp_storage_bytes,
+                                                         keys_first,
+                                                         values_first,
+                                                         num_items,
+                                                         keys_output,
+                                                         values_output,
+                                                         d_num_runs_out,
+                                                         reduction_op,
+                                                         equality_op,
+                                                         stream,
+                                                         debug_sync),
                                     "reduce_by_key failed on 2nd step");
 
         size_type num_runs_out = hip_rocprim::get_value(policy, d_num_runs_out);

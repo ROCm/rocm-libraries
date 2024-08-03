@@ -28,10 +28,8 @@ void test_event_wait(
 {
   ASSERT_EQUAL_WITH_FILE_AND_LINE(true, e.valid_stream(), filename, lineno);
 
-  while(!e.ready())
-  {
-      e.wait();
-  }
+  e.wait();
+  e.wait();
 
   ASSERT_EQUAL_WITH_FILE_AND_LINE(true, e.valid_stream(), filename, lineno);
   ASSERT_EQUAL_WITH_FILE_AND_LINE(true, e.ready(), filename, lineno);
@@ -76,4 +74,3 @@ auto test_future_value_retrieval(
 } // namespace unittest
 
 #endif // THRUST_CPP_DIALECT >= 2014
-

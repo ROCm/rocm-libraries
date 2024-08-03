@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -141,8 +141,8 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
             // gather indices
             thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
                 size,
-                min,
-                max,
+                saturate_cast<unsigned int>(min),
+                saturate_cast<unsigned int>(max),
                 seed + seed_value_addition
             );
 
@@ -191,8 +191,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
             // gather indices
             thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
                 size,
-                min,
-                max,
+                saturate_cast<unsigned int>(min),
+                saturate_cast<unsigned int>(max),
                 seed + seed_value_addition
             );
 
@@ -353,8 +353,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
             // gather indices
             thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
                 size,
-                min,
-                max,
+                saturate_cast<unsigned int>(min),
+                saturate_cast<unsigned int>(max),
                 seed + seed_value_addition
             );
 
@@ -366,8 +366,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
             // gather stencil
             thrust::host_vector<unsigned int> h_stencil = get_random_data<unsigned int>(
                 size,
-                min,
-                max,
+                saturate_cast<unsigned int>(min),
+                saturate_cast<unsigned int>(max),
                 seed + 2 * seed_value_addition
             );
 
@@ -426,8 +426,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
             // gather indices
             thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
                 size,
-                min,
-                max,
+                saturate_cast<unsigned int>(min),
+                saturate_cast<unsigned int>(max),
                 seed + seed_value_addition
             );
 
@@ -439,8 +439,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
             // gather stencil
             thrust::host_vector<unsigned int> h_stencil = get_random_data<unsigned int>(
                 size,
-                min,
-                max,
+                saturate_cast<unsigned int>(min),
+                saturate_cast<unsigned int>(max),
                 seed + seed_value_addition
             );
 

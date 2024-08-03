@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ void TestAllOf(void)
     ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
     v[1] = 0;
-
+    
     ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
     ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), true);
@@ -93,7 +93,7 @@ void TestAnyOf(void)
     ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
     v[1] = 0;
-
+    
     ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
     ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), false);
@@ -155,7 +155,7 @@ void TestNoneOf(void)
     ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
     v[1] = 0;
-
+    
     ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
     ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), true);
@@ -205,3 +205,4 @@ void TestNoneOfDispatchImplicit()
     ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestNoneOfDispatchImplicit);
+

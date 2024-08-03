@@ -34,7 +34,6 @@ template<typename T, typename System>
 } // end detail
 THRUST_NAMESPACE_END
 
-#include <thrust/detail/config.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/detail/tagged_iterator.h>
 #include <thrust/detail/contiguous_storage.h>

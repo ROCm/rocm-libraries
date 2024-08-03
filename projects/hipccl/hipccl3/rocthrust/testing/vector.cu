@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -21,6 +21,9 @@
 #include <thrust/sequence.h>
 #include <thrust/device_malloc_allocator.h>
 
+#if THRUST_CPP_DIALECT >= 2011
+#include <initializer_list>
+#endif
 #include <vector>
 #include <list>
 #include <limits>
@@ -54,6 +57,30 @@ void TestVectorBool(void)
 }
 DECLARE_UNITTEST(TestVectorBool);
 
+template <class Vector>
+void TestVectorInitializerList(void)
+{
+    Vector v{1, 2, 3};
+    ASSERT_EQUAL(v.size(), 3lu);
+    ASSERT_EQUAL(v[0], 1);
+    ASSERT_EQUAL(v[1], 2);
+    ASSERT_EQUAL(v[2], 3);
+
+    v = {1, 2, 3, 4};
+    ASSERT_EQUAL(v.size(), 4lu);
+    ASSERT_EQUAL(v[0], 1);
+    ASSERT_EQUAL(v[1], 2);
+    ASSERT_EQUAL(v[2], 3);
+    ASSERT_EQUAL(v[3], 4);
+    
+    const auto alloc = v.get_allocator();
+    Vector v2{{1, 2, 3}, alloc};
+    ASSERT_EQUAL(v2.size(), 3lu);
+    ASSERT_EQUAL(v2[0], 1);
+    ASSERT_EQUAL(v2[1], 2);
+    ASSERT_EQUAL(v2[2], 3);
+}
+DECLARE_VECTOR_UNITTEST(TestVectorInitializerList);
 
 template <class Vector>
 void TestVectorFrontBack(void)
@@ -200,7 +227,7 @@ void TestVectorFromBiDirectionalIterator(void)
 
     Vector v(stl_list.begin(), stl_list.end());
 
-   ASSERT_EQUAL(v.size(), 3lu);
+    ASSERT_EQUAL(v.size(), 3lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 2);
@@ -401,13 +428,13 @@ void TestVectorErasePosition(void)
 
     v.erase(v.begin() + 2);
 
-    ASSERT_EQUAL(v.size(), 2lu); 
+    ASSERT_EQUAL(v.size(), 2lu);
     ASSERT_EQUAL(v[0], 1);
     ASSERT_EQUAL(v[1], 3);
 
     v.erase(v.begin() + 1);
 
-    ASSERT_EQUAL(v.size(), 1lu); 
+    ASSERT_EQUAL(v.size(), 1lu);
     ASSERT_EQUAL(v[0], 1);
 
     v.erase(v.begin() + 0);
@@ -425,7 +452,7 @@ void TestVectorEraseRange(void)
 
     v.erase(v.begin() + 1, v.begin() + 3);
 
-    ASSERT_EQUAL(v.size(), 4lu); 
+    ASSERT_EQUAL(v.size(), 4lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 3);
     ASSERT_EQUAL(v[2], 4);
@@ -433,13 +460,13 @@ void TestVectorEraseRange(void)
 
     v.erase(v.begin() + 2, v.end());
 
-    ASSERT_EQUAL(v.size(), 2lu); 
+    ASSERT_EQUAL(v.size(), 2lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 3);
 
     v.erase(v.begin() + 0, v.begin() + 1);
 
-    ASSERT_EQUAL(v.size(), 1lu); 
+    ASSERT_EQUAL(v.size(), 1lu);
     ASSERT_EQUAL(v[0], 3);
 
     v.erase(v.begin(), v.end());
@@ -827,3 +854,4 @@ DECLARE_VECTOR_UNITTEST(TestVectorReversed);
   }
   DECLARE_VECTOR_UNITTEST(TestVectorMove);
 #endif
+

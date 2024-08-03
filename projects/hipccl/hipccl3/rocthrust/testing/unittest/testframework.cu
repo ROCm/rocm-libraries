@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,10 +22,6 @@
 // #include backends' testframework.h, if they exist and are required for the build
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #include <unittest/cuda/testframework.h>
-#endif
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-#include <unittest/hip/testframework.h>
 #endif
 
 #include <iostream>
@@ -542,9 +538,3 @@ int main(int argc, char **argv)
   return (passed) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-bool supports_managed_memory() {
-    const HIPTestDriver* driver = dynamic_cast<const HIPTestDriver*>(&UnitTestDriver::s_driver());
-    return driver == nullptr || driver->supports_managed_memory();
-}
-#endif

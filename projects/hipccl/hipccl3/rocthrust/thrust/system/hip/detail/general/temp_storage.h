@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #include <thrust/system/hip/detail/general/various.h>
 #include <thrust/tuple.h>
 

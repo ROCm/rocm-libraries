@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -26,11 +26,25 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/type_traits.h>
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#include <cuda/std/type_traits>
+#endif
+
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template<typename T>
+struct has_trivial_assign
+  : public integral_constant<
+      bool,
+      (is_pod<T>::value && !is_const<T>::value)
+      || ::cuda::std::is_trivially_copy_assignable<T>::value
+    >
+{};
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 template <typename T>
 struct has_trivial_assign : public integral_constant<bool,
                                                      (is_pod<T>::value && !is_const<T>::value)
@@ -45,10 +59,9 @@ struct has_trivial_assign : public integral_constant<bool,
       || __is_trivially_assignable(T, const T)
 #endif // THRUST_HOST_COMPILER
                                                      >
-{
-};
+{};
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 } // end detail
 
 THRUST_NAMESPACE_END
-

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -64,7 +64,7 @@ void TestTabulateSimple(void)
 {
   using namespace thrust::placeholders;
   typedef typename Vector::value_type T;
-
+  
   Vector v(5);
 
   thrust::tabulate(v.begin(), v.end(), thrust::identity<T>());
@@ -82,7 +82,7 @@ void TestTabulateSimple(void)
   ASSERT_EQUAL(v[2], -2);
   ASSERT_EQUAL(v[3], -3);
   ASSERT_EQUAL(v[4], -4);
-
+  
   thrust::tabulate(v.begin(), v.end(), _1 * _1 * _1);
 
   ASSERT_EQUAL(v[0], 0);
@@ -125,3 +125,4 @@ void TestTabulateToDiscardIterator(size_t n)
   // nothing to check -- just make sure it compiles
 }
 DECLARE_VARIABLE_UNITTEST(TestTabulateToDiscardIterator);
+

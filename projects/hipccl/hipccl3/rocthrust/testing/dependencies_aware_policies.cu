@@ -161,10 +161,6 @@ typedef policy_info<
     thrust::system::cpp::detail::execution_policy
 > cpp_par_info;
 typedef policy_info<
-    thrust::system::THRUST_DEVICE_BACKEND::detail::par_t,
-    thrust::THRUST_DEVICE_BACKEND_DETAIL::execute_on_stream_base
-> THRUST_DEVICE_BACKEND_par_info;
-typedef policy_info<
     thrust::system::omp::detail::par_t,
     thrust::system::omp::detail::execution_policy
 > omp_par_info;
@@ -193,9 +189,13 @@ SimpleUnitTest<
         // TODO: uncomment when dependencies are generalized to all backends
         // sequential_info,
         // cpp_par_info,
-        THRUST_DEVICE_BACKEND_par_info
         // omp_par_info,
-        // tbb_par_info
+        // tbb_par_info,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        cuda_par_info
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+        hip_par_info
+#endif
     >
 > TestDependencyAttachmentInstance;
 

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -31,7 +31,6 @@ struct my_allocator_with_custom_construct1
   __host__ __device__
   my_allocator_with_custom_construct1()
   {}
-
 
   __host__ __device__
   void construct(T *p)
@@ -79,7 +78,6 @@ void TestAllocatorCustomCopyConstruct(size_t n)
 DECLARE_VARIABLE_UNITTEST(TestAllocatorCustomCopyConstruct);
 
 template <typename T>
-
 struct my_allocator_with_custom_destroy
 {
   // This is only used with thrust::cpp::vector:
@@ -104,9 +102,8 @@ struct my_allocator_with_custom_destroy
 
   __host__ __device__
   void destroy(T *)
-
   {
-    NV_IF_TARGET(NV_IS_HOST, (g_state = true;), (g_state = true;));
+    NV_IF_TARGET(NV_IS_HOST, (g_state = true;));
   }
 
   value_type *allocate(std::ptrdiff_t n)

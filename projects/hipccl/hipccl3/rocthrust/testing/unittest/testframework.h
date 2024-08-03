@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -324,9 +324,6 @@ typedef std::map<std::string, std::string> ArgumentMap;
 
 std::vector<size_t> get_test_sizes(void);
 void                set_test_sizes(const std::string&);
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-bool                supports_managed_memory();
-#endif
 
 class UnitTest {
     public:
@@ -390,7 +387,6 @@ class NAME##UnitTest : public UnitTest {                         \
 };                                                               \
 NAME##UnitTest NAME##Instance
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP
 // Macro to create host and device versions of a
 // unit test for a bunch of data types
 #define DECLARE_VECTOR_UNITTEST(VTEST)                          \
@@ -447,62 +443,6 @@ void VTEST##Universal(void) {                                   \
 DECLARE_UNITTEST(VTEST##Host);                                  \
 DECLARE_UNITTEST(VTEST##Device);                                \
 DECLARE_UNITTEST(VTEST##Universal);
-#else // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-// Macro to create host and device versions of a
-// unit test for a bunch of data types
-#define DECLARE_VECTOR_UNITTEST(VTEST)                          \
-void VTEST##Host(void) {                                        \
-    VTEST< thrust::host_vector<signed char> >();                \
-    VTEST< thrust::host_vector<short> >();                      \
-    VTEST< thrust::host_vector<int> >();                        \
-    VTEST< thrust::host_vector<float> >();                      \
-    VTEST< thrust::host_vector<custom_numeric> >();             \
-    /* MR vectors */                                            \
-    VTEST< thrust::host_vector<int,                             \
-        thrust::mr::stateless_resource_allocator<int,           \
-            thrust::host_memory_resource> > >();                \
-}                                                               \
-void VTEST##Device(void) {                                      \
-    VTEST< thrust::device_vector<signed char> >();              \
-    VTEST< thrust::device_vector<short> >();                    \
-    VTEST< thrust::device_vector<int> >();                      \
-    VTEST< thrust::device_vector<float> >();                    \
-    VTEST< thrust::device_vector<custom_numeric> >();           \
-    /* MR vectors */                                            \
-    VTEST< thrust::device_vector<int,                           \
-        thrust::mr::stateless_resource_allocator<int,           \
-            thrust::device_memory_resource> > >();              \
-}                                                               \
-void VTEST##Universal(void) {                                   \
-    if(supports_managed_memory()) {                             \
-        VTEST< thrust::universal_vector<int> >();               \
-    }                                                           \
-}                                                               \
-DECLARE_UNITTEST(VTEST##Host);                                  \
-DECLARE_UNITTEST(VTEST##Device);                                \
-DECLARE_UNITTEST(VTEST##Universal);
-
-// Same as above, but only for integral types
-#define DECLARE_INTEGRAL_VECTOR_UNITTEST(VTEST)                 \
-void VTEST##Host(void) {                                        \
-    VTEST< thrust::host_vector<signed char> >();                \
-    VTEST< thrust::host_vector<short> >();                      \
-    VTEST< thrust::host_vector<int> >();                        \
-}                                                               \
-void VTEST##Device(void) {                                      \
-    VTEST< thrust::device_vector<signed char> >();              \
-    VTEST< thrust::device_vector<short> >();                    \
-    VTEST< thrust::device_vector<int> >();                      \
-}                                                               \
-void VTEST##Universal(void) {                                   \
-    if(supports_managed_memory()) {                             \
-        VTEST< thrust::universal_vector<int> >();               \
-    }                                                           \
-}                                                               \
-DECLARE_UNITTEST(VTEST##Host);                                  \
-DECLARE_UNITTEST(VTEST##Device);                                \
-DECLARE_UNITTEST(VTEST##Universal);
-#endif
 
 // Macro to create instances of a test for several data types.
 #define DECLARE_GENERIC_UNITTEST(TEST)                           \
@@ -678,3 +618,4 @@ template<template <typename> class TestName,
     loop(0);
   }
 }; // end VectorUnitTest
+

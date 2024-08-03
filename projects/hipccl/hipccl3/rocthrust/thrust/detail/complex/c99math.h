@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -104,11 +104,11 @@ __host__ __device__ inline int isnan(double x){
 }
 
 __host__ __device__ inline int signbit(float x){
-  return (*((uint32_t *)&x)) & 0x80000000;
+  return ((*((uint32_t *)&x)) & 0x80000000) != 0 ? 1 : 0;
 }
 
 __host__ __device__ inline int signbit(double x){
-  return (*((uint32_t *)&x)) & 0x80000000;
+  return ((*((uint64_t *)&x)) & 0x8000000000000000) != 0ull ? 1 : 0;
 }
 
 __host__ __device__ inline int isfinite(float x){

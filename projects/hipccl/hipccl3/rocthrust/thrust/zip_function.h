@@ -153,9 +153,11 @@ template <typename Function>
 class zip_function
 {
   public:
-     __host__ __device__
+    /*! Constructs a \p zip_function with the provided function object \p func. */
+    __host__ __device__
     zip_function(Function func) : func(std::move(func)) {}
 
+    /*! Applies the N-ary function object to elements of the tuple \p args. */
 // Add workaround for decltype(auto) on C++11-only compilers:
 #if THRUST_CPP_DIALECT >= 2014
 

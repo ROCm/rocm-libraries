@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -548,8 +548,8 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKeyInPlace)
         {
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_vals = get_random_data<int>(
-                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+            thrust::host_vector<T> h_vals = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             for(size_t i = 0; i < size; i++)
                 h_vals[i] = i % 10;
             thrust::device_vector<T> d_vals = h_vals;
@@ -593,8 +593,8 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
         {
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_vals = get_random_data<int>(
-                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+            thrust::host_vector<T> h_vals = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             for(size_t i = 0; i < size; i++)
                 h_vals[i] = i % 10;
             thrust::device_vector<T> d_vals = h_vals;
@@ -631,7 +631,7 @@ TEST(ScanByKeyTests, TestScanByKeyMixedTypes)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<unsigned int> h_vals = get_random_data<unsigned int>(
-            size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+            size, std::numeric_limits<unsigned int>::min(), std::numeric_limits<unsigned int>::max(), seed);
         for(size_t i = 0; i < size; i++)
             h_vals[i] %= 10;
         thrust::device_vector<unsigned int> d_vals = h_vals;

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -141,9 +141,10 @@ TYPED_TEST(PrimitiveInnerProductTests, InnerProductWithRandomData)
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-        T error_margin = (T)0.01 * size;
-        T min          = (T)std::numeric_limits<T>::min() / (size + 1);
-        T max          = (T)std::numeric_limits<T>::max() / (size + 1);
+        T error_margin = static_cast<T>(0.01) * size;
+
+        T min = saturate_cast<T>(-10);
+        T max = saturate_cast<T>(10);
 
         for(auto seed : get_seeds())
         {
@@ -165,7 +166,7 @@ TYPED_TEST(PrimitiveInnerProductTests, InnerProductWithRandomData)
             T expected = thrust::inner_product(h_v1.begin(), h_v1.end(), h_v2.begin(), init);
             T result   = thrust::inner_product(d_v1.begin(), d_v1.end(), d_v2.begin(), init);
 
-            ASSERT_NEAR(clip_infinity(expected), clip_infinity(result), error_margin);
+            ASSERT_NEAR(clip_infinity<T>(expected), clip_infinity<T>(result), error_margin);
         }
     }
 };

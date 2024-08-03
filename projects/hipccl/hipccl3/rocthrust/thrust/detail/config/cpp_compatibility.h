@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
  */
 
 #pragma once
+
+// Internal config header that is only included through thrust/detail/config/config.h
 
 #include <thrust/detail/config/cpp_dialect.h>
 

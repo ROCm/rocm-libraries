@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2019 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved. 
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -29,8 +29,6 @@
 #include <sstream>
 #include <thrust/detail/type_traits.h>
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-
 #if THRUST_CPP_DIALECT >= 2011
 #  define THRUST_STD_COMPLEX_REAL(z) \
     reinterpret_cast< \
@@ -46,8 +44,6 @@
 #  define THRUST_STD_COMPLEX_IMAG(z) (z).imag()
 #  define THRUST_STD_COMPLEX_DEVICE
 #endif
-
-#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 THRUST_NAMESPACE_BEGIN
 

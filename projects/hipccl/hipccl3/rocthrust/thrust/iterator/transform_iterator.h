@@ -203,10 +203,11 @@ template <class AdaptableUnaryFunction, class Iterator, class Reference = use_de
   public:
     /*! Null constructor does nothing.
      */
-    __host__ __device__
-    transform_iterator() {}
+    transform_iterator() = default;
 
 #if THRUST_CPP_DIALECT >= 2011
+    /*! Default copy constructor.
+     */
     transform_iterator(transform_iterator const&) = default;
 #endif
 
@@ -352,4 +353,3 @@ make_transform_iterator(Iterator it, AdaptableUnaryFunction fun)
  */
 
 THRUST_NAMESPACE_END
-
