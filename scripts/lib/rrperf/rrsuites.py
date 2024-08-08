@@ -774,6 +774,76 @@ def mixedgemm_f8f6f4():
     yield from gemm_mixed_32x32x64_f8f6f4()
 
 
+def _f8f6f4_gemm_macrotiles(
+    wave_m, wave_n, wave_k, gemmTypes, mac_m_factor, mac_n_factor, mac_k_factor
+):
+    params = dict(
+        M=256,
+        N=256,
+        K=512,
+        mac_m=wave_m * mac_m_factor,
+        mac_n=wave_m * mac_n_factor,
+        mac_k=wave_k * mac_k_factor,
+        wave_m=wave_m,
+        wave_n=wave_n,
+        wave_k=wave_k,
+        workgroup_size_x=64,
+        workgroup_size_y=1,
+        trans_A="T",
+        trans_B="N",
+    )
+    yield GEMMRun(
+        **params,
+        **gemmTypes,
+    )
+
+
+def gemm_f8f6f4_different_macrotiles():
+    for type in [fp8fp8_fp32, fp6fp6_fp32, fp4fp4_fp32, bf8bf8_fp32, bf6bf6_fp32]:
+        for m_factor in [2, 4, 8]:
+            for n_factor in [2, 4, 8]:
+                for k_factor in [2, 4]:
+                    yield from _f8f6f4_gemm_macrotiles(
+                        16, 16, 128, type, m_factor, n_factor, k_factor
+                    )
+                    yield from _f8f6f4_gemm_macrotiles(
+                        32, 32, 64, type, m_factor, n_factor, k_factor
+                    )
+
+
+def _f8f6f4_gemm_prefetch(wave_m, wave_n, wave_k, gemmTypes, prefetchFactor):
+    params = dict(
+        M=256,
+        N=256,
+        K=512,
+        mac_m=wave_m * 4,
+        mac_n=wave_m * 4,
+        mac_k=wave_k * 2,
+        wave_m=wave_m,
+        wave_n=wave_n,
+        wave_k=wave_k,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
+        trans_A="T",
+        trans_B="N",
+        prefetchInFlight=prefetchFactor,
+        prefetchLDSFactor=prefetchFactor,
+    )
+    yield GEMMRun(
+        **params,
+        **gemmTypes,
+    )
+
+
+def gemm_f8f6f4_test_prefetch():
+    # Any factor > 2 fails to generate due to lack of registers/too large imm offset.
+    # TODO: test with more aggressive prefetching once we can.
+    for factor in [2]:
+        for type in [fp8fp8_fp32, fp6fp6_fp32, fp4fp4_fp32, bf8bf8_fp32, bf6bf6_fp32]:
+            yield from _f8f6f4_gemm_prefetch(16, 16, 128, type, factor)
+            yield from _f8f6f4_gemm_prefetch(32, 32, 64, type, factor)
+
+
 def all():
     yield from sgemm()
     yield from hgemm()
