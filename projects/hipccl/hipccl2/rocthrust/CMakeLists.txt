@@ -12,7 +12,8 @@ else()
 endif()
 
 # Thrust project
-project(rocthrust LANGUAGES CXX)
+# Note: C is required here for dependencies
+project(rocthrust LANGUAGES CXX C)
 
 #Adding CMAKE_PREFIX_PATH
 list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm ${ROCM_PATH} )

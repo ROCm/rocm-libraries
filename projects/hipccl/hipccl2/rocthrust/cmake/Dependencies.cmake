@@ -62,6 +62,52 @@ if(BUILD_TEST)
     )
     find_package(GTest REQUIRED CONFIG PATHS ${GTEST_ROOT})
   endif()
+
+  # SQlite (for run-to-run bitwise-reproducibility tests)
+  # Note: SQLite 3.36.0 enabled the backup API by default, which we need
+  # for cache serialization.  We also want to use a static SQLite,
+  # and distro static libraries aren't typically built
+  # position-independent.
+  include( FetchContent )
+
+  if(DEFINED ENV{SQLITE_3_43_2_SRC_URL})
+    set(SQLITE_3_43_2_SRC_URL_INIT $ENV{SQLITE_3_43_2_SRC_URL})
+  else()
+    set(SQLITE_3_43_2_SRC_URL_INIT https://www.sqlite.org/2023/sqlite-amalgamation-3430200.zip)
+  endif()
+    set(SQLITE_3_43_2_SRC_URL ${SQLITE_3_43_2_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
+    set(SQLITE_SRC_3_43_2_SHA3_256 af02b88cc922e7506c6659737560c0756deee24e4e7741d4b315af341edd8b40 CACHE STRING "SHA3-256 hash of SQLite source code")
+
+    # embed SQLite
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
+      # use extract timestamp for fetched files instead of timestamps in the archive
+      cmake_policy(SET CMP0135 NEW)
+    endif()
+
+  message("Downloading SQLite.")
+  FetchContent_Declare(sqlite_local
+    URL ${SQLITE_3_43_2_SRC_URL}
+    URL_HASH SHA3_256=${SQLITE_SRC_3_43_2_SHA3_256}
+  )
+  FetchContent_MakeAvailable(sqlite_local)
+
+  add_library(sqlite3 OBJECT ${sqlite_local_SOURCE_DIR}/sqlite3.c)
+  target_include_directories(sqlite3 PUBLIC ${sqlite_local_SOURCE_DIR})
+  set_target_properties( sqlite3 PROPERTIES
+      C_VISIBILITY_PRESET "hidden"
+      VISIBILITY_INLINES_HIDDEN ON
+      POSITION_INDEPENDENT_CODE ON
+      LINKER_LANGUAGE CXX
+  )
+
+  # We don't need extensions, and omitting them from SQLite removes the
+  # need for dlopen/dlclose from within rocThrust.
+  # We also don't need the shared cache, and omitting it yields some performance improvements.
+  target_compile_options(
+      sqlite3
+      PRIVATE -DSQLITE_OMIT_LOAD_EXTENSION
+      PRIVATE -DSQLITE_OMIT_SHARED_CACHE
+  )
 endif()
 
 # Benchmark dependencies

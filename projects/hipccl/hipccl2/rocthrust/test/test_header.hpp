@@ -16,6 +16,7 @@
  */
 
 #include "../testing/unittest/random.h"
+#include "bitwise_repro/bwr_db.hpp"
 
 #include <gtest/gtest.h>
 
@@ -113,6 +114,54 @@ inline int set_device_from_ctest()
     clean_env(env);
     return device;
 }
+}
+
+// If enabled, set up the database for inter-run bitwise reproducibility testing.
+// Inter-run testing is enabled through the following environment variables:
+// ROCTHRUST_BWR_PATH - path to the database (or where it should be created)
+// ROCTHRUST_BWR_GENERATE - if set to 1, info about any function calls not
+// found in the database will be inserted. No errors will be reported in this mode.
+namespace inter_run_bwr
+{
+    // Disable this testing by default.
+    bool enabled = false;
+
+    // This code doesn't need to be visible outside this file.
+    namespace
+    {
+        const static std::string path_env = "ROCTHRUST_BWR_PATH";
+        const static std::string generate_env = "ROCTHRUST_BWR_GENERATE";
+
+        // Check the environment variables to see if the database should be
+        // instantiated, and if so, what mode it should be in.
+        std::unique_ptr<BitwiseReproDB> create_db()
+        {
+            // Get the path to the database from an environment variable.
+            const char* db_path = std::getenv(path_env.c_str());
+            const char* db_mode = std::getenv(generate_env.c_str());
+            if (db_path)
+            {
+                // Check if we are allowed to insert rows into the database if
+                // we encounter calls that aren't already recorded.
+                BitwiseReproDB::Mode mode = BitwiseReproDB::Mode::test_mode;
+                if (db_mode && std::stoi(db_mode) > 0)
+                    mode = BitwiseReproDB::Mode::generate_mode;
+
+                enabled = true;
+                return std::make_unique<BitwiseReproDB>(db_path, mode);
+            }
+            else if (db_mode)
+            {
+                throw std::runtime_error("ROCTHRUST_BWR_GENERATE is defined, but no database path was given.\n"
+                    "Please set ROCTHRUST_BWR_PATH to the database path.");
+            }
+
+            return nullptr;
+        }
+    }
+
+    // Create/open the run-to-run bitwise reproducibility database.
+    std::unique_ptr<BitwiseReproDB> db = create_db();
 }
 
 // Input type parameter
