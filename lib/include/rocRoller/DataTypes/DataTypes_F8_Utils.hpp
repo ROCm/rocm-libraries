@@ -107,35 +107,54 @@ namespace rocRoller
                 bias     = 15;
             }
 
-            uint32_t signed_inf = (sign << 7) + (((1 << we) - 1) << wm); // (sign bit) 1111 000
+            uint32_t signed_inf;
 
             // Deal with inf and NaNs
             if constexpr(negative_zero_nan)
             {
+                signed_inf = 0x80;
                 if constexpr(sizeof(T) == 4)
                 {
                     if((x & 0x7F800000) == 0x7F800000)
-                        return 0x80;
+                        return signed_inf;
                 }
                 else
                 {
                     if((x & 0x7C00) == 0x7C00)
-                        return 0x80;
+                        return signed_inf;
                 }
             }
             else
             {
-                // IEEE style
-                //FIXME Fix the return value for the OCP mode
-                if constexpr(sizeof(T) == 4)
+                // OCP F8 mode
+                signed_inf = (sign << 7) + ((1 << (we + wm)) - 1); // (sign bit) 1111 111
+                if constexpr(!is_bf8)
                 {
-                    if((x & 0x7F800000) == 0x7F800000)
-                        return signed_inf + (mantissa != 0 ? ((1 << wm) - 1) : 0);
+                    if constexpr(sizeof(T) == 4)
+                    {
+                        if((x & 0x7F800000) == 0x7F800000)
+                            return signed_inf;
+                    }
+                    else
+                    {
+                        if((x & 0x7C00) == 0x7C00)
+                            return signed_inf;
+                    }
                 }
+                // OCP BF8 mode
                 else
                 {
-                    if((x & 0x7C00) == 0x7C00)
-                        return signed_inf + (mantissa != 0 ? ((1 << wm) - 1) : 0);
+                    signed_inf = (sign << 7) + (((1 << we) - 1) << wm); // (sign bit) 11111 00
+                    if constexpr(sizeof(T) == 4)
+                    {
+                        if((x & 0x7F800000) == 0x7F800000)
+                            return signed_inf + (mantissa != 0 ? ((1 << wm) - 1) : 0);
+                    }
+                    else
+                    {
+                        if((x & 0x7C00) == 0x7C00)
+                            return signed_inf + (mantissa != 0 ? ((1 << wm) - 1) : 0);
+                    }
                 }
             }
             if(x == 0)
@@ -257,8 +276,6 @@ namespace rocRoller
                 }
                 else
                 {
-                    // IEEE style
-                    //FIXME fix the return value for both OCP and NANOO mode
                     return signed_inf;
                 }
             }

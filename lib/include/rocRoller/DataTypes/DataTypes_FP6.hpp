@@ -47,7 +47,7 @@ namespace rocRoller
      */
     struct FP6
     {
-        FP6()
+        constexpr FP6()
             : data(F6_ZERO_VALUE)
         {
         }
@@ -61,6 +61,12 @@ namespace rocRoller
         explicit FP6(T const& value)
             : data(float_to_fp6(static_cast<double>(value)).data)
         {
+        }
+
+        template <typename T, typename = typename std::enable_if_t<std::is_convertible_v<T, float>>>
+        void operator=(T const& value)
+        {
+            data = float_to_fp6(static_cast<float>(value)).data;
         }
 
         explicit operator float() const

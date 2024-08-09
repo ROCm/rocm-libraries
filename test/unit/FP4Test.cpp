@@ -423,4 +423,62 @@ namespace rocRollerTest
         for(int i = 0; i < floats.size(); i++)
             EXPECT_EQ(cases[i], floats[i]);
     }
+
+    TEST_F(CPUFP4Test, OutOfBoundsConversions)
+    {
+        rocRoller::FP4 nFP4;
+        nFP4 = 6.1;
+        EXPECT_FLOAT_EQ(nFP4, 6.0);
+        nFP4 = 7.0;
+        EXPECT_FLOAT_EQ(nFP4, 6.0);
+        nFP4 = 128.0;
+        EXPECT_FLOAT_EQ(nFP4, 6.0);
+        nFP4 = -6.1;
+        EXPECT_FLOAT_EQ(nFP4, -6.0);
+        nFP4 = -7.0;
+        EXPECT_FLOAT_EQ(nFP4, -6.0);
+        nFP4 = -128.0;
+        EXPECT_FLOAT_EQ(nFP4, -6.0);
+    }
+
+    void checkSpecialValues(float& f32_inf, float& f32_nan, float& f32_zero)
+    {
+        rocRoller::FP4 fp4_zero(f32_zero);
+        rocRoller::FP4 fp4_pos_inf(f32_inf);
+        rocRoller::FP4 fp4_neg_inf(-f32_inf);
+        rocRoller::FP4 fp4_nan(f32_nan);
+
+        EXPECT_TRUE(std::iszero(fp4_zero));
+        EXPECT_FALSE(std::isnan(fp4_pos_inf));
+        EXPECT_FALSE(std::isinf(fp4_pos_inf));
+        EXPECT_FALSE(std::isnan(fp4_neg_inf));
+        EXPECT_FALSE(std::isinf(fp4_neg_inf));
+        EXPECT_FALSE(std::isnan(fp4_nan));
+        EXPECT_FALSE(std::isinf(fp4_nan));
+
+        EXPECT_FLOAT_EQ(fp4_pos_inf, 6.0);
+        EXPECT_FLOAT_EQ(fp4_neg_inf, -6.0);
+        EXPECT_FLOAT_EQ(fp4_nan, 6.0);
+    }
+
+    TEST_F(CPUFP4Test, SpecialValues)
+    {
+        union
+        {
+            uint32_t bits;
+            float    val;
+        } f32_inf, f32_nan, f32_zero;
+
+        // For single-precision, if all exponent bits are 1 and
+        //  - if mantissa is zero     => Inf
+        //  - if mantissa is non-zero => NaN
+        f32_inf.bits  = 0x7F800000;
+        f32_nan.bits  = 0x7F800001;
+        f32_zero.bits = 0x0;
+
+        EXPECT_TRUE(std::isinf(f32_inf.val));
+        EXPECT_TRUE(std::isnan(f32_nan.val));
+
+        checkSpecialValues(f32_inf.val, f32_nan.val, f32_zero.val);
+    }
 }

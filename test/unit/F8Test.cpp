@@ -529,10 +529,9 @@ namespace rocRollerTest
             }
             else
             {
-                //FIXME fix the convert from f32_inf to f8_pos/neg_inf for OCP
-                EXPECT_FALSE(std::isnan(f8_pos_inf));
+                EXPECT_TRUE(std::isnan(f8_pos_inf));
                 EXPECT_FALSE(std::isinf(f8_pos_inf));
-                EXPECT_FALSE(std::isnan(f8_neg_inf));
+                EXPECT_TRUE(std::isnan(f8_neg_inf));
                 EXPECT_FALSE(std::isinf(f8_neg_inf));
             }
         }

@@ -542,4 +542,87 @@ namespace rocRollerTest
         testPacking(fp6, DataTypes::FP6_FMT);
         testPacking(bf6, DataTypes::BF6_FMT);
     }
+
+    TEST_F(CPUF6Test, OutOfBoundsConversions)
+    {
+        rocRoller::FP6 nF6;
+        nF6 = 7.6;
+        EXPECT_FLOAT_EQ(nF6, 7.5);
+        nF6 = 8.0;
+        EXPECT_FLOAT_EQ(nF6, 7.5);
+        nF6 = 128.0;
+        EXPECT_FLOAT_EQ(nF6, 7.5);
+        nF6 = -7.6;
+        EXPECT_FLOAT_EQ(nF6, -7.5);
+        nF6 = -8.0;
+        EXPECT_FLOAT_EQ(nF6, -7.5);
+        nF6 = -128.0;
+        EXPECT_FLOAT_EQ(nF6, -7.5);
+
+        rocRoller::BF6 nBF6;
+        nBF6 = 28.1;
+        EXPECT_FLOAT_EQ(nBF6, 28.0);
+        nBF6 = 29.0;
+        EXPECT_FLOAT_EQ(nBF6, 28.0);
+        nBF6 = 128.0;
+        EXPECT_FLOAT_EQ(nBF6, 28.0);
+        nBF6 = -28.1;
+        EXPECT_FLOAT_EQ(nBF6, -28.0);
+        nBF6 = -29.0;
+        EXPECT_FLOAT_EQ(nBF6, -28.0);
+        nBF6 = -128.0;
+        EXPECT_FLOAT_EQ(nBF6, -28.0);
+    }
+
+    template <typename F6Type>
+    void checkSpecialValues(float& f32_inf, float& f32_nan, float& f32_zero)
+    {
+        F6Type f6_zero(f32_zero);
+        F6Type f6_pos_inf(f32_inf);
+        F6Type f6_neg_inf(-f32_inf);
+        F6Type f6_nan(f32_nan);
+
+        EXPECT_TRUE(std::iszero(f6_zero));
+        EXPECT_FALSE(std::isnan(f6_pos_inf));
+        EXPECT_FALSE(std::isinf(f6_pos_inf));
+        EXPECT_FALSE(std::isnan(f6_neg_inf));
+        EXPECT_FALSE(std::isinf(f6_neg_inf));
+        EXPECT_FALSE(std::isnan(f6_nan));
+        EXPECT_FALSE(std::isinf(f6_nan));
+
+        if constexpr(std::is_same<F6Type, BF6>::value)
+        {
+            EXPECT_FLOAT_EQ(f6_pos_inf, 28.0);
+            EXPECT_FLOAT_EQ(f6_neg_inf, -28.0);
+            EXPECT_FLOAT_EQ(f6_nan, 28.0);
+        }
+        else
+        {
+            EXPECT_FLOAT_EQ(f6_pos_inf, 7.5);
+            EXPECT_FLOAT_EQ(f6_neg_inf, -7.5);
+            EXPECT_FLOAT_EQ(f6_nan, 7.5);
+        }
+    }
+
+    TEST_F(CPUF6Test, SpecialValues)
+    {
+        union
+        {
+            uint32_t bits;
+            float    val;
+        } f32_inf, f32_nan, f32_zero;
+
+        // For single-precision, if all exponent bits are 1 and
+        //  - if mantissa is zero     => Inf
+        //  - if mantissa is non-zero => NaN
+        f32_inf.bits  = 0x7F800000;
+        f32_nan.bits  = 0x7F800001;
+        f32_zero.bits = 0x0;
+
+        EXPECT_TRUE(std::isinf(f32_inf.val));
+        EXPECT_TRUE(std::isnan(f32_nan.val));
+
+        checkSpecialValues<rocRoller::FP6>(f32_inf.val, f32_nan.val, f32_zero.val);
+        checkSpecialValues<rocRoller::BF6>(f32_inf.val, f32_nan.val, f32_zero.val);
+    }
 }

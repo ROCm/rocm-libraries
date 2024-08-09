@@ -332,7 +332,7 @@ namespace rocRoller
 
     struct FP4
     {
-        FP4()
+        constexpr FP4()
             : data(FP4_ZERO_VALUE)
         {
         }
@@ -346,6 +346,12 @@ namespace rocRoller
         explicit FP4(T const& value)
             : data(float_to_fp4(static_cast<double>(value)).data)
         {
+        }
+
+        template <typename T, typename = typename std::enable_if_t<std::is_convertible_v<T, float>>>
+        void operator=(T const& value)
+        {
+            data = float_to_fp4(static_cast<float>(value)).data;
         }
 
         explicit operator float() const
