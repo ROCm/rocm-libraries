@@ -1,7 +1,3 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Generator.hpp>

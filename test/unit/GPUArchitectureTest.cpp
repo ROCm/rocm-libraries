@@ -1,14 +1,19 @@
 #include <algorithm>
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
+
 #include <vector>
 
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 
+#include "SimpleFixture.hpp"
+
 using namespace rocRoller;
 
-TEST(GPUArchitectureTest, EmptyConstructor)
+class GPUArchitectureTest : public SimpleFixture
+{
+};
+
+TEST_F(GPUArchitectureTest, EmptyConstructor)
 {
     GPUArchitecture Test;
     EXPECT_EQ(Test.HasCapability(GPUCapability::SupportedISA), false);
@@ -20,7 +25,7 @@ TEST(GPUArchitectureTest, EmptyConstructor)
     EXPECT_EQ(Test.GetCapability(GPUCapability::MaxVmcnt), 15);
 }
 
-TEST(GPUArchitectureTest, TargetConstructor)
+TEST_F(GPUArchitectureTest, TargetConstructor)
 {
     GPUArchitecture Test(GPUArchitectureTarget("gfx908"));
     EXPECT_EQ(Test.HasCapability(GPUCapability::SupportedISA), false);
@@ -32,7 +37,7 @@ TEST(GPUArchitectureTest, TargetConstructor)
     EXPECT_EQ(Test.GetCapability(GPUCapability::MaxVmcnt), 15);
 }
 
-TEST(GPUArchitectureTest, FullConstructor)
+TEST_F(GPUArchitectureTest, FullConstructor)
 {
     std::map<GPUCapability, int> capabilities
         = {{GPUCapability::SupportedSource, 0}, {GPUCapability::MaxLgkmcnt, 63}};
@@ -50,7 +55,7 @@ TEST(GPUArchitectureTest, FullConstructor)
     EXPECT_EQ(Test.GetCapability(GPUCapability::MaxVmcnt), 15);
 }
 
-TEST(GPUArchitectureTest, ValidateGeneratedDef)
+TEST_F(GPUArchitectureTest, ValidateGeneratedDef)
 {
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(
                   GPUArchitectureTarget("gfx908:xnack-"), GPUCapability::HasExplicitNC),
@@ -76,7 +81,7 @@ TEST(GPUArchitectureTest, ValidateGeneratedDef)
               GPUArchitectureLibrary::getInstance()->HasCapability("gfx908:xnack-", "v_fma_f16"));
 }
 
-TEST(GPUArchitectureTest, Xnack)
+TEST_F(GPUArchitectureTest, Xnack)
 {
     EXPECT_EQ(
         GPUArchitectureLibrary::getInstance()->HasCapability("gfx1030", GPUCapability::HasXnack),
@@ -95,7 +100,7 @@ TEST(GPUArchitectureTest, Xnack)
               false);
 }
 
-TEST(GPUArchitectureTest, WaveFrontSize)
+TEST_F(GPUArchitectureTest, WaveFrontSize)
 {
     EXPECT_EQ(
         GPUArchitectureLibrary::getInstance()->HasCapability("gfx1030", GPUCapability::HasWave64),
@@ -137,7 +142,7 @@ TEST(GPUArchitectureTest, WaveFrontSize)
               32);
 }
 
-TEST(GPUArchitectureTest, Validate90aInstructions)
+TEST_F(GPUArchitectureTest, Validate90aInstructions)
 {
     //Check that some flat instructions belong to both LGKMDSQueue and VMQueue.
     std::vector<std::string> test_insts
@@ -204,7 +209,7 @@ TEST(GPUArchitectureTest, Validate90aInstructions)
         true);
 }
 
-TEST(GPUArchitectureTest, Validate908Instructions)
+TEST_F(GPUArchitectureTest, Validate908Instructions)
 {
     EXPECT_EQ(
         GPUArchitectureLibrary::getInstance()->HasCapability("gfx908", GPUCapability::v_mac_f32),
@@ -214,7 +219,7 @@ TEST(GPUArchitectureTest, Validate908Instructions)
         true);
 }
 
-TEST(GPUArchitectureTest, Validate94xInstructions)
+TEST_F(GPUArchitectureTest, Validate94xInstructions)
 {
     EXPECT_EQ(
         GPUArchitectureLibrary::getInstance()->HasCapability("gfx942", GPUCapability::v_mac_f32),
@@ -224,7 +229,7 @@ TEST(GPUArchitectureTest, Validate94xInstructions)
         true);
 }
 
-TEST(GPUArchitectureTest, MFMA)
+TEST_F(GPUArchitectureTest, MFMA)
 {
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx942:sramecc+",
                                                                    GPUCapability::HasMFMA_fp8),
@@ -234,14 +239,14 @@ TEST(GPUArchitectureTest, MFMA)
         false);
 }
 
-TEST(GPUArchitectureTest, CheckDefFile)
+TEST_F(GPUArchitectureTest, CheckDefFile)
 {
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetDevice("gfx90a").HasCapability(
                   GPUCapability::SupportedISA),
               true);
 }
 
-TEST(GPUArchitectureTest, TargetComparison)
+TEST_F(GPUArchitectureTest, TargetComparison)
 {
     EXPECT_EQ(GPUArchitectureTarget("gfx908") == GPUArchitectureTarget("gfx908"), true);
     EXPECT_EQ(GPUArchitectureTarget("gfx90a") != GPUArchitectureTarget("gfx908"), true);

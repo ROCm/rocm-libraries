@@ -1,7 +1,3 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 

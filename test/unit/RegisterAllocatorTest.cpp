@@ -1,6 +1,3 @@
-
-#include <gtest/gtest.h>
-
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/Context.hpp>

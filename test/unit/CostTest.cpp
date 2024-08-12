@@ -1,7 +1,3 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/Scheduling/Costs/Cost.hpp>
 #include <rocRoller/Scheduling/Costs/LinearWeightedCost.hpp>

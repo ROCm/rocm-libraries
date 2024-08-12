@@ -1,14 +1,13 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Scheduling/MetaObserver.hpp>
 #include <rocRoller/Scheduling/Observers/AllocatingObserver.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
+#include "SimpleFixture.hpp"
+
 using namespace rocRoller;
 
-class MetaObserverTest : public ::testing::Test
+class MetaObserverTest : public SimpleFixture
 {
 };
 

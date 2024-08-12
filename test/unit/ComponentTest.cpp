@@ -1,12 +1,15 @@
-
-#include <gtest/gtest.h>
-
 #include <iostream>
 #include <rocRoller/Utilities/Component.hpp>
 #include <string>
 
+#include "SimpleFixture.hpp"
+
 namespace rocRollerTest
 {
+    class ComponentTest : public SimpleFixture
+    {
+    };
+
     using namespace rocRoller::Component;
 
     struct TestArgument
@@ -81,7 +84,7 @@ namespace rocRollerTest
     RegisterComponent(AImpl);
     RegisterComponent(BImpl);
 
-    TEST(ComponentTest, Basic)
+    TEST_F(ComponentTest, Basic)
     {
         auto argA = std::make_shared<TestArgument>();
         auto argB = std::make_shared<TestArgument>();

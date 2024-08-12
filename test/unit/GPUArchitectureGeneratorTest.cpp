@@ -1,10 +1,9 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <GPUArchitectureGenerator/GPUArchitectureGenerator.hpp>
 #include <GPUArchitectureGenerator/GPUArchitectureGenerator_defs.hpp>
 
-class GPUArchitectureGeneratorTest : public ::testing::Test
+#include "SimpleFixture.hpp"
+
+class GPUArchitectureGeneratorTest : public SimpleFixture
 {
 protected:
     void SetUp() override

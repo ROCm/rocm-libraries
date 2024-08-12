@@ -1,6 +1,3 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include "DataTypes/DataTypes.hpp"
 #include "GenericContextFixture.hpp"
 #include "InstructionValues/Register.hpp"

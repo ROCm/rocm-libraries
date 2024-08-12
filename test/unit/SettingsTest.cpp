@@ -1,7 +1,3 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <any>
 #include <bitset>
 #include <map>
@@ -13,12 +9,17 @@
 #include <rocRoller/Utilities/Settings.hpp>
 
 #include "GenericContextFixture.hpp"
+#include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
 
 using namespace rocRoller;
 
 namespace rocRollerTest
 {
+    class SettingsTest : public SimpleFixture
+    {
+    };
+
     class GenericSettings : public GenericContextFixture
     {
     };
@@ -190,7 +191,7 @@ namespace rocRollerTest
         EXPECT_THROW(settings->get(Settings::Scheduler), FatalError);
     }
 
-    TEST(SettingsTest, HelpString)
+    TEST_F(SettingsTest, HelpString)
     {
         auto        settings = Settings::getInstance();
         std::string help     = settings->help();

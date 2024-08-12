@@ -1,6 +1,3 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <algorithm>
 
 #include <rocRoller/AssemblyKernel.hpp>
@@ -386,7 +383,7 @@ namespace rocRollerTest
             EXPECT_TRUE(std::isnan(f8));
     }
 
-    TEST(F8Test, CPUConversions)
+    TEST_P(F8Test, CPUConversions)
     {
         auto const& FP8Values = FloatReference<rocRoller::FP8>::Values;
         std::for_each(FP8Values.begin(), FP8Values.end(), numberConversion<rocRoller::FP8>);
@@ -411,7 +408,7 @@ namespace rocRollerTest
         EXPECT_TRUE(std::iszero(f8_zero));
     }
 
-    TEST(F8Test, SpecialValues)
+    TEST_P(F8Test, SpecialValues)
     {
         union
         {

@@ -1,14 +1,14 @@
-
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/Assemblers/Assembler.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 #include "GenericContextFixture.hpp"
+#include "SimpleFixture.hpp"
 
 using namespace rocRoller;
+
+class AssemblerTest : public SimpleFixture
+{
+};
 
 static constexpr auto simple_assembly{
     R"(
@@ -94,13 +94,13 @@ auto assemble()
     return kernelObject;
 }
 
-TEST(AssemblerTest, Basic)
+TEST_F(AssemblerTest, Basic)
 {
     auto kernelObject = assemble();
     EXPECT_NE(kernelObject.size(), 0);
 }
 
-TEST(AssemblerTest, BadTarget)
+TEST_F(AssemblerTest, BadTarget)
 {
     auto myAssembler = rocRoller::Assembler::Get();
 
@@ -115,7 +115,7 @@ namespace rocRollerTest
     {
     };
 
-    TEST(SubassemblerPathTest, VersionedROCM)
+    TEST_F(SubassemblerPathTest, VersionedROCM)
     {
         auto path = static_cast<std::string>(
             std::filesystem::canonical(Settings::getDefault(Settings::SubprocessAssemblerPath)));
@@ -125,7 +125,7 @@ namespace rocRollerTest
         EXPECT_NE(assemble().size(), 0);
     }
 
-    TEST(SubassemblerPathTest, MissingPath)
+    TEST_F(SubassemblerPathTest, MissingPath)
     {
         Settings::getInstance()->set(
             Settings::SubprocessAssemblerPath,

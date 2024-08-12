@@ -1,6 +1,3 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 

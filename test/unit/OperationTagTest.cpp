@@ -1,14 +1,15 @@
-
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <rocRoller/Operations/OperationTag.hpp>
 #include <unordered_set>
 #include <vector>
 
-TEST(OperationTagTest, Basic)
+#include "SimpleFixture.hpp"
+
+class OperationTagTest : public SimpleFixture
+{
+};
+
+TEST_F(OperationTagTest, Basic)
 {
     using namespace rocRoller;
 

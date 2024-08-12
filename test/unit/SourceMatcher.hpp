@@ -1,7 +1,5 @@
 #pragma once
 
-#include <gtest/gtest.h>
-
 #ifdef ROCROLLER_TESTS_USE_YAML_CPP
 #include <yaml-cpp/yaml.h>
 #endif
@@ -10,6 +8,8 @@
 
 #include <string>
 #include <string_view>
+
+#include "Utilities.hpp"
 
 using namespace rocRoller;
 

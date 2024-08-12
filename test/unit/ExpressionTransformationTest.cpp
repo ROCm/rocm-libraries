@@ -1,7 +1,3 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>

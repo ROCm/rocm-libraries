@@ -1,13 +1,12 @@
 #pragma once
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include "ContextFixture.hpp"
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
+
+#include "Utilities.hpp"
 
 /**
  * Returns a (googletest) Generator that will yield every GPU ISA supported by rocRoller.

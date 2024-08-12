@@ -1,6 +1,3 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/Context.hpp>
 #include <rocRoller/KernelOptions.hpp>
 

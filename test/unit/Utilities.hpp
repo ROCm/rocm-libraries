@@ -20,6 +20,10 @@
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
+#ifdef TEST
+#undef TEST // Rely on TEST_F and TEST_P instead
+#endif
+
 template <typename T>
 std::shared_ptr<T> make_shared_device(std::size_t n = 1, T init = {})
 {

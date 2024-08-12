@@ -1,8 +1,6 @@
-
-#include <gmock/gmock.h>
 #include <gtest/gtest-spi.h>
-#include <gtest/gtest.h>
 
+#include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
 
 #include <rocRoller/Utilities/Utils.hpp>
@@ -11,8 +9,11 @@ using namespace rocRoller;
 
 namespace rocRollerTest
 {
+    class SourceMatcherTest : public SimpleFixture
+    {
+    };
 
-    TEST(SourceMatcherTest, NormalizedSourceLinesBasic)
+    TEST_F(SourceMatcherTest, NormalizedSourceLinesBasic)
     {
         using ::testing::ElementsAre;
 
@@ -26,7 +27,7 @@ namespace rocRollerTest
                     ElementsAre("some code", "more code"));
     }
 
-    TEST(SourceMatcherTest, NormalizedSourceLinesString)
+    TEST_F(SourceMatcherTest, NormalizedSourceLinesString)
     {
         using ::testing::ElementsAre;
 
@@ -49,7 +50,7 @@ namespace rocRollerTest
                     ElementsAre("\"nothing but  string constant\""));
     }
 
-    TEST(SourceMatcherTest, NormalizedSourceLinesComment)
+    TEST_F(SourceMatcherTest, NormalizedSourceLinesComment)
     {
         using ::testing::ElementsAre;
         using ::testing::IsEmpty;
@@ -95,7 +96,7 @@ namespace rocRollerTest
                     ElementsAre("// only comments and whitespace", "/* another comment */"));
     }
 
-    TEST(SourceMatcherTest, NormalizedSourceLinesLonger)
+    TEST_F(SourceMatcherTest, NormalizedSourceLinesLonger)
     {
         using ::testing::ElementsAre;
 
@@ -133,7 +134,7 @@ namespace rocRollerTest
                                 "hello_world:"));
     }
 
-    TEST(SourceMatcherTest, NormalizedSourceLinesYAMLDoc)
+    TEST_F(SourceMatcherTest, NormalizedSourceLinesYAMLDoc)
     {
 #ifdef ROCROLLER_TESTS_USE_YAML_CPP
         using ::testing::ElementsAre;
@@ -165,7 +166,7 @@ foo:
 #endif
     }
 
-    TEST(SourceMatcherTest, NormalizedSourceLinesUnterminatedYAMLDoc)
+    TEST_F(SourceMatcherTest, NormalizedSourceLinesUnterminatedYAMLDoc)
     {
 #ifdef ROCROLLER_TESTS_USE_YAML_CPP
         using ::testing::ElementsAre;
@@ -190,7 +191,7 @@ amdhsa.version:
 #endif
     }
 
-    TEST(SourceMatcherTest, NormalizedYAML)
+    TEST_F(SourceMatcherTest, NormalizedYAML)
     {
 #ifdef ROCROLLER_TESTS_USE_YAML_CPP
         std::string input1 = "{x: 7, y: 2, a: [4,5,6]}";
@@ -227,7 +228,7 @@ y: 2
 #endif
     }
 
-    TEST(SourceMatcherTest, MatchesSource)
+    TEST_F(SourceMatcherTest, MatchesSource)
     {
         std::string programA = "#include <iostream>\n"
                                "int main(int argc, const char * argv[])\n"
@@ -268,7 +269,7 @@ y: 2
         EXPECT_NONFATAL_FAILURE(EXPECT_THAT(programB, MatchesSource(programC)), "Hello");
     }
 
-    TEST(SourceMatcherTest, MatchesSourceIncludingComments)
+    TEST_F(SourceMatcherTest, MatchesSourceIncludingComments)
     {
         std::string programA = "/**\n"
                                " *\n"

@@ -1,7 +1,3 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include "GenericContextFixture.hpp"
 #include "Utilities.hpp"
 #include <rocRoller/Utilities/Logging.hpp>
