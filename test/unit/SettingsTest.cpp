@@ -1,6 +1,4 @@
-#include <any>
-#include <bitset>
-#include <map>
+#include <omp.h>
 #include <sstream>
 #include <stdlib.h>
 
@@ -176,6 +174,32 @@ namespace rocRollerTest
         settings->set(Settings::F8ModeOption, F8Mode::NaNoo);
         EXPECT_THROW(settings->set(Settings::F8ModeOption, "invalidValue"), FatalError);
         EXPECT_EQ(settings->get(Settings::F8ModeOption), F8Mode::NaNoo);
+    }
+
+    TEST_F(GenericSettings, ThreadSafetyTest)
+    {
+        auto settings = Settings::getInstance();
+
+        unsigned int numCores = std::thread::hardware_concurrency();
+        ASSERT_GT(numCores, 2);
+
+#pragma omp parallel num_threads(numCores)
+        {
+            int tid = omp_get_thread_num();
+            for(int i = 0; i < 100; ++i)
+            {
+                if(tid % 2 == 0)
+                {
+                    auto f8Mode = settings->get(Settings::F8ModeOption);
+                    EXPECT_TRUE(((f8Mode == F8Mode::NaNoo) || (f8Mode == F8Mode::OCP)));
+                }
+                else
+                {
+                    uint8_t setOCP = (rand() % 100) > 50;
+                    settings->set(Settings::F8ModeOption, (setOCP ? F8Mode::OCP : F8Mode::NaNoo));
+                }
+            }
+        }
     }
 
     TEST_F(GenericSettings, InvalidValueTest)
