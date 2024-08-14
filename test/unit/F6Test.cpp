@@ -590,18 +590,11 @@ namespace rocRollerTest
         EXPECT_FALSE(std::isnan(f6_nan));
         EXPECT_FALSE(std::isinf(f6_nan));
 
-        if constexpr(std::is_same<F6Type, BF6>::value)
-        {
-            EXPECT_FLOAT_EQ(f6_pos_inf, 28.0);
-            EXPECT_FLOAT_EQ(f6_neg_inf, -28.0);
-            EXPECT_FLOAT_EQ(f6_nan, 28.0);
-        }
-        else
-        {
-            EXPECT_FLOAT_EQ(f6_pos_inf, 7.5);
-            EXPECT_FLOAT_EQ(f6_neg_inf, -7.5);
-            EXPECT_FLOAT_EQ(f6_nan, 7.5);
-        }
+        constexpr float max_f6_val = std::is_same_v<F6Type, BF6> ? 28.0f : 7.5f;
+
+        EXPECT_FLOAT_EQ(f6_pos_inf, max_f6_val);
+        EXPECT_FLOAT_EQ(f6_neg_inf, -max_f6_val);
+        EXPECT_FLOAT_EQ(f6_nan, max_f6_val);
     }
 
     TEST_F(CPUF6Test, SpecialValues)

@@ -112,6 +112,7 @@ namespace rocRoller
             // Deal with inf and NaNs
             if constexpr(negative_zero_nan)
             {
+                // In Optimal mode (both FP8 and BF8) +/-Inf and +/-NaN are represented as 0x80
                 signed_inf = 0x80;
                 if constexpr(sizeof(T) == 4)
                 {
@@ -160,7 +161,7 @@ namespace rocRoller
             if(x == 0)
                 return 0;
 
-            // First need to check if it is normal or denorm as there is a difference of implict 1
+            // First need to check if it is normal or denorm as there is a difference of implicit 1
             // Then need to adjust the exponent to align with the F8 exponent, in the meanwhile, shift
             // The mantissa. Then for stochastic rounding, add rng to mantissa and truncate. And for
             // RNE, no need to add rng. Then probably need to check whether there is carry and adjust
