@@ -166,7 +166,7 @@ def run_cmd(cmd, test = False, time_limit = 0):
         else:
             error = False
             timeout = False
-            test_proc = subprocess.Popen(shlex.split(cmdline), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
+            test_proc = subprocess.Popen(cmdline, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
             if time_limit > 0:
                 start = time.monotonic()
                 #p = multiprocessing.Process(target=time_stop, args=(start, test_proc.pid))
@@ -205,15 +205,27 @@ def batch(script, xml):
     # 
     cwd = pathlib.os.curdir
     rtest_cwd_path = os.path.abspath( os.path.join( cwd, 'rtest.xml') )
+
     if os.path.isfile(rtest_cwd_path) and os.path.dirname(rtest_cwd_path).endswith( "staging" ):
         # if in a staging directory then test locally
         test_dir = cwd 
     else:
-        if args.debug: build_type = "debug"
-        else: build_type = "release"
         # deal with windows pathing
         install_dir = '//'.join(args.install_dir.split('\\'))
-        test_dir = f"{install_dir}//{build_type}//test"
+
+        if args.debug: 
+            build_type = "debug"
+        else: 
+            #check if  we have a release folder in build
+            if os.path.isdir(f'{install_dir}//release//test'):
+                build_type = "release"
+            else:
+                build_type = ""
+        
+        if len(build_type) > 0:
+            test_dir = f"{install_dir}//{build_type}//test"
+        else:
+            test_dir = f"{install_dir}//test"
     fail = False
     for i in range(len(script)):
         cmdline = script[i]
@@ -259,7 +271,6 @@ def batch(script, xml):
         else:
             error = run_cmd(cmd)
         fail = fail or error
-
     if (fail):
         if (cmd == "%XML%"):
             print(f"FAILED xml test suite!")
@@ -270,6 +281,7 @@ def batch(script, xml):
         return 1
     if (os.curdir != cwd):
         os.chdir( cwd )
+    
     return 0
 
 def run_tests():
@@ -303,8 +315,8 @@ def main():
 
     status = run_tests()
 
-    if args.fail_test: status = 1
-
+    if args.fail_test: 
+        status = 1
     if (status):
         sys.exit(status)
 
