@@ -6,7 +6,7 @@ Documentation for rocPRIM is available at
 ## Unreleased rocPRIM-3.3.0 for ROCm 6.3.0
 
 ### Additions
-
+* Add --test smoke option in rtest.py. It will run a subset of tests such that the total test time is in 5 minutes. Use python3 ./rtest.py --test smoke or python3 ./rtest.py -t smoke to execute smoke test.
 * Option `--seed` to benchmarks to specify a seed for the generation of random inputs. The default behavior is to keep using a random seed per benchmark measurement.
 * Added configuration autotuning to device partition (`rocprim::partition`, `rocprim::partition_two_way`, and `rocprim::partition_three_way`), device select (`rocprim::select`, `rocprim::unique`, and `rocprim::unique_by_key`), and device reduce by key (`rocprim::reduce_by_key`) for improved performance on selected architectures.
 * Added `rocprim::uninitialized_array` which provides uninitialized storage in local memory for user-defined types.
@@ -21,7 +21,7 @@ Documentation for rocPRIM is available at
 * Changed the default seed for `device_benchmark_segmented_reduce`.
 
 ### Fixes
-
+* Fixed an issue in rtest.py where if the build folder was made without release or debug directory it would crash the program
 * Fixed an issue where while running rtest.py on windows and passing in an absolute path to `--install_dir` causes a `FileNotFound` error.
 * rocPRIM functions are no longer forcefully inlined on Windows, significantly reducing the build
   time in debug builds.
