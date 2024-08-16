@@ -14,7 +14,7 @@ def runCI =
     nodeDetails, jobName->
 
     def prj = new rocProject('hipCUB', 'PreCheckin')
-
+    prj.timeout.compile = 400
     // Define test architectures, optional rocm version argument is available
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
 
