@@ -61,8 +61,9 @@ ROCPRIM_HOST_DEVICE inline void merge_path_search(OffsetT        diagonal,
                                                   BinaryFunction compare_function
                                                   = BinaryFunction())
 {
-    path_coordinate.x = rocprim::detail::merge_path(a, b, a_len, b_len, diagonal, compare_function);
-    path_coordinate.y = diagonal - path_coordinate.x;
+    OffsetT split_min = rocprim::detail::merge_path(a, b, a_len, b_len, diagonal, compare_function);
+    path_coordinate.x = ::rocprim::min(split_min, a_len);
+    path_coordinate.y = diagonal - split_min;
 }
 
 /// \brief Returns the offset of the first value within \p input which does not compare less than \p val
