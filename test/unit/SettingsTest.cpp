@@ -181,24 +181,37 @@ namespace rocRollerTest
         auto settings = Settings::getInstance();
 
         unsigned int numCores = std::thread::hardware_concurrency();
-        ASSERT_GT(numCores, 2);
+        ASSERT_GT(numCores, 2) << "Test should only be run in a multi-core environment.";
+
+        auto minIters        = 1000;
+        auto durationSeconds = 2;
+        auto end
+            = std::chrono::high_resolution_clock::now() + std::chrono::seconds(durationSeconds);
 
 #pragma omp parallel num_threads(numCores)
         {
-            int tid = omp_get_thread_num();
-            for(int i = 0; i < 100; ++i)
+            size_t iters = 0;
+            int    tid   = omp_get_thread_num();
+            while(std::chrono::high_resolution_clock::now() < end)
             {
+                iters++;
                 if(tid % 2 == 0)
                 {
                     auto f8Mode = settings->get(Settings::F8ModeOption);
-                    EXPECT_TRUE(((f8Mode == F8Mode::NaNoo) || (f8Mode == F8Mode::OCP)));
+                    EXPECT_TRUE(((f8Mode == F8Mode::NaNoo) || (f8Mode == F8Mode::OCP)))
+                        << "Invalid value for F8ModeOption.";
                 }
                 else
                 {
-                    uint8_t setOCP = (rand() % 100) > 50;
+                    auto setOCP = (rand() % 2) == 0;
                     settings->set(Settings::F8ModeOption, (setOCP ? F8Mode::OCP : F8Mode::NaNoo));
                 }
+                usleep(rand() % 100);
             }
+            EXPECT_GT(iters, minIters)
+                << "Test time of " << durationSeconds << " was not sufficient to perform "
+                << minIters << " iterations. Thread " << tid << " only performed " << iters
+                << " iterations.";
         }
     }
 
