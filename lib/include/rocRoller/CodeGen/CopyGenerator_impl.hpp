@@ -89,6 +89,11 @@ namespace rocRoller
                     co_yield_(Instruction("v_mov_b32", {dest->subset({k})}, {src}, {}, comment));
                 }
             }
+            else if(dest->variableType().getElementSize() == 8
+                    && context->targetArchitecture().HasCapability(GPUCapability::v_mov_b64))
+            {
+                co_yield_(Instruction("v_mov_b64", {dest->element({0})}, {src}, {}, comment));
+            }
             else
             {
                 for(size_t k = 0; k < dest->registerCount() / 2; ++k)
@@ -159,10 +164,22 @@ namespace rocRoller
             // Scalar/Vector -> Vector
             if(src->regType() == Register::Type::Scalar || src->regType() == Register::Type::Vector)
             {
-                for(size_t i = 0; i < src->registerCount(); ++i)
+                if(dest->variableType().getElementSize() == 8
+                   && context->targetArchitecture().HasCapability(GPUCapability::v_mov_b64))
                 {
-                    co_yield_(Instruction(
-                        "v_mov_b32", {dest->subset({i})}, {src->subset({i})}, {}, comment));
+                    for(size_t i = 0; i < src->registerCount() / 2; ++i)
+                    {
+                        co_yield_(Instruction(
+                            "v_mov_b64", {dest->element({i})}, {src->element({i})}, {}, comment));
+                    }
+                }
+                else
+                {
+                    for(size_t i = 0; i < src->registerCount(); ++i)
+                    {
+                        co_yield_(Instruction(
+                            "v_mov_b32", {dest->subset({i})}, {src->subset({i})}, {}, comment));
+                    }
                 }
             }
             // ACCVGPR -> Vector
@@ -191,10 +208,21 @@ namespace rocRoller
             }
             else
             {
-                for(size_t i = 0; i < src->registerCount(); ++i)
+                if(dest->variableType().getElementSize() == 8)
                 {
-                    co_yield_(Instruction(
-                        "s_mov_b32", {dest->subset({i})}, {src->subset({i})}, {}, comment));
+                    for(size_t i = 0; i < src->registerCount() / 2; ++i)
+                    {
+                        co_yield_(Instruction(
+                            "s_mov_b64", {dest->element({i})}, {src->element({i})}, {}, comment));
+                    }
+                }
+                else
+                {
+                    for(size_t i = 0; i < src->registerCount(); ++i)
+                    {
+                        co_yield_(Instruction(
+                            "s_mov_b32", {dest->subset({i})}, {src->subset({i})}, {}, comment));
+                    }
                 }
             }
         }

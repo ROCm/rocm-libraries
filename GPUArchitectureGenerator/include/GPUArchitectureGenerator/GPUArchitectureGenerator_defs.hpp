@@ -102,6 +102,8 @@ namespace GPUArchitectureGenerator
             {rocRoller::GPUCapability::v_fma_f32, {"v_fma_f32 v20, v21, v22, v23", ""}},
             {rocRoller::GPUCapability::v_fmac_f32, {"v_fmac_f32 v20, v21, v22", ""}},
 
+            {rocRoller::GPUCapability::v_mov_b64, {"v_mov_b64 v[2:3], v[0:1]", ""}},
+
             {rocRoller::GPUCapability::HasAtomicAdd,
              {"buffer_atomic_add_f32 v0, v1, s[0:3], 0 offen offset:0", ""}},
 

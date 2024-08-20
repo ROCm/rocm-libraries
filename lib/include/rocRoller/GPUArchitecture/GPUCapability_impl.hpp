@@ -75,6 +75,8 @@ namespace rocRoller
             {"v_fma_f32", Value::v_fma_f32},
             {"v_fmac_f32", Value::v_fmac_f32},
 
+            {"v_mov_b64", Value::v_mov_b64},
+
             {"HasAtomicAdd", Value::HasAtomicAdd},
 
             {"MaxVmcnt", Value::MaxVmcnt},
