@@ -64,7 +64,8 @@ class thread {
 
     // TODO: The default member initializer for worknode_d makes it impossible to have an instance of gpu::thread in
     // __shared__ or __device__ memory (pointers to gpu::thread are still allowed). This is not ideal.
-    __host__ __device__ thread() noexcept {}
+    __host__ thread() noexcept;
+    __device__ thread() noexcept {}
     __host__ __device__ thread(const thread &) = delete;
     __host__ __device__ thread(thread &&other) noexcept
 #ifdef __HIP_DEVICE_COMPILE__
@@ -104,8 +105,7 @@ class thread {
     __host__ __device__ static constexpr unsigned int max_width() noexcept { return MAX_THREAD_WIDTH; }
     __device__ static constexpr unsigned int hardware_concurrency() noexcept { return NUM_VCORES; }
     __host__ static unsigned int hardware_concurrency() noexcept;
-    __host__ static void start();
-    __host__ static void finish(bool blocking = true);
+
   private:
     template <class WorkNode_t>
     __host__ void sendWorkNodeViaKernel(std::unique_ptr<WorkNode_t> worknode_h);
@@ -278,6 +278,7 @@ __host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : fn(
 __device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *worknode);
 __host__ WorkNode_Header **getCPUWorkQueueAddr();
 __host__ void insertWorkNodeIntoCPUQueue(WorkNode_Header *worknode, const uint32_t myPushCount);
+__host__ void prepDeviceForWork();
 
 //====================================================================================================================//
 //      KERNELS
@@ -310,6 +311,8 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     if (width > MAX_THREAD_WIDTH) {
         throw std::length_error("thread::thread: width must not exceed " + std::to_string(MAX_THREAD_WIDTH));
     }
+    prepDeviceForWork();
+
     std::unique_ptr worknode_h = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
     using WorkNode_t = typename decltype(worknode_h)::element_type;
     // First two are prerequisites for the third, and produce more user-friendly error messages
