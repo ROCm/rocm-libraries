@@ -124,7 +124,6 @@ __global__ void thread_test() {
 #endif // 0
 
 int main() {
-    gpu::thread::start();
     gpu::thread([] __device__(){gmain();}).join();
 
     std::vector<gpu::thread> threads(1<<16);
@@ -141,6 +140,5 @@ int main() {
             throw;
         }
     }
-    gpu::thread::finish();
     return 0;
 }

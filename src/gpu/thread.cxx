@@ -21,7 +21,7 @@ __device__ uint32_t activeVcoreCount = 0;
 __device__ WorkNode_Header *currentWorkNode[NUM_VCORES] = {};
 
 hipStream_t mainStream;
-bool started = false;
+std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
 
 
 // Locks and returns the worknode at location. If *location == nullptr (i.e. it's locked), waits for the node to be unlocked.
@@ -246,6 +246,45 @@ __host__ void insertWorkNodeIntoCPUQueue(WorkNode_Header *worknode_d, const uint
     __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &raw_ptrs[myIndex], sizeof(void*), myIndex * sizeof(void*), hipMemcpyHostToDevice, getEnqueingStream()));
 }
 
+static __global__ void threading_main();
+__host__ void prepDeviceForWork() {
+    if (gpuThreadFromHost_counter++ != 0) {
+        return;
+    }
+    bool isFirstTime = false;
+    // This bit serves 2 purposes: The lambda is a trick to run a code snippet once, then, since we have to allocate a
+    // variable for the trick anyways, and we also need some persistent memory to copy from when setting
+    // cpuWorkQueueIndex_last = -1U, we'll use temp for that purpose too.
+    static uint32_t temp = ([&isFirstTime]() {
+        // TODO: investigate using hipExtStreamCreateWithCUMask for this
+        __LIBGPU_HIP_CHECK__(hipStreamCreateWithFlags(&mainStream, hipStreamNonBlocking));
+        isFirstTime = true;
+    }(), -1U);
+
+    // cpuWorkQueueIndex_last is initialized to -1U, so we don't need to do this the first time through
+    if (!isFirstTime) {
+        // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
+        // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its copy in that stream, and we need to make
+        // sure the change made by the last thread's destructor doesn't get over-written
+        __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueueIndex_last), &temp, sizeof(temp), 0, hipMemcpyHostToDevice, getEnqueingStream()));
+        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+    }
+
+    hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(MAX_THREAD_WIDTH), 0, mainStream);
+}
+
+static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bool blocking = false) {
+    // Needs to be static because the copy might not be done before we return
+    static uint32_t temp;
+    temp = cpuWorkQueueIndex_push;
+    __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueueIndex_last), &temp, sizeof(temp), 0, hipMemcpyHostToDevice, getEnqueingStream()));
+    if (blocking) {
+        // We could wait for the memcpy to finish (with hipStreamSynchronize(enqueingStream)) before
+        // synchronizing on mainStream, but there's no need.
+        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(mainStream));
+    }
+}
+
 static __device__ bool shouldKeepPollingForWork() {
     // Don't bother with any of the atomic loads if the CPU hasn't told us it's done sending work.
     if (cpuWorkQueueIndex_last == -1U) {
@@ -351,6 +390,10 @@ __device__ unsigned int get_fiber_id() noexcept {
 
 } // namespace this_thread
 
+__host__ thread::thread() noexcept {
+    prepDeviceForWork();
+}
+
 __host__ __device__ thread &thread::operator=(thread &&other) noexcept {
 #ifdef __HIP_DEVICE_COMPILE__
     if (joinable()) {
@@ -373,10 +416,14 @@ __host__ __device__ thread::~thread() {
     if (joinable()) {
 #ifdef __HIP_DEVICE_COMPILE__
         assert(!joinable() && "Attempted to destroy a gpu::thread object that still has an associated thread");
+    }
 #else
         std::terminate();
-#endif
     }
+    if (--gpuThreadFromHost_counter == 0) {
+        notifyDeviceThereMightNotBeAnyMoreWork();
+    }
+#endif
 }
 
 __host__ __device__ thread::id thread::get_id(uint32_t index) const {
@@ -444,9 +491,6 @@ __host__ __device__ void thread::join() {
     ::free(worknode_d);
     worknode_d = nullptr;
 #else // __HIP_DEVICE_COMPILE__
-    if (!started) {
-        throw std::logic_error("called gpu::thread::join() before calling gpu::start()");
-    }
     if (!joinable()) {
         throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::join failed");
     }
@@ -498,31 +542,6 @@ __host__ unsigned int thread::hardware_concurrency() noexcept {
     catch (...) {
         std::cerr << "Exception while fetching numVcores\n";
         return 1;
-    }
-}
-
-__host__ void thread::start() {
-    if (started) {
-        throw std::logic_error("gpu::start() called twice");
-    }
-    started = true;
-    // TODO: investigate using hipExtStreamCreateWithCUMask for this
-    __LIBGPU_HIP_CHECK__(hipStreamCreateWithFlags(&mainStream, hipStreamNonBlocking));
-    hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(MAX_THREAD_WIDTH), 0, mainStream);
-}
-
-__host__ void thread::finish(bool blocking) {
-    if (!started) {
-        throw std::logic_error("called gpu::finish() before calling gpu::start()");
-    }
-    uint32_t temp = cpuWorkQueueIndex_push;
-    __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueueIndex_last), &temp, sizeof(temp), 0, hipMemcpyHostToDevice, getEnqueingStream()));
-    if (blocking) {
-        // We could wait for the memcpy to finish (with hipStreamSynchronize(enqueingStream)) before
-        // synchronizing on mainStream, but there's no need.
-        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(mainStream));
-        __LIBGPU_HIP_CHECK__(hipStreamDestroy(mainStream));
-        // Don't destroy enqueingStream because unlike mainStream we won't re-create it if the user decides to 're-start the GPU'
     }
 }
 
