@@ -74,6 +74,7 @@ class thread {
 #else
         : worknode_d(std::move(other.worknode_d)), worknodeSize(other.worknodeSize) {}
 #endif
+    __host__ __device__ thread &operator=(const thread&) = delete;
     __host__ __device__ thread &operator=(thread &&other) noexcept;
 
     template <class Fn_t, class... Args_t>
