@@ -490,7 +490,7 @@ namespace rocRoller
                 return call(a.arg, b.arg);
             }
 
-            bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
+            constexpr bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
             {
                 return a == b;
             }
@@ -525,7 +525,7 @@ namespace rocRoller
                 return a->sameAs(b);
             }
 
-            bool operator()(DataFlowTag const& a, DataFlowTag const& b)
+            constexpr bool operator()(DataFlowTag const& a, DataFlowTag const& b)
             {
                 return a == b;
             }
@@ -537,7 +537,7 @@ namespace rocRoller
 
             // a & b are different operator/value classes
             template <class T, class U>
-            requires(!std::same_as<T, U>) bool operator()(T const& a, U const& b)
+            requires(!std::same_as<T, U>) constexpr bool operator()(T const& a, U const& b)
             {
                 return false;
             }
@@ -648,7 +648,7 @@ namespace rocRoller
                 return call(a.arg, b.arg);
             }
 
-            bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
+            constexpr bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
             {
                 return a == b;
             }
@@ -674,7 +674,7 @@ namespace rocRoller
                 return a->sameAs(b);
             }
 
-            bool operator()(DataFlowTag const& a, DataFlowTag const& b)
+            constexpr bool operator()(DataFlowTag const& a, DataFlowTag const& b)
             {
                 return a == b;
             }
@@ -908,7 +908,7 @@ namespace rocRoller
             }
 
             template <CValue Value>
-            int operator()(Value const& expr) const
+            constexpr int operator()(Value const& expr) const
             {
                 return 0;
             }

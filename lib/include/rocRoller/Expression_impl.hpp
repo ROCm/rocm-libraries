@@ -439,22 +439,22 @@ namespace rocRoller
                 return {EvaluationTime::KernelExecute};
             }
 
-            EvaluationTimes operator()(AssemblyKernelArgumentPtr const& expr) const
+            constexpr EvaluationTimes operator()(AssemblyKernelArgumentPtr const& expr) const
             {
                 return {EvaluationTime::KernelLaunch, EvaluationTime::KernelExecute};
             }
 
-            EvaluationTimes operator()(DataFlowTag const& expr) const
+            constexpr EvaluationTimes operator()(DataFlowTag const& expr) const
             {
                 return {EvaluationTime::KernelExecute};
             }
 
-            EvaluationTimes operator()(CommandArgumentPtr const& expr) const
+            constexpr EvaluationTimes operator()(CommandArgumentPtr const& expr) const
             {
                 return {EvaluationTime::KernelLaunch};
             }
 
-            EvaluationTimes operator()(CommandArgumentValue const& expr) const
+            constexpr EvaluationTimes operator()(CommandArgumentValue const& expr) const
             {
                 return EvaluationTimes::All();
             }

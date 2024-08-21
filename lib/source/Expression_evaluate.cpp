@@ -45,6 +45,9 @@ namespace rocRoller
 {
     namespace Expression
     {
+        template <typename T>
+        concept CIntegral = std::integral<T> && !std::same_as<bool, T>;
+
         /**
          * Visitor for a specific Operation expression.  Performs that
          * specific Operation (Add, subtract, etc).  Does not walk the
@@ -214,15 +217,16 @@ namespace rocRoller
         /**
          * Declares a BinaryEvaluatorVisitor that can be defined solely by a single binary expression.
          */
-#define BINARY_EVALUATOR_VISITOR(name, op)                                                \
-    template <>                                                                           \
-    struct OperationEvaluatorVisitor<name> : public BinaryEvaluatorVisitor<name>          \
-    {                                                                                     \
-        template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>                   \
-        requires CCan##name<LHS, RHS> auto evaluate(LHS const& lhs, RHS const& rhs) const \
-        {                                                                                 \
-            return lhs op rhs;                                                            \
-        }                                                                                 \
+#define BINARY_EVALUATOR_VISITOR(name, op)                                          \
+    template <>                                                                     \
+    struct OperationEvaluatorVisitor<name> : public BinaryEvaluatorVisitor<name>    \
+    {                                                                               \
+        template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>             \
+        requires CCan##name<LHS, RHS> constexpr auto evaluate(LHS const& lhs,       \
+                                                              RHS const& rhs) const \
+        {                                                                           \
+            return lhs op rhs;                                                      \
+        }                                                                           \
     }
 
 #define SIMPLE_BINARY_OP(name, op) \
@@ -419,11 +423,8 @@ namespace rocRoller
         struct OperationEvaluatorVisitor<LogicalShiftR>
             : public BinaryEvaluatorVisitor<LogicalShiftR>
         {
-            template <typename T, typename U>
-            requires(std::integral<T>&&
-                         std::integral<U> && !std::same_as<T, bool> && !std::same_as<U, bool>) T
-                evaluate(T const& lhs, U const& rhs)
-            const
+            template <CIntegral T, CIntegral U>
+            constexpr T evaluate(T const& lhs, U const& rhs) const
             {
                 return static_cast<typename std::make_unsigned<T>::type>(lhs) >> rhs;
             }
@@ -541,9 +542,8 @@ namespace rocRoller
         struct OperationEvaluatorVisitor<BitwiseNegate>
             : public UnaryEvaluatorVisitor<BitwiseNegate>
         {
-            template <typename T>
-            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, T>
-                evaluate(T const& arg) const
+            template <CIntegral T>
+            constexpr T evaluate(T const& arg) const
             {
                 return ~arg;
             }
@@ -552,8 +552,8 @@ namespace rocRoller
         template <>
         struct OperationEvaluatorVisitor<Exponential2> : public UnaryEvaluatorVisitor<Exponential2>
         {
-            template <typename T>
-            std::enable_if_t<std::is_floating_point_v<T>, T> evaluate(T const& arg) const
+            template <std::floating_point T>
+            constexpr T evaluate(T const& arg) const
             {
                 return std::exp2(arg);
             }
@@ -562,8 +562,8 @@ namespace rocRoller
         template <>
         struct OperationEvaluatorVisitor<Exponential> : public UnaryEvaluatorVisitor<Exponential>
         {
-            template <typename T>
-            std::enable_if_t<std::is_floating_point_v<T>, T> evaluate(T const& arg) const
+            template <std::floating_point T>
+            constexpr T evaluate(T const& arg) const
             {
                 return std::exp(arg);
             }
@@ -573,8 +573,8 @@ namespace rocRoller
         struct OperationEvaluatorVisitor<Negate> : public UnaryEvaluatorVisitor<Negate>
         {
             template <typename T>
-            requires(std::floating_point<T> || std::signed_integral<T>) T evaluate(T const& arg)
-            const
+            requires(std::floating_point<T> || std::signed_integral<T>) constexpr T
+                evaluate(T const& arg) const
             {
                 return -arg;
             }
@@ -584,7 +584,7 @@ namespace rocRoller
         struct OperationEvaluatorVisitor<LogicalNot> : public UnaryEvaluatorVisitor<LogicalNot>
         {
             template <typename T>
-            bool evaluate(T const& arg) const
+            constexpr bool evaluate(T const& arg) const
             {
                 return !arg;
             }
@@ -637,15 +637,16 @@ namespace rocRoller
         struct ToBoolVisitor
         {
             template <typename T>
-            bool operator()(T const& val)
+            constexpr bool operator()(T const& val)
             {
-                if constexpr(std::is_integral_v<T>)
-                {
-                    return val != 0;
-                }
-
                 Throw<FatalError>("Invalid bool type: ", typeid(T).name());
                 return 0;
+            }
+
+            template <std::integral T>
+            constexpr bool operator()(T const& val)
+            {
+                return val != 0;
             }
 
             bool call(CommandArgumentValue const& val)

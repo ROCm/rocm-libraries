@@ -51,19 +51,19 @@ namespace rocRoller
      */
 
     template <typename T>
-    T CeilDivide(T num, T den)
+    constexpr T CeilDivide(T num, T den)
     {
         return (num + (den - 1)) / den;
     }
 
     template <typename T>
-    T RoundUpToMultiple(T val, T den)
+    constexpr T RoundUpToMultiple(T val, T den)
     {
         return CeilDivide(val, den) * den;
     }
 
     template <typename T, typename = typename std::enable_if<std::is_integral<T>::value>>
-    T IsPrime(T val)
+    constexpr T IsPrime(T val)
     {
         if(val < 2)
             return false;
@@ -79,7 +79,7 @@ namespace rocRoller
     }
 
     template <typename T, typename = typename std::enable_if<std::is_integral<T>::value>>
-    T NextPrime(T val)
+    constexpr T NextPrime(T val)
     {
         if(val < 2)
             return 2;
@@ -283,7 +283,7 @@ namespace rocRoller
             co_yield begin;
     }
 
-    inline auto Generated(auto gen)
+    inline constexpr auto Generated(auto gen)
     {
         return std::vector(gen.begin(), gen.end());
     }
@@ -322,7 +322,7 @@ namespace rocRoller
     }
 
     template <typename T>
-    inline bool contains(std::vector<T> x, T val)
+    constexpr inline bool contains(std::vector<T> x, T val)
     {
         return std::any_of(x.begin(), x.end(), [val](T elem) { return elem == val; });
     }
