@@ -1,23 +1,15 @@
-// -*- C++ -*-
 //===----------------------------------------------------------------------===//
 //
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of libcu++, the C++ Standard Library for your entire system,
+// under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-// SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES.
+// SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef _LIBCUDACXX_EXPECTED
-#define _LIBCUDACXX_EXPECTED
-
-/*
-expected synopsis
-namespace std {
-
-}
-
-*/
+#ifndef _CUDA_FUNCTIONAL_
+#define _CUDA_FUNCTIONAL_
 
 #include <cuda/std/detail/__config>
 
@@ -29,10 +21,7 @@ namespace std {
 #  pragma system_header
 #endif // no system header
 
-#include <cuda/std/__expected/bad_expected_access.h>
-#include <cuda/std/__expected/expected.h>
-#include <cuda/std/__expected/unexpect.h>
-#include <cuda/std/__expected/unexpected.h>
-#include <cuda/std/version>
+#include <cuda/__functional/proclaim_return_type.h>
+#include <cuda/std/functional>
 
-#endif // _LIBCUDACXX_EXPECTED
+#endif // _CUDA_FUNCTIONAL_
