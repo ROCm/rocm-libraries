@@ -873,9 +873,9 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), 2);
         EXPECT_EQ(countSubstring(generatedCode, "v_mfma_scale_f32_32x32x64_f8f6f4"), 2);
         if(isFP8)
-            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 abid:1 blgp:0b000"), 2);
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 blgp:0b000"), 2);
         else
-            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 abid:1 blgp:0b001"), 2);
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 blgp:0b001"), 2);
     }
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x128_TN)
@@ -918,9 +918,9 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), 2);
         EXPECT_EQ(countSubstring(generatedCode, "v_mfma_scale_f32_16x16x128_f8f6f4"), 2);
         if(isFP8)
-            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 abid:1 blgp:0b000"), 2);
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b000 blgp:0b000"), 2);
         else
-            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 abid:1 blgp:0b001"), 2);
+            EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 blgp:0b001"), 2);
     }
 
     void verifyInsturctions(std::string       instructionString,
@@ -1031,7 +1031,7 @@ namespace MatrixMultiplyTest
                            4,
                            2,
                            "v_mfma_scale_f32_32x32x64_f8f6f4",
-                           "cbsz:0b100 abid:1 blgp:0b100");
+                           "cbsz:0b100 blgp:0b100");
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP4_16x16x128_TN)
@@ -1108,7 +1108,7 @@ namespace MatrixMultiplyTest
                            4,
                            2,
                            "v_mfma_scale_f32_16x16x128_f8f6f4",
-                           "cbsz:0b100 abid:1 blgp:0b100");
+                           "cbsz:0b100 blgp:0b100");
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
@@ -1247,7 +1247,7 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPUF6, GPU_ScaledMatrixMultiplyMacroTileF6_16x16x128_TN)
     {
-        auto mfmaDataTypes = "cbsz:0b010 abid:1 blgp:0b010";
+        auto mfmaDataTypes = "cbsz:0b010 blgp:0b010";
 
         uint8_t scaleA = 128;
         uint8_t scaleB = 125;
@@ -1259,7 +1259,7 @@ namespace MatrixMultiplyTest
         {
             matrixMultiplyMacroTile<BF6, BF6, float>(
                 16, 16, 128, 1, 2.e-6, true, "T", "N", scaleA, scaleB);
-            mfmaDataTypes = "cbsz:0b011 abid:1 blgp:0b011";
+            mfmaDataTypes = "cbsz:0b011 blgp:0b011";
         }
 
         if(!commandKernel)
@@ -1333,7 +1333,7 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPUF6, GPU_ScaledMatrixMultiplyMacroTileF6_32x32x64_TN)
     {
-        auto mfmaDataTypes = "cbsz:0b010 abid:1 blgp:0b010";
+        auto mfmaDataTypes = "cbsz:0b010 blgp:0b010";
 
         uint8_t scaleA = 128;
         uint8_t scaleB = 125;
@@ -1345,7 +1345,7 @@ namespace MatrixMultiplyTest
         {
             matrixMultiplyMacroTile<BF6, BF6, float>(
                 32, 32, 64, 1, 2.e-6, true, "T", "N", scaleA, scaleB);
-            mfmaDataTypes = "cbsz:0b011 abid:1 blgp:0b011";
+            mfmaDataTypes = "cbsz:0b011 blgp:0b011";
         }
 
         if(!commandKernel)

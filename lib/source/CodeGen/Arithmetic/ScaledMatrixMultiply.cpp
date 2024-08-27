@@ -96,17 +96,10 @@ namespace rocRoller
             auto        typeB    = matB->variableType().dataType;
             std::string cbsz     = "cbsz:" + Arithmetic::getModifier(typeA); // Matrix A type
             std::string blgp     = "blgp:" + Arithmetic::getModifier(typeB); // Matrix B type
-            std::string abid     = "abid:1"; // Enable scale
-            std::string modifier = concatenate(cbsz, " ", abid, " ", blgp);
+            std::string modifier = concatenate(cbsz, " ", blgp);
 
             auto mfma = concatenate("v_mfma_scale_f32_", M, "x", N, "x", K, "_f8f6f4");
 
-            // Currently compiler has a bug that the number of VGPRs must be 8 regardless
-            // the data types of input matrices, and the following two lines are to workaround
-            // this bug.
-            // TODO: Remove these two lines when the compiler bug gets fixed.
-            matA = matA->withFixedRegisters(8);
-            matB = matB->withFixedRegisters(8);
             co_yield_(
                 Instruction(mfma, {dest}, {matA, matB, matC, scaleA, scaleB}, {modifier}, ""));
         }

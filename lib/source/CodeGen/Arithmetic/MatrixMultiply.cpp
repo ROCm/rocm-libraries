@@ -161,10 +161,6 @@ namespace rocRoller
                                        Arithmetic::getModifier(typeA),
                                        " blgp:",
                                        Arithmetic::getModifier(typeB));
-
-                // TODO Remove register allocation hack.
-                A = A->withFixedRegisters(8);
-                B = B->withFixedRegisters(8);
             }
 
             auto mfma = concatenate("v_mfma_", typeStr(typeD), "_", M, "x", N, "x", K, inputType);

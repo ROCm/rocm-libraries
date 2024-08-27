@@ -1155,8 +1155,7 @@ namespace GEMMDriverTest
         gemm.scaleA = 128;
         gemm.scaleB = 125;
         basicGEMM<FP4, FP4, float>(m_context, gemm);
-        check_mfma_f8f6f4(
-            m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b100 abid:1 blgp:0b100");
+        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b100 blgp:0b100");
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 8) / 64, 4, 10);
     }
 
@@ -1176,8 +1175,7 @@ namespace GEMMDriverTest
         gemm.scaleA = 128;
         gemm.scaleB = 125;
         basicGEMM<FP4, FP4, float>(m_context, gemm);
-        check_mfma_f8f6f4(
-            m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b100 abid:1 blgp:0b100");
+        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b100 blgp:0b100");
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 8) / 64, 4, 10);
     }
 
@@ -1197,8 +1195,7 @@ namespace GEMMDriverTest
         gemm.scaleA = 128;
         gemm.scaleB = 125;
         basicGEMM<FP6, FP6, float>(m_context, gemm);
-        check_mfma_f8f6f4(
-            m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b010 abid:1 blgp:0b010");
+        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b010 blgp:0b010");
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
@@ -1218,8 +1215,7 @@ namespace GEMMDriverTest
         gemm.scaleA = 128;
         gemm.scaleB = 125;
         basicGEMM<FP6, FP6, float>(m_context, gemm);
-        check_mfma_f8f6f4(
-            m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b010 abid:1 blgp:0b010");
+        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b010 blgp:0b010");
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
@@ -1239,8 +1235,7 @@ namespace GEMMDriverTest
         gemm.scaleA = 128;
         gemm.scaleB = 125;
         basicGEMM<BF6, BF6, float>(m_context, gemm);
-        check_mfma_f8f6f4(
-            m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b011 abid:1 blgp:0b011");
+        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b011 blgp:0b011");
         check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 
@@ -1260,8 +1255,7 @@ namespace GEMMDriverTest
         gemm.scaleA = 128;
         gemm.scaleB = 125;
         basicGEMM<BF6, BF6, float>(m_context, gemm);
-        check_mfma_f8f6f4(
-            m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b011 abid:1 blgp:0b011");
+        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_32x32x64_f8f6f4", "cbsz:0b011 blgp:0b011");
         check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
     }
 

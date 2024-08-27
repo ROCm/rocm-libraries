@@ -537,22 +537,13 @@ namespace rocRoller
             }
             else if(hasContiguousIndices())
             {
-                if(m_fakedRegisters > 0)
-                {
-                    auto firstRegister = regIndices[m_allocationCoord.front()];
-                    auto lastRegister  = firstRegister + m_fakedRegisters - 1;
-                    os << concatenate(prefix, "[", firstRegister, ":", lastRegister, "]");
-                }
-                else
-                {
-                    // contiguous range of registers, e.g. v[0:3].
-                    os << concatenate(prefix,
-                                      "[",
-                                      regIndices[m_allocationCoord.front()],
-                                      ":",
-                                      regIndices[m_allocationCoord.back()],
-                                      "]");
-                }
+                // contiguous range of registers, e.g. v[0:3].
+                os << concatenate(prefix,
+                                  "[",
+                                  regIndices[m_allocationCoord.front()],
+                                  ":",
+                                  regIndices[m_allocationCoord.back()],
+                                  "]");
             }
             else
             {
@@ -717,15 +708,6 @@ namespace rocRoller
             auto r = std::make_shared<Value>(
                 allocation(), regType(), variableType(), m_allocationCoord);
             r->m_negate = true;
-            return r;
-        }
-
-        inline ValuePtr Value::withFixedRegisters(uint numFakedRegisters) const
-        {
-            AssertFatal(IsRegister(m_regType) && hasContiguousIndices());
-            auto r = std::make_shared<Value>(
-                allocation(), regType(), variableType(), m_allocationCoord);
-            r->m_fakedRegisters = numFakedRegisters;
             return r;
         }
 

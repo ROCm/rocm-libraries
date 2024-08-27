@@ -845,7 +845,7 @@ namespace rocRoller
                     //   v_mov_b32 v8, 128 // Copy scaleA to VGPR
                     //   v_mov_b32 v11, 125 // Copy scaleB to VGPR
                     //   s_nop 1
-                    //   v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[12:19], v[16:23], a[0:3], v8, v11 cbsz:0 abid:1 blgp:0
+                    //   v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[12:19], v[16:23], a[0:3], v8, v11 cbsz:0 blgp:0
                     //
                     auto scaledMatMul
                         = std::make_shared<Expression::Expression>(Expression::ScaledMatrixMultiply(

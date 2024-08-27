@@ -3063,7 +3063,7 @@ namespace ExpressionTest
             128,
             16 * 128 / 64 / 4, // M * K / 64 / 4
             128 * 16 / 64 / 4, // K * N / 64 / 4
-            R"(v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:7], v[8:15], a[0:3], v16, v17 cbsz:0b000 abid:1 blgp:0b000)");
+            R"(v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[0:7], v[8:15], a[0:3], v16, v17 cbsz:0b000 blgp:0b000)");
     }
 
     TEST_P(ARCH_ExpressionTest, MFMA_SCALE_F32_32x32x64_F8F6F4)
@@ -3076,7 +3076,7 @@ namespace ExpressionTest
             64,
             32 * 64 / 64 / 4, // M * K / 64 / 4
             64 * 32 / 64 / 4, // K * N / 64 / 4
-            R"(v_mfma_scale_f32_32x32x64_f8f6f4 a[0:15], v[0:7], v[8:15], a[0:15], v16, v17 cbsz:0b000 abid:1 blgp:0b000)");
+            R"(v_mfma_scale_f32_32x32x64_f8f6f4 a[0:15], v[0:7], v[8:15], a[0:15], v16, v17 cbsz:0b000 blgp:0b000)");
     }
 
     TEST_P(ARCH_ExpressionTest, MFMA_F32_32x32x64_F8F6F4)
