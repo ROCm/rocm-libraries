@@ -165,6 +165,16 @@ ExternalProject_Add(spdlog
 add_executable(
   GPUArchitectureGenerator
   GPUArchitectureGenerator/source/GPUArchitectureGenerator.cpp
+
+  lib/source/GPUArchitecture.cpp
+  lib/source/GPUArchitectureLibrary.cpp
+
+  lib/source/Assemblers/Assembler.cpp
+  lib/source/Costs/Cost.cpp
+  lib/source/DataTypes_F8_Utils.cpp
+  lib/source/Error.cpp
+  lib/source/Logging.cpp
+  lib/source/Scheduler.cpp
 )
 add_dependencies(GPUArchitectureGenerator spdlog)
 target_compile_features(GPUArchitectureGenerator PUBLIC cxx_std_20)
@@ -172,9 +182,6 @@ target_compile_options(GPUArchitectureGenerator PUBLIC  ${COROUTINES_COMPILE_OPT
 target_link_options(GPUArchitectureGenerator PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
   GPUArchitectureGenerator PUBLIC
-  -Wl,--whole-archive
-  rocroller
-  -Wl,--no-whole-archive
   ${llvm_libs}
   msgpackc-cxx
 )
@@ -189,6 +196,10 @@ target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC
                            ${libdivide_SOURCE_DIR}/
                            ${LLVM_INCLUDE_DIRS}
                            ${LLD_INCLUDE_DIRS})
+
+if(YAML_BACKEND STREQUAL "YAML_CPP")
+  target_link_libraries(GPUArchitectureGenerator PUBLIC yaml-cpp)
+endif()
 
 if(ROCROLLER_USE_HIP)
   target_link_libraries(GPUArchitectureGenerator PUBLIC hip::host)
