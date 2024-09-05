@@ -16,11 +16,11 @@
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
-#include "GEMMProblem.hpp"
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
+#include <common/GEMMProblem.hpp>
 
 namespace GEMMDriverTest
 {

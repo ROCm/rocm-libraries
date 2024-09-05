@@ -25,7 +25,9 @@ namespace rocRoller
                 auto const& architecture = context->targetArchitecture();
 
                 AssertFatal(architecture.HasInstructionInfo(instruction),
-                            "Instruction '" + instruction + "' is not supported by rocRoller.");
+                            "Instruction not supported by rocRoller.",
+                            ShowValue(instruction),
+                            ShowValue(architecture.target()));
             }
         }
     }

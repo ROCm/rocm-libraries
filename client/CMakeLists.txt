@@ -21,7 +21,6 @@ if(BUILD_CLIENT)
     TensileGEMMSolution.cpp
     visualize.cpp
 
-    ../test/unit/Utilities.cpp
   )
 
   target_compile_options(gemm PUBLIC ${EXTRA_COMPILE_OPTIONS})
@@ -36,6 +35,7 @@ if(BUILD_CLIENT)
     gemm
     PUBLIC
     rocroller_interface
+    common_test_utilities
     msgpackc-cxx
     gtest_main
     gmock
@@ -69,8 +69,6 @@ if(BUILD_CLIENT)
   add_executable(codegen_stress
     codegen_stress_test.cpp
     Parser.cpp
-
-    ../test/unit/Utilities.cpp
   )
 
   target_compile_options(codegen_stress PUBLIC ${EXTRA_COMPILE_OPTIONS})
@@ -85,6 +83,7 @@ if(BUILD_CLIENT)
     codegen_stress
     PUBLIC
     rocroller_interface
+    common_test_utilities
     msgpackc-cxx
     gtest_main
     gmock

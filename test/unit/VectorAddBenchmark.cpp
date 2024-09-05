@@ -3,7 +3,8 @@
 
 #include <rocRoller/Utilities/HIPTimer.hpp>
 
-#include "CommonGraphs.hpp"
+#include <common/CommonGraphs.hpp>
+
 #include "GPUContextFixture.hpp"
 #include "Utilities.hpp"
 

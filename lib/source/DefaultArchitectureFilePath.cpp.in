@@ -1,0 +1,4 @@
+namespace rocRoller
+{
+    const char* DefaultArchitectureFilePath = "@ROCROLLER_DEFAULT_ARCHITECTURE_FILE_PATH@";
+};

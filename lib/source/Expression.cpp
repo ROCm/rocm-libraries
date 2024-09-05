@@ -800,6 +800,8 @@ namespace rocRoller
 
         struct ExpressionGetCommentVisitor
         {
+            bool includeRegisterComments = true;
+
             template <typename Expr>
             requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) std::string
                 operator()(Expr const& expr) const
@@ -809,7 +811,7 @@ namespace rocRoller
 
             std::string operator()(Register::ValuePtr const& expr) const
             {
-                if(expr)
+                if(includeRegisterComments && expr)
                     return expr->name();
 
                 return "";
@@ -826,19 +828,29 @@ namespace rocRoller
             }
         };
 
-        std::string getComment(Expression const& expr)
+        std::string getComment(Expression const& expr, bool includeRegisterComments)
         {
-            auto visitor = ExpressionGetCommentVisitor();
+            auto visitor = ExpressionGetCommentVisitor{includeRegisterComments};
             return visitor.call(expr);
         }
 
-        std::string getComment(ExpressionPtr const& expr)
+        std::string getComment(ExpressionPtr const& expr, bool includeRegisterComments)
         {
             if(!expr)
             {
                 return "";
             }
-            return getComment(*expr);
+            return getComment(*expr, includeRegisterComments);
+        }
+
+        std::string getComment(ExpressionPtr const& expr)
+        {
+            return getComment(expr, true);
+        }
+
+        std::string getComment(Expression const& expr)
+        {
+            return getComment(expr, true);
         }
 
         void appendComment(Expression& expr, std::string comment)

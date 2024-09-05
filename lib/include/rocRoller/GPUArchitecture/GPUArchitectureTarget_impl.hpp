@@ -108,6 +108,12 @@ namespace rocRoller
         parseString(input);
     }
 
+    inline GPUArchitectureTarget& GPUArchitectureTarget::operator=(std::string const& input)
+    {
+        parseString(input);
+        return *this;
+    }
+
     inline int GPUArchitectureTarget::getMajorVersion() const
     {
         return m_majorVersion;

@@ -694,6 +694,9 @@ namespace rocRoller
         void setComment(ExpressionPtr& expr, std::string comment);
         void setComment(Expression& expr, std::string comment);
 
+        std::string getComment(Expression const& expr, bool includeRegisterComments);
+        std::string getComment(ExpressionPtr const& expr, bool includeRegisterComments);
+
         std::string getComment(ExpressionPtr const& expr);
         std::string getComment(Expression const& expr);
 

@@ -79,6 +79,18 @@ namespace rocRoller
         return stream;
     }
 
+    std::ostream& operator<<(std::ostream& stream, const KernelArguments::const_iterator& iter)
+    {
+        if(iter.isEnd())
+        {
+            return stream << "[end]";
+        }
+        else
+        {
+            return stream << "&(" << iter->first << ": " << iter->second << ")";
+        }
+    }
+
     KernelArguments::KernelArguments(bool log, size_t bytes)
         : m_log(log)
     {
@@ -177,6 +189,11 @@ namespace rocRoller
             return ret;
         }
         return *this;
+    }
+
+    bool KernelArguments::const_iterator::isEnd() const
+    {
+        return (*this) == m_args.end();
     }
 
     bool KernelArguments::const_iterator::operator==(const const_iterator& rhs) const

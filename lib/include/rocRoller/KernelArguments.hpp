@@ -84,6 +84,7 @@ namespace rocRoller
             const_iterator  operator++(int);
             bool            operator==(const const_iterator& rhs) const;
             bool            operator!=(const const_iterator& rhs) const;
+            bool            isEnd() const;
             ArgPair const&  operator*() const;
             ArgPair const*  operator->() const;
             void            reset();
@@ -133,6 +134,7 @@ namespace rocRoller
     };
 
     std::ostream& operator<<(std::ostream& stream, const KernelArguments& t);
+    std::ostream& operator<<(std::ostream& stream, const KernelArguments::const_iterator& iter);
 
 } // namespace rocRoller
 

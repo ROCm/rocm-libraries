@@ -12,16 +12,9 @@ namespace rocRoller
     // the ExecutableKernel class.
     struct KernelInvocation
     {
-        std::array<unsigned int, 3> workitemCount;
-        std::array<unsigned int, 3> workgroupSize;
-        unsigned int                sharedMemBytes;
-
-        KernelInvocation()
-            : workitemCount({1, 1, 1})
-            , workgroupSize({1, 1, 1})
-            , sharedMemBytes(0)
-        {
-        }
+        std::array<unsigned int, 3> workitemCount  = {1, 1, 1};
+        std::array<unsigned int, 3> workgroupSize  = {1, 1, 1};
+        unsigned int                sharedMemBytes = 0;
     };
 
     // The executer class can load a kernel from a string of machine code and
