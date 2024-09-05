@@ -551,6 +551,7 @@ set(
   test/unit/GEMMFusion.cpp
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
+  test/unit/ConversionTest.cpp
   test/unit/F8Test.cpp
   test/unit/HazardObserverTest.cpp
   test/unit/HypergraphTest.cpp

@@ -7,6 +7,8 @@
 #include "Operation.hpp"
 #include "T_Execute_fwd.hpp"
 
+#include "rocRoller/DataTypes/DataTypes.hpp"
+
 #include <memory>
 #include <unordered_set>
 #include <variant>
@@ -55,6 +57,26 @@ namespace rocRoller
         MAKE_UNARY_XOP(E_Neg)
         MAKE_UNARY_XOP(E_Abs)
         MAKE_UNARY_XOP(E_Not)
+
+        struct E_Cvt : public E_Unary
+        {
+            E_Cvt(OperationTag a, rocRoller::DataType destType)
+                : E_Unary(a)
+                , destType(destType)
+            {
+            }
+            E_Cvt(const std::initializer_list<OperationTag>& args, rocRoller::DataType destType)
+                : E_Unary(args)
+                , destType(destType)
+            {
+            }
+            std::string name() const
+            {
+                return "E_Cvt";
+            }
+
+            rocRoller::DataType destType;
+        };
 
         struct E_Binary
         {

@@ -58,6 +58,35 @@ TEST_F(CommandTest, ToString)
     EXPECT_EQ(msg.str(), command->toString());
 }
 
+TEST_F(CommandTest, ConvertOp)
+{
+    // A command to convert a Float tensor into Half type
+    auto command = std::make_shared<rocRoller::Command>();
+
+    EXPECT_EQ(0, command->operations().size());
+
+    auto tagTensor = command->addOperation(Operations::Tensor(1, DataType::Float));
+    auto load_linear
+        = std::make_shared<Operations::Operation>(Operations::T_Load_Linear(tagTensor));
+    auto tagLoad = command->addOperation(load_linear);
+
+    auto cvtOp = std::make_shared<Operations::XOp>(Operations::E_Cvt(tagLoad, DataType::Half));
+    Operations::T_Execute execute(command->getNextTag());
+    auto                  tagConvert = execute.addXOp(cvtOp);
+    command->addOperation(execute);
+
+    EXPECT_EQ(execute.getInputs(), std::unordered_set<Operations::OperationTag>({tagLoad}));
+    EXPECT_EQ(execute.getOutputs(), std::unordered_set<Operations::OperationTag>({tagConvert}));
+
+    constexpr auto result = R"(
+        Tensor.Float.d1 0, (base=&0, lim=&8, sizes={&16 }, strides={&24 })
+        T_LOAD_LINEAR 1 Tensor 0
+        T_EXECUTE 1
+        E_Cvt 2, 1)";
+
+    EXPECT_EQ(NormalizedSource(command->toString()), NormalizedSource(result));
+}
+
 TEST_F(CommandTest, VectorAdd)
 {
     auto command = std::make_shared<rocRoller::Command>();

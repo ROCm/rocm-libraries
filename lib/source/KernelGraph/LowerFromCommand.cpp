@@ -463,6 +463,19 @@ namespace rocRoller
                                 // TODO Implement E_Not XOp
                                 Throw<FatalError>("Not implemented yet.");
                             },
+                            [&](Operations::E_Cvt const& op) -> Expression::ExpressionPtr {
+                                switch(op.destType)
+                                {
+                                case DataType::Float:
+                                    return std::make_shared<Expression::Expression>(
+                                        Expression::Convert<DataType::Float>{dflow[0]});
+                                case DataType::Half:
+                                    return std::make_shared<Expression::Expression>(
+                                        Expression::Convert<DataType::Half>{dflow[0]});
+                                default:
+                                    Throw<FatalError>("Not implemented yet.");
+                                }
+                            },
                             [&](Operations::E_Add const& op) -> Expression::ExpressionPtr {
                                 return std::make_shared<Expression::Expression>(
                                     Expression::Add{dflow[0], dflow[1]});

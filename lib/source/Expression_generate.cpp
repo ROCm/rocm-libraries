@@ -610,10 +610,34 @@ namespace rocRoller
                 int packingRatio = std::max(destInfo.packing, argInfo.packing)
                                    / std::min(destInfo.packing, argInfo.packing);
 
+                // arg's packing might be larger than dest's packing.
+                // For example, this could be a conversion op that
+                // converts Halfx2 (packing=2) into Float (packing=1).
+                // If this occurs, that means we should `unpack` the
+                // arg into dest
+                bool const isUnpacking = argInfo.packing > destInfo.packing;
+
                 if(dest == nullptr)
                 {
-                    dest = resultPlaceholder(
-                        destType, true, results[0]->valueCount() / packingRatio);
+                    if(destType.regType == rocRoller::Register::Type::Accumulator)
+                    {
+                        // If the expr is a matrix multiply (mfma), the register type might
+                        // be ACCVGPR. But Unary operation cannot work on ACCVGPR,
+                        // and we have to allocate Vector instead.
+                        destType.regType = rocRoller::Register::Type::Vector;
+                    }
+
+                    if(isUnpacking)
+                    {
+                        // unpacking args into (multiple registers) dest
+                        dest = resultPlaceholder(
+                            destType, true, results[0]->valueCount() * packingRatio);
+                    }
+                    else
+                    {
+                        dest = resultPlaceholder(
+                            destType, true, results[0]->valueCount() / packingRatio);
+                    }
                 }
 
                 if(GetGenerator<Operation>(dest, results[0])->isIdentity(results[0]))
@@ -626,32 +650,48 @@ namespace rocRoller
                 }
                 else
                 {
-                    for(size_t i = 0; i < dest->valueCount(); i++)
+                    if(isUnpacking)
                     {
-                        Register::ValuePtr arg;
-                        if(argInfo.packing < destInfo.packing)
+                        for(size_t i = 0; i < results[0]->valueCount(); i++)
                         {
-                            if(packingRatio == 2)
-                                arg = results[0]->element({i * packingRatio, i * packingRatio + 1});
-                            else if(packingRatio == 4)
-                                arg = results[0]->element({i * packingRatio,
-                                                           i * packingRatio + 1,
-                                                           i * packingRatio + 2,
-                                                           i * packingRatio + 3});
+                            Register::ValuePtr destRegs;
+                            const size_t       index = i * packingRatio;
+                            if(packingRatio == 2) // e.g., unpack a Halfx2 to two Float
+                                destRegs = dest->element({index, index + 1});
+                            else if(packingRatio == 4) // e.g., unpack a FP8x4 to four Float
+                                destRegs = dest->element({index, index + 1, index + 2, index + 3});
                             else
                                 Throw<FatalError>("Packing ratio not supported yet.");
-                        }
-                        else if(argInfo.packing > destInfo.packing)
-                        {
-                            Throw<FatalError>("Argument to unary expression cannot be a datatype "
-                                              "with packing greater than the destination");
-                        }
-                        else
-                        {
-                            arg = results[0]->element({i});
-                        }
 
-                        co_yield generateOp<Operation>(dest->element({i}), arg);
+                            Register::ValuePtr arg = results[0]->element({i});
+                            co_yield generateOp<Operation>(destRegs, arg);
+                        }
+                    }
+                    else
+                    {
+                        for(size_t i = 0; i < dest->valueCount(); i++)
+                        {
+                            Register::ValuePtr arg;
+                            if(argInfo.packing < destInfo.packing)
+                            {
+                                if(packingRatio == 2)
+                                    arg = results[0]->element(
+                                        {i * packingRatio, i * packingRatio + 1});
+                                else if(packingRatio == 4)
+                                    arg = results[0]->element({i * packingRatio,
+                                                               i * packingRatio + 1,
+                                                               i * packingRatio + 2,
+                                                               i * packingRatio + 3});
+                                else
+                                    Throw<FatalError>("Packing ratio not supported yet.");
+                            }
+                            else
+                            {
+                                arg = results[0]->element({i});
+                            }
+
+                            co_yield generateOp<Operation>(dest->element({i}), arg);
+                        }
                     }
                 }
 
