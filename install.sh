@@ -47,7 +47,7 @@ function display_help()
   echo "    [--build_dir] Specify the name of the build folder"
   echo "    [--enable-hipsparselt-marker] build with hipsparselt marker"
   echo "    [--enable-tensile-marker] build with tensile marker"
-
+  echo "    [--keep-build-tmp] do not remove the temporary build artifacts or build_tmp"
 }
 
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
@@ -335,6 +335,7 @@ tensile_no_lazy_library_loading=false
 enable_hipsparselt_marker=false
 enable_tensile_marker=false
 blis_dir=
+keep_build_tmp=false
 
 if ! [ -z ${ROCM_PATH+x} ]; then
     rocm_path=${ROCM_PATH}
@@ -347,7 +348,7 @@ fi
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,cuda,use-cuda,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,architecture:,cpu_ref_lib:,logic:,cov:,fork:,branch:,test_local_path:,use-custom-version:,build_dir:,enable-hipsparselt-marker,enable-tensile-marker --options hicdgrkl:o:f:b:t:nu::a: -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,cuda,use-cuda,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,architecture:,cpu_ref_lib:,logic:,cov:,fork:,branch:,test_local_path:,use-custom-version:,build_dir:,enable-hipsparselt-marker,enable-tensile-marker,keep-build-tmp --options hicdgrkl:o:f:b:t:nu::a: -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -444,6 +445,9 @@ while true; do
         --build_dir)
             build_dir_user=${2}
             shift 2;;
+        --keep-build-tmp)
+            keep_build_tmp=true
+            shift ;;
         --) shift ; break ;;
         --enable-hipsparselt-marker)
             enable_hipsparselt_marker=true
@@ -683,6 +687,10 @@ pushd .
 
   if [[ "${enable_tensile_marker}" == true ]]; then
     tensile_opt="${tensile_opt} -DTensile_ENABLE_MARKER=ON"
+  fi
+
+  if [[ "${keep_build_tmp}" == true ]]; then
+    tensile_opt="${tensile_opt} -DTensile_KEEP_BUILD_TMP=ON"
   fi
 
   echo $cmake_common_options
