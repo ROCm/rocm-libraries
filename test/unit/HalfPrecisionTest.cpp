@@ -7,6 +7,7 @@
 #include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"
+#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 
 using namespace rocRoller;
@@ -544,27 +545,13 @@ namespace rocRollerTest
 
         CommandArguments commandArgs = command->createArguments();
 
-        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
-        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
-        commandArgs.setArgument(tagTensorC, ArgumentType::Value, d_c.get());
+        TensorDescriptor descA(dataType, {size_t(nx), size_t(ny)}, "T");
+        TensorDescriptor descB(dataType, {size_t(nx), size_t(ny)}, "T");
+        TensorDescriptor descC(dataType, {size_t(nx), size_t(ny)}, "T");
 
-        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)nx * ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)nx);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
-
-        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)nx * ny);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)nx);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)ny);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)ny);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)1);
-
-        commandArgs.setArgument(tagTensorC, ArgumentType::Limit, (size_t)nx * ny);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)nx);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)ny);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 0, (size_t)ny);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 1, (size_t)1);
+        setCommandTensorArg(commandArgs, tagTensorA, descA, d_a.get());
+        setCommandTensorArg(commandArgs, tagTensorB, descB, d_b.get());
+        setCommandTensorArg(commandArgs, tagTensorC, descC, d_c.get());
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);

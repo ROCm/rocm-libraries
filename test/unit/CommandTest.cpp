@@ -1,6 +1,6 @@
 #include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
-
+#include "TensorDescriptor.hpp"
 #include <rocRoller/Operations/Command.hpp>
 
 using namespace rocRoller;
@@ -238,6 +238,26 @@ TEST_F(CommandTest, SetCommandArguments)
 
     commandArgs.setArgument(tagScalarB, ArgumentType::Value, 2);
     EXPECT_THROW({ commandArgs.setArgument(tagScalarB, ArgumentType::Limit, 10); }, FatalError);
+}
+
+TEST_F(CommandTest, TensorDescriptor)
+{
+    auto command = std::make_shared<rocRoller::Command>();
+
+    auto tagTensor = command->addOperation(rocRoller::Operations::Tensor(2, DataType::Float));
+
+    TensorDescriptor desc(DataType::Float, {512u, 1024u}, "T");
+
+    CommandArguments commandArgs = command->createArguments();
+    auto             device      = make_shared_device<float>(512u * 1024u);
+    setCommandTensorArg(commandArgs, tagTensor, desc, device.get());
+
+    // Below should NOT error out as arguments have been set in setCommandTensorArg
+    EXPECT_NO_THROW({ commandArgs.setArgument(tagTensor, ArgumentType::Value, device.get()); });
+    EXPECT_NO_THROW({ commandArgs.setArgument(tagTensor, ArgumentType::Size, 0, 512u); });
+    EXPECT_NO_THROW({ commandArgs.setArgument(tagTensor, ArgumentType::Size, 1, 1024u); });
+    EXPECT_NO_THROW({ commandArgs.setArgument(tagTensor, ArgumentType::Stride, 0, 1024u); });
+    EXPECT_NO_THROW({ commandArgs.setArgument(tagTensor, ArgumentType::Stride, 1, 1u); });
 }
 
 TEST_F(CommandTest, GetRuntimeArguments)

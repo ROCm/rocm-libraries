@@ -18,6 +18,7 @@
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
+#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 
 using namespace rocRoller;
@@ -73,9 +74,9 @@ namespace MatrixMultiplyTest
             int mac_n = wave_n;
             int mac_k = 32;
 
-            int M = mac_m;
-            int N = mac_n;
-            int K = 32;
+            unsigned M = mac_m;
+            unsigned N = mac_n;
+            unsigned K = 32;
 
             if constexpr(std::is_same_v<T, FP8> || std::is_same_v<T, BF8>)
             {
@@ -129,42 +130,13 @@ namespace MatrixMultiplyTest
 
             CommandArguments commandArgs = command->createArguments();
 
-            commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_A.get());
-            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
-            if(transA == "N")
-            {
-                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
-                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
-            }
-            else
-            {
-                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)K);
-                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
-            }
+            TensorDescriptor descA(dataTypeAB, {M, K}, transA);
+            TensorDescriptor descB(dataTypeAB, {K, N}, transB);
+            TensorDescriptor descD(dataTypeD, {M, N}, {1u, M});
 
-            commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_B.get());
-            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
-            if(transB == "N")
-            {
-                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
-                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
-            }
-            else
-            {
-                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)N);
-                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)1);
-            }
-
-            commandArgs.setArgument(tagTensorD, ArgumentType::Value, d_D.get());
-            commandArgs.setArgument(tagTensorD, ArgumentType::Limit, (size_t)M * N);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Size, 0, (size_t)M);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Size, 1, (size_t)N);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 0, (size_t)1);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 1, (size_t)M);
+            setCommandTensorArg(commandArgs, tagTensorA, descA, (T*)d_A.get());
+            setCommandTensorArg(commandArgs, tagTensorB, descB, (T*)d_B.get());
+            setCommandTensorArg(commandArgs, tagTensorD, descD, d_D.get());
 
             auto kernelOptions                           = std::make_shared<KernelOptions>();
             kernelOptions->packMultipleElementsInto1VGPR = true;
@@ -242,9 +214,9 @@ namespace MatrixMultiplyTest
             auto dataTypeD  = TypeInfo<ACC>::Var.dataType;
 
             // matrix size: A is MxK; B is KxN; D is MxN
-            int M = 1024;
-            int N = 1024;
-            int K = 512;
+            unsigned M = 1024;
+            unsigned N = 1024;
+            unsigned K = 512;
 
             // output macro tile size; we will launch 2x2 waves
             int mac_m = 2 * wave_m;
@@ -296,26 +268,13 @@ namespace MatrixMultiplyTest
 
             CommandArguments commandArgs = command->createArguments();
 
-            commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_A.get());
-            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
+            TensorDescriptor descA(dataTypeAB, {M, K}, {1u, M});
+            TensorDescriptor descB(dataTypeAB, {K, N}, {1u, K});
+            TensorDescriptor descD(dataTypeD, {M, N}, {1u, M});
 
-            commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_B.get());
-            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
-
-            commandArgs.setArgument(tagTensorD, ArgumentType::Value, d_D.get());
-            commandArgs.setArgument(tagTensorD, ArgumentType::Limit, (size_t)M * N);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Size, 0, (size_t)M);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Size, 1, (size_t)N);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 0, (size_t)1);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 1, (size_t)M);
+            setCommandTensorArg(commandArgs, tagTensorA, descA, (T*)d_A.get());
+            setCommandTensorArg(commandArgs, tagTensorB, descB, (T*)d_B.get());
+            setCommandTensorArg(commandArgs, tagTensorD, descD, d_D.get());
 
             auto params = std::make_shared<CommandParameters>();
             params->setManualKernelDimension(2);
@@ -364,9 +323,9 @@ namespace MatrixMultiplyTest
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
             // matrix size: A is MxK; B is KxN; D is MxN
-            int M = 1024;
-            int N = 1024;
-            int K = 512;
+            unsigned M = 1024;
+            unsigned N = 1024;
+            unsigned K = 512;
 
             // output macro tile size
             int mac_m = 64;
@@ -426,33 +385,15 @@ namespace MatrixMultiplyTest
 
             CommandArguments commandArgs = command->createArguments();
 
-            commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_A.get());
-            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
-            // tiled?
-            commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_B.get());
-            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
+            TensorDescriptor descA(dataType, {M, K}, {1u, M});
+            TensorDescriptor descB(dataType, {K, N}, {1u, K});
+            TensorDescriptor descC(dataType, {M, N}, {1u, M});
+            TensorDescriptor descD(dataType, {M, N}, {1u, M});
 
-            commandArgs.setArgument(tagTensorC, ArgumentType::Value, d_C.get());
-            commandArgs.setArgument(tagTensorC, ArgumentType::Limit, (size_t)M * N);
-            commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)M);
-            commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)N);
-            commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 0, (size_t)1);
-            commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 1, (size_t)M);
-
-            commandArgs.setArgument(tagTensorD, ArgumentType::Value, d_D.get());
-            commandArgs.setArgument(tagTensorD, ArgumentType::Limit, (size_t)M * N);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Size, 0, (size_t)M);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Size, 1, (size_t)N);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 0, (size_t)1);
-            commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 1, (size_t)M);
+            setCommandTensorArg(commandArgs, tagTensorA, descA, (T*)d_A.get());
+            setCommandTensorArg(commandArgs, tagTensorB, descB, (T*)d_B.get());
+            setCommandTensorArg(commandArgs, tagTensorC, descC, (T*)d_C.get());
+            setCommandTensorArg(commandArgs, tagTensorD, descD, d_D.get());
 
             auto params = std::make_shared<CommandParameters>();
             params->setManualKernelDimension(2);

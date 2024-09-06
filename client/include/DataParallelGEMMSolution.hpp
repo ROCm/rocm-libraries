@@ -2,6 +2,8 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelOptions.hpp>
 
+#include "../../test/unit/TensorDescriptor.hpp"
+
 #include "GEMMParameters.hpp"
 #include "GEMMSolution.hpp"
 #include "visualize.hpp"
@@ -367,93 +369,32 @@ namespace rocRoller
                 {
                     CommandArguments commandArgs = this->m_command->createArguments();
 
-                    bool no_beta = m_solutionParams.problemParams.beta == 0.0
-                                   && m_solutionParams.problemParams.alpha == 1.0;
+                    unsigned const M = m_solutionParams.problemParams.m;
+                    unsigned const N = m_solutionParams.problemParams.n;
+                    unsigned const K = m_solutionParams.problemParams.k;
 
-                    commandArgs.setArgument(m_tagTensorA, ArgumentType::Value, m_dA.get());
-                    commandArgs.setArgument(m_tagTensorB, ArgumentType::Value, m_dB.get());
-                    commandArgs.setArgument(m_tagTensorA,
-                                            ArgumentType::Limit,
-                                            (size_t)m_solutionParams.problemParams.m
-                                                * m_solutionParams.problemParams.k);
-                    commandArgs.setArgument(m_tagTensorB,
-                                            ArgumentType::Limit,
-                                            (size_t)m_solutionParams.problemParams.k
-                                                * m_solutionParams.problemParams.n);
+                    TensorDescriptor descA(
+                        getDataTypeFromString(m_solutionParams.problemParams.typeA),
+                        {M, K},
+                        m_solutionParams.problemParams.transA == TransposeType::T ? "T" : "N");
+                    TensorDescriptor descB(
+                        getDataTypeFromString(m_solutionParams.problemParams.typeB),
+                        {K, N},
+                        m_solutionParams.problemParams.transB == TransposeType::T ? "T" : "N");
 
-                    commandArgs.setArgument(m_tagTensorA,
-                                            ArgumentType::Size,
-                                            0,
-                                            (size_t)m_solutionParams.problemParams.m);
-                    commandArgs.setArgument(m_tagTensorA,
-                                            ArgumentType::Size,
-                                            1,
-                                            (size_t)m_solutionParams.problemParams.k);
-                    commandArgs.setArgument(m_tagTensorB,
-                                            ArgumentType::Size,
-                                            0,
-                                            (size_t)m_solutionParams.problemParams.k);
-                    commandArgs.setArgument(m_tagTensorB,
-                                            ArgumentType::Size,
-                                            1,
-                                            (size_t)m_solutionParams.problemParams.n);
+                    setCommandTensorArg(commandArgs, m_tagTensorA, descA, m_dA.get());
+                    setCommandTensorArg(commandArgs, m_tagTensorB, descB, m_dB.get());
 
-                    //TODO: Handle transposed matrices more elegantly
-                    if(m_solutionParams.problemParams.transA == TransposeType::T)
-                    {
-                        commandArgs.setArgument(m_tagTensorA,
-                                                ArgumentType::Stride,
-                                                0,
-                                                (size_t)m_solutionParams.problemParams.k);
-                        commandArgs.setArgument(m_tagTensorA, ArgumentType::Stride, 1, (size_t)1);
-                    }
-                    else
-                    {
-                        commandArgs.setArgument(m_tagTensorA, ArgumentType::Stride, 0, (size_t)1);
-                        commandArgs.setArgument(m_tagTensorA,
-                                                ArgumentType::Stride,
-                                                1,
-                                                (size_t)m_solutionParams.problemParams.m);
-                    }
-
-                    //TODO: Handle transposed matrices more elegantly
-                    if(m_solutionParams.problemParams.transB == TransposeType::T)
-                    {
-                        commandArgs.setArgument(m_tagTensorB,
-                                                ArgumentType::Stride,
-                                                0,
-                                                (size_t)m_solutionParams.problemParams.n);
-                        commandArgs.setArgument(m_tagTensorB, ArgumentType::Stride, 1, (size_t)1);
-                    }
-                    else
-                    {
-                        commandArgs.setArgument(m_tagTensorB, ArgumentType::Stride, 0, (size_t)1);
-                        commandArgs.setArgument(m_tagTensorB,
-                                                ArgumentType::Stride,
-                                                1,
-                                                (size_t)m_solutionParams.problemParams.k);
-                    }
-
+                    bool const no_beta = m_solutionParams.problemParams.beta == 0.0
+                                         && m_solutionParams.problemParams.alpha == 1.0;
                     if(!no_beta)
                     {
-                        commandArgs.setArgument(m_tagTensorC, ArgumentType::Value, m_dC.get());
-                        commandArgs.setArgument(m_tagTensorC,
-                                                ArgumentType::Limit,
-                                                (size_t)m_solutionParams.problemParams.m
-                                                    * m_solutionParams.problemParams.n);
-                        commandArgs.setArgument(m_tagTensorC,
-                                                ArgumentType::Size,
-                                                0,
-                                                (size_t)m_solutionParams.problemParams.m);
-                        commandArgs.setArgument(m_tagTensorC,
-                                                ArgumentType::Size,
-                                                1,
-                                                (size_t)m_solutionParams.problemParams.n);
-                        commandArgs.setArgument(m_tagTensorC, ArgumentType::Stride, 0, (size_t)1);
-                        commandArgs.setArgument(m_tagTensorC,
-                                                ArgumentType::Stride,
-                                                1,
-                                                (size_t)m_solutionParams.problemParams.m);
+                        TensorDescriptor descC(
+                            getDataTypeFromString(m_solutionParams.problemParams.typeC),
+                            {M, N},
+                            "N");
+                        setCommandTensorArg(commandArgs, m_tagTensorC, descC, m_dC.get());
+
                         commandArgs.setArgument(m_tagScalarAlpha,
                                                 ArgumentType::Value,
                                                 m_solutionParams.problemParams.alpha);
@@ -462,24 +403,9 @@ namespace rocRoller
                                                 m_solutionParams.problemParams.beta);
                     }
 
-                    commandArgs.setArgument(m_tagTensorD, ArgumentType::Value, m_dD.get());
-                    commandArgs.setArgument(m_tagTensorD,
-                                            ArgumentType::Limit,
-                                            (size_t)m_solutionParams.problemParams.m
-                                                * m_solutionParams.problemParams.n);
-                    commandArgs.setArgument(m_tagTensorD,
-                                            ArgumentType::Size,
-                                            0,
-                                            (size_t)m_solutionParams.problemParams.m);
-                    commandArgs.setArgument(m_tagTensorD,
-                                            ArgumentType::Size,
-                                            1,
-                                            (size_t)m_solutionParams.problemParams.n);
-                    commandArgs.setArgument(m_tagTensorD, ArgumentType::Stride, 0, (size_t)1);
-                    commandArgs.setArgument(m_tagTensorD,
-                                            ArgumentType::Stride,
-                                            1,
-                                            (size_t)m_solutionParams.problemParams.m);
+                    TensorDescriptor descD(
+                        getDataTypeFromString(m_solutionParams.problemParams.typeD), {M, N}, "N");
+                    setCommandTensorArg(commandArgs, m_tagTensorD, descD, m_dD.get());
 
                     return commandArgs;
                 }
