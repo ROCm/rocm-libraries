@@ -56,6 +56,15 @@ struct WorkNode_Header;
 template <class Callable_t>
 struct WorkNode;
 
+struct WorkNodeDeleter {
+    // WorkNode<T> is trivially destructible (implied by std::is_trivially_copyable).
+    // Note: Technically, we should do a static_cast of ptr back to WorkNode_t before freeing. If we really want to fix
+    // it, we could give unique_ptr a function pointer instead of a functor (i.e. the type of worknode_d would be
+    // std::unique_ptr<WorkNode_Header, void (*)(WorkNode_Header *)>), and at construction time pass a pointer to a
+    // function that will do the cast before the free.
+    void operator()(WorkNode_Header* ptr) { gpu::free(ptr); }
+};
+
 class thread {
   public:
     // TODO: temporary measure. Should to be replaced with an actual class.
@@ -107,16 +116,11 @@ class thread {
     __host__ static unsigned int hardware_concurrency() noexcept;
 
   private:
-    template <class WorkNode_t>
-    __host__ void sendWorkNodeViaKernel(std::unique_ptr<WorkNode_t> worknode_h);
-    template <class WorkNode_t>
-    __host__ void sendWorkNodeViaBuffer(std::unique_ptr<WorkNode_t> worknode_h, std::shared_ptr<WorkNode_Header> previous_worknode);
-
 #ifdef __HIP_DEVICE_COMPILE__
     // If we don't initialize worknode_d to nullptr, operator= might fail when assigning to a default constructed gpu::thread.
     WorkNode_Header *worknode_d = nullptr;
 #else
-    std::shared_ptr<WorkNode_Header> worknode_d = nullptr;
+    std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d = nullptr;
 #endif
 };
 
@@ -203,12 +207,6 @@ __device__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args)
 
 
 //====================================================================================================================//
-//      GLOBAL VARIABLE DECLARATIONS
-//====================================================================================================================//
-
-extern std::atomic<uint32_t> cpuWorkQueueIndex_push;
-
-//====================================================================================================================//
 //      INTERNAL/HELPER FUNCTIONS
 //====================================================================================================================//
 
@@ -242,16 +240,16 @@ __device__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : f
     width = w;
 }
 
+template <class WorkNode_t>
+__global__ void getWrapperFn(WrappedFnPointer *ptr) {
+    *ptr = wrapper<WorkNode_t>;
+}
+
 template <class Callable_t>
 __host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : fn(std::move(callable)) {
     width = w;
     worknodeSize = sizeof(WorkNode<Callable_t>);
     // Only way to pass the device the information about how to invoke WorkNode<Callable_t>.fn is by launching a kernel.
-    // Thus, we initialize wrapper_fn later in insertWorkNodeFromHost.
-    // Since we have to incur the overhead of launching a kernel anyways, we also use that kernel to initialize
-    // link_to_self and vthread_id - that way we can keep all the status information in device memory, rather than in
-    // pinned host memory.
-
     // Why do we NEED a kernel?
     // We can't reference __device__ functions from __host__ functions, so this is illegal:
     // header = {nullptr, nullptr, false, {}, 0, wrapper<WorkNode<Callable_t>> };
@@ -269,6 +267,20 @@ __host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : fn(
     //
     // If there's some other way of bundling the arguments up, and passing them to the device along with a function that
     // accepts those arguments, we could use that and avoid a kernel launch from the host.
+
+    // Note that we only do this once for a given set of Fn_t and Args_t types
+    static WrappedFnPointer saved_wrapper_fn = []() {
+        WrappedFnPointer *tmp, *tmp_d;
+        __LIBGPU_HIP_CHECK__(hipHostMalloc(reinterpret_cast<void **>(&tmp), sizeof(tmp), hipHostRegisterMapped));
+        __LIBGPU_HIP_CHECK__(hipHostGetDevicePointer(reinterpret_cast<void **>(&tmp_d), tmp, 0));
+        hipLaunchKernelGGL(getWrapperFn<WorkNode<Callable_t>>, dim3(1), dim3(1), 0, getEnqueingStream(), tmp_d);
+        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+        // TODO: Memory Leak! We can't un-register or free tmp because of the implicit hipDeviceSynchronize() that would
+        // cause. However, this should only be a small amount of memory, and because this code only runs once per
+        // specialization of the WorkNode class, it cannot grow indefinitely.
+        return *tmp;
+    }();
+    wrapper_fn = saved_wrapper_fn;
 }
 
 // TODO: many of these might be better as member functions of WorkNode or WorkNode_Header, and we could potentially make
@@ -276,19 +288,7 @@ __host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : fn(
 
 // Post-condition: worknode is likely unlocked and may get invalidated
 __device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *worknode);
-__host__ WorkNode_Header **getCPUWorkQueueAddr();
-__host__ void insertWorkNodeIntoCPUQueue(WorkNode_Header *worknode, const uint32_t myPushCount);
-__host__ void prepDeviceForWork();
-
-//====================================================================================================================//
-//      KERNELS
-//====================================================================================================================//
-
-template <class WorkNode_t>
-__global__ void insertWorkNodeFromHost(WorkNode_Header *worknode) {
-    worknode->wrapper_fn = wrapper<WorkNode_t>;
-    insertWorkNodeIntoMainQueue(worknode);
-}
+__host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h);
 
 } // namespace internal
 
@@ -311,7 +311,6 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     if (width > MAX_THREAD_WIDTH) {
         throw std::length_error("thread::thread: width must not exceed " + std::to_string(MAX_THREAD_WIDTH));
     }
-    prepDeviceForWork();
 
     std::unique_ptr worknode_h = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
     using WorkNode_t = typename decltype(worknode_h)::element_type;
@@ -321,88 +320,15 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     static_assert(std::is_trivially_copyable_v<std::remove_reference_t<Fn_t>>);
     static_assert((std::is_trivially_copyable_v<std::remove_reference_t<Args_t>> && ...));
     // We're about to memcpy the WorkNode from host to device memory. Make sure that's ok.
-    // TODO: could these requirements be relaxed to is_trivially_destructible<T> and
-    // is_trivially_constructible<remove_ref<T>, decltype(t)> (i.e. is_trivially_move_constructible or
-    // is_trivially_copy_constructible depending on if T is rvalue or lvalue ref)?
-    // Note: Do we need to worry about non-object Fn_t's?
     static_assert(std::is_trivially_copyable_v<WorkNode_t>);
+    // Check that it's safe-ish to do the memcpy using a WorkNode_Header* instead of a WorkNode_t*
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Winvalid-offsetof"     // To suppress warning.
+    static_assert(offsetof(WorkNode_t, wrapper_fn) == offsetof(WorkNode_Header, wrapper_fn));
+    #pragma GCC diagnostic pop
 
-#ifdef __HIP_DEVICE_COMPILE__
-    // Need to make sure that the insertWorkNodeFromHost template is always instantiated
-    hipLaunchKernelGGL(insertWorkNodeFromHost<WorkNode_t>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d);
-#else
-    {
-        WorkNode_t *temp_ptr;
-        // WorkNode_Header *temp_ptr;
-        // TODO: do we even want to move the worknode into device memory, or just leave it in pinned host memory?
-        __LIBGPU_HIP_CHECK__(hipMallocAsync(&temp_ptr, sizeof(*worknode_h), getEnqueingStream()));
-        WorkNode_Header *base = temp_ptr;
-        worknode_d = std::shared_ptr<WorkNode_Header>(base, [](WorkNode_Header *ptr) {
-            // WorkNode<T> is trivially destructible (implied by std::is_trivially_copyable).
-            __LIBGPU_HIP_CHECK__(hipFreeAsync(static_cast<WorkNode_t *>(ptr), getEnqueingStream()));
-        });
-    }
-
-    // Pointer to the last worknode_d we constructed that had the same Fn_t and Args_t template arguments.
-    static std::weak_ptr<WorkNode_Header> previous_worknode_weak;
-    std::shared_ptr<WorkNode_Header> previous_worknode = previous_worknode_weak.lock();
-    previous_worknode_weak = worknode_d;
-    if (previous_worknode == nullptr) {
-        sendWorkNodeViaKernel<WorkNode_t>(std::move(worknode_h));
-    } else {
-        sendWorkNodeViaBuffer<WorkNode_t>(std::move(worknode_h), std::move(previous_worknode));
-    }
-#endif //!__HIP_DEVICE_COMPILE__
-}
-
-template <class WorkNode_t>
-inline __host__ void
-thread::sendWorkNodeViaKernel(std::unique_ptr<WorkNode_t> worknode_h [[maybe_unused]]) {
 #ifndef __HIP_DEVICE_COMPILE__
-    // Maybe we want to do this memcpy in the kernel?
-    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(static_cast<WorkNode_t *>(worknode_d.get()), worknode_h.get(), sizeof(*worknode_h), hipMemcpyHostToDevice, getEnqueingStream()));
-
-    hipEvent_t event; // Create a synchronization point after hipMemcpyAsync, so we can make sure the copy is finished before unregistering and/or freeing worknode_h.
-    __LIBGPU_HIP_CHECK__(hipEventCreate(&event));
-    __LIBGPU_HIP_CHECK__(hipEventRecord(event, getEnqueingStream()));
-
-    hipLaunchKernelGGL(insertWorkNodeFromHost<WorkNode_t>, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
-
-    // Make sure that the copy is finished before worknode_h goes out of scope and gets unregistered and/or destroyed.
-    __LIBGPU_HIP_CHECK__(hipEventSynchronize(event));
-    __LIBGPU_HIP_CHECK__(hipEventDestroy(event));
-#endif //!__HIP_DEVICE_COMPILE__
-}
-
-template <class WorkNode_t>
-inline __host__ void
-thread::sendWorkNodeViaBuffer(std::unique_ptr<WorkNode_t> worknode_h [[maybe_unused]],
-                              std::shared_ptr<WorkNode_Header> previous_worknode [[maybe_unused]]) {
-#ifndef __HIP_DEVICE_COMPILE__
-    const uint32_t myCount = cpuWorkQueueIndex_push++;
-    const size_t myIndex = myCount % CPU_WORK_QUEUE_SIZE;
-
-    // Set worknode_h->link_to_self = &cpuWorkQueue[myIndex];
-    worknode_h->link_to_self = getCPUWorkQueueAddr() + myIndex;
-
-    // TODO: set worknode_h->vthread_id
-
-    // Initialize worknode_d using worknode_h
-    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(static_cast<WorkNode_t *>(worknode_d.get()), worknode_h.get(), sizeof(*worknode_h), hipMemcpyHostToDevice, getEnqueingStream()));
-
-    // Set worknode_d->wrapper_fn by copying it from previous_worknode
-    static_assert(offsetof(WorkNode_Header, wrapper_fn) == 0);
-    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), previous_worknode.get(), sizeof(worknode_d->wrapper_fn), hipMemcpyDeviceToDevice, getEnqueingStream()));
-
-    hipEvent_t event; // Create a synchronization point so we can make sure both copies are finished before worknode_h and previous_worknode go out of scope.
-    __LIBGPU_HIP_CHECK__(hipEventCreate(&event));
-    __LIBGPU_HIP_CHECK__(hipEventRecord(event, getEnqueingStream()));
-
-    insertWorkNodeIntoCPUQueue(worknode_d.get(), myCount);
-
-    // Make sure that we're finished with worknode_h and previous_worknode before they go out of scope.
-    __LIBGPU_HIP_CHECK__(hipEventSynchronize(event));
-    __LIBGPU_HIP_CHECK__(hipEventDestroy(event));
+    worknode_d.reset(sendWorkNodeToGPU(worknode_h.get()));
 #endif
 }
 

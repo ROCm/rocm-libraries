@@ -219,7 +219,7 @@ static inline __device__ bool invokeNext(bool yielding = false) {
     return true;
 }
 
-__host__ WorkNode_Header **getCPUWorkQueueAddr() {
+static __host__ WorkNode_Header **getCPUWorkQueueAddr() {
     static WorkNode_Header ** const cpuWorkQueueAddr = static_cast<WorkNode_Header **>([](){
         void *temp;
         __LIBGPU_HIP_CHECK__(hipGetSymbolAddress(&temp, HIP_SYMBOL(cpuWorkQueue)));
@@ -237,17 +237,8 @@ static __host__ void waitForSpaceInCPUQueue(const uint32_t myPushCount) {
     }
 }
 
-__host__ void insertWorkNodeIntoCPUQueue(WorkNode_Header *worknode_d, const uint32_t myPushCount) {
-    waitForSpaceInCPUQueue(myPushCount);
-    const size_t myIndex = myPushCount % CPU_WORK_QUEUE_SIZE;
-    static WorkNode_Header *raw_ptrs[CPU_WORK_QUEUE_SIZE] = {};
-    raw_ptrs[myIndex] = worknode_d;
-    // Set cpuWorkQueue[myIndex] = worknode_d;
-    __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &raw_ptrs[myIndex], sizeof(void*), myIndex * sizeof(void*), hipMemcpyHostToDevice, getEnqueingStream()));
-}
-
 static __global__ void threading_main();
-__host__ void prepDeviceForWork() {
+static __host__ void prepDeviceForWork() {
     if (gpuThreadFromHost_counter++ != 0) {
         return;
     }
@@ -283,6 +274,31 @@ static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bo
         // synchronizing on mainStream, but there's no need.
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(mainStream));
     }
+}
+
+static __host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h, WorkNode_Header **new_location) {
+    prepDeviceForWork();
+
+    worknode_h->link_to_self = new_location;
+    // TODO: set worknode_h->vthread_id
+
+    std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d(static_cast<WorkNode_Header *>(gpu::malloc(worknode_h->worknodeSize)));
+    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), worknode_h, worknode_h->worknodeSize, hipMemcpyHostToDevice, getEnqueingStream()));
+
+    // *new_location = worknode_d.get();
+    WorkNode_Header *temp = worknode_d.get();
+    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(new_location, &temp, sizeof(void*), hipMemcpyHostToDevice, getEnqueingStream()));
+
+    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+    return worknode_d.release();
+}
+__host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h) {
+    const uint32_t myPushCount = cpuWorkQueueIndex_push++;
+    const size_t myPushIndex = myPushCount % CPU_WORK_QUEUE_SIZE;
+
+    waitForSpaceInCPUQueue(myPushCount);
+
+    return sendWorkNodeToGPU(worknode_h, getCPUWorkQueueAddr() + myPushIndex);
 }
 
 static __device__ bool shouldKeepPollingForWork() {
