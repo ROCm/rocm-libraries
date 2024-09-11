@@ -175,6 +175,14 @@ namespace rocRoller
         }
 
         template <>
+        inline void EmitterOutput::output(BFloat16& obj)
+        {
+            std::stringstream ss;
+            ss << obj;
+            *emitter << ss.str();
+        }
+
+        template <>
         struct IOTraits<EmitterOutput>
         {
             using IO = EmitterOutput;
@@ -250,6 +258,14 @@ namespace rocRoller
             float floatVal;
             nodeInputHelper(n, floatVal);
             val = floatVal;
+        }
+
+        template <>
+        inline void nodeInputHelper(YAML::Node& n, BFloat16& val)
+        {
+            float floatVal;
+            nodeInputHelper(n, floatVal);
+            val.data = floatVal;
         }
 
         struct NodeInput
@@ -428,6 +444,28 @@ namespace YAML
         }
 
         static bool decode(const Node& node, rocRoller::BF8& rhs)
+        {
+            if(!node.IsSequence() || node.size() != 1)
+            {
+                return false;
+            }
+
+            rhs.data = node[0].as<decltype(rhs.data)>();
+            return true;
+        }
+    };
+
+    template <>
+    struct convert<rocRoller::BFloat16>
+    {
+        static Node encode(const rocRoller::BFloat16& rhs)
+        {
+            Node node;
+            node.push_back(rhs.data);
+            return node;
+        }
+
+        static bool decode(const Node& node, rocRoller::BFloat16& rhs)
         {
             if(!node.IsSequence() || node.size() != 1)
             {

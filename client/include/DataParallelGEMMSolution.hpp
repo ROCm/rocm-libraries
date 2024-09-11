@@ -243,6 +243,13 @@ namespace rocRoller
                         wave_k = 8;
                         wave_b = 1;
                     }
+                    else if constexpr(std::is_same_v<A, BFloat16> && std::is_same_v<B, BFloat16>)
+                    {
+                        wave_m = 16;
+                        wave_n = 16;
+                        wave_k = 8;
+                        wave_b = 1;
+                    }
                     else if constexpr((std::is_same_v<A, FP8> && std::is_same_v<B, FP8>)
                                       || (std::is_same_v<A, BF8> && std::is_same_v<B, BF8>))
                     {

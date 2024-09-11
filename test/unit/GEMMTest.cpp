@@ -819,6 +819,46 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_FP32_32x32x4)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 32;
+        gemm.waveN = 32;
+        gemm.waveK = 4;
+
+        basicGEMM<BFloat16, float>(m_context, gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_FP32_16x16x8)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 8;
+
+        basicGEMM<BFloat16, float>(m_context, gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_BF16_32x32x4)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 32;
+        gemm.waveN = 32;
+        gemm.waveK = 4;
+
+        basicGEMM<BFloat16, BFloat16>(m_context, gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_BF16_16x16x8)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 8;
+
+        basicGEMM<BFloat16, BFloat16>(m_context, gemm);
+    }
+
     GEMMProblem setup_GEMMF8_NT()
     {
         GEMMProblem gemm;

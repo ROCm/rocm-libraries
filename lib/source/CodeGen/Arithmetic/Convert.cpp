@@ -10,6 +10,8 @@ namespace rocRoller
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Float);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Half);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Halfx2);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::BFloat16);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::BFloat16x2);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP8x4);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::BF8x4);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int32);
@@ -31,6 +33,8 @@ namespace rocRoller
     DefineSpecializedGetGeneratorConvert(Float);
     DefineSpecializedGetGeneratorConvert(Half);
     DefineSpecializedGetGeneratorConvert(Halfx2);
+    DefineSpecializedGetGeneratorConvert(BFloat16);
+    DefineSpecializedGetGeneratorConvert(BFloat16x2);
     DefineSpecializedGetGeneratorConvert(FP8x4);
     DefineSpecializedGetGeneratorConvert(BF8x4);
     DefineSpecializedGetGeneratorConvert(Int32);
@@ -52,6 +56,8 @@ namespace rocRoller
             ConvertCase(Float);
             ConvertCase(Half);
             ConvertCase(Halfx2);
+            ConvertCase(BFloat16);
+            ConvertCase(BFloat16x2);
             ConvertCase(FP8);
             ConvertCase(BF8);
             ConvertCase(Int32);
@@ -91,6 +97,21 @@ namespace rocRoller
             break;
         case DataType::BF8:
             co_yield_(Instruction("v_cvt_f32_bf8", {dest}, {arg}, {}, ""));
+            break;
+        case DataType::BFloat16:
+            co_yield generateOp<Expression::ShiftL>(dest, arg, Register::Value::Literal(16u));
+            break;
+        case DataType::BFloat16x2:
+            // unpack BFloat16x2
+            co_yield generateOp<Expression::BitwiseAnd>(
+                dest->element({0}), arg, Register::Value::Literal(0xFFFF));
+            co_yield generateOp<Expression::LogicalShiftR>(
+                dest->element({1}), arg, Register::Value::Literal(16u));
+            // convert BFloat16 to FP32
+            co_yield generateOp<Expression::ShiftL>(
+                dest->element({0}), dest->element({0}), Register::Value::Literal(16u));
+            co_yield generateOp<Expression::ShiftL>(
+                dest->element({1}), dest->element({1}), Register::Value::Literal(16u));
             break;
         default:
             Throw<FatalError>("Unsupported datatype for convert to float: ", ShowValue(dataType));
@@ -149,6 +170,52 @@ namespace rocRoller
             break;
         default:
             Throw<FatalError>("Unsupported datatype for convert to halfx2: ", ShowValue(dataType));
+        }
+    }
+
+    template <>
+    Generator<Instruction> ConvertGenerator<DataType::BFloat16>::generate(Register::ValuePtr dest,
+                                                                          Register::ValuePtr arg)
+    {
+        AssertFatal(arg != nullptr);
+
+        auto dataType = getArithDataType(arg);
+
+        switch(dataType)
+        {
+        case DataType::Float:
+            co_yield generateOp<Expression::LogicalShiftR>(
+                dest, arg, Register::Value::Literal(16u));
+            break;
+        case DataType::BFloat16x2:
+            co_yield generateOp<Expression::BitwiseAnd>(
+                dest->element({0}), arg, Register::Value::Literal(0xFFFF));
+            co_yield generateOp<Expression::LogicalShiftR>(
+                dest->element({1}), arg, Register::Value::Literal(16u));
+            break;
+        default:
+            Throw<FatalError>("Unsupported datatype for convert to bfloat16: ",
+                              ShowValue(dataType));
+        }
+    }
+
+    template <>
+    Generator<Instruction> ConvertGenerator<DataType::BFloat16x2>::generate(Register::ValuePtr dest,
+                                                                            Register::ValuePtr arg)
+    {
+        AssertFatal(arg != nullptr);
+
+        auto dataType = getArithDataType(arg);
+
+        switch(dataType)
+        {
+        case DataType::BFloat16:
+            AssertFatal(arg->valueCount() == 2, "Conversion to Bfloat16x2 requires two elements");
+            co_yield m_context->copier()->packHalf(dest, arg->element({0}), arg->element({1}));
+            break;
+        default:
+            Throw<FatalError>("Unsupported datatype for convert to bfloat16x2: ",
+                              ShowValue(dataType));
         }
     }
 

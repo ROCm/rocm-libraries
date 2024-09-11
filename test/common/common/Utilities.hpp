@@ -9,7 +9,7 @@
 #include <memory>
 #include <sstream>
 
-#include <hip/amd_detail/amd_hip_fp16.h>
+#include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
@@ -168,6 +168,8 @@ double epsilon()
     double rv = 0.0;
     if constexpr(std::is_same_v<T, __half>)
         rv = std::pow(2.0, -10);
+    else if constexpr(std::is_same_v<T, BFloat16>)
+        rv = std::pow(2.0, -5);
     else if constexpr(std::is_same_v<T, FP8>)
         rv = std::pow(2.0, -3);
     else if constexpr(std::is_same_v<T, BF8>)
@@ -255,6 +257,24 @@ int countSubstring(const std::string& str, const std::string& sub);
 
 namespace rocRoller
 {
+    // TODO: use data generator for input, then remove this function
+    template <typename T>
+    std::vector<float> unpackToFloat(std::vector<T> const& A)
+    {
+        static_assert(
+            std::is_same_v<
+                T,
+                rocRoller::
+                    FP8> || std::is_same_v<T, rocRoller::BF8> || std::is_same_v<T, rocRoller::BFloat16> || std::is_same_v<T, rocRoller::Half>);
+
+        std::vector<float> floatA(A.size());
+        for(std::size_t i = 0; i != A.size(); ++i)
+        {
+            floatA[i] = float(A[i]);
+        }
+        return floatA;
+    }
+
     void CPUMM(std::vector<float>&       D,
                const std::vector<float>& C,
                const std::vector<float>& A,
@@ -279,29 +299,34 @@ namespace rocRoller
                bool                       transA = false,
                bool                       transB = true);
 
-    void CPUMM(std::vector<float>&       D,
-               const std::vector<float>& C,
-               const std::vector<FP8>&   A,
-               const std::vector<FP8>&   B,
-               int                       M,
-               int                       N,
-               int                       K,
-               float                     alpha,
-               float                     beta,
-               bool                      transA = false,
-               bool                      transB = true);
+    void CPUMM(std::vector<BFloat16>&       D,
+               const std::vector<BFloat16>& C,
+               const std::vector<BFloat16>& A,
+               const std::vector<BFloat16>& B,
+               int                          M,
+               int                          N,
+               int                          K,
+               float                        alpha,
+               float                        beta,
+               bool                         transA = false,
+               bool                         transB = true);
 
+    template <typename TA, typename TB>
     void CPUMM(std::vector<float>&       D,
                const std::vector<float>& C,
-               const std::vector<BF8>&   A,
-               const std::vector<BF8>&   B,
+               const std::vector<TA>&    A,
+               const std::vector<TB>&    B,
                int                       M,
                int                       N,
                int                       K,
                float                     alpha,
                float                     beta,
                bool                      transA = false,
-               bool                      transB = true);
+               bool                      transB = true)
+    {
+        CPUMM(
+            D, C, unpackToFloat<TA>(A), unpackToFloat<TB>(B), M, N, K, alpha, beta, transA, transB);
+    }
 }
 
 /*

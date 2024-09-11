@@ -2141,7 +2141,8 @@ namespace ExpressionTest
         CHECK_THROWS_AS(Expression::convert(DataType::Int8x4, intExpr), FatalError);
         CHECK_NOTHROW(Expression::convert(DataType::Int32, intExpr));
         CHECK_NOTHROW(Expression::convert(DataType::Int64, intExpr));
-        CHECK_THROWS_AS(Expression::convert(DataType::BFloat16, intExpr), FatalError);
+        CHECK_NOTHROW(Expression::convert(DataType::BFloat16, intExpr));
+        CHECK_NOTHROW(Expression::convert(DataType::BFloat16x2, intExpr));
         CHECK_THROWS_AS(Expression::convert(DataType::Int8, intExpr), FatalError);
         CHECK_THROWS_AS(Expression::convert(DataType::Raw32, intExpr), FatalError);
         CHECK_NOTHROW(Expression::convert(DataType::UInt32, intExpr));

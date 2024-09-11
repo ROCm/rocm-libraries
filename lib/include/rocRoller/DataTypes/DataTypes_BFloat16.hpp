@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,28 +26,23 @@
 
 #pragma once
 
-#include <cinttypes>
-#include <cmath>
-#include <iostream>
+#include "DataTypes_BF16_Utils.hpp"
 
-#define ROCROLLER_USE_BF16
-
-#ifndef __BYTE_ORDER__
-#define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
-#endif
-
-#define BFLOAT16_Q_NAN_VALUE 0xFFC1
+#define ROCROLLER_USE_BFloat16
 
 namespace rocRoller
 {
     /**
- * \ingroup DataTypes
- * @{
- */
-
+     * \ingroup DataTypes
+     * @{
+     */
+    /**
+    *  @brief Floating point 8-bit type in E5M2 format
+    *
+    */
     struct BFloat16
     {
-        BFloat16()
+        constexpr BFloat16()
             : data(BFLOAT16_ZERO_VALUE)
         {
         }
@@ -55,199 +50,67 @@ namespace rocRoller
         BFloat16(BFloat16 const& other) = default;
 
         template <typename T,
-                  typename = typename std::enable_if<(!std::is_same<T, BFloat16>::value)
-                                                     && std::is_convertible<T, float>::value>::type>
+                  typename
+                  = typename std::enable_if<(!std::is_same<T, BFloat16>::value)
+                                            && std::is_convertible<T, double>::value>::type>
         explicit BFloat16(T const& value)
-            : data(float_to_bfloat16(static_cast<float>(value)).data)
+            : data(float_to_bf16(static_cast<double>(value)).data)
         {
         }
 
         explicit operator float() const
         {
-            return bfloat16_to_float(*this);
+            return bf16_to_float(*this);
         }
 
-        explicit operator double() const
+        operator double() const
         {
             return static_cast<double>(float(*this));
         }
 
-        explicit operator int() const
-        {
-            return static_cast<int>(float(*this));
-        }
-
-        explicit operator uint32_t() const
-        {
-            return static_cast<uint32_t>(float(*this));
-        }
-
         uint16_t data;
-
-    private:
-        static const int16_t BFLOAT16_ZERO_VALUE = 0x00;
-
-        // zero extend lower 16 bits of bfloat16 to convert to IEEE float
-        static float bfloat16_to_float(const BFloat16 v)
-        {
-            union
-            {
-                float    fp32 = 0;
-                uint16_t q[2];
-            };
-
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-            q[0] = v.data;
-#else
-            q[1]      = v.data;
-#endif
-            return fp32;
-        }
-
-        // truncate lower 16 bits of IEEE float to convert to bfloat16
-        static BFloat16 float_to_bfloat16(const float v)
-        {
-            BFloat16 bf16;
-            if(std::isnan(v))
-            {
-                bf16.data = BFLOAT16_Q_NAN_VALUE;
-                return bf16;
-            }
-            union
-            {
-                float    fp32;
-                uint16_t p[2];
-            };
-            fp32 = v;
-
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-            bf16.data = p[0];
-#else
-            bf16.data = p[1];
-#endif
-            return bf16;
-        }
     };
 
-    inline std::ostream& operator<<(std::ostream& os, const BFloat16& bf16)
+    inline std::ostream& operator<<(std::ostream& os, const BFloat16& obj)
     {
-        os << static_cast<float>(bf16);
+        os << static_cast<float>(obj);
         return os;
     }
 
-    inline BFloat16 operator+(BFloat16 a, BFloat16 b)
+    inline BFloat16 operator-(BFloat16 const& a)
     {
-        return static_cast<BFloat16>(static_cast<float>(a) + static_cast<float>(b));
-    }
-    inline BFloat16 operator+(int a, BFloat16 b)
-    {
-        return static_cast<BFloat16>(static_cast<float>(a) + static_cast<float>(b));
-    }
-    inline BFloat16 operator+(BFloat16 a, int b)
-    {
-        return static_cast<BFloat16>(static_cast<float>(a) + static_cast<float>(b));
-    }
-    inline BFloat16 operator-(BFloat16 a, BFloat16 b)
-    {
-        return static_cast<BFloat16>(static_cast<float>(a) - static_cast<float>(b));
-    }
-    inline BFloat16 operator*(BFloat16 a, BFloat16 b)
-    {
-        return static_cast<BFloat16>(static_cast<float>(a) * static_cast<float>(b));
-    }
-    inline BFloat16 operator/(BFloat16 a, BFloat16 b)
-    {
-        return static_cast<BFloat16>(static_cast<float>(a) / static_cast<float>(b));
+        return static_cast<BFloat16>(-static_cast<float>(a));
     }
 
-    inline bool operator<(BFloat16 a, BFloat16 b)
-    {
-        return static_cast<float>(a) < static_cast<float>(b);
-    }
-    inline bool operator<=(BFloat16 a, BFloat16 b)
-    {
-        return static_cast<float>(a) <= static_cast<float>(b);
-    }
-    inline bool operator==(BFloat16 a, BFloat16 b)
+    template <typename T, typename = typename std::enable_if_t<std::is_convertible_v<T, float>>>
+    inline bool operator==(BFloat16 const& a, T const& b)
     {
         return static_cast<float>(a) == static_cast<float>(b);
     }
-    inline bool operator!=(BFloat16 a, BFloat16 b)
-    {
-        return static_cast<float>(a) != static_cast<float>(b);
-    }
-    inline bool operator>(BFloat16 a, BFloat16 b)
-    {
-        return static_cast<float>(a) > static_cast<float>(b);
-    }
-    inline bool operator>=(BFloat16 a, BFloat16 b)
-    {
-        return static_cast<float>(a) >= static_cast<float>(b);
-    }
 
-    inline BFloat16& operator+=(BFloat16& a, BFloat16 b)
+    inline bool operator==(BFloat16 const& a, BFloat16 const& b)
     {
-        a = a + b;
-        return a;
-    }
-    inline BFloat16& operator-=(BFloat16& a, BFloat16 b)
-    {
-        a = a - b;
-        return a;
-    }
-    inline BFloat16& operator*=(BFloat16& a, BFloat16 b)
-    {
-        a = a * b;
-        return a;
-    }
-    inline BFloat16& operator/=(BFloat16& a, BFloat16 b)
-    {
-        a = a / b;
-        return a;
-    }
-
-    inline BFloat16 operator++(BFloat16& a)
-    {
-        a += BFloat16(1);
-        return a;
-    }
-    inline BFloat16 operator++(BFloat16& a, int)
-    {
-        BFloat16 original_value = a;
-        ++a;
-        return original_value;
+        return static_cast<float>(a) == static_cast<float>(b);
     }
 
     /**
- * @}
- */
+     * @}
+     */
 } // namespace rocRoller
 
 namespace std
 {
-    inline bool isinf(const rocRoller::BFloat16& a)
+    template <>
+    struct is_floating_point<rocRoller::BFloat16> : true_type
     {
-        return std::isinf(static_cast<float>(a));
-    }
-    inline bool isnan(const rocRoller::BFloat16& a)
-    {
-        return std::isnan(static_cast<float>(a));
-    }
-    inline bool iszero(const rocRoller::BFloat16& a)
-    {
-        return (a.data & 0x7FFF) == 0;
-    }
+    };
 
-    inline rocRoller::BFloat16 abs(const rocRoller::BFloat16& a)
+    template <>
+    struct hash<rocRoller::BFloat16>
     {
-        return static_cast<rocRoller::BFloat16>(std::abs(static_cast<float>(a)));
-    }
-    inline rocRoller::BFloat16 sin(const rocRoller::BFloat16& a)
-    {
-        return static_cast<rocRoller::BFloat16>(std::sin(static_cast<float>(a)));
-    }
-    inline rocRoller::BFloat16 cos(const rocRoller::BFloat16& a)
-    {
-        return static_cast<rocRoller::BFloat16>(std::cos(static_cast<float>(a)));
-    }
+        size_t operator()(const rocRoller::BFloat16& a) const
+        {
+            return hash<uint16_t>()(a.data);
+        }
+    };
 } // namespace std

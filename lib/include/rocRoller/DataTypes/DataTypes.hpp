@@ -84,6 +84,8 @@ namespace rocRoller
         ComplexDouble, //< Two 64bit floating point; real and imaginary
         Half, //< 16bit floating point (IEEE format)
         Halfx2, //< Two 16bit floating point; packed into 32bits
+        BFloat16, //< 16bit floating point (brain-float format)
+        BFloat16x2, //< Two bfloat values; packed into 32bits
         FP8, //< 8bit floating point (E4M3)
         FP8x4, //< Four 8bit floating point (E4M3); packed into 32bits
         BF8, //< 8bit floating point (E5M2)
@@ -93,7 +95,6 @@ namespace rocRoller
         Int16, //< 16bit signed integer
         Int32, //< 32bit signed integer
         Int64, //< 64bit signed integer
-        BFloat16, //< 16bit floating point (brain-float format)
         Raw32, //< Thirty-two bits
         UInt8, //< 8bit unsigned integer
         UInt16, //< 16bit unsigned integer
@@ -826,6 +827,24 @@ namespace rocRoller
     {
     };
 
+    struct BFloat16x2 : public DistinctType<uint32_t, BFloat16x2>
+    {
+    };
+
+    template <>
+    struct TypeInfo<BFloat16x2> : public BaseTypeInfo<BFloat16x2,
+                                                      DataType::BFloat16x2,
+                                                      DataType::BFloat16,
+                                                      PointerType::Value,
+                                                      2,
+                                                      1,
+                                                      32,
+                                                      false,
+                                                      false,
+                                                      true>
+    {
+    };
+
     struct Raw32 : public DistinctType<uint32_t, Raw32>
     {
     };
@@ -977,6 +996,7 @@ namespace rocRoller
     DeclareEnumTypeInfo(Int32, int32_t);
     DeclareEnumTypeInfo(Int64, int64_t);
     DeclareEnumTypeInfo(BFloat16, BFloat16);
+    DeclareEnumTypeInfo(BFloat16x2, BFloat16x2);
     DeclareEnumTypeInfo(Int8, int8_t);
     DeclareEnumTypeInfo(Raw32, Raw32);
     DeclareEnumTypeInfo(UInt32, uint32_t);

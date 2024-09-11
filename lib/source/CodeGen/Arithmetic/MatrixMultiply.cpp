@@ -11,6 +11,9 @@ namespace rocRoller
     {
         RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::Float);
         RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::Halfx2);
+        RegisterComponentTemplateSpec(MatrixMultiplyGenerator,
+                                      DataType::Float,
+                                      DataType::BFloat16x2);
         RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::FP8x4);
         RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::BF8x4);
 
@@ -23,6 +26,8 @@ namespace rocRoller
                 return "f32";
             else if constexpr(DATATYPE == DataType::Halfx2)
                 return "f16";
+            else if constexpr(DATATYPE == DataType::BFloat16x2)
+                return "bf16";
             else if constexpr(DATATYPE == DataType::FP8x4)
                 return "_fp8_fp8";
             else if constexpr(DATATYPE == DataType::BF8x4)

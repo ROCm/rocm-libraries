@@ -3,8 +3,8 @@
 #include <cstdio>
 #include <iterator>
 
-#include <hip/amd_detail/amd_hip_fp16.h>
 #include <hip/hip_ext.h>
+#include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
 #include <rocRoller/AssemblyKernel.hpp>

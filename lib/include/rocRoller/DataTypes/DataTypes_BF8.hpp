@@ -216,14 +216,6 @@ namespace std
     {
         return static_cast<rocRoller::BF8>(std::cos(static_cast<float>(a)));
     }
-    inline rocRoller::BF8 exp2(const rocRoller::BF8& a)
-    {
-        return static_cast<rocRoller::BF8>(std::exp2(static_cast<float>(a)));
-    }
-    inline rocRoller::BF8 exp(const rocRoller::BF8& a)
-    {
-        return static_cast<rocRoller::BF8>(std::exp(static_cast<float>(a)));
-    }
 
     template <>
     struct is_floating_point<rocRoller::BF8> : true_type

@@ -17,6 +17,20 @@ fp16 = dict(
     type_D="half",
 )
 
+bf16_fp32 = dict(
+    type_A="bf16",
+    type_B="bf16",
+    type_C="float",
+    type_D="float",
+)
+
+bf16_bf16 = dict(
+    type_A="bf16",
+    type_B="bf16",
+    type_C="bf16",
+    type_D="bf16",
+)
+
 fp32 = dict(
     type_A="float",
     type_B="float",
@@ -515,6 +529,74 @@ def f8gemm():
         workgroup_size_x=256,
         workgroup_size_y=1,
         **fp8fp8_fp32,
+    )
+
+
+def bf16gemm_16x16x8():
+    yield GEMMRun(
+        M=1024,
+        N=1024,
+        K=1024,
+        mac_m=64,
+        mac_n=16,
+        mac_k=64,
+        wave_m=16,
+        wave_n=16,
+        wave_k=8,
+        workgroup_size_x=128,
+        workgroup_size_y=1,
+        **bf16_fp32,
+    )
+
+
+def bf16gemm_32x32x4():
+    yield GEMMRun(
+        M=1024,
+        N=1024,
+        K=1024,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        wave_m=32,
+        wave_n=32,
+        wave_k=4,
+        workgroup_size_x=128,
+        workgroup_size_y=1,
+        **bf16_fp32,
+    )
+
+
+def bf16bf16gemm_16x16x8():
+    yield GEMMRun(
+        M=1024,
+        N=1024,
+        K=1024,
+        mac_m=64,
+        mac_n=16,
+        mac_k=64,
+        wave_m=16,
+        wave_n=16,
+        wave_k=8,
+        workgroup_size_x=128,
+        workgroup_size_y=1,
+        **bf16_bf16,
+    )
+
+
+def bf16bf16gemm_32x32x4():
+    yield GEMMRun(
+        M=1024,
+        N=1024,
+        K=1024,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        wave_m=32,
+        wave_n=32,
+        wave_k=4,
+        workgroup_size_x=128,
+        workgroup_size_y=1,
+        **bf16_bf16,
     )
 
 

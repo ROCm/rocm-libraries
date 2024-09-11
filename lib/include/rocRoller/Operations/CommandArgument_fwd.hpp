@@ -21,6 +21,7 @@ namespace rocRoller
         float,
         double,
         Half,
+        BFloat16,
         FP8,
         BF8,
         bool,
@@ -34,6 +35,7 @@ namespace rocRoller
         float*,
         double*,
         Half*,
+        BFloat16*,
         FP8*,
         BF8*>;
 

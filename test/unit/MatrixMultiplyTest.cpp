@@ -447,6 +447,11 @@ namespace MatrixMultiplyTest
     {
     };
 
+    class MatrixMultiplyTestGPUBFloat16
+        : public BaseMatrixMultiplyContextFixture<std::tuple<int, int, int>>
+    {
+    };
+
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTile)
     {
         matrixMultiplyMacroTile<float>(32, 32, 2, 1, 2.e-6);
@@ -497,6 +502,18 @@ namespace MatrixMultiplyTest
 
         EXPECT_EQ(expectedLocalWriteOffset, 128);
         EXPECT_EQ(numLocalRead, 16);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_FP32)
+    {
+        auto [mfma_m, mfma_n, mfma_k] = std::get<std::tuple<int, int, int>>(GetParam());
+        matrixMultiplyMacroTile<BFloat16, float>(mfma_m, mfma_n, mfma_k, 1, 2.e-6, false);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_BF16)
+    {
+        auto [mfma_m, mfma_n, mfma_k] = std::get<std::tuple<int, int, int>>(GetParam());
+        matrixMultiplyMacroTile<BFloat16>(mfma_m, mfma_n, mfma_k, 1, 2.e-6, false);
     }
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x32_NN)
@@ -669,4 +686,11 @@ namespace MatrixMultiplyTest
                              ::testing::Combine(mfmaSupportedISAValues(),
                                                 ::testing::Values(rocRoller::DataType::FP8,
                                                                   rocRoller::DataType::BF8)));
+
+    INSTANTIATE_TEST_SUITE_P(
+        MatrixMultiplyTestGPUBFloat16,
+        MatrixMultiplyTestGPUBFloat16,
+        ::testing::Combine(mfmaSupportedISAValues(),
+                           ::testing::Values(std::tuple<int, int, int>{32, 32, 4},
+                                             std::tuple<int, int, int>{16, 16, 8})));
 }

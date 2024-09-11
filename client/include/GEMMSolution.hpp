@@ -37,7 +37,8 @@ namespace rocRoller
                                                  std::vector<D> h_D)
                 {
                     // Host result
-                    std::vector<D> h_result(m_problemParams.m * m_problemParams.n, 0.0);
+                    std::vector<D> h_result(m_problemParams.m * m_problemParams.n,
+                                            static_cast<D>(0.0));
                     CPUMM(h_result,
                           h_C,
                           h_A,
