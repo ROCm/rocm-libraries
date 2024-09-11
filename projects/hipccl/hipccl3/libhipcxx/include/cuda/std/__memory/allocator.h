@@ -49,7 +49,6 @@
 #include <cuda/std/__type_traits/is_volatile.h>
 #include <cuda/std/__utility/forward.h>
 #include <cuda/std/cstddef>
-#include <cuda/std/cstdlib>
 
 #if defined(_CCCL_HAS_CONSTEXPR_ALLOCATION) && !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <memory>

@@ -47,7 +47,6 @@
 
 #include <cuda/std/__atomic/api/owned.h>
 #include <cuda/std/__type_traits/void_t.h> // _CUDA_VSTD::void_t
-#include <cuda/std/cstdlib> // _LIBCUDACXX_UNREACHABLE
 
 #if defined(_CCCL_CUDA_COMPILER)
 #  include <cuda/ptx> // cuda::ptx::*
@@ -681,7 +680,7 @@ _CCCL_DEVICE inline async_contract_fulfillment memcpy_async_tx(
         // or from shared to remote cluster dsmem. To copy to remote
         // dsmem, we need to arrive on a cluster-scoped barrier, which
         // is not yet implemented. So we trap in this case as well.
-        _LIBCUDACXX_UNREACHABLE();
+        _CCCL_UNREACHABLE();
       }),
     (__cuda_ptx_memcpy_async_tx_is_not_supported_before_SM_90__();));
 
@@ -802,7 +801,7 @@ struct __memcpy_completion_impl
         // This completion mechanism should not be used with a shared
         // memory barrier. Or at least, we do not currently envision
         // bulk group to be used with shared memory barriers.
-        _LIBCUDACXX_UNREACHABLE();
+        _CCCL_UNREACHABLE();
       case __completion_mechanism::__mbarrier_complete_tx:
 #  if __cccl_ptx_isa >= 800
         // Pre-sm90, the mbarrier_complete_tx completion mechanism is not available.
@@ -818,7 +817,7 @@ struct __memcpy_completion_impl
         return async_contract_fulfillment::none;
       default:
         // Get rid of "control reaches end of non-void function":
-        _LIBCUDACXX_UNREACHABLE();
+        _CCCL_UNREACHABLE();
     }
   }
 
@@ -848,16 +847,16 @@ struct __memcpy_completion_impl
         return async_contract_fulfillment::async;
       case __completion_mechanism::__mbarrier_complete_tx:
         // Non-smem barriers do not have an mbarrier_complete_tx mechanism..
-        _LIBCUDACXX_UNREACHABLE();
+        _CCCL_UNREACHABLE();
       case __completion_mechanism::__async_bulk_group:
         // This completion mechanism is currently not expected to be used with barriers.
-        _LIBCUDACXX_UNREACHABLE();
+        _CCCL_UNREACHABLE();
       case __completion_mechanism::__sync:
         // sync: In this case, we do not need to do anything.
         return async_contract_fulfillment::none;
       default:
         // Get rid of "control reaches end of non-void function":
-        _LIBCUDACXX_UNREACHABLE();
+        _CCCL_UNREACHABLE();
     }
   }
 
@@ -882,7 +881,7 @@ struct __memcpy_completion_impl
         return async_contract_fulfillment::none;
       default:
         // Get rid of "control reaches end of non-void function":
-        _LIBCUDACXX_UNREACHABLE();
+        _CCCL_UNREACHABLE();
     }
   }
 };
