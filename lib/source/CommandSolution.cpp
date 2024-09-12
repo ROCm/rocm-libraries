@@ -59,14 +59,14 @@ namespace rocRoller
         return m_wavefrontCounts;
     }
 
-    void
-        CommandParameters::setManualWorkitemCount(std::array<Expression::ExpressionPtr, 3> const& v)
+    void CommandLaunchParameters::setManualWorkitemCount(
+        std::array<Expression::ExpressionPtr, 3> const& v)
     {
         m_workitemCount = v;
     }
 
     std::optional<std::array<Expression::ExpressionPtr, 3>>
-        CommandParameters::getManualWorkitemCount() const
+        CommandLaunchParameters::getManualWorkitemCount() const
     {
         return m_workitemCount;
     }
@@ -148,44 +148,15 @@ namespace rocRoller
         return rv;
     }
 
-    CommandKernel::CommandKernel(ContextPtr context)
-        : m_context(context)
+    void CommandKernel::setContext(ContextPtr context)
     {
-        m_executableKernel = m_context->instructions()->getExecutableKernel();
+        m_context = context;
     }
 
-    CommandKernel::CommandKernel(CommandPtr command, std::string name)
+    CommandKernel::CommandKernel(CommandPtr command, std::string kernelName)
         : m_command(command)
-        , m_preParameters(std::make_shared<CommandParameters>())
+        , m_name(kernelName)
     {
-        generateKernel(name);
-    }
-
-    CommandKernel::CommandKernel(CommandPtr                         command,
-                                 std::string                        name,
-                                 std::shared_ptr<CommandParameters> preParameters,
-                                 std::shared_ptr<CommandParameters> postParameters,
-                                 std::shared_ptr<KernelOptions>     kernelOptions)
-        : m_command(command)
-        , m_preParameters(preParameters)
-        , m_postParameters(postParameters)
-        , m_kernelOptions(kernelOptions)
-    {
-        AssertFatal(m_preParameters);
-
-        generateKernel(name);
-    }
-
-    CommandKernel::CommandKernel(CommandPtr                      command,
-                                 ContextPtr                      context,
-                                 KernelGraph::KernelGraph const& kernelGraph)
-        : m_command(command)
-        , m_context(context)
-        , m_kernelGraph(kernelGraph)
-        , m_preParameters(std::make_shared<CommandParameters>())
-    {
-        generateKernelSource();
-        assembleKernel();
     }
 
     KernelGraph::KernelGraph CommandKernel::getKernelGraph() const
@@ -213,33 +184,25 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::generateKernelGraph");
 
-        auto logger = rocRoller::Log::getLogger();
+        AssertFatal(m_context);
 
         KernelGraph::ConstraintStatus check;
 
-        if(!m_kernelOptions)
-        {
-            m_kernelOptions = std::make_shared<KernelOptions>();
-        }
-
-        m_context = Context::ForDefaultHipDevice(name, *m_kernelOptions);
+        if(!m_commandParameters)
+            m_commandParameters = std::make_shared<CommandParameters>();
 
         // TODO: Determine the correct kernel dimensions
-        if(m_preParameters->getManualKernelDimension() > 0)
-            m_context->kernel()->setKernelDimensions(m_preParameters->getManualKernelDimension());
+        if(m_commandParameters->getManualKernelDimension() > 0)
+            m_context->kernel()->setKernelDimensions(
+                m_commandParameters->getManualKernelDimension());
         else
             m_context->kernel()->setKernelDimensions(1);
 
         // TODO: Determine the correct work group size
-        if(m_preParameters->getManualWorkgroupSize())
-            m_context->kernel()->setWorkgroupSize(*m_preParameters->getManualWorkgroupSize());
+        if(m_commandParameters->getManualWorkgroupSize())
+            m_context->kernel()->setWorkgroupSize(*m_commandParameters->getManualWorkgroupSize());
         else
             m_context->kernel()->setWorkgroupSize({64, 1, 1});
-
-        if(m_preParameters->getManualWorkitemCount())
-            m_context->kernel()->setWorkitemCount(*m_preParameters->getManualWorkitemCount());
-        else
-            m_context->kernel()->setWorkitemCount(m_command->createWorkItemCount());
 
         auto zero = std::make_shared<Expression::Expression>(0u);
         m_context->kernel()->setDynamicSharedMemBytes(zero);
@@ -250,9 +213,8 @@ namespace rocRoller
         m_kernelGraph = KernelGraph::translate(m_command);
 
         if(Settings::getInstance()->get(Settings::LogGraphs))
-            logger->debug(
-                "CommandKernel::generateKernel: post translate: {}",
-                m_kernelGraph.toDOT(false, "CommandKernel::generateKernel: post translate"));
+            Log::debug("CommandKernel::generateKernel: post translate: {}",
+                       m_kernelGraph.toDOT(false, "CommandKernel::generateKernel: post translate"));
 
         if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
         {
@@ -265,23 +227,24 @@ namespace rocRoller
         std::vector<KernelGraph::GraphTransformPtr> transforms;
 
         transforms.push_back(std::make_shared<KernelGraph::OrderMemory>(
-            !m_context->kernelOptions().allowAmbiguousMemoryNodes));
-        transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_preParameters));
+            !m_commandParameters->allowAmbiguousMemoryNodes));
+        transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_commandParameters));
         transforms.push_back(std::make_shared<KernelGraph::LowerLinear>(m_context));
-        transforms.push_back(std::make_shared<KernelGraph::LowerTile>(
-            m_preParameters, m_context, m_preParameters->getSplitStoreTileIntoWaveBlocks()));
         transforms.push_back(
-            std::make_shared<KernelGraph::LowerTensorContraction>(m_preParameters, m_context));
+            std::make_shared<KernelGraph::LowerTile>(m_commandParameters, m_context));
+        transforms.push_back(
+            std::make_shared<KernelGraph::LowerTensorContraction>(m_commandParameters, m_context));
 
         // TODO: remove the condition by making ConstantPropagation and Streamk work simultaneously
-        if(!m_context->kernelOptions().streamK)
+        if(!m_commandParameters->streamK)
         {
             transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
         }
 
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
-        if(m_context->kernelOptions().streamK)
+        if(m_commandParameters->streamK)
         {
+            // XXX move this
             auto numCUsArg  = m_command->allocateArgument(DataType::UInt32,
                                                          m_command->getNextTag(),
                                                          ArgumentType::Value,
@@ -290,30 +253,32 @@ namespace rocRoller
             auto numCUsExpr = std::make_shared<Expression::Expression>(numCUsArg);
 
             transforms.push_back(std::make_shared<KernelGraph::AddStreamK>(
-                m_context->kernelOptions().loopOverOutputTilesDimensions,
+                m_commandParameters->loopOverOutputTilesDimensions,
                 rocRoller::XLOOP,
                 rocRoller::KLOOP,
-                m_context->kernelOptions().streamKTwoTile,
+                m_commandParameters->streamKTwoTile,
                 numCUsExpr,
+                m_commandParameters,
                 m_context));
         }
-        else if(!m_context->kernelOptions().loopOverOutputTilesDimensions.empty())
+        else if(!m_commandParameters->loopOverOutputTilesDimensions.empty())
         {
             transforms.push_back(std::make_shared<KernelGraph::LoopOverTileNumbers>(
-                m_context->kernelOptions().loopOverOutputTilesDimensions,
-                m_context->kernelOptions().loopOverOutputTilesCoordSizes,
-                m_context->kernelOptions().loopOverOutputTilesIteratedTiles,
-                m_context->kernelOptions().loopOverOutputTilesTopLoop,
+                m_commandParameters->loopOverOutputTilesDimensions,
+                m_commandParameters->loopOverOutputTilesCoordSizes,
+                m_commandParameters->loopOverOutputTilesIteratedTiles,
+                m_commandParameters->loopOverOutputTilesTopLoop,
                 m_context));
         }
         transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>());
-        transforms.push_back(std::make_shared<KernelGraph::UnrollLoops>(m_context));
-        if(m_context->kernelOptions().fuseLoops)
+        transforms.push_back(
+            std::make_shared<KernelGraph::UnrollLoops>(m_commandParameters, m_context));
+        if(m_commandParameters->fuseLoops)
         {
             transforms.push_back(std::make_shared<KernelGraph::FuseLoops>());
         }
         transforms.push_back(std::make_shared<KernelGraph::OrderEpilogueBlocks>());
-        transforms.push_back(std::make_shared<KernelGraph::AddLDS>(m_context));
+        transforms.push_back(std::make_shared<KernelGraph::AddLDS>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
         transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
@@ -321,10 +286,8 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
-        if(m_postParameters)
-        {
-            transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_postParameters));
-        }
+        transforms.push_back(
+            std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
 
         for(auto& t : transforms)
         {
@@ -357,15 +320,32 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::assembleKernel");
 
-        m_executableKernel = m_context->instructions()->getExecutableKernel();
+        m_context->instructions()->assemble();
     }
 
-    void CommandKernel::generateKernel(std::string name)
+    void CommandKernel::loadKernel()
+    {
+        TIMER(t, "CommandKernel::loadKernel");
+
+        if(!m_executableKernel)
+            m_executableKernel = m_context->instructions()->getExecutableKernel();
+    }
+
+    void CommandKernel::generateKernel()
     {
         TIMER(t, "CommandKernel::generateKernel");
 
-        generateKernelGraph(name);
-        generateKernelSource();
+        if(m_command)
+        {
+            generateKernelGraph(m_name);
+            generateKernelSource();
+        }
+        else
+        {
+            // Probably from a unit test.  The context should contain
+            // scheduled instructions already.
+        }
+
         assembleKernel();
     }
 
@@ -373,6 +353,21 @@ namespace rocRoller
     {
         // TODO: CommandKernel predicates.
         return true;
+    }
+
+    void CommandKernel::setCommandParameters(CommandParametersPtr commandParams)
+    {
+        m_commandParameters = commandParams;
+    }
+
+    CommandParametersPtr CommandKernel::getCommandParameters() const
+    {
+        return m_commandParameters;
+    }
+
+    void CommandKernel::setLaunchParameters(CommandLaunchParametersPtr launch)
+    {
+        m_launchParameters = launch;
     }
 
     void CommandKernel::launchKernel(RuntimeArguments const& args)
@@ -386,11 +381,27 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::launchKernel");
 
-        AssertFatal(m_context);
-        AssertFatal(m_context->kernel());
+        AssertFatal(m_context, "Unable to launch kernel: CommandKernel must have a Context.");
+        AssertFatal(m_context->kernel(),
+                    "Unable to launch kernel: Context must have an AssemblyKernel.");
+
+        if(m_launchParameters)
+        {
+            if(m_launchParameters->getManualWorkitemCount())
+                m_context->kernel()->setWorkitemCount(
+                    *m_launchParameters->getManualWorkitemCount());
+            else
+                m_context->kernel()->setWorkitemCount(m_command->createWorkItemCount());
+        }
+        else if(m_command)
+        {
+            m_context->kernel()->setWorkitemCount(m_command->createWorkItemCount());
+        }
 
         auto kargs = getKernelArguments(args);
         auto inv   = getKernelInvocation(args);
+
+        loadKernel();
 
         m_executableKernel->executeKernel(kargs, inv, timer, iteration);
     }

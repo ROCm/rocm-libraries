@@ -108,6 +108,8 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
     std::vector<D> h_D(solutionParams.problemParams.m * solutionParams.problemParams.n,
                        static_cast<D>(0.0));
 
+    auto context = rocRoller::Context::ForDefaultHipDevice(solutionParams.generateKernelName(), {});
+
     if(solutionParams.scheduler == "TENSILE_ASM")
     {
         Client::GEMMClient::Result result;
@@ -136,6 +138,7 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
         if(defaultDevice.HasCapability(GPUCapability::ArchAccUnifiedRegs))
         {
             Client::GEMMClient::StreamKGEMMSolution<A, B, C, D> gemmKernel(solutionParams);
+            gemmKernel.setContext(context);
             result = gemmKernel.benchmark(runParams, checkResult, doVisualize, h_A, h_B, h_C, h_D);
         }
         else
@@ -159,6 +162,7 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
             outfile << toYAML(gemmKernel.getKernel()->getKernelGraph());
         }
 
+        gemmKernel.setContext(context);
         auto result = gemmKernel.benchmark(runParams, checkResult, doVisualize, h_A, h_B, h_C, h_D);
 
         return result;

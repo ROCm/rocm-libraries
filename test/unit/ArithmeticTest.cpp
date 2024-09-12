@@ -303,7 +303,9 @@ namespace ArithmeticTest
 
             if(isLocalDevice())
             {
-                CommandKernel commandKernel(m_context);
+                CommandKernel commandKernel;
+                commandKernel.setContext(m_context);
+                commandKernel.generateKernel();
 
                 size_t const resultSize           = 21;
                 size_t const comparisonResultSize = 10;
@@ -620,7 +622,9 @@ namespace ArithmeticTest
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
-            CommandKernel commandKernel(m_context);
+            CommandKernel commandKernel;
+            commandKernel.setContext(m_context);
+            commandKernel.generateKernel();
 
             auto d_result      = make_shared_device<float>(6);
             auto d_cond_result = make_shared_device<int>(6);
@@ -763,7 +767,9 @@ namespace ArithmeticTest
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
-            CommandKernel commandKernel(m_context);
+            CommandKernel commandKernel;
+            commandKernel.setContext(m_context);
+            commandKernel.generateKernel();
 
             auto d_result = make_shared_device<float>(1);
 
@@ -932,7 +938,9 @@ namespace ArithmeticTest
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
-            CommandKernel commandKernel(m_context);
+            CommandKernel commandKernel;
+            commandKernel.setContext(m_context);
+            commandKernel.generateKernel();
 
             float               a       = 2.f;
             std::vector<__half> b       = {static_cast<__half>(1.), static_cast<__half>(2.)};
@@ -1175,7 +1183,9 @@ namespace ArithmeticTest
         // Only execute the kernels if running on the architecture that the kernel was built for,        // otherwise just assemble the instructions.
         if(isLocalDevice())
         {
-            CommandKernel commandKernel(m_context);
+            CommandKernel commandKernel;
+            commandKernel.setContext(m_context);
+            commandKernel.generateKernel();
 
             auto d_result      = make_shared_device<double>(5);
             auto d_cond_result = make_shared_device<int>(6);

@@ -374,7 +374,9 @@ namespace FastDivisionTest
 
             auto d_result = make_shared_device<R>();
 
-            CommandKernel commandKernel(this->m_context);
+            CommandKernel commandKernel;
+            commandKernel.setContext(this->m_context);
+            commandKernel.generateKernel();
 
             auto numerators   = TestValues::ByType<A>::values;
             auto denominators = TestValues::ByType<B>::values;
@@ -535,7 +537,9 @@ namespace FastDivisionTest
 
             auto d_result = make_shared_device<A>();
 
-            CommandKernel commandKernel(m_context);
+            CommandKernel commandKernel;
+            commandKernel.setContext(m_context);
+            commandKernel.generateKernel();
 
             for(A a : numerators)
             {

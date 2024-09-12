@@ -151,7 +151,9 @@ namespace rocRollerTest
 
         F8Problem prob;
         genF8x4LoadToFloatStore(context, prob, a.size(), F8Type);
-        CommandKernel commandKernel(context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(Context::ForDefaultHipDevice("F8x4"));
+        commandKernel.generateKernel();
 
         auto d_a      = make_shared_device(a);
         auto d_result = make_shared_device<float>(result.size());

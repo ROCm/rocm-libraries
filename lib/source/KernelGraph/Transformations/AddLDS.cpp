@@ -396,8 +396,9 @@ namespace rocRoller
          */
         struct AddLDSVisitor
         {
-            AddLDSVisitor(ContextPtr context)
-                : m_context(context)
+            AddLDSVisitor(CommandParametersPtr params, ContextPtr context)
+                : m_params(params)
+                , m_context(context)
             {
             }
 
@@ -431,7 +432,8 @@ namespace rocRoller
             std::map<int, std::map<int, std::vector<int>>> m_loadFromLDSChains;
             std::map<int, std::unordered_set<int>>         m_prefetchDelete;
 
-            ContextPtr m_context;
+            CommandParametersPtr m_params;
+            ContextPtr           m_context;
         };
 
         /**
@@ -503,7 +505,7 @@ namespace rocRoller
 
             auto k = original;
 
-            auto visitor = AddLDSVisitor(m_context);
+            auto visitor = AddLDSVisitor(m_params, m_context);
 
             // Add LDS operations
             for(auto const& loadTag : k.control.getNodes<LoadTiled>())
@@ -516,10 +518,9 @@ namespace rocRoller
                 visitor.stageStore(k, storeTag);
             }
 
-            if(m_context->kernelOptions().prefetch)
+            if(m_params->prefetch)
             {
-                AssertFatal(m_context->kernelOptions().unrollK > 1,
-                            "KLoop must be unrolled when prefetching.");
+                AssertFatal(m_params->unrollK > 1, "KLoop must be unrolled when prefetching.");
                 visitor.stagePrefetch(k);
             }
 
@@ -848,7 +849,7 @@ namespace rocRoller
 
             std::vector<int> preChain;
 
-            int numInFlight = m_context->kernelOptions().prefetchInFlight;
+            int numInFlight = m_params->prefetchInFlight;
 
             // Loads first
             for(int u = 0; u < numInFlight; ++u)
@@ -951,7 +952,7 @@ namespace rocRoller
             for(uint u = 0; u < numUnroll; ++u)
                 segmentBoundaries.push_back(graph.control.addElement(NOP()));
 
-            auto separateMemOps = !m_context->kernelOptions().prefetchMixMemOps;
+            auto separateMemOps = !m_params->prefetchMixMemOps;
 
             for(uint u = 0; u < numUnroll; ++u)
             {
@@ -1386,7 +1387,7 @@ namespace rocRoller
             // segment can be moved into (prefetched) the current
             // segment.
             //
-            int splitLDSPrefetchFactor = m_context->kernelOptions().prefetchLDSFactor;
+            int splitLDSPrefetchFactor = m_params->prefetchLDSFactor;
             for(auto [forLoop, numUnroll] : m_prefetchLoops)
             {
                 auto forLoopCoord     = getForLoopCoords(forLoop, k).first;

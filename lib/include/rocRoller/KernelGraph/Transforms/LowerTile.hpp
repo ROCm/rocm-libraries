@@ -27,20 +27,10 @@ namespace rocRoller
         class LowerTile : public GraphTransform
         {
         public:
-            LowerTile(std::shared_ptr<CommandParameters> params, ContextPtr context)
+            LowerTile(CommandParametersPtr params, ContextPtr context)
 
                 : m_params(params)
                 , m_context(context)
-                , m_splitStoreTileIntoWaveBlocks(true)
-            {
-            }
-
-            LowerTile(std::shared_ptr<CommandParameters> params,
-                      ContextPtr                         context,
-                      bool                               splitStoreTileIntoWaveBlocks)
-                : m_params(params)
-                , m_context(context)
-                , m_splitStoreTileIntoWaveBlocks(splitStoreTileIntoWaveBlocks)
             {
             }
 
@@ -56,9 +46,8 @@ namespace rocRoller
             }
 
         private:
-            std::shared_ptr<CommandParameters> m_params;
-            ContextPtr                         m_context;
-            bool                               m_splitStoreTileIntoWaveBlocks;
+            CommandParametersPtr m_params;
+            ContextPtr           m_context;
         };
     }
 }

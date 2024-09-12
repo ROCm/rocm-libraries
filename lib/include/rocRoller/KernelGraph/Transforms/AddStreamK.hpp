@@ -1,4 +1,5 @@
 #pragma once
+#include "CommandSolution_fwd.hpp"
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
@@ -56,13 +57,15 @@ namespace rocRoller
                        std::string const&        accumulatorLoop,
                        bool                      twoTile,
                        Expression::ExpressionPtr numWGs,
+                       CommandParametersPtr      params,
                        ContextPtr                context);
 
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override;
 
         private:
-            ContextPtr m_context;
+            CommandParametersPtr m_params;
+            ContextPtr           m_context;
 
             /**
              * The sub-dimensions of dangling `MacroTileNumber`s that

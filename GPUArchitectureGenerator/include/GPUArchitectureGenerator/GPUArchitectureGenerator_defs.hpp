@@ -67,6 +67,8 @@ namespace GPUArchitectureGenerator
              {"v_mfma_f64_16x16x4f64 v[0:7], v[32:33], v[36:37], v[0:7]", ""}},
             {rocRoller::GPUCapability::HasMFMA_bf16_1k,
              {"v_mfma_f32_32x32x4bf16_1k a[0:31], v[32:33], v[36:37], a[0:31]", ""}},
+            {rocRoller::GPUCapability::HasMFMA_bf16,
+             {"v_mfma_f32_32x32x4bf16 a[0:15], v11, v10, a[0:15]", ""}},
 
             {rocRoller::GPUCapability::HasAccumOffset,
              {".amdhsa_kernel hello_world\n  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr\n  "

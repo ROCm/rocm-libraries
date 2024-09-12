@@ -27,8 +27,7 @@ namespace GEMMDriverTest
     struct GEMMTestGPU : public CurrentGPUContextFixture
     {
         template <typename T, typename TD = T>
-        void basicGEMM(ContextPtr&        m_context,
-                       const GEMMProblem& gemm,
+        void basicGEMM(const GEMMProblem& gemm,
                        bool               debuggable  = false,
                        bool               setIdentity = false,
                        int                numIters    = 1,
@@ -197,24 +196,30 @@ namespace GEMMDriverTest
                                       ArgumentType::Value,
                                       DataDirection::ReadWrite,
                                       rocRoller::SCRATCH);
-            auto kernelOptions                           = std::make_shared<KernelOptions>();
-            kernelOptions->fuseLoops                     = gemm.fuseLoops;
-            kernelOptions->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
-            kernelOptions->unrollK                       = gemm.unrollK;
-            kernelOptions->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
-            kernelOptions->prefetch                      = gemm.prefetch;
-            kernelOptions->prefetchInFlight              = gemm.prefetchInFlight;
-            kernelOptions->prefetchLDSFactor             = gemm.prefetchLDSFactor;
-            kernelOptions->prefetchMixMemOps             = gemm.prefetchMixMemOps;
-            kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
-            kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
+
+            auto params = std::make_shared<CommandParameters>();
+            params->setManualKernelDimension(2);
+            // TODO: Calculate these values internally based on workgroup sizes.
+            params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
+            params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
+
+            params->fuseLoops                     = gemm.fuseLoops;
+            params->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
+            params->unrollK                       = gemm.unrollK;
+            params->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
+            params->prefetch                      = gemm.prefetch;
+            params->prefetchInFlight              = gemm.prefetchInFlight;
+            params->prefetchLDSFactor             = gemm.prefetchLDSFactor;
+            params->prefetchMixMemOps             = gemm.prefetchMixMemOps;
+            params->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
+            params->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
 
             if(gemm.loopOverTiles > 0)
             {
-                kernelOptions->loopOverOutputTilesDimensions = {0, 1};
-                kernelOptions->loopOverOutputTilesCoordSizes
+                params->loopOverOutputTilesDimensions = {0, 1};
+                params->loopOverOutputTilesCoordSizes
                     = {static_cast<uint>(M / gemm.macM), static_cast<uint>(N / gemm.macN)};
-                kernelOptions->loopOverOutputTilesIteratedTiles = 2;
+                params->loopOverOutputTilesIteratedTiles = 2;
             }
 
             if(gemm.streamK)
@@ -226,19 +231,12 @@ namespace GEMMDriverTest
                     "Current scratch space implementation assumes that the kernel is launched "
                     "with numWorkgroupY == 1");
 
-                kernelOptions->numScratchTiles
-                    = std::min(gemm.numCUs, numWorkgroupX * numWorkgroupY);
+                params->numScratchTiles = std::min(gemm.numCUs, numWorkgroupX * numWorkgroupY);
 
-                kernelOptions->loopOverOutputTilesDimensions = {0, 1};
-                kernelOptions->streamK                       = true;
-                kernelOptions->streamKTwoTile                = gemm.streamKTwoTile;
+                params->loopOverOutputTilesDimensions = {0, 1};
+                params->streamK                       = true;
+                params->streamKTwoTile                = gemm.streamKTwoTile;
             }
-
-            auto params = std::make_shared<CommandParameters>();
-            params->setManualKernelDimension(2);
-            // TODO: Calculate these values internally based on workgroup sizes.
-            params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
-            params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
 
             auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                 {gemm.macM, gemm.macK},
@@ -267,20 +265,27 @@ namespace GEMMDriverTest
             params->setDimensionInfo(tagStoreD, macTileD);
 
             params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
-            params->setManualWorkitemCount({NX, NY, NZ});
-
             rocRoller::Log::getLogger()->debug(
                 "GEMM workgroup sizes {} {} {}", workgroupSizeX, workgroupSizeY, 1);
             rocRoller::Log::getLogger()->debug(
                 "GEMM workitem counts {} {} {}", toString(NX), toString(NY), toString(NZ));
 
-            auto postParams = std::make_shared<CommandParameters>();
-            postParams->setManualWavefrontCount(
+            params->setManualWavefrontCount(
                 {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
                  static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
 
-            CommandKernel commandKernel(
-                command, testKernelName(), params, postParams, kernelOptions);
+            CommandKernel commandKernel(command, testKernelName());
+
+            // TODO Some test have loops, we need to reset the context.
+            m_context = createContext();
+
+            commandKernel.setContext(m_context);
+            commandKernel.setCommandParameters(params);
+            commandKernel.generateKernel();
+
+            auto launch = std::make_shared<CommandLaunchParameters>();
+            launch->setManualWorkitemCount({NX, NY, NZ});
+            commandKernel.setLaunchParameters(launch);
 
             CommandArguments commandArgs = command->createArguments();
 
@@ -301,6 +306,7 @@ namespace GEMMDriverTest
             auto scratchSpaceRequired = commandKernel.scratchSpaceRequired();
             auto deviceScratch        = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
             commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
+
             if(gemm.streamK)
             {
                 commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numCUs);
@@ -330,7 +336,6 @@ namespace GEMMDriverTest
                             HasHipSuccess(0));
 
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
-                m_context = commandKernel.getContext();
 
                 ASSERT_THAT(
                     hipMemcpy(
@@ -382,19 +387,19 @@ namespace GEMMDriverTest
         auto settings = Settings::getInstance();
 
         settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Sequential);
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
         std::string seq = m_context->instructions()->toString();
 
         settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::RoundRobin);
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
         std::string rr = m_context->instructions()->toString();
 
         settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Cooperative);
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
         std::string coop_nop = m_context->instructions()->toString();
 
         settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Priority);
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
         std::string priority_nop = m_context->instructions()->toString();
 
         EXPECT_NE(NormalizedSource(seq), NormalizedSource(rr));
@@ -409,7 +414,7 @@ namespace GEMMDriverTest
         for(auto seed : seeds)
         {
             settings->set(Settings::RandomSeed, seed);
-            basicGEMM<float>(m_context, gemm);
+            basicGEMM<float>(gemm);
             std::string rand     = m_context->instructions()->toString();
             bool        not_seen = insts.insert(rand).second;
             EXPECT_EQ(not_seen, true);
@@ -420,21 +425,21 @@ namespace GEMMDriverTest
     TEST_F(GEMMTestGPU, GPU_BasicGEMM)
     {
         GEMMProblem gemm;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBetaIsZero)
     {
         GEMMProblem gemm;
         gemm.beta = 0;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMNotSetC)
     {
         GEMMProblem gemm;
         gemm.beta = 0;
-        basicGEMM<float>(m_context, gemm, false, false, 1, true);
+        basicGEMM<float>(gemm, false, false, 1, true);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
@@ -472,7 +477,7 @@ namespace GEMMDriverTest
         for(auto twoTile : {true, false})
         {
             gemm.streamKTwoTile = twoTile;
-            basicGEMM<float>(m_context, gemm);
+            basicGEMM<float>(gemm);
         }
     }
 
@@ -509,7 +514,7 @@ namespace GEMMDriverTest
         for(auto twoTile : {true, false})
         {
             gemm.streamKTwoTile = twoTile;
-            basicGEMM<float>(m_context, gemm);
+            basicGEMM<float>(gemm);
         }
     }
 
@@ -559,7 +564,7 @@ namespace GEMMDriverTest
                     for(auto storeLDSD : {false, true})
                     {
                         gemm.storeLDSD = storeLDSD;
-                        basicGEMM<Half>(m_context, gemm);
+                        basicGEMM<Half>(gemm);
                     }
                 }
             }
@@ -598,7 +603,7 @@ namespace GEMMDriverTest
         for(auto twoTile : {true, false})
         {
             gemm.streamKTwoTile = twoTile;
-            basicGEMM<Half>(m_context, gemm);
+            basicGEMM<Half>(gemm);
         }
     }
 
@@ -607,7 +612,7 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.storeLDSD     = false;
         gemm.loopOverTiles = true;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMNoLDSA)
@@ -616,7 +621,7 @@ namespace GEMMDriverTest
         gemm.loadLDSA  = false;
         gemm.loadLDSB  = true;
         gemm.fuseLoops = false;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMNoLDSB)
@@ -625,7 +630,7 @@ namespace GEMMDriverTest
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = false;
         gemm.fuseLoops = false;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMNoLDSAB)
@@ -634,7 +639,7 @@ namespace GEMMDriverTest
         gemm.loadLDSA  = false;
         gemm.loadLDSB  = false;
         gemm.fuseLoops = false;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollK)
@@ -647,7 +652,7 @@ namespace GEMMDriverTest
         gemm.fuseLoops = false;
         gemm.unrollK   = 4;
         gemm.macK      = 8;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKLDS)
@@ -660,7 +665,7 @@ namespace GEMMDriverTest
         gemm.fuseLoops = false;
         gemm.unrollK   = 2;
         gemm.macK      = 4;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDS)
@@ -673,7 +678,7 @@ namespace GEMMDriverTest
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
         gemm.macK      = 8;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDSA)
@@ -686,7 +691,7 @@ namespace GEMMDriverTest
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
         gemm.macK      = 8;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDSB)
@@ -699,7 +704,7 @@ namespace GEMMDriverTest
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
         gemm.macK      = 8;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKLDSPrefetch)
@@ -722,7 +727,7 @@ namespace GEMMDriverTest
                 for(auto mixMemOps : {false, true})
                 {
                     gemm.prefetchMixMemOps = mixMemOps;
-                    basicGEMM<float>(m_context, gemm);
+                    basicGEMM<float>(gemm);
                 }
             }
         }
@@ -752,7 +757,7 @@ namespace GEMMDriverTest
                 for(auto mixMemOps : {false, true})
                 {
                     gemm.prefetchMixMemOps = mixMemOps;
-                    basicGEMM<Half>(m_context, gemm);
+                    basicGEMM<Half>(gemm);
                 }
             }
         }
@@ -779,7 +784,7 @@ namespace GEMMDriverTest
                 for(auto mixMemOps : {false, true})
                 {
                     gemm.prefetchMixMemOps = mixMemOps;
-                    basicGEMM<float>(m_context, gemm);
+                    basicGEMM<float>(gemm);
                 }
             }
         }
@@ -808,7 +813,7 @@ namespace GEMMDriverTest
         gemm.prefetchInFlight  = 3;
         gemm.prefetchLDSFactor = 2;
         gemm.prefetchMixMemOps = true;
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16)
@@ -816,7 +821,7 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.waveK = 8;
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_FP32_32x32x4)
@@ -826,7 +831,7 @@ namespace GEMMDriverTest
         gemm.waveN = 32;
         gemm.waveK = 4;
 
-        basicGEMM<BFloat16, float>(m_context, gemm);
+        basicGEMM<BFloat16, float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_FP32_16x16x8)
@@ -836,7 +841,7 @@ namespace GEMMDriverTest
         gemm.waveN = 16;
         gemm.waveK = 8;
 
-        basicGEMM<BFloat16, float>(m_context, gemm);
+        basicGEMM<BFloat16, float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_BF16_32x32x4)
@@ -846,7 +851,7 @@ namespace GEMMDriverTest
         gemm.waveN = 32;
         gemm.waveK = 4;
 
-        basicGEMM<BFloat16, BFloat16>(m_context, gemm);
+        basicGEMM<BFloat16, BFloat16>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_BF16_16x16x8)
@@ -856,7 +861,7 @@ namespace GEMMDriverTest
         gemm.waveN = 16;
         gemm.waveK = 8;
 
-        basicGEMM<BFloat16, BFloat16>(m_context, gemm);
+        basicGEMM<BFloat16, BFloat16>(gemm);
     }
 
     GEMMProblem setup_GEMMF8_NT()
@@ -897,13 +902,13 @@ namespace GEMMDriverTest
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
     {
         auto gemm = setup_GEMMF8_NT();
-        basicGEMM<FP8, float>(m_context, gemm);
+        basicGEMM<FP8, float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_NT)
     {
         auto gemm = setup_GEMMF8_NT();
-        basicGEMM<BF8, float>(m_context, gemm);
+        basicGEMM<BF8, float>(gemm);
     }
 
     GEMMProblem setup_GEMMF8_TN()
@@ -964,14 +969,14 @@ namespace GEMMDriverTest
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_TN)
     {
         auto gemm = setup_GEMMF8_TN();
-        basicGEMM<FP8, float>(m_context, gemm);
+        basicGEMM<FP8, float>(gemm);
         check_GEMMF8_TN(m_context);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_TN)
     {
         auto gemm = setup_GEMMF8_TN();
-        basicGEMM<BF8, float>(m_context, gemm);
+        basicGEMM<BF8, float>(gemm);
         check_GEMMF8_TN(m_context);
     }
 
@@ -996,7 +1001,7 @@ namespace GEMMDriverTest
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X1)
@@ -1021,7 +1026,7 @@ namespace GEMMDriverTest
         gemm.transA = "T";
         gemm.transB = "N";
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
 
         std::string generatedCode = m_context->instructions()->toString();
 
@@ -1052,7 +1057,7 @@ namespace GEMMDriverTest
         gemm.transA = "T";
         gemm.transB = "N";
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
 
         std::string generatedCode = m_context->instructions()->toString();
 
@@ -1080,7 +1085,7 @@ namespace GEMMDriverTest
 
         gemm.transA = "T";
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
 
         std::string generatedCode = m_context->instructions()->toString();
 
@@ -1110,7 +1115,7 @@ namespace GEMMDriverTest
 
         gemm.transA = "T";
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
 
         std::string generatedCode = m_context->instructions()->toString();
 
@@ -1138,7 +1143,7 @@ namespace GEMMDriverTest
 
         gemm.storeLDSD = false;
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1x8UnrollK)
@@ -1162,7 +1167,7 @@ namespace GEMMDriverTest
 
         gemm.storeLDSD = false;
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
     }
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2x4)
     {
@@ -1183,7 +1188,7 @@ namespace GEMMDriverTest
 
         gemm.storeLDSD = false;
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
 
         std::string generatedCode = m_context->instructions()->toString();
 
@@ -1216,7 +1221,7 @@ namespace GEMMDriverTest
 
         gemm.storeLDSD = false;
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
 
         std::string generatedCode = m_context->instructions()->toString();
 
@@ -1244,7 +1249,7 @@ namespace GEMMDriverTest
 
         gemm.transB = "N";
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
 
         std::string generatedCode = m_context->instructions()->toString();
 
@@ -1274,7 +1279,7 @@ namespace GEMMDriverTest
 
         gemm.transB = "N";
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
 
         std::string generatedCode = m_context->instructions()->toString();
 
@@ -1288,11 +1293,11 @@ namespace GEMMDriverTest
         gemm.transB                        = "N";
 
         gemm.literalStrides = true;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
         std::string output_literalStrides = m_context->instructions()->toString();
 
         gemm.literalStrides = false;
-        basicGEMM<float>(m_context, gemm);
+        basicGEMM<float>(gemm);
         std::string output_noLiteralStrides = m_context->instructions()->toString();
 
         //Since we're setting the first dimension to a literal 1, there will be less occurrences of Load_Tiled_0_stride_0.
@@ -1333,7 +1338,7 @@ namespace GEMMDriverTest
         gemm.loadLDSB  = true;
         gemm.storeLDSD = true;
 
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMStoreDWave)
@@ -1373,12 +1378,12 @@ namespace GEMMDriverTest
         gemm.storeLDSD = true;
 
         gemm.splitStoreTileIntoWaveBlocks = true;
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
         auto instructions0 = output();
         EXPECT_EQ(nonZeroDSReadOffsets(instructions0), std::set<int>{1024});
 
         gemm.splitStoreTileIntoWaveBlocks = false;
-        basicGEMM<Half>(m_context, gemm);
+        basicGEMM<Half>(gemm);
         auto instructions1 = output();
         EXPECT_EQ(nonZeroDSReadOffsets(instructions1), std::set<int>{64});
     }
@@ -1404,6 +1409,6 @@ namespace GEMMDriverTest
         gemm.loadLDSB  = true;
         gemm.storeLDSD = true;
 
-        basicGEMM<Half>(m_context, gemm, true);
+        basicGEMM<Half>(gemm, true);
     }
 }

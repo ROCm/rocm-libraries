@@ -362,7 +362,7 @@ namespace rocRollerTest::Graphs
     }
 
     template <typename T>
-    std::shared_ptr<CommandParameters> GEMM<T>::getCommandParameters() const
+    CommandParametersPtr GEMM<T>::getCommandParameters() const
     {
         using namespace rocRoller::KernelGraph::CoordinateGraph;
 
@@ -456,8 +456,7 @@ namespace rocRollerTest::Graphs
     }
 
     template <typename T>
-    std::shared_ptr<CommandParameters> TileDoubleAdd<T>::getCommandParameters(size_t nx,
-                                                                              size_t ny) const
+    CommandParametersPtr TileDoubleAdd<T>::getCommandParameters(size_t nx, size_t ny) const
     {
         using namespace rocRoller::KernelGraph::CoordinateGraph;
 
@@ -479,15 +478,24 @@ namespace rocRollerTest::Graphs
                                == m_thrM * m_thrN * workgroupSizeX * workgroupSizeY,
                     "MacroTile size mismatch");
 
+        params->setManualKernelDimension(2);
+        params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
+
+        return params;
+    }
+
+    template <typename T>
+    CommandLaunchParametersPtr TileDoubleAdd<T>::getCommandLaunchParameters(size_t nx,
+                                                                            size_t ny) const
+    {
         auto NX = std::make_shared<Expression::Expression>(nx / m_thrM);
         auto NY = std::make_shared<Expression::Expression>(ny / m_thrN);
         auto NZ = std::make_shared<Expression::Expression>(1u);
 
-        params->setManualKernelDimension(2);
-        params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
+        auto launch = std::make_shared<CommandLaunchParameters>();
+        launch->setManualWorkitemCount({NX, NY, NZ});
 
-        return params;
+        return launch;
     }
 
     template <typename T>
@@ -600,7 +608,7 @@ namespace rocRollerTest::Graphs
     }
 
     template <typename T>
-    std::shared_ptr<CommandParameters> TileCopy<T>::getCommandParameters(size_t nx, size_t ny) const
+    CommandParametersPtr TileCopy<T>::getCommandParameters(size_t nx, size_t ny) const
     {
         using namespace rocRoller::KernelGraph::CoordinateGraph;
 
@@ -617,15 +625,22 @@ namespace rocRollerTest::Graphs
                                == m_thrM * m_thrN * workgroupSizeX * workgroupSizeY,
                     "MacroTile size mismatch");
 
+        params->setManualKernelDimension(2);
+        params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
+
+        return params;
+    }
+
+    template <typename T>
+    CommandLaunchParametersPtr TileCopy<T>::getCommandLaunchParameters(size_t nx, size_t ny) const
+    {
         auto NX = std::make_shared<Expression::Expression>(nx / m_thrM);
         auto NY = std::make_shared<Expression::Expression>(ny / m_thrN);
         auto NZ = std::make_shared<Expression::Expression>(1u);
 
-        params->setManualKernelDimension(2);
-        params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
-
-        return params;
+        auto launch = std::make_shared<CommandLaunchParameters>();
+        launch->setManualWorkitemCount({NX, NY, NZ});
+        return launch;
     }
 
     template <typename T>

@@ -493,7 +493,9 @@ namespace CopyGeneratorTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         const int size       = 4;
         auto      input_ptr  = make_shared_device<float>(size);

@@ -13,7 +13,7 @@ namespace rocRoller
         class UpdateParameters : public GraphTransform
         {
         public:
-            UpdateParameters(std::shared_ptr<CommandParameters> params)
+            UpdateParameters(CommandParametersPtr params)
                 : m_params(params)
             {
             }
@@ -25,7 +25,25 @@ namespace rocRoller
             }
 
         private:
-            std::shared_ptr<CommandParameters> m_params;
+            CommandParametersPtr m_params;
+        };
+
+        class UpdateWavefrontParameters : public GraphTransform
+        {
+        public:
+            UpdateWavefrontParameters(CommandParametersPtr params)
+                : m_params(params)
+            {
+            }
+
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "UpdateWavefrontParameters";
+            }
+
+        private:
+            CommandParametersPtr m_params;
         };
     }
 }

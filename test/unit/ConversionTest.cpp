@@ -192,6 +192,8 @@ namespace rocRollerTest
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
+        params->setManualWavefrontCount({2u, 2u});
+        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
         // TODO: the translate step should figure out that there is a
         // T_Mul and do the right thing for the T_Load_Tiled commands
@@ -206,13 +208,15 @@ namespace rocRollerTest
         params->setDimensionInfo(tagLoadB, macTileB);
         params->setDimensionInfo(tagLoadC, macTileC);
 
-        auto postParams = std::make_shared<CommandParameters>();
-        postParams->setManualWavefrontCount({2u, 2u});
+        auto launch = std::make_shared<CommandLaunchParameters>();
+        launch->setManualWorkitemCount({NX, NY, NZ});
 
-        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
+        CommandKernel commandKernel(command, "MatrixMultiplyABC");
+        commandKernel.setContext(m_context);
+        commandKernel.setCommandParameters(params);
+        commandKernel.generateKernel();
 
-        CommandKernel commandKernel(command, "MatrixMultiplyABC", params, postParams);
+        commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         std::vector<TypeD> gpu_D(M * N, 0.f);
@@ -317,6 +321,8 @@ namespace rocRollerTest
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
+        params->setManualWavefrontCount({2u, 2u});
+        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
         auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
@@ -326,13 +332,15 @@ namespace rocRollerTest
         params->setDimensionInfo(tagLoadA, macTileA);
         params->setDimensionInfo(tagLoadB, macTileB);
 
-        auto postParams = std::make_shared<CommandParameters>();
-        postParams->setManualWavefrontCount({2u, 2u});
+        auto launch = std::make_shared<CommandLaunchParameters>();
+        launch->setManualWorkitemCount({NX, NY, NZ});
 
-        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
+        CommandKernel commandKernel(command, "MatrixMultiply");
+        commandKernel.setContext(m_context);
+        commandKernel.setCommandParameters(params);
+        commandKernel.generateKernel();
 
-        CommandKernel commandKernel(command, "MatrixMultiply", params, postParams);
+        commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         std::vector<TypeD> gpu_D(M * N, 0.f);
@@ -420,14 +428,6 @@ namespace rocRollerTest
         auto macTileLDS = KernelGraph::CoordinateGraph::MacroTile(
             {cs.m, cs.n}, MemoryType::LDS, {cs.threadTileM, cs.threadTileN});
 
-        // each workgroup will get one tile; since workgroup_size matches m * n
-        auto NX = std::make_shared<Expression::Expression>(
-            cs.nx / cs.threadTileM); // number of work items x
-        auto NY = std::make_shared<Expression::Expression>(
-            cs.ny / cs.threadTileN); // number of work items y
-        auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
-        params->setManualWorkitemCount({NX, NY, NZ});
-
         unsigned int workgroup_size_x = cs.m / cs.threadTileM;
         unsigned int workgroup_size_y = cs.n / cs.threadTileN;
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
@@ -437,7 +437,22 @@ namespace rocRollerTest
         // TODO Fix MemoryType promotion (LDS)
         params->setDimensionInfo(tagC, macTileVGPR);
 
-        CommandKernel commandKernel(command, "convertAndAdd", params);
+        // each workgroup will get one tile; since workgroup_size matches m * n
+        auto NX = std::make_shared<Expression::Expression>(
+            cs.nx / cs.threadTileM); // number of work items x
+        auto NY = std::make_shared<Expression::Expression>(
+            cs.ny / cs.threadTileN); // number of work items y
+        auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
+
+        auto launch = std::make_shared<CommandLaunchParameters>();
+        launch->setManualWorkitemCount({NX, NY, NZ});
+
+        CommandKernel commandKernel(command, "convertAndAdd");
+        commandKernel.setContext(m_context);
+        commandKernel.setCommandParameters(params);
+        commandKernel.generateKernel();
+
+        commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         std::vector<DestType> gpuResult(a.size());
@@ -511,6 +526,7 @@ namespace rocRollerTest
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
+        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
         auto macTileVGPR = KernelGraph::CoordinateGraph::MacroTile(
             {cs.m, cs.n}, MemoryType::VGPR, {cs.threadTileM, cs.threadTileN});
@@ -521,10 +537,15 @@ namespace rocRollerTest
         // TODO Fix MemoryType promotion (LDS)
         params->setDimensionInfo(tagCvtA, macTileVGPR);
 
-        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
+        auto launch = std::make_shared<CommandLaunchParameters>();
+        launch->setManualWorkitemCount({NX, NY, NZ});
 
-        CommandKernel commandKernel(command, "DirectConvert", params);
+        CommandKernel commandKernel(command, "DirectConvert");
+        commandKernel.setContext(m_context);
+        commandKernel.setCommandParameters(params);
+        commandKernel.generateKernel();
+
+        commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         std::vector<DestType> gpuResult(srcData.size());

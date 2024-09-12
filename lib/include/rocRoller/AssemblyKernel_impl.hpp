@@ -221,15 +221,15 @@ namespace rocRoller
     {
         if(m_workgroupCount.at(index) == nullptr)
         {
-            AssertFatal(m_workitemCount[index] != nullptr, "Workitem Count does not exist");
-
-            Expression::ExpressionPtr exPtr
-                = m_workitemCount[index] / Expression::literal(m_workgroupSize[index]);
+            // TODO: Workgroup count should be computed at launch time:
+            // Expression::ExpressionPtr exPtr
+            //     = m_workitemCount[index] / Expression::literal(m_workgroupSize[index]);
+            auto expr = Expression::literal(0u);
 
             std::string argName = concatenate("LAUNCH_WORKGROUPCOUNT_", index);
-            auto        resType = Expression::resultType(exPtr);
+            auto        resType = Expression::resultType(expr);
             m_workgroupCount[index]
-                = addArgument({argName, resType.varType, DataDirection::ReadOnly, exPtr});
+                = addArgument({argName, resType.varType, DataDirection::ReadOnly, expr});
         }
         return m_workgroupCount[index];
     }

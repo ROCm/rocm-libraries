@@ -17,11 +17,14 @@ namespace rocRollerTest
 {
     namespace Graphs
     {
-        using ContextPtr        = rocRoller::ContextPtr;
-        using CommandPtr        = rocRoller::CommandPtr;
-        using CommandParameters = rocRoller::CommandParameters;
-        using KernelGraph       = rocRoller::KernelGraph::KernelGraph;
-        using KernelArguments   = rocRoller::KernelArguments;
+        using CommandLaunchParameters    = rocRoller::CommandLaunchParameters;
+        using CommandLaunchParametersPtr = rocRoller::CommandLaunchParametersPtr;
+        using CommandParameters          = rocRoller::CommandParameters;
+        using CommandParametersPtr       = rocRoller::CommandParametersPtr;
+        using CommandPtr                 = rocRoller::CommandPtr;
+        using ContextPtr                 = rocRoller::ContextPtr;
+        using KernelArguments            = rocRoller::KernelArguments;
+        using KernelGraph                = rocRoller::KernelGraph::KernelGraph;
 
         /**
          * @brief Graph for linear: alpha x + beta y.
@@ -136,7 +139,7 @@ namespace rocRollerTest
             void setMFMA(int m, int n, int k, int b);
             void setUseLDS(bool a, bool b, bool d);
 
-            std::shared_ptr<CommandParameters> getCommandParameters() const;
+            CommandParametersPtr getCommandParameters() const;
 
         private:
             void createCommand();
@@ -171,7 +174,8 @@ namespace rocRollerTest
             void setTileSize(int m, int n);
             void setSubTileSize(int m, int n);
 
-            std::shared_ptr<CommandParameters> getCommandParameters(size_t nx, size_t ny) const;
+            CommandParametersPtr       getCommandParameters(size_t nx, size_t ny) const;
+            CommandLaunchParametersPtr getCommandLaunchParameters(size_t nx, size_t ny) const;
 
             KernelArguments getRuntimeArguments(size_t nx, size_t ny, T* x, T* y, T* rv);
 
@@ -208,7 +212,8 @@ namespace rocRollerTest
             void setSubTileSize(int m, int n);
             void setLiteralStrides(std::vector<size_t> const& literalStrides);
 
-            std::shared_ptr<CommandParameters> getCommandParameters(size_t nx, size_t ny) const;
+            CommandParametersPtr       getCommandParameters(size_t nx, size_t ny) const;
+            CommandLaunchParametersPtr getCommandLaunchParameters(size_t nx, size_t ny) const;
 
             KernelArguments getRuntimeArguments(size_t nx, size_t ny, T* x, T* rv);
 

@@ -83,6 +83,7 @@ namespace rocRoller
 
                 iot::mapRequired(io, ".args", kern.arguments());
 
+                iot::mapRequired(io, ".workgroup_size", kern.workgroupSize());
                 // TODO: only do this for appropriate logging levels
                 auto graph = kern.kernel_graph();
                 if(graph)

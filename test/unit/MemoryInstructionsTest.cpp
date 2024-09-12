@@ -887,7 +887,9 @@ namespace MemoryInstructionsTest
         KernelArguments kargs;
         kargs.append<void*>("result", d_result.get());
         kargs.append<void*>("a", d_a.get());
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         commandKernel.launchKernel(kargs.runtimeArguments());
 
@@ -1022,7 +1024,9 @@ namespace MemoryInstructionsTest
 
             KernelArguments kargs;
             kargs.append<void*>("result", d_result.get());
-            CommandKernel commandKernel(m_context);
+            CommandKernel commandKernel;
+            commandKernel.setContext(m_context);
+            commandKernel.generateKernel();
 
             commandKernel.launchKernel(kargs.runtimeArguments());
 

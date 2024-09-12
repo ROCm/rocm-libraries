@@ -295,7 +295,7 @@ namespace rocRoller
 
         struct UpdateParametersVisitor
         {
-            UpdateParametersVisitor(std::shared_ptr<CommandParameters> params)
+            UpdateParametersVisitor(CommandParametersPtr params)
             {
                 m_newDimensions = params->getDimensionInfo();
             }
@@ -327,8 +327,10 @@ namespace rocRoller
 
         KernelGraph UpdateParameters::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::updateParameters");
-            rocRoller::Log::getLogger()->debug("KernelGraph::updateParameters()");
+            TIMER(t, "KernelGraph::UpdateParameters");
+
+            if(!m_params)
+                return original;
 
             auto updateVisitor = UpdateParametersVisitor(m_params);
             auto kgraph        = rewriteDimensions(original, updateVisitor);
@@ -338,6 +340,17 @@ namespace rocRoller
             auto infoVisitor = PropagateTileInfoVisitor(kgraph);
             rewriteDimensions(kgraph, infoVisitor);
 
+            return kgraph;
+        }
+
+        KernelGraph UpdateWavefrontParameters::apply(KernelGraph const& original)
+        {
+            TIMER(t, "KernelGraph::UpdateWavefrontParameters");
+
+            if(!m_params)
+                return original;
+
+            auto kgraph = original;
             auto counts = m_params->getManualWavefrontCounts();
             if(counts)
             {

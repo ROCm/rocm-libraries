@@ -37,6 +37,11 @@ namespace rocRoller
             BenchmarkResults                          benchmark(RunParameters const& runParams,
                                                                 CommandArguments     runtimeArgs);
 
+            virtual void setContext(ContextPtr context)
+            {
+                m_kernel->setContext(context);
+            }
+
         protected:
             rocRoller::CommandPtr                     m_command;
             std::shared_ptr<rocRoller::CommandKernel> m_kernel;

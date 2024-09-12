@@ -251,11 +251,12 @@ namespace rocRoller
                                               int                              macTileTag,
                                               VariableType                     varType,
                                               const LoopInfo&                  loopInfo,
+                                              CommandParametersPtr             params,
                                               ContextPtr                       context)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
-            auto numWorkgroupsX = literal(context->kernelOptions().numScratchTiles);
+            auto numWorkgroupsX = literal(params->numScratchTiles);
             auto numWorkgroupsY = literal(1u);
 
             auto sizeX = simplify(numWorkgroupsX * literal(static_cast<uint>(macTile.sizes[0])));
@@ -271,7 +272,7 @@ namespace rocRoller
 
             // Store
             auto jammedStoreScratchTileTag
-                = createInternalTile(graph, varType, macTileTag, jammedSizes, context);
+                = createInternalTile(graph, varType, macTileTag, jammedSizes, params, context);
             graph.coordinates.addElement(View(), {jammedStoreScratchTileTag}, {macTileTag});
 
             auto jammedStoreScratchTile
@@ -307,13 +308,14 @@ namespace rocRoller
 
             // Load
             auto jammedLoadScratchTileTag
-                = createInternalTile(graph, varType, macTileTag, jammedSizes, context);
+                = createInternalTile(graph, varType, macTileTag, jammedSizes, params, context);
             auto jammedLoadScratchTile
                 = *graph.coordinates.get<MacroTile>(jammedLoadScratchTileTag);
             jammedLoadScratchTile.layoutType = LayoutType::SCRATCH;
             graph.coordinates.setElement(jammedLoadScratchTileTag, jammedLoadScratchTile);
 
-            auto loadScratchTileTag    = createInternalTile(graph, varType, macTileTag, context);
+            auto loadScratchTileTag
+                = createInternalTile(graph, varType, macTileTag, params, context);
             auto loadScratchTile       = *graph.coordinates.get<MacroTile>(loadScratchTileTag);
             loadScratchTile.layoutType = LayoutType::SCRATCH;
             graph.coordinates.setElement(loadScratchTileTag, loadScratchTile);
@@ -507,6 +509,7 @@ namespace rocRoller
                              DataType                               dataType,
                              std::vector<int> const&                epilogueOperations,
                              LoopInfo const&                        loopInfo,
+                             CommandParametersPtr                   params,
                              ContextPtr                             context)
         {
             auto DF = [](int tag) {
@@ -545,7 +548,7 @@ namespace rocRoller
             auto flagRegister = graph.coordinates.addElement(VGPR());
             auto loadFlagTag  = graph.control.addElement(LoadSGPR(DataType::UInt32, bufOpts));
 
-            auto numScratch     = Expression::literal(context->kernelOptions().numScratchTiles);
+            auto numScratch     = Expression::literal(params->numScratchTiles);
             auto boundsCheckTag = graph.control.addElement(
                 ConditionalOp{(DF(workgroup) + one < numScratch), "Bounds Check"});
 
@@ -719,12 +722,14 @@ namespace rocRoller
                                std::string const&      accumulatorLoop,
                                bool                    twoTile,
                                ExpressionPtr           numWGs,
+                               CommandParametersPtr    params,
                                ContextPtr              context)
             : m_dimensionIndices(dims)
             , m_topLoop(topLoop)
             , m_accumulatorLoop(accumulatorLoop)
             , m_twoTile(twoTile)
             , m_numWGs(numWGs)
+            , m_params(params)
             , m_context(context)
         {
         }
@@ -886,6 +891,7 @@ namespace rocRoller
                     LoopInfo const&        loopInfo,
                     AccumulatorInfo const& accumInfo,
                     ArgumentInfo const&    argInfo,
+                    CommandParametersPtr   params,
                     ContextPtr             context)
         {
             //
@@ -1081,7 +1087,7 @@ namespace rocRoller
             {
                 // Create scratch space for flags
                 auto flagsScratch = newScratchCoordinate(
-                    literal(context->kernelOptions().numScratchTiles), DataType::UInt32, context);
+                    literal(params->numScratchTiles), DataType::UInt32, context);
                 auto flagsScratchTag = graph.coordinates.addElement(flagsScratch);
 
                 // Create scratch space for partially accumulated tiles
@@ -1092,6 +1098,7 @@ namespace rocRoller
                                                             accumInfo.accumulatorTile,
                                                             accumInfo.accumulatorVarType,
                                                             loopInfo,
+                                                            params,
                                                             context);
 
                 // Add send
@@ -1120,6 +1127,7 @@ namespace rocRoller
                                           accumInfo.accumulatorVarType.dataType,
                                           epilogueOperations,
                                           loopInfo,
+                                          params,
                                           context);
 
                 postAccumulationCond = graph.control.addElement(ConditionalOp{
@@ -1448,7 +1456,7 @@ namespace rocRoller
             auto accumInfo = stage(graph, loopInfo);
             auto argInfo
                 = setupArguments(m_numWGs, m_twoTile, graph, loopInfo, accumInfo, m_context);
-            commit(graph, m_twoTile, loopInfo, accumInfo, argInfo, m_context);
+            commit(graph, m_twoTile, loopInfo, accumInfo, argInfo, m_params, m_context);
 
             return graph;
         }

@@ -201,7 +201,9 @@ namespace FastMultiplicationTest
 
         auto d_result = make_shared_device<int>();
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         auto values = TestValues::int32Values;
 
@@ -293,7 +295,9 @@ namespace FastMultiplicationTest
 
         auto d_result = make_shared_device<int64_t>();
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         auto values = TestValues::int64Values;
 

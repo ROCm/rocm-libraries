@@ -121,7 +121,9 @@ namespace LowerExponentialTest
 
             auto d_result = make_shared_device<float>();
 
-            CommandKernel commandKernel(m_context);
+            CommandKernel commandKernel;
+            commandKernel.setContext(m_context);
+            commandKernel.generateKernel();
 
             CommandArguments commandArgs = command->createArguments();
 

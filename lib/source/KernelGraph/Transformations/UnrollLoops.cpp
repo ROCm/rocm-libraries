@@ -1,4 +1,5 @@
 
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -43,8 +44,7 @@ namespace rocRoller
          * A value of 1 means do not unroll it.
          * Use getForLoopName to determine which forLoop we are attempting to unroll
          */
-        unsigned int
-            getUnrollAmount(KernelGraph& graph, int loopTag, KernelOptions const& kernelOptions)
+        unsigned int getUnrollAmount(KernelGraph& graph, int loopTag, auto const& params)
         {
             auto name = getForLoopName(graph, loopTag);
 
@@ -57,7 +57,7 @@ namespace rocRoller
             auto dimTag        = graph.mapper.get(loopTag, NaryArgument::DEST);
             auto forLoopLength = getSize(std::get<Dimension>(graph.coordinates.getElement(dimTag)));
 
-            auto unrollK = kernelOptions.unrollK;
+            auto unrollK = params->unrollK;
             // Find the number of forLoops following this for loop.
             if(name == rocRoller::KLOOP && unrollK > 0)
                 return unrollK;
@@ -243,8 +243,9 @@ namespace rocRoller
 
         struct UnrollLoopsVisitor
         {
-            UnrollLoopsVisitor(ContextPtr context)
-                : m_context(context)
+            UnrollLoopsVisitor(CommandParametersPtr params, ContextPtr context)
+                : m_params(params)
+                , m_context(context)
             {
             }
 
@@ -265,7 +266,7 @@ namespace rocRoller
                     }
                 }
 
-                auto unrollAmount = getUnrollAmount(graph, tag, m_context->kernelOptions());
+                auto unrollAmount = getUnrollAmount(graph, tag, m_params);
                 if(unrollAmount == 1)
                     return;
 
@@ -510,6 +511,7 @@ namespace rocRoller
             std::map<std::pair<int, int>, std::shared_ptr<GraphReindexer>> m_unrollReindexers;
             std::unordered_set<int>                                        m_unrolledLoopOps;
             std::shared_ptr<Context>                                       m_context;
+            CommandParametersPtr                                           m_params;
         };
 
         KernelGraph UnrollLoops::apply(KernelGraph const& original)
@@ -517,7 +519,7 @@ namespace rocRoller
             TIMER(t, "KernelGraph::unrollLoops");
             auto newGraph = original;
 
-            auto visitor = UnrollLoopsVisitor(m_context);
+            auto visitor = UnrollLoopsVisitor(m_params, m_context);
             visitor.commit(newGraph);
             return newGraph;
         }
