@@ -26,7 +26,7 @@ namespace GEMMDriverTest
 {
     struct GEMMTestGPU : public CurrentGPUContextFixture
     {
-        template <typename T, typename TD = T>
+        template <typename T, typename TC = T, typename TD = TC>
         void basicGEMM(const GEMMProblem& gemm,
                        bool               debuggable  = false,
                        bool               setIdentity = false,
@@ -41,6 +41,7 @@ namespace GEMMDriverTest
             }
 
             auto dataTypeAB = TypeInfo<T>::Var.dataType;
+            auto dataTypeC  = TypeInfo<TC>::Var.dataType;
             auto dataTypeD  = TypeInfo<TD>::Var.dataType;
 
             // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
@@ -113,7 +114,7 @@ namespace GEMMDriverTest
             // Host data
             std::vector<T>  hostA;
             std::vector<T>  hostB;
-            std::vector<TD> hostC;
+            std::vector<TC> hostC;
 
             GenerateRandomInput(31415u, hostA, M * K, hostB, K * N, hostC, M * N);
 
@@ -127,7 +128,7 @@ namespace GEMMDriverTest
 
             std::shared_ptr<T>  deviceA = make_shared_device(hostA);
             std::shared_ptr<T>  deviceB = make_shared_device(hostB);
-            std::shared_ptr<TD> deviceC = (notSetC) ? nullptr : make_shared_device(hostC);
+            std::shared_ptr<TC> deviceC = (notSetC) ? nullptr : make_shared_device(hostC);
             std::shared_ptr<TD> deviceD = make_shared_device<TD>(M * N, TD{});
 
             auto command  = std::make_shared<Command>();
@@ -149,7 +150,7 @@ namespace GEMMDriverTest
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             auto tagTensorC = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataTypeD, oneStridesN)); // C
+                rocRoller::Operations::Tensor(2, dataTypeC, oneStridesN)); // C
             auto tagLoadC = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
             auto tagScalarAlpha
@@ -188,7 +189,18 @@ namespace GEMMDriverTest
 
             auto tagTensorD = command->addOperation(
                 rocRoller::Operations::Tensor(2, dataTypeD, oneStridesN)); // D
-            command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
+            if constexpr(std::is_same_v<TC, TD>)
+            {
+                command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
+            }
+            else
+            {
+                // If Matrix C and D are of different types, an explicit type conversion is required
+                auto cvtOp  = rocRoller::Operations::T_Execute(command->getNextTag());
+                auto tagCvt = cvtOp.addXOp(rocRoller::Operations::E_Cvt(tagStoreD, dataTypeD));
+                command->addOperation(std::move(cvtOp)); // Convert( alpha * (A * B) + beta * C )
+                command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
+            }
 
             auto tagScratch = command->allocateTag();
             command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
@@ -314,17 +326,37 @@ namespace GEMMDriverTest
 
             // Host result
             std::vector<TD> h_result(M * N, TD{});
-            rocRoller::CPUMM(h_result,
-                             hostC,
-                             hostA,
-                             hostB,
-                             M,
-                             N,
-                             K,
-                             alpha,
-                             beta,
-                             gemm.transA == "T",
-                             gemm.transB == "T");
+            if constexpr(std::is_same_v<TC, TD>)
+            {
+                rocRoller::CPUMM(h_result,
+                                 hostC,
+                                 hostA,
+                                 hostB,
+                                 M,
+                                 N,
+                                 K,
+                                 alpha,
+                                 beta,
+                                 gemm.transA == "T",
+                                 gemm.transB == "T");
+            }
+            else
+            {
+                std::vector<TC> h_C(M * N, TC{});
+                rocRoller::CPUMM(h_C,
+                                 hostC,
+                                 hostA,
+                                 hostB,
+                                 M,
+                                 N,
+                                 K,
+                                 alpha,
+                                 beta,
+                                 gemm.transA == "T",
+                                 gemm.transB == "T");
+                for(size_t i = 0; i < h_C.size(); i++)
+                    h_result[i] = TD(h_C[i]);
+            }
 
             // Device result
             std::vector<TD> d_result(M * N);
@@ -909,6 +941,20 @@ namespace GEMMDriverTest
     {
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<BF8, float>(gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMConversionFP8_NT)
+    {
+        auto gemm = setup_GEMMF8_NT();
+        // D (FP8) = Convert( alpha * A (FP8) * B (FP8) + beta * C (F32) )
+        basicGEMM<FP8, float, FP8>(gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMConversionBF8_NT)
+    {
+        auto gemm = setup_GEMMF8_NT();
+        // D (BF8) = Convert( alpha * A (BF8) * B (BF8) + beta * C (F32) )
+        basicGEMM<BF8, float, BF8>(gemm);
     }
 
     GEMMProblem setup_GEMMF8_TN()

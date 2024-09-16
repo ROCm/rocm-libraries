@@ -12,6 +12,8 @@ namespace rocRoller
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Halfx2);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::BFloat16);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::BFloat16x2);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP8);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::BF8);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP8x4);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::BF8x4);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int32);
@@ -35,6 +37,8 @@ namespace rocRoller
     DefineSpecializedGetGeneratorConvert(Halfx2);
     DefineSpecializedGetGeneratorConvert(BFloat16);
     DefineSpecializedGetGeneratorConvert(BFloat16x2);
+    DefineSpecializedGetGeneratorConvert(FP8);
+    DefineSpecializedGetGeneratorConvert(BF8);
     DefineSpecializedGetGeneratorConvert(FP8x4);
     DefineSpecializedGetGeneratorConvert(BF8x4);
     DefineSpecializedGetGeneratorConvert(Int32);
@@ -266,6 +270,70 @@ namespace rocRoller
         break;
         default:
             Throw<FatalError>("Unsupported datatype for convert to BF8x4: ", ShowValue(dataType));
+        }
+    }
+
+    template <>
+    Generator<Instruction> ConvertGenerator<DataType::FP8>::generate(Register::ValuePtr dest,
+                                                                     Register::ValuePtr arg)
+    {
+        AssertFatal(arg != nullptr);
+
+        auto dataType = getArithDataType(arg);
+
+        switch(dataType)
+        {
+        case DataType::Float:
+        {
+            // F32 to F8 only supports packed conversion currently. But for simplicity,
+            // here we convert only one value at a time. If we want to convert
+            // two distinct F32 at a time, the caller of this function must ensure
+            // two values (in arg) are passed in.
+            // TODO: this (might) wastes registers (four FP8 can be packed in a
+            // register at most)
+            co_yield m_context->copier()->copy(dest->subset({0}),
+                                               Register::Value::Literal(0),
+                                               "Zero out register for converting F32 to FP8");
+            // Note: the second input is set to 0 to ensure the destination register only
+            //       contains a FP8 value (i.e., the other 24 bits are 0)
+            co_yield_(Instruction(
+                "v_cvt_pk_fp8_f32", {dest}, {arg, Register::Value::Literal(0)}, {}, ""));
+        }
+        break;
+        default:
+            Throw<FatalError>("Unsupported datatype for convert to FP8: ", ShowValue(dataType));
+        }
+    }
+
+    template <>
+    Generator<Instruction> ConvertGenerator<DataType::BF8>::generate(Register::ValuePtr dest,
+                                                                     Register::ValuePtr arg)
+    {
+        AssertFatal(arg != nullptr);
+
+        auto dataType = getArithDataType(arg);
+
+        switch(dataType)
+        {
+        case DataType::Float:
+        {
+            // F32 to F8 only supports packed conversion currently. But for simplicity,
+            // here we convert only one value at a time. If we want to convert
+            // two distinct F32 at a time, the caller of this function must ensure
+            // two values (in arg) are passed in.
+            // TODO: this (might) wastes registers (four BF8 can be packed in a
+            // register at most)
+            co_yield m_context->copier()->copy(dest->subset({0}),
+                                               Register::Value::Literal(0),
+                                               "Zero out register for converting F32 to BF8");
+            // Note: the second input is set to 0 to ensure the destination register only
+            //       contains a BF8 value (i.e., the other 24 bits are 0)
+            co_yield_(Instruction(
+                "v_cvt_pk_bf8_f32", {dest}, {arg, Register::Value::Literal(0)}, {}, ""));
+        }
+        break;
+        default:
+            Throw<FatalError>("Unsupported datatype for convert to bf8: ", ShowValue(dataType));
         }
     }
 

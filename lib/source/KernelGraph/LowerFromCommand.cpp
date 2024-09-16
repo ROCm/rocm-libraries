@@ -472,6 +472,12 @@ namespace rocRoller
                                 case DataType::Half:
                                     return std::make_shared<Expression::Expression>(
                                         Expression::Convert<DataType::Half>{dflow[0]});
+                                case DataType::FP8:
+                                    return std::make_shared<Expression::Expression>(
+                                        Expression::Convert<DataType::FP8>{dflow[0]});
+                                case DataType::BF8:
+                                    return std::make_shared<Expression::Expression>(
+                                        Expression::Convert<DataType::BF8>{dflow[0]});
                                 default:
                                     Throw<FatalError>("Not implemented yet.");
                                 }

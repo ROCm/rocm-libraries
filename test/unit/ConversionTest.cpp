@@ -8,7 +8,9 @@
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
+#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
+#include <common/GEMMProblem.hpp>
 
 using namespace rocRoller;
 
@@ -61,7 +63,7 @@ namespace rocRollerTest
         /*
          *  Testing: D = Convert(A * B + C)
         */
-        template <typename TypeABC, typename TypeD>
+        template <typename TypeAB, typename TypeC, typename TypeD>
         void matrixMultiplyABC(
             int wave_m, int wave_n, int wave_k, int wave_b, double acceptableError);
 
@@ -89,7 +91,7 @@ namespace rocRollerTest
                        bool const                loadLDS_A);
     };
 
-    template <typename TypeABC, typename TypeD>
+    template <typename TypeAB, typename TypeC, typename TypeD>
     void ConversionTest::matrixMultiplyABC(
         int wave_m, int wave_n, int wave_k, int wave_b, double acceptableError)
     {
@@ -104,9 +106,9 @@ namespace rocRollerTest
         int K = 256;
 
         // output macro tile size
-        int mac_m = 64;
-        int mac_n = 64;
-        int mac_k = 64;
+        int mac_m = 2 * wave_m;
+        int mac_n = 2 * wave_n;
+        int mac_k = 2 * wave_k;
 
         AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
         AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
@@ -123,26 +125,27 @@ namespace rocRollerTest
 
         RandomGenerator random(61u);
 
-        auto A = random.vector<TypeABC>(M * K, -1.f, 1.f);
-        auto B = random.vector<TypeABC>(K * N, -1.f, 1.f);
-        auto C = random.vector<TypeABC>(M * N, -1.f, 1.f);
+        auto A = random.vector<TypeAB>(M * K, -1.f, 1.f);
+        auto B = random.vector<TypeAB>(K * N, -1.f, 1.f);
+        auto C = random.vector<TypeC>(M * N, -1.f, 1.f);
 
         auto d_A = make_shared_device(A);
         auto d_B = make_shared_device(B);
         auto d_C = make_shared_device(C);
         auto d_D = make_shared_device<TypeD>(M * N);
 
-        auto       command     = std::make_shared<Command>();
-        auto const dataTypeABC = TypeInfo<TypeABC>::Var.dataType;
-        auto const dataTypeD   = TypeInfo<TypeD>::Var.dataType;
+        auto       command    = std::make_shared<Command>();
+        auto const dataTypeAB = TypeInfo<TypeAB>::Var.dataType;
+        auto const dataTypeC  = TypeInfo<TypeC>::Var.dataType;
+        auto const dataTypeD  = TypeInfo<TypeD>::Var.dataType;
 
-        auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeABC)); // A
+        auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeAB)); // A
         auto tagLoadA   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-        auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeABC)); // B
+        auto tagTensorB = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeAB)); // B
         auto tagLoadB   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
-        auto tagTensorC = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeABC)); // C
+        auto tagTensorC = command->addOperation(rocRoller::Operations::Tensor(2, dataTypeC)); // C
         auto tagLoadC   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
         auto tagAB
@@ -162,33 +165,15 @@ namespace rocRollerTest
 
         CommandArguments commandArgs = command->createArguments();
 
-        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_A.get());
-        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
-        // tiled?
-        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_B.get());
-        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
+        TensorDescriptor descA(dataTypeAB, {size_t(M), size_t(K)}, "N");
+        TensorDescriptor descB(dataTypeAB, {size_t(K), size_t(N)}, "N");
+        TensorDescriptor descC(dataTypeC, {size_t(M), size_t(N)}, "N");
+        TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
-        commandArgs.setArgument(tagTensorC, ArgumentType::Value, d_C.get());
-        commandArgs.setArgument(tagTensorC, ArgumentType::Limit, (size_t)M * N);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)M);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)N);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 0, (size_t)1);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 1, (size_t)M);
-
-        commandArgs.setArgument(tagTensorD, ArgumentType::Value, d_D.get());
-        commandArgs.setArgument(tagTensorD, ArgumentType::Limit, (size_t)M * N);
-        commandArgs.setArgument(tagTensorD, ArgumentType::Size, 0, (size_t)M);
-        commandArgs.setArgument(tagTensorD, ArgumentType::Size, 1, (size_t)N);
-        commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 0, (size_t)1);
-        commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 1, (size_t)M);
+        setCommandTensorArg(commandArgs, tagTensorA, descA, d_A.get());
+        setCommandTensorArg(commandArgs, tagTensorB, descB, d_B.get());
+        setCommandTensorArg(commandArgs, tagTensorC, descC, d_C.get());
+        setCommandTensorArg(commandArgs, tagTensorD, descD, d_D.get());
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -219,11 +204,11 @@ namespace rocRollerTest
         commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
-        std::vector<TypeD> gpu_D(M * N, 0.f);
+        std::vector<TypeD> gpu_D(M * N);
         ASSERT_THAT(hipMemcpy(gpu_D.data(), d_D.get(), M * N * sizeof(TypeD), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        std::vector<TypeABC> tmp_D(M * N, 0.f);
+        std::vector<float> tmp_D(M * N, 0.f);
         CPUMM(tmp_D, C, A, B, M, N, K, 1.0, 1.0, false, false);
 
         std::vector<TypeD> cpu_D;
@@ -231,7 +216,7 @@ namespace rocRollerTest
         for(size_t i = 0; i < M * N; i++)
             cpu_D.emplace_back(TypeD(tmp_D[i]));
 
-        auto tol = gemmAcceptableError<TypeABC, TypeABC, TypeD>(
+        auto tol = gemmAcceptableError<TypeAB, TypeAB, TypeD>(
             M, N, K, m_context->targetArchitecture().target());
         auto res = compare(gpu_D, cpu_D, tol);
 
@@ -566,6 +551,38 @@ namespace rocRollerTest
         Log::info("C = Convert(A) RNorm is {}", res.relativeNormL2);
     }
 
+    TEST_F(ConversionTest, Float2FP8_VGPR)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+        ConversionSettings cs(256, 512, 16, 8, 4, 4);
+        auto               srcData = cs.generateData<float>();
+        convertTo<rocRoller::FP8>(srcData, cs, false /* load A in LDS */);
+    }
+
+    TEST_F(ConversionTest, Float2FP8_LDS)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+        ConversionSettings cs(256, 512, 16, 8, 4, 4);
+        auto               srcData = cs.generateData<float>();
+        convertTo<rocRoller::FP8>(srcData, cs, true /* load A in LDS */);
+    }
+
+    TEST_F(ConversionTest, Float2BF8_VGPR)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+        ConversionSettings cs(256, 512, 16, 8, 4, 4);
+        auto               srcData = cs.generateData<float>();
+        convertTo<rocRoller::BF8>(srcData, cs, false /* load A in LDS */);
+    }
+
+    TEST_F(ConversionTest, Float2BF8_LDS)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+        ConversionSettings cs(256, 512, 16, 8, 4, 4);
+        auto               srcData = cs.generateData<float>();
+        convertTo<rocRoller::BF8>(srcData, cs, true /* load A in LDS */);
+    }
+
     TEST_F(ConversionTest, Float2Half_VGPR)
     {
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
@@ -599,6 +616,7 @@ namespace rocRollerTest
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               a = cs.generateData<float>(12345u);
         auto               b = cs.generateData<float>(56789u);
+        // C (Half) = Convert( A(Float) ) + Convert( B(Float) )
         convertAdd<rocRoller::Half>(a, b, cs, true /* load A in LDS */);
     }
 
@@ -607,6 +625,7 @@ namespace rocRollerTest
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               a = cs.generateData<float>(12345u);
         auto               b = cs.generateData<float>(56789u);
+        // C (Half) = Convert( A(Float) ) + Convert( B(Float) )
         convertAdd<rocRoller::Half>(a, b, cs, false /* load A in LDS */);
     }
 
@@ -615,6 +634,7 @@ namespace rocRollerTest
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               a = cs.generateData<Half>(12345u);
         auto               b = cs.generateData<Half>(56789u);
+        // C (Float) = Convert( A(Half) ) + Convert( B(Half) )
         convertAdd<float>(a, b, cs, true /* load A in LDS */);
     }
 
@@ -623,22 +643,33 @@ namespace rocRollerTest
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               a = cs.generateData<Half>(12345u);
         auto               b = cs.generateData<Half>(56789u);
+        // C (Float) = Convert( A(Half) ) + Convert( B(Half) )
         convertAdd<float>(a, b, cs, false /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, MatrixMultiplyABC)
+    TEST_F(ConversionTest, MatrixMultiplyABC_F32_Half)
     {
-        // Matrix A, B and C are float and matrix D is Half.
-        // Result of (A * B) + C is float (mfma) and then we
-        // convert it to Half
-        matrixMultiplyABC<float, Half>(32, 32, 2, 1, 2.e-6);
+        // D (Half) = Convert( A (F32) * B (F32) + C (F32) )
+        matrixMultiplyABC<float, float, Half>(32, 32, 2, 1, 2.e-6);
+    }
+
+    TEST_F(ConversionTest, MatrixMultiplyABC_F32_FP8)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+        // D (FP8) = Convert( A (FP8) * B (FP8) + C (F32) )
+        matrixMultiplyABC<FP8, float, FP8>(16, 16, 32, 1, 2.e-6);
+    }
+
+    TEST_F(ConversionTest, MatrixMultiplyABC_F32_BF8)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+        // D (BF8) = Convert( A (BF8) * B (BF8) + C (F32) )
+        matrixMultiplyABC<BF8, float, BF8>(16, 16, 32, 1, 2.e-6);
     }
 
     TEST_F(ConversionTest, MatrixMultiply)
     {
-        // Matrix A and B are float and matrix D is Half.
-        // Result of (A * B) is float (mfma) and then we
-        // convert it to Half
+        // D (Half) = Convert( A (F32) * B (F32) )
         matrixMultiply<float, Half>(32, 32, 2, 1, 2.e-6);
     }
 

@@ -108,6 +108,8 @@ namespace rocRoller
             Convert<DataType::Halfx2>,
             Convert<DataType::BFloat16>,
             Convert<DataType::BFloat16x2>,
+            Convert<DataType::FP8>,
+            Convert<DataType::BF8>,
             Convert<DataType::FP8x4>,
             Convert<DataType::BF8x4>,
             Convert<DataType::Float>,
