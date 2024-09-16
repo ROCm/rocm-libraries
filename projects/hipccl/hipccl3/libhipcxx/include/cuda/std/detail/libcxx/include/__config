@@ -1500,10 +1500,8 @@ To override this error and proceed with the build, please set the compile-time f
 #  define _LIBCUDACXX_HIP_RDTSC_NANOSECONDS_PER_CYCLE 40  // 25 MHz for s_memrealtime -> 1*1e9/25*1e6 ns/cycle = 40 ns/cycle (gfx90a and gfx908 only!)
 #endif
 
-#  if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#    define _LIBCUDACXX_CPO_ACCESSIBILITY __device__ _LIBCUDACXX_CONSTEXPR_GLOBAL
-#  else
-#    define _LIBCUDACXX_CPO_ACCESSIBILITY _LIBCUDACXX_INLINE_VAR constexpr
+#  if !defined(__cpp_fold_expressions) || __cpp_fold_expressions < 201603L
+#    define _LIBCUDACXX_HAS_NO_FOLD_EXPRESSIONS
 #  endif
 
 #endif // __cplusplus
