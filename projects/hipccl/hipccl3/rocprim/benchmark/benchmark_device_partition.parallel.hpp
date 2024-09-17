@@ -135,21 +135,10 @@ struct device_partition_flag_benchmark : public config_autotune_interface
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
-        std::vector<DataType> input;
-        if(std::is_floating_point<DataType>::value)
-        {
-            input = get_random_data<DataType>(size,
-                                              static_cast<DataType>(-1000),
-                                              static_cast<DataType>(1000),
-                                              seed.get_0());
-        }
-        else
-        {
-            input = get_random_data<DataType>(size,
-                                              std::numeric_limits<DataType>::min(),
-                                              std::numeric_limits<DataType>::max(),
-                                              seed.get_0());
-        }
+        std::vector<DataType> input = get_random_data<DataType>(size,
+                                                                generate_limits<DataType>::min(),
+                                                                generate_limits<DataType>::max(),
+                                                                seed.get_0());
 
         std::vector<FlagType> flags_0;
         std::vector<FlagType> flags_1;
@@ -309,7 +298,7 @@ struct device_partition_predicate_benchmark : public config_autotune_interface
         {
             const auto dispatch_predicate = [&](float probability)
             {
-                auto predicate = [probability] __device__(const DataType& value) -> bool
+                auto predicate = [probability](const DataType& value) -> bool
                 { return value < static_cast<DataType>(127 * probability); };
                 HIP_CHECK(rocprim::partition<Config>(d_temp_storage,
                                                      temp_storage_size_bytes,
@@ -401,21 +390,10 @@ struct device_partition_two_way_flag_benchmark : public config_autotune_interfac
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
-        std::vector<DataType> input;
-        if(std::is_floating_point<DataType>::value)
-        {
-            input = get_random_data<DataType>(size,
-                                              static_cast<DataType>(-1000),
-                                              static_cast<DataType>(1000),
-                                              seed.get_0());
-        }
-        else
-        {
-            input = get_random_data<DataType>(size,
-                                              std::numeric_limits<DataType>::min(),
-                                              std::numeric_limits<DataType>::max(),
-                                              seed.get_0());
-        }
+        std::vector<DataType> input = get_random_data<DataType>(size,
+                                                                generate_limits<DataType>::min(),
+                                                                generate_limits<DataType>::max(),
+                                                                seed.get_0());
 
         std::vector<FlagType> flags_0;
         std::vector<FlagType> flags_1;
@@ -583,7 +561,7 @@ struct device_partition_two_way_predicate_benchmark : public config_autotune_int
         {
             const auto dispatch_predicate = [&](float probability)
             {
-                auto predicate = [probability] __device__(const DataType& value) -> bool
+                auto predicate = [probability](const DataType& value) -> bool
                 { return value < static_cast<DataType>(127 * probability); };
                 HIP_CHECK(rocprim::partition_two_way<Config>(d_temp_storage,
                                                              temp_storage_size_bytes,
@@ -701,10 +679,10 @@ struct device_partition_three_way_benchmark : public config_autotune_interface
             const auto dispatch_predicate = [&](std::pair<float, float> probability)
             {
                 const float probability_one = probability.first;
-                auto        predicate_one   = [probability_one] __device__(const DataType& value)
+                auto        predicate_one   = [probability_one](const DataType& value)
                 { return value < DataType(127 * probability_one); };
                 const float probability_two = probability.second;
-                auto        predicate_two   = [probability_two] __device__(const DataType& value)
+                auto        predicate_two   = [probability_two](const DataType& value)
                 { return value < DataType(127 * probability_two); };
 
                 HIP_CHECK(rocprim::partition_three_way<Config>(d_temp_storage,

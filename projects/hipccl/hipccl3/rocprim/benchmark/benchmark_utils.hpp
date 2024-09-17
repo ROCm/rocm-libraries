@@ -329,6 +329,50 @@ struct custom_type_decomposer
     }
 };
 
+template<class T, class enable = void>
+struct generate_limits;
+
+template<class T>
+struct generate_limits<T, std::enable_if_t<rocprim::is_integral<T>::value>>
+{
+    static inline T min()
+    {
+        return std::numeric_limits<T>::min();
+    }
+    static inline T max()
+    {
+        return std::numeric_limits<T>::max();
+    }
+};
+
+template<class T>
+struct generate_limits<T, std::enable_if_t<is_custom_type<T>::value>>
+{
+    using F = typename T::first_type;
+    using S = typename T::second_type;
+    static inline T min()
+    {
+        return T(generate_limits<F>::min(), generate_limits<S>::min());
+    }
+    static inline T max()
+    {
+        return T(generate_limits<F>::max(), generate_limits<S>::max());
+    }
+};
+
+template<class T>
+struct generate_limits<T, std::enable_if_t<rocprim::is_floating_point<T>::value>>
+{
+    static inline T min()
+    {
+        return T(-1000);
+    }
+    static inline T max()
+    {
+        return T(1000);
+    }
+};
+
 template<class OutputIterator, class Generator>
 inline auto generate_random_data_n(OutputIterator             it,
                                    size_t                     size,

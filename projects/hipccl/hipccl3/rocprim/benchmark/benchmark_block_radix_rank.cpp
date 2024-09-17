@@ -103,18 +103,10 @@ void run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, 
     const unsigned int     grid_size       = ((N + items_per_block - 1) / items_per_block);
     const unsigned int     size            = items_per_block * grid_size;
 
-    std::vector<T> input;
-    if ROCPRIM_IF_CONSTEXPR(std::is_floating_point<T>::value)
-    {
-        input = get_random_data<T>(size, static_cast<T>(-1000), static_cast<T>(1000), seed.get_0());
-    }
-    else
-    {
-        input = get_random_data<T>(size,
-                                   std::numeric_limits<T>::min(),
-                                   std::numeric_limits<T>::max(),
-                                   seed.get_0());
-    }
+    std::vector<T> input = get_random_data<T>(size,
+                                              generate_limits<T>::min(),
+                                              generate_limits<T>::max(),
+                                              seed.get_0());
 
     T*            d_input;
     unsigned int* d_output;

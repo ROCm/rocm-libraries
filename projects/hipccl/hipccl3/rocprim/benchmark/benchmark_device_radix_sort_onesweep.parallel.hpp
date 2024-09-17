@@ -88,28 +88,6 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
     static constexpr unsigned int batch_size  = 10;
     static constexpr unsigned int warmup_size = 5;
 
-    static std::vector<Key> generate_keys(size_t size, unsigned int seed)
-    {
-        using key_type = Key;
-
-        if(std::is_floating_point<key_type>::value)
-        {
-            return get_random_data<key_type>(size,
-                                             static_cast<key_type>(-1000),
-                                             static_cast<key_type>(1000),
-                                             seed,
-                                             size);
-        }
-        else
-        {
-            return get_random_data<key_type>(size,
-                                             std::numeric_limits<key_type>::min(),
-                                             std::numeric_limits<key_type>::max(),
-                                             seed,
-                                             size);
-        }
-    }
-
     // keys benchmark
     template<typename val = Value>
     auto do_run(benchmark::State&   state,
@@ -118,9 +96,13 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
                 hipStream_t         stream) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
-        auto keys_input = generate_keys(size, seed.get_0());
-
         using key_type = Key;
+
+        std::vector<key_type> keys_input
+            = get_random_data<key_type>(size,
+                                        generate_limits<key_type>::min(),
+                                        generate_limits<key_type>::max(),
+                                        seed.get_0());
 
         key_type* d_keys_input;
         key_type* d_keys_output;
@@ -237,10 +219,14 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
                 hipStream_t         stream) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
-        auto keys_input = generate_keys(size, seed.get_0());
-
         using key_type   = Key;
         using value_type = Value;
+
+        std::vector<key_type> keys_input
+            = get_random_data<key_type>(size,
+                                        generate_limits<key_type>::min(),
+                                        generate_limits<key_type>::max(),
+                                        seed.get_0());
 
         std::vector<value_type> values_input(size);
         for(size_t i = 0; i < size; i++)
