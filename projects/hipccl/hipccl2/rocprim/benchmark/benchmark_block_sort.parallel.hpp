@@ -234,21 +234,11 @@ public:
     {
         const auto size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
-        std::vector<KeyType> input;
-        if(std::is_floating_point<KeyType>::value)
-        {
-            input = get_random_data<KeyType>(size,
-                                             static_cast<KeyType>(-1000),
-                                             static_cast<KeyType>(1000),
-                                             seed.get_0());
-        }
-        else
-        {
-            input = get_random_data<KeyType>(size,
-                                             std::numeric_limits<KeyType>::min(),
-                                             std::numeric_limits<KeyType>::max(),
-                                             seed.get_0());
-        }
+        std::vector<KeyType> input = get_random_data<KeyType>(size,
+                                                              generate_limits<KeyType>::min(),
+                                                              generate_limits<KeyType>::max(),
+                                                              seed.get_0());
+
         KeyType* d_input;
         KeyType* d_output;
         HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(KeyType)));

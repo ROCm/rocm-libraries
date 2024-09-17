@@ -136,19 +136,12 @@ void run_benchmark(benchmark::State&   state,
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
 
-    std::vector<T> input;
-    if(std::is_floating_point<T>::value)
-    {
-        input = get_random_data<T>(size, static_cast<T>(-1000), static_cast<T>(1000), seed.get_0());
-    }
-    else
-    {
-        input = get_random_data<T>(size,
-                                   std::numeric_limits<T>::min(),
-                                   std::numeric_limits<T>::max(),
-                                   seed.get_0());
-    }
-    T * d_input;
+    std::vector<T> input = get_random_data<T>(size,
+                                              generate_limits<T>::min(),
+                                              generate_limits<T>::max(),
+                                              seed.get_0());
+
+    T*  d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));

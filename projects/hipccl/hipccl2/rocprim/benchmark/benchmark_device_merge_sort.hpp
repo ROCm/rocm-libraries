@@ -67,21 +67,11 @@ struct device_merge_sort_benchmark : public config_autotune_interface
         using key_type = Key;
 
         // Generate data
-        std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
-        {
-            keys_input = get_random_data<key_type>(size,
-                                                   static_cast<key_type>(-1000),
-                                                   static_cast<key_type>(1000),
-                                                   seed.get_0());
-        }
-        else
-        {
-            keys_input = get_random_data<key_type>(size,
-                                                   std::numeric_limits<key_type>::min(),
-                                                   std::numeric_limits<key_type>::max(),
-                                                   seed.get_0());
-        }
+        std::vector<key_type> keys_input
+            = get_random_data<key_type>(size,
+                                        generate_limits<key_type>::min(),
+                                        generate_limits<key_type>::max(),
+                                        seed.get_0());
 
         key_type* d_keys_input;
         key_type* d_keys_output;
@@ -177,21 +167,11 @@ struct device_merge_sort_benchmark : public config_autotune_interface
         using value_type = Value;
 
         // Generate data
-        std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
-        {
-            keys_input = get_random_data<key_type>(size,
-                                                   static_cast<key_type>(-1000),
-                                                   static_cast<key_type>(1000),
-                                                   seed.get_0());
-        }
-        else
-        {
-            keys_input = get_random_data<key_type>(size,
-                                                   std::numeric_limits<key_type>::min(),
-                                                   std::numeric_limits<key_type>::max(),
-                                                   seed.get_0());
-        }
+        std::vector<key_type> keys_input
+            = get_random_data<key_type>(size,
+                                        generate_limits<key_type>::min(),
+                                        generate_limits<key_type>::max(),
+                                        seed.get_0());
 
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
