@@ -84,6 +84,8 @@ namespace rocRoller::KernelGraph
     template <typename T>
     std::optional<int> findContainingOperation(int candidate, KernelGraph const& kgraph)
     {
+        namespace CF = rocRoller::KernelGraph::ControlGraph;
+
         int lastTag = -1;
         for(auto parent : kgraph.control.depthFirstVisit(candidate, Graph::Direction::Upstream))
         {
@@ -123,6 +125,8 @@ namespace rocRoller::KernelGraph
     template <typename T>
     std::optional<int> findTopOfContainingOperation(int candidate, KernelGraph const& kgraph)
     {
+        namespace CF = rocRoller::KernelGraph::ControlGraph;
+
         int lastTag       = -1;
         int lastOperation = candidate;
         for(auto parent : kgraph.control.depthFirstVisit(candidate, Graph::Direction::Upstream))
@@ -146,6 +150,8 @@ namespace rocRoller::KernelGraph
                                            std::vector<int> const&         startNodes,
                                            Predicate                       dontDuplicate)
     {
+        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
         std::vector<int> newStartNodes;
 
         if(reindexer == nullptr)

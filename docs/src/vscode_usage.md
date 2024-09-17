@@ -69,7 +69,7 @@ run **Remote-Containers: Reopen folder in SSH** in VSCode to exit the container.
 
 4. **NOTE**: To set up a clang configuration, update the following entry:
 
-	`"dockerfile": "../docker/dockerfile-ubuntu-clang-13"`
+	`"dockerfile": "../docker/dockerfile-ubuntu-clang"`
 
 5. Run **Remote-Containers: Reopen in Container** in VSCode to use the container. You may be asked to rebuild the container if there have been alterations to the Dockerfiles.
 

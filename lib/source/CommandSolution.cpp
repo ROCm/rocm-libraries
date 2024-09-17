@@ -345,8 +345,6 @@ namespace rocRoller
             // Probably from a unit test.  The context should contain
             // scheduled instructions already.
         }
-
-        assembleKernel();
     }
 
     bool CommandKernel::matchesPredicates(/* args */) const

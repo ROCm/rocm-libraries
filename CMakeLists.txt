@@ -17,14 +17,10 @@ option(BUILD_SHARED_LIBS                "Build using shared libraries" ON)
 set(YAML_BACKEND "YAML_CPP" CACHE STRING "YAML backend used for serialization")
 set_property(CACHE YAML_BACKEND PROPERTY STRINGS YAML_CPP LLVM)
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  if (YAML_BACKEND STREQUAL "LLVM")
-    message(FATAL_ERROR "LLVM YAML backend not supported with Clang")
-  endif()
-  set(COROUTINES_COMPILE_OPTION -fcoroutines-ts)
-  set(EXTRA_COMPILE_OPTIONS -stdlib=libc++)
-  set(EXTRA_LINK_OPTIONS -lc++ -lm -fuse-ld=lld)
-  set_source_files_properties(lib/source/Assemblers/InProcessAssembler.cpp PROPERTIES COMPILE_FLAGS "-stdlib=libstdc++")
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  set(COROUTINES_COMPILE_OPTION )
+  set(EXTRA_COMPILE_OPTIONS )
+  set(EXTRA_LINK_OPTIONS -fuse-ld=lld)
 else()
   set(COROUTINES_COMPILE_OPTION -fcoroutines)
   set(EXTRA_COMPILE_OPTIONS )
@@ -42,6 +38,18 @@ if(CODE_COVERAGE)
   set(EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_COMPILE_OPTIONS})
   set(EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_LINK_OPTIONS})
 endif()
+
+if(ROCROLLER_USE_HIP)
+  list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
+  find_package(hip)
+
+  find_package(LLVM REQUIRED HINTS /opt/rocm/llvm/)
+
+  llvm_map_components_to_libnames(llvm_libs all)
+  find_package(LLD REQUIRED CONFIG HINTS ${LLVM_DIR}/../lld/)
+endif()
+
+find_package(OpenMP)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -147,17 +155,6 @@ endif()
 
 enable_testing()
 include(CTest)
-
-find_package(LLVM 13.0.1 REQUIRED)
-find_package(OpenMP)
-
-llvm_map_components_to_libnames(llvm_libs all)
-find_package(LLD REQUIRED CONFIG HINTS ${LLVM_DIR}/../lib/cmake/lld/)
-
-if(ROCROLLER_USE_HIP)
-  list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
-  find_package(hip)
-endif()
 
 if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/extern/spdlog)
   execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} submodule update --init -- extern/spdlog)

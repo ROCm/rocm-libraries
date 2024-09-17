@@ -12,7 +12,6 @@ pytest-cov
 pytest-mock
 scipy
 pyyaml
-msgpack
 joblib
 # codeql
 sarif-tools==1.0.0

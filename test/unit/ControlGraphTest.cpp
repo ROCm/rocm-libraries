@@ -461,6 +461,8 @@ namespace rocRollerTest
     {
         KernelGraph::KernelGraph kg;
         using namespace KernelGraph;
+        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
         auto five = Expression::literal(5);
         auto four = Expression::literal(4);
 

@@ -149,8 +149,8 @@ namespace rocRoller
 
         /**
          * @brief Set context.
-	 *
-	 * This must be called before `generateKernel`.
+         *
+         * This must be called before `generateKernel`.
          */
         void setContext(ContextPtr);
 
@@ -163,19 +163,28 @@ namespace rocRoller
         CommandParametersPtr getCommandParameters() const;
 
         /**
-         * @brief Generates the kernel, assembles it, and records the
-         * info needed to launch the kernel, given command arguments.
+         * @brief Generates the kernel (does graph lowering and
+         * code-generation).
          */
         void generateKernel();
 
+        /**
+         * @brief Assembles a generated kernel.  Does not try to load
+         * it.
+         */
+        void assembleKernel();
+
+        /**
+         * @brief Assembles and loads a generated kernel onto the GPU.
+         */
         void loadKernel();
 
         void addPredicate(Expression::ExpressionPtr expression);
         bool matchesPredicates(/* args */) const;
 
         /**
-	 * @brief Set (manual) launch parameters.
-	 */
+         * @brief Set (manual) launch parameters.
+         */
         void setLaunchParameters(CommandLaunchParametersPtr);
 
         /**
@@ -186,8 +195,8 @@ namespace rocRoller
         /**
          * @brief Determines launch bounds and arguments, and launches the kernel.
          *
-         * @param args The runtime arguments being passed to the kernel
-        */
+         * @param args The runtime arguments being passed to the kernel.
+         */
         void launchKernel(RuntimeArguments const& args);
 
         /**
@@ -196,7 +205,10 @@ namespace rocRoller
          * @param args The runtime arguments being passed to the kernel
          * @param timer HIPTimer that will record how long the kernel took to execute
          * @param iteration Iteration number within the timer
-        */
+         *
+         * Assembles and loads a generated kernel if this has not been
+         * done already.
+         */
         void launchKernel(RuntimeArguments const&   args,
                           std::shared_ptr<HIPTimer> timer,
                           int                       iteration);
@@ -211,6 +223,7 @@ namespace rocRoller
          * Determines kernel arguments for a particular invocation.
          */
         KernelArguments getKernelArguments(RuntimeArguments const& args);
+
         /**
          * Determines launch bounds for a particular invocation.
          */
@@ -228,7 +241,7 @@ namespace rocRoller
 
         /**
          * @brief Returns the hipFunction for the kernel
-        */
+         */
         hipFunction_t getHipFunction() const;
 
     private:
@@ -249,8 +262,6 @@ namespace rocRoller
         void generateKernelSource();
 
         Generator<Instruction> kernelInstructions();
-
-        void assembleKernel();
     };
 
     class CommandSolution

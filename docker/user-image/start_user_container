@@ -28,7 +28,7 @@ import subprocess
 import argparse
 
 dockerfiles = {
-    "clang": "docker/dockerfile-ubuntu-clang-13",
+    "clang": "docker/dockerfile-ubuntu-clang",
     "gcc": "docker/dockerfile-ubuntu-gcc",
     "trace": "docker/dockerfile-ubuntu-trace",
 }

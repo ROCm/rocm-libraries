@@ -47,20 +47,20 @@ if(BUILD_CLIENT)
 
   if(ROCROLLER_USE_LLVM)
     target_compile_definitions(gemm PUBLIC ROCROLLER_USE_LLVM)
-    target_include_directories(
-      gemm
-      PUBLIC
-      ${HIP_ROOT_DIR}/include
-      ${LLVM_INCLUDE_DIRS}
-      ${LLD_INCLUDE_DIRS}
-    )
-    target_link_libraries(
-      gemm
-      PUBLIC
-      ${llvm_libs}
-      lldELF
-    )
   endif()
+  target_include_directories(
+    gemm
+    PUBLIC
+    ${HIP_ROOT_DIR}/include
+    ${LLVM_INCLUDE_DIRS}
+    ${LLD_INCLUDE_DIRS}
+  )
+  target_link_libraries(
+    gemm
+    PUBLIC
+    ${llvm_libs}
+    lldELF
+  )
   if(ROCROLLER_USE_YAML_CPP)
     target_compile_definitions(gemm PUBLIC ROCROLLER_USE_YAML_CPP)
     set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -95,20 +95,20 @@ if(BUILD_CLIENT)
 
   if(ROCROLLER_USE_LLVM)
     target_compile_definitions(codegen_stress PUBLIC ROCROLLER_USE_LLVM)
-    target_include_directories(
-      codegen_stress
-      PUBLIC
-      ${HIP_ROOT_DIR}/include
-      ${LLVM_INCLUDE_DIRS}
-      ${LLD_INCLUDE_DIRS}
-    )
-    target_link_libraries(
-      codegen_stress
-      PUBLIC
-      ${llvm_libs}
-      lldELF
-    )
   endif()
+  target_include_directories(
+    codegen_stress
+    PUBLIC
+    ${HIP_ROOT_DIR}/include
+    ${LLVM_INCLUDE_DIRS}
+    ${LLD_INCLUDE_DIRS}
+  )
+  target_link_libraries(
+    codegen_stress
+    PUBLIC
+    ${llvm_libs}
+    lldELF
+  )
   if(ROCROLLER_USE_YAML_CPP)
     target_compile_definitions(codegen_stress PUBLIC ROCROLLER_USE_YAML_CPP)
     set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)

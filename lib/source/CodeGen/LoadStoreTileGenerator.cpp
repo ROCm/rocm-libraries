@@ -27,6 +27,7 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        namespace CT         = rocRoller::KernelGraph::CoordinateGraph;
         namespace Expression = rocRoller::Expression;
         using namespace ControlGraph;
         using namespace CoordinateGraph;

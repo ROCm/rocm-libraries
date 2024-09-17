@@ -68,6 +68,8 @@ namespace rocRoller::KernelGraph
      */
     void reflow(KernelGraph& graph, int dim, std::vector<int> const& other_inputs)
     {
+        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
         std::vector<int> inputs, outputs;
         for(auto const& tag : graph.coordinates.getNeighbours<Graph::Direction::Upstream>(dim))
         {

@@ -513,7 +513,8 @@ namespace rocRoller
             return {required, path};
         }
 
-        CT::User newScratchCoordinate(ExpressionPtr size, VariableType varType, ContextPtr context)
+        rocRoller::KernelGraph::CoordinateGraph::User
+            newScratchCoordinate(ExpressionPtr size, VariableType varType, ContextPtr context)
         {
             auto currentOffset = context->getScratchAmount();
             auto newCoordinate = User(size, currentOffset);

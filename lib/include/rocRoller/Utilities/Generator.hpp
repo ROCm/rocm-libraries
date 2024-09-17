@@ -16,14 +16,7 @@
  * co_yield Instruction::Comment(...) // works fine.
  */
 #if defined(__clang__)
-#include <experimental/coroutine>
-
-namespace std
-{
-    using suspend_always = experimental::suspend_always;
-    template <typename T>
-    using coroutine_handle = experimental::coroutine_handle<T>;
-}
+#include <coroutine>
 
 #define co_yield_(arg) co_yield arg
 
@@ -404,6 +397,11 @@ namespace rocRoller
 
             bool operator==(std::default_sentinel_t) const;
             bool operator!=(std::default_sentinel_t) const;
+
+            friend bool operator==(std::default_sentinel_t const& a, Iterator const& b)
+            {
+                return b == a;
+            }
 
             Iterator();
             // cppcheck-suppress noExplicitConstructor
