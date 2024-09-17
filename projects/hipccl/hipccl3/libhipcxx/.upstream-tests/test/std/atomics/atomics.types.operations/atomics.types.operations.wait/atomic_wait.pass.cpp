@@ -86,7 +86,7 @@ struct TestFn
     {
       cuda::std::atomic_wait(vt, T(2));
     };
-  
+
     concurrent_agents_launch(agent_notify_v, agent_wait_v);
   }
 };
