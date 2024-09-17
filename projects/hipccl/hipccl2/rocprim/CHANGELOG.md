@@ -36,7 +36,12 @@ Documentation for rocPRIM is available at
 
 * `rocprim::thread_load` and `rocprim::thread_store`, use dereference instead. Not all of those functions are available on every device architecture, and their usage can hurt performance, because inline assembly inhibits optimizations.
 
-## Unreleased rocPRIM-3.2.0 for ROCm 6.2.0
+## rocPRIM-3.2.1 for ROCm 6.2.1
+
+### Optimizations
+* Improved performance of block_reduce_warp_reduce when warp size == block size.
+
+## rocPRIM-3.2.0 for ROCm 6.2.0
 
 ### Additions
 

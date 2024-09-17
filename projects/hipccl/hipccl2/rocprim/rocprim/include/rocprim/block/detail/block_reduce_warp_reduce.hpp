@@ -180,21 +180,25 @@ private:
             input, output, num_valid, reduce_op
         );
 
-        // i-th warp will have its partial stored in storage_.warp_partials[i-1]
-        if(lane_id == 0)
+        // Final reduction across warps is only required if there is more than 1 warp
+        if ROCPRIM_IF_CONSTEXPR (warps_no_ > 1)
         {
-            storage_.warp_partials[warp_id] = output;
-        }
-        ::rocprim::syncthreads();
+            // i-th warp will have its partial stored in storage_.warp_partials[i-1]
+            if(lane_id == 0)
+            {
+                storage_.warp_partials[warp_id] = output;
+            }
+            ::rocprim::syncthreads();
 
-        if(flat_tid < warps_no_)
-        {
-            // Use warp partial to calculate the final reduce results for every thread
-            auto warp_partial = storage_.warp_partials[lane_id];
+            if(flat_tid < warps_no_)
+            {
+                // Use warp partial to calculate the final reduce results for every thread
+                auto warp_partial = storage_.warp_partials[lane_id];
 
-            warp_reduce<!warps_no_is_pow_of_two_, warp_reduce_output_type>(
-                warp_partial, output, warps_no_, reduce_op
-            );
+                warp_reduce<!warps_no_is_pow_of_two_, warp_reduce_output_type>(
+                    warp_partial, output, warps_no_, reduce_op
+                );
+            }
         }
     }
 
@@ -246,22 +250,26 @@ private:
             input, output, num_valid, reduce_op
         );
 
-        // i-th warp will have its partial stored in storage_.warp_partials[i-1]
-        if(lane_id == 0)
+        // Final reduction across warps is only required if there is more than 1 warp
+        if ROCPRIM_IF_CONSTEXPR (warps_no_ > 1)
         {
-            storage_.warp_partials[warp_id] = output;
-        }
-        ::rocprim::syncthreads();
+            // i-th warp will have its partial stored in storage_.warp_partials[i-1]
+            if(lane_id == 0)
+            {
+                storage_.warp_partials[warp_id] = output;
+            }
+            ::rocprim::syncthreads();
 
-        if(flat_tid < warps_no_)
-        {
-            // Use warp partial to calculate the final reduce results for every thread
-            auto warp_partial = storage_.warp_partials[lane_id];
+            if(flat_tid < warps_no_)
+            {
+                // Use warp partial to calculate the final reduce results for every thread
+                auto warp_partial = storage_.warp_partials[lane_id];
 
-            unsigned int valid_warps_no = (valid_items + warp_size_ - 1) / warp_size_;
-            warp_reduce_output_type().reduce(
-                warp_partial, output, valid_warps_no, reduce_op
-            );
+                unsigned int valid_warps_no = (valid_items + warp_size_ - 1) / warp_size_;
+                warp_reduce_output_type().reduce(
+                    warp_partial, output, valid_warps_no, reduce_op
+                );
+            }
         }
     }
 };
