@@ -9,8 +9,10 @@
 #include <memory>
 #include <sstream>
 
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Utilities/Logging.hpp>

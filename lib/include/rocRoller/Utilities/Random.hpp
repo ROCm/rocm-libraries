@@ -2,10 +2,13 @@
 
 #include <cmath>
 #include <cstdlib>
-#include <hip/hip_fp16.h>
-#include <hip/hip_runtime.h>
 #include <memory>
 #include <random>
+
+#ifdef ROCROLLER_USE_HIP
+#include <hip/hip_fp16.h>
+#include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Settings.hpp>

@@ -1,7 +1,7 @@
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
-
-#include <random>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -16,7 +16,6 @@
 
 #include "DataTypes/DataTypes.hpp"
 #include "GPUContextFixture.hpp"
-#include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
@@ -60,16 +59,6 @@ namespace MatrixMultiplyTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
 
                 // TODO Remove this when we can generate FP8 kernels on archs that don't support FP8
-                if(!isLocalDevice())
-                {
-                    GTEST_SKIP();
-                }
-            }
-            if constexpr(std::is_same_v<T, BFloat16>)
-            {
-                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16);
-
-                // TODO Remove this when we can generate BF16 kernels on archs that don't support BF16
                 if(!isLocalDevice())
                 {
                     GTEST_SKIP();
@@ -467,8 +456,7 @@ namespace MatrixMultiplyTest
     {
     };
 
-    class MatrixMultiplyTestGPUBFloat16
-        : public BaseMatrixMultiplyContextFixture<std::tuple<int, int, int>>
+    class MatrixMultiplyTestGPUBFloat16 : public BaseMatrixMultiplyContextFixture<>
     {
     };
 
@@ -524,16 +512,52 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(numLocalRead, 16);
     }
 
-    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_FP32)
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_FP32_32x32x4_BF16)
     {
-        auto [mfma_m, mfma_n, mfma_k] = std::get<std::tuple<int, int, int>>(GetParam());
-        matrixMultiplyMacroTile<BFloat16, float>(mfma_m, mfma_n, mfma_k, 1, 2.e-6, false);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
+        matrixMultiplyMacroTile<BFloat16, float>(32, 32, 4, 1, 2.e-6, false);
     }
 
-    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_BF16)
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_FP32_32x32x8_BF16)
     {
-        auto [mfma_m, mfma_n, mfma_k] = std::get<std::tuple<int, int, int>>(GetParam());
-        matrixMultiplyMacroTile<BFloat16>(mfma_m, mfma_n, mfma_k, 1, 2.e-6, false);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x8_1k);
+        matrixMultiplyMacroTile<BFloat16, float>(32, 32, 8, 1, 2.e-6, false);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_FP32_16x16x8_BF16)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
+        matrixMultiplyMacroTile<BFloat16, float>(16, 16, 8, 1, 2.e-6, false);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_FP32_16x16x16_BF16)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
+        matrixMultiplyMacroTile<BFloat16, float>(16, 16, 16, 1, 2.e-6, false);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_32x32x4_BF16)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
+        matrixMultiplyMacroTile<BFloat16>(32, 32, 4, 1, 2.e-6, false);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_32x32x8_BF16)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x8_1k);
+        matrixMultiplyMacroTile<BFloat16>(32, 32, 8, 1, 2.e-6, false);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_16x16x8_BF16)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
+        matrixMultiplyMacroTile<BFloat16>(16, 16, 8, 1, 2.e-6, false);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_16x16x16_BF16)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
+        matrixMultiplyMacroTile<BFloat16>(16, 16, 16, 1, 2.e-6, false);
     }
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x32_NN)
@@ -707,10 +731,7 @@ namespace MatrixMultiplyTest
                                                 ::testing::Values(rocRoller::DataType::FP8,
                                                                   rocRoller::DataType::BF8)));
 
-    INSTANTIATE_TEST_SUITE_P(
-        MatrixMultiplyTestGPUBFloat16,
-        MatrixMultiplyTestGPUBFloat16,
-        ::testing::Combine(mfmaSupportedISAValues(),
-                           ::testing::Values(std::tuple<int, int, int>{32, 32, 4},
-                                             std::tuple<int, int, int>{16, 16, 8})));
+    INSTANTIATE_TEST_SUITE_P(MatrixMultiplyTestGPUBFloat16,
+                             MatrixMultiplyTestGPUBFloat16,
+                             ::testing::Combine(mfmaSupportedISAValues()));
 }

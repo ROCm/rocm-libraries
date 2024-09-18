@@ -3,10 +3,10 @@
 #include "ContextFixture.hpp"
 #include <rocRoller/Utilities/Utils.hpp>
 
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
-
-#include "Utilities.hpp"
+#endif /* ROCROLLER_USE_HIP */
 
 /**
  * Returns a (googletest) Generator that will yield every GPU ISA supported by rocRoller.

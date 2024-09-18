@@ -6,9 +6,11 @@
 #include <iostream>
 #include <vector>
 
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocwmma/rocwmma.hpp>
 

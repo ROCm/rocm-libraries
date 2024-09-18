@@ -1,8 +1,8 @@
-#include <cstdio>
-#include <iterator>
 
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -11,7 +11,6 @@
 #include <rocRoller/Utilities/Generator.hpp>
 
 #include "GenericContextFixture.hpp"
-#include "SourceMatcher.hpp"
 
 using namespace rocRoller;
 

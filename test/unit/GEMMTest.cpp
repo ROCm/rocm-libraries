@@ -1,5 +1,7 @@
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <regex>
 
@@ -863,6 +865,18 @@ namespace GEMMDriverTest
         gemm.waveN = 32;
         gemm.waveK = 4;
 
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
+        basicGEMM<BFloat16, float>(gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_FP32_32x32x8)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 32;
+        gemm.waveN = 32;
+        gemm.waveK = 8;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x8_1k);
         basicGEMM<BFloat16, float>(gemm);
     }
 
@@ -873,6 +887,18 @@ namespace GEMMDriverTest
         gemm.waveN = 16;
         gemm.waveK = 8;
 
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
+        basicGEMM<BFloat16, float>(gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_FP32_16x16x16)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 16;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
         basicGEMM<BFloat16, float>(gemm);
     }
 
@@ -883,6 +909,18 @@ namespace GEMMDriverTest
         gemm.waveN = 32;
         gemm.waveK = 4;
 
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
+        basicGEMM<BFloat16, BFloat16>(gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_BF16_32x32x8)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 32;
+        gemm.waveN = 32;
+        gemm.waveK = 8;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x8_1k);
         basicGEMM<BFloat16, BFloat16>(gemm);
     }
 
@@ -893,7 +931,19 @@ namespace GEMMDriverTest
         gemm.waveN = 16;
         gemm.waveK = 8;
 
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
         basicGEMM<BFloat16, BFloat16>(gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMBF16_BF16_16x16x16)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 16;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
+        basicGEMM<BFloat16, float>(gemm);
     }
 
     GEMMProblem setup_GEMMF8_NT()

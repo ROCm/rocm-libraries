@@ -114,8 +114,17 @@ namespace rocRoller
                         "Invalid DEST (D) data type",
                         ShowValue(lhs->variableType()));
 
-            auto mfma
-                = concatenate("v_mfma_", typeStr<ACC>(), "_", M, "x", N, "x", K, typeStr<INPUT>());
+            std::string inputType = typeStr<INPUT>();
+
+            if(lhs->variableType().dataType == DataType::BFloat16x2)
+            {
+                if(((M == 32) && (N == 32) && (K == 8)) || ((M == 16) && (N == 16) && (K == 16)))
+                {
+                    inputType = "bf16_1k";
+                }
+            }
+
+            auto mfma = concatenate("v_mfma_", typeStr<ACC>(), "_", M, "x", N, "x", K, inputType);
             co_yield_(Instruction(mfma, {dest}, {lhs, r1hs, r2hs}, {}, ""));
         }
     }

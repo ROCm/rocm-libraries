@@ -1,7 +1,7 @@
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
-
-#include <random>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -13,9 +13,6 @@
 
 #include "DataTypes/DataTypes.hpp"
 #include "GPUContextFixture.hpp"
-#include "GenericContextFixture.hpp"
-#include "Scheduling/Observers/FileWritingObserver.hpp"
-#include "SourceMatcher.hpp"
 #include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 
