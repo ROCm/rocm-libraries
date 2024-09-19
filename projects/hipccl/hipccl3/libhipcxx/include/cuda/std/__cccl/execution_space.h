@@ -39,27 +39,18 @@
 #  pragma system_header
 #endif // no system header
 
-#ifndef __has_include
-#  define __has_include(x) 0
-#endif // !__has_include
-
-// Bring in the __host__ and __device__ macros:
-#if __has_include(<crt/host_defines.h>)
-#  define __CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__
-#  include <crt/host_defines.h>
-#endif
-
-#if defined(_CCCL_CUDA_COMPILER) || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC_RTC__)
+// We need to ensure that we not only compile with a cuda compiler but also compile cuda source files
+#if defined(_CCCL_CUDA_COMPILER) && (defined(__CUDACC__) || defined(_NVHPC_CUDA)) || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC_RTC__)
 #  define _CCCL_HOST        __host__
 #  define _CCCL_DEVICE      __device__
 #  define _CCCL_HOST_DEVICE __host__ __device__
 #  define _CCCL_FORCEINLINE __forceinline__
-#else // ^^^ _CCCL_CUDA_COMPILER ^^^ / vvv !_CCCL_CUDA_COMPILER
+#else // ^^^ _CCCL_CUDA_COMPILATION ^^^ / vvv !_CCCL_CUDA_COMPILATION vvv
 #  define _CCCL_HOST
 #  define _CCCL_DEVICE
 #  define _CCCL_HOST_DEVICE
 #  define _CCCL_FORCEINLINE inline
-#endif // !_CCCL_CUDA_COMPILER
+#endif // !_CCCL_CUDA_COMPILATION
 
 #if !defined(_CCCL_EXEC_CHECK_DISABLE)
 #  if defined(_CCCL_CUDA_COMPILER_NVCC)

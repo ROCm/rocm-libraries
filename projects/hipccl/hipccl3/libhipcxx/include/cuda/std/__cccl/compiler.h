@@ -101,7 +101,7 @@
 #  define _CCCL_CUDACC_VER_MINOR __CUDACC_VER_MINOR__
 #  define _CCCL_CUDACC_VER_BUILD __CUDACC_VER_BUILD__
 #  define _CCCL_CUDACC_VER       _CCCL_CUDACC_VER_MAJOR * 100000 + _CCCL_CUDACC_VER_MINOR * 1000 + _CCCL_CUDACC_VER_BUILD
-#endif // __CUDACC__ || _CCCL_CUDA_COMPILER_NVHPC
+#endif // _CCCL_CUDA_COMPILER
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC_RTC__) 
 // Some convenience macros to filter CUDACC versions
