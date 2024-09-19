@@ -112,9 +112,10 @@ endif()
 
 # Benchmark dependencies
 if(BUILD_BENCHMARKS)
+  set(BENCHMARK_VERSION 1.8.0)
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
     # Google Benchmark (https://github.com/google/benchmark.git)
-    find_package(benchmark QUIET)
+    find_package(benchmark ${BENCHMARK_VERSION} QUIET)
   else()
     message(STATUS "Force installing Google Benchmark.")
   endif()
@@ -137,7 +138,7 @@ if(BUILD_BENCHMARKS)
     download_project(
       PROJ                googlebenchmark
       GIT_REPOSITORY      https://github.com/google/benchmark.git
-      GIT_TAG             v1.8.0
+      GIT_TAG             v${BENCHMARK_VERSION}
       INSTALL_DIR         ${GOOGLEBENCHMARK_ROOT}
       CMAKE_ARGS          -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DBUILD_SHARED_LIBS=OFF -DBENCHMARK_ENABLE_TESTING=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_CXX_STANDARD=14 ${COMPILER_OVERRIDE}
       LOG_DOWNLOAD        TRUE

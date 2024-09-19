@@ -67,11 +67,9 @@ namespace crc
     }
 
     /*! \brief Performs a 32-bit cyclic redundancy check on the data it's passed.
-    * \note For more information on this algorithm and the optimizations used here,
-    * see: https://en.wikipedia.org/wiki/Computation_of_cyclic_redundancy_checks.
-    * \param data Pointer to the data to compute the check for, as a byte-array.
-    * \param len Number of bytes in the data buffer.
-    */
+     * \param data Pointer to the data to compute the check for, as a byte-array.
+     * \param len Number of bytes in the data buffer.
+     */
     uint32_t crc(const uint8_t* data, size_t len)
     {
         // Precompute values we know we'll use frequently and store them in a 
@@ -504,3 +502,4 @@ private:
 } // end namespace bwr_utils
 
 #endif // BRW_UTILS_HPP
+

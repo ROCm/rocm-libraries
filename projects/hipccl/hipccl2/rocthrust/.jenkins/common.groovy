@@ -32,12 +32,8 @@ def runTestCommand (platform, project)
 
     def testCommand = "ctest --output-on-failure"
     def hmmTestCommand = ''
-    def excludeRegex = 'reduce_by_key.hip'
-
-    if (platform.jenkinsLabel.contains('gfx11'))
-    {
-        excludeRegex = /(reduce_by_key.hip|partition.hip|sort.hip|sort_by_key.hip|stable_sort_by_key.hip|stable_sort.hip|async_copy.hip|async_reduce.hip|async_scan.hip|async_sort.hip|async_transform.hip)/
-    }
+    // Note: temporarily disable scan tests below while waiting for a compiler fix
+    def excludeRegex = /(reduce_by_key.hip|scan)/
     testCommandExclude = "--exclude-regex \"${excludeRegex}\""
 
     if (platform.jenkinsLabel.contains('gfx90a'))
