@@ -25,8 +25,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef _LIBCUDACXX___CUDA_ATOMIC_H
-#define _LIBCUDACXX___CUDA_ATOMIC_H
+#ifndef _CUDA___ATOMIC_ATOMIC_H
+#define _CUDA___ATOMIC_ATOMIC_H
 
 #include <cuda/std/detail/__config>
 
@@ -155,4 +155,4 @@ inline _CCCL_HOST_DEVICE void atomic_signal_fence(memory_order __m)
 
 _LIBCUDACXX_END_NAMESPACE_CUDA
 
-#endif // _LIBCUDACXX___CUDA_ATOMIC_H
+#endif // _CUDA___ATOMIC_ATOMIC_H
