@@ -187,10 +187,15 @@ namespace detail
     template <typename T>
     struct random_to_item_t<T, typename std::enable_if<!std::is_floating_point<T>::value>::type>
     {
+#if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
         using CastT = typename std::conditional<
             std::is_same<T, int128_t>::value || std::is_same<T, uint128_t>::value,
             typename std::conditional<std::is_signed<T>::value, long, unsigned long>::type,
             T>::type;
+#else
+        using CastT = typename std::conditional<std::is_signed<T>::value, long, unsigned long>::type;
+#endif
+
 
         double m_min;
         double m_max;
