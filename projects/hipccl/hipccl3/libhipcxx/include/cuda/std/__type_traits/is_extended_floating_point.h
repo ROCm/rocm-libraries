@@ -54,11 +54,13 @@ _LIBCUDACXX_INLINE_VAR constexpr bool __is_extended_floating_point_v = __is_exte
 #endif // _CCCL_STD_VER >= 2014
 
 #if defined(_LIBCUDACXX_HAS_NVFP16)
+
 #if defined(__HIP_PLATFORM_AMD__)
 #  include <hip/hip_fp16.h>
 #else
 #  include <cuda_fp16.h>
 #endif
+
 template <>
 struct __is_extended_floating_point<__half> : true_type
 {};

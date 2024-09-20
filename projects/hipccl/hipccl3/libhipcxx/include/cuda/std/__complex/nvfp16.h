@@ -69,27 +69,6 @@ struct __is_non_narrowing_convertible<__half, float>
 };
 
 template <>
-struct __is_non_narrowing_convertible<__half, double>
-{
-  static constexpr bool value = true;
-};
-
-template <>
-struct __is_non_narrowing_convertible<float, __half>
-{
-  static constexpr bool value = true;
-};
-
-template <>
-struct __is_non_narrowing_convertible<double, __half>
-{
-  static constexpr bool value = true;
-};
-} // namespace __cccl_internal
-
-_LIBCUDACXX_BEGIN_NAMESPACE_STD
-
-template <>
 struct __complex_alignment<__half> : integral_constant<size_t, alignof(__half2)>
 {};
 
