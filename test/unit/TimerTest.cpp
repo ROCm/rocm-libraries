@@ -15,7 +15,7 @@ class TimerTest : public GenericContextFixture
 
 class TimerTestGPU : public CurrentGPUContextFixture
 {
-    void SetUp()
+    void SetUp() override
     {
         CurrentGPUContextFixture::SetUp();
     }

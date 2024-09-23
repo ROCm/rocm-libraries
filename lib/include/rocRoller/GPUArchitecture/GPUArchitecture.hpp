@@ -71,7 +71,7 @@ namespace rocRoller
         template <std::floating_point T>
         bool isSupportedConstantValue(T value) const;
 
-        GPUArchitectureTarget const& target() const;
+        constexpr GPUArchitectureTarget const& target() const;
 
         template <typename T1, typename T2, typename T3>
         friend struct rocRoller::Serialization::MappingTraits;
@@ -85,7 +85,7 @@ namespace rocRoller
         std::map<std::string, GPUInstructionInfo> const& getAllIntructionInfo() const;
 
     private:
-        GPUArchitectureTarget                     m_isaVersion;
+        GPUArchitectureTarget                     m_archTarget;
         std::map<GPUCapability, int>              m_capabilities;
         std::map<std::string, GPUInstructionInfo> m_instructionInfos;
 

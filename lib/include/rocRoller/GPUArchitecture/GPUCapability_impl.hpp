@@ -87,7 +87,6 @@ namespace rocRoller
             {"MaxExpcnt", Value::MaxExpcnt},
             {"SupportedSource", Value::SupportedSource},
 
-            {"HasEccHalf", Value::HasEccHalf},
             {"Waitcnt0Disabled", Value::Waitcnt0Disabled},
             {"SeparateVscnt", Value::SeparateVscnt},
             {"CMPXWritesSGPR", Value::CMPXWritesSGPR},

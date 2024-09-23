@@ -110,7 +110,7 @@ namespace rocRoller
         void addNop(int count);
         void setNopMin(int count);
 
-        int nopCount() const;
+        constexpr int nopCount() const;
 
         constexpr bool isCommentOnly() const;
         constexpr bool isLabel() const;

@@ -44,14 +44,17 @@ namespace rocRoller
             XDLWrite90a(ContextPtr context)
                 : WaitStateObserver<XDLWrite90a>(context){};
 
-            static bool required(ContextPtr context)
+            constexpr static bool required(GPUArchitectureTarget const& target)
             {
-                return context->targetArchitecture().target().getVersionString() == "gfx90a";
+                return target.is90aGPU();
             }
 
-            int         getMaxNops(Instruction const& inst) const;
-            bool        trigger(Instruction const& inst) const;
-            bool        writeTrigger() const;
+            int                   getMaxNops(Instruction const& inst) const;
+            bool                  trigger(Instruction const& inst) const;
+            static constexpr bool writeTrigger()
+            {
+                return true;
+            }
             int         getNops(Instruction const& inst) const;
             std::string getComment() const
             {

@@ -434,7 +434,8 @@ namespace rocRollerTest
 
     INSTANTIATE_TEST_SUITE_P(F8Test,
                              F8Test,
-                             ::testing::Combine(::testing::Values("gfx942:sramecc+"),
+                             ::testing::Combine(::testing::Values(GPUArchitectureTarget{
+                                                    GPUArchitectureGFX::GFX942, {.sramecc = true}}),
                                                 ::testing::Values(rocRoller::DataType::FP8,
                                                                   rocRoller::DataType::BF8)));
 

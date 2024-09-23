@@ -15,11 +15,6 @@ namespace rocRoller
             return GPUInstructionInfo::isVALU(inst.getOpCode());
         }
 
-        bool VALUWriteReadlane94x::writeTrigger() const
-        {
-            return true;
-        }
-
         int VALUWriteReadlane94x::getNops(Instruction const& inst) const
         {
             if(inst.getOpCode().rfind("v_readlane", 0) == 0)

@@ -19,7 +19,7 @@ namespace VectorAddBenchmark
     class VectorAddBenchmarkGPU : public CurrentGPUContextFixture,
                                   public ::testing::WithParamInterface<int>
     {
-        void SetUp()
+        void SetUp() override
         {
             CurrentGPUContextFixture::SetUp();
         }

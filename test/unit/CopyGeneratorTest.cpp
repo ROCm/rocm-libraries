@@ -22,17 +22,17 @@ namespace CopyGeneratorTest
 
     class CopyGenerator90aTest : public GenericContextFixture
     {
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx90a";
+            return {GPUArchitectureGFX::GFX90A};
         }
     };
 
     class CopyGenerator94xTest : public GenericContextFixture
     {
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx942";
+            return {GPUArchitectureGFX::GFX942};
         }
     };
 

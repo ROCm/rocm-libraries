@@ -28,12 +28,12 @@ namespace MatrixMultiplyTest
     template <typename... Ts>
     class BaseMatrixMultiplyContextFixture
         : public BaseGPUContextFixture,
-          public ::testing::WithParamInterface<std::tuple<std::string, Ts...>>
+          public ::testing::WithParamInterface<std::tuple<rocRoller::GPUArchitectureTarget, Ts...>>
     {
     protected:
         virtual rocRoller::ContextPtr createContext() override
         {
-            std::string device = std::get<0>(this->GetParam());
+            GPUArchitectureTarget device = std::get<0>(this->GetParam());
 
             return this->createContextForArch(device);
         }

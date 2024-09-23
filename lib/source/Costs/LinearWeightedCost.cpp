@@ -167,19 +167,19 @@ namespace rocRoller
             }
             else
             {
-                const auto arch = ctx->targetArchitecture().target().getVersionString();
-                // TODO: consolidate with other arch version discriminators
-                if(arch == "gfx908")
+                const auto arch = ctx->targetArchitecture().target();
+
+                if(arch.is908GPU())
                     m_weights = GFX908_WEIGHTS;
-                else if(arch == "gfx90a")
+                else if(arch.is90aGPU())
                     m_weights = GFX90A_WEIGHTS;
-                else if(arch == "gfx940" || arch == "gfx941" || arch == "gfx942")
+                else if(arch.is94XGPU())
                     m_weights = GFX942_WEIGHTS;
                 else
                 {
                     Log::warn("Unsupported architecture {} for linear weighted cost; defaulting to "
                               "GFX90A weights",
-                              arch);
+                              arch.toString());
                     m_weights = GFX90A_WEIGHTS;
                 }
             }

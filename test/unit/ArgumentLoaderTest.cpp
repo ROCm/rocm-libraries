@@ -20,7 +20,7 @@ namespace rocRollerTest
 {
     class ArgumentLoaderTest : public GenericContextFixture
     {
-        void SetUp()
+        void SetUp() override
         {
             Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
             GenericContextFixture::SetUp();

@@ -30,11 +30,6 @@ namespace rocRoller
             return GPUInstructionInfo::isMFMA(inst.getOpCode());
         };
 
-        bool XDLReadSrcC94x::writeTrigger() const
-        {
-            return false;
-        }
-
         int XDLReadSrcC94x::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isVALU(inst.getOpCode())

@@ -18,7 +18,7 @@ namespace rocRollerTest
     public:
         Expression::FastArithmetic fastArith{m_context};
 
-        void SetUp()
+        void SetUp() override
         {
             GenericContextFixture::SetUp();
             fastArith = Expression::FastArithmetic(m_context);

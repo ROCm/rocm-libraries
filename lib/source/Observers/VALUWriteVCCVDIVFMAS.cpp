@@ -15,11 +15,6 @@ namespace rocRoller
             return GPUInstructionInfo::isVALU(inst.getOpCode());
         }
 
-        bool VALUWriteVCCVDIVFMAS::writeTrigger() const
-        {
-            return true;
-        }
-
         int VALUWriteVCCVDIVFMAS::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isVDivFmas(inst.getOpCode()))

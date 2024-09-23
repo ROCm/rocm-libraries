@@ -23,7 +23,7 @@ TEST_F(GPUArchitectureGeneratorTest, BasicYAML)
     EXPECT_NE(generated_source, "");
 
     auto readback = rocRoller::GPUArchitecture::readYaml("output.yaml");
-    EXPECT_EQ(readback.size(), GPUArchitectureGenerator::SupportedISAs.size());
+    EXPECT_EQ(readback.size(), GPUArchitectureGenerator::SupportedArchitectures.size());
     for(auto& x : readback)
     {
         EXPECT_TRUE(x.second.HasCapability("SupportedISA"));
@@ -42,7 +42,7 @@ TEST_F(GPUArchitectureGeneratorTest, BasicMsgpack)
     EXPECT_NE(generated_source, "");
 
     auto readback = rocRoller::GPUArchitecture::readMsgpack("output.msgpack");
-    EXPECT_EQ(readback.size(), GPUArchitectureGenerator::SupportedISAs.size());
+    EXPECT_EQ(readback.size(), GPUArchitectureGenerator::SupportedArchitectures.size());
     for(auto& x : readback)
     {
         EXPECT_TRUE(x.second.HasCapability("SupportedISA"));

@@ -414,8 +414,8 @@ namespace rocRoller
             auto store = StoreTiled(scratchDataType);
 
             // TODO: Improve setting of arch-specific buffer options
-            if(!(context->targetArchitecture().target().getVersionString() == "gfx908"
-                 || context->targetArchitecture().target().getVersionString() == "gfx90a"))
+            if(!(context->targetArchitecture().target().is908GPU()
+                 || context->targetArchitecture().target().is90aGPU()))
             {
                 store.bufOpts = {.sc1 = true};
             }
@@ -457,8 +457,8 @@ namespace rocRoller
 
             // TODO: Improve setting of arch-specific buffer options
             BufferInstructionOptions bufOpts;
-            if(context->targetArchitecture().target().getVersionString() == "gfx908"
-               || context->targetArchitecture().target().getVersionString() == "gfx90a")
+            if(context->targetArchitecture().target().is908GPU()
+               || context->targetArchitecture().target().is90aGPU())
             {
                 bufOpts = {.glc = true};
             }
@@ -536,8 +536,8 @@ namespace rocRoller
 
             // TODO: Improve setting of arch-specific buffer options
             BufferInstructionOptions bufOpts;
-            if(context->targetArchitecture().target().getVersionString() == "gfx908"
-               || context->targetArchitecture().target().getVersionString() == "gfx90a")
+            if(context->targetArchitecture().target().is908GPU()
+               || context->targetArchitecture().target().is90aGPU())
             {
                 bufOpts = {.glc = true};
             }

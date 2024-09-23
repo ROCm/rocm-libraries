@@ -20,26 +20,27 @@ namespace GPUArchitectureGenerator
 {
     const std::string DEFAULT_ASSEMBLER = "/opt/rocm/bin/amdclang";
 
-    const std::vector<rocRoller::GPUArchitectureTarget> SupportedISAs
-        = {rocRoller::GPUArchitectureTarget("gfx803"),
-           rocRoller::GPUArchitectureTarget("gfx900"),
-           rocRoller::GPUArchitectureTarget("gfx906"),
-           rocRoller::GPUArchitectureTarget("gfx906:sramecc+"),
-           rocRoller::GPUArchitectureTarget("gfx908:xnack+"),
-           rocRoller::GPUArchitectureTarget("gfx908"),
-           rocRoller::GPUArchitectureTarget("gfx908:sramecc+"),
-           rocRoller::GPUArchitectureTarget("gfx90a"),
-           rocRoller::GPUArchitectureTarget("gfx90a:sramecc+"),
-           rocRoller::GPUArchitectureTarget("gfx940"),
-           rocRoller::GPUArchitectureTarget("gfx941"),
-           rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
-           rocRoller::GPUArchitectureTarget("gfx942"),
-           rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
-           rocRoller::GPUArchitectureTarget("gfx1010"),
-           rocRoller::GPUArchitectureTarget("gfx1011"),
-           rocRoller::GPUArchitectureTarget("gfx1012"),
-           rocRoller::GPUArchitectureTarget("gfx1012:xnack+"),
-           rocRoller::GPUArchitectureTarget("gfx1030")};
+    const std::vector<rocRoller::GPUArchitectureTarget> SupportedArchitectures = {
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX803},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX900},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX906},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX906, {.sramecc = true}},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908, {.xnack = true}},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908, {.sramecc = true}},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A, {.sramecc = true}},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX940},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941, {.sramecc = true}},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942, {.sramecc = true}},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1010},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1011},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1012},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1012, {.xnack = true}},
+        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1030},
+    };
 
     // GPUCapability -> {Assembler Query, Assembler Options}
     const std::unordered_map<rocRoller::GPUCapability,
@@ -122,78 +123,52 @@ namespace GPUArchitectureGenerator
     const std::unordered_map<rocRoller::GPUCapability,
                              std::vector<rocRoller::GPUArchitectureTarget>,
                              rocRoller::GPUCapability::Hash>
-        ArchSpecificCaps = {{rocRoller::GPUCapability::HasEccHalf,
-                             {rocRoller::GPUArchitectureTarget("gfx906"),
-                              rocRoller::GPUArchitectureTarget("gfx908"),
-                              rocRoller::GPUArchitectureTarget("gfx90a"),
-                              rocRoller::GPUArchitectureTarget("gfx940"),
-                              rocRoller::GPUArchitectureTarget("gfx941"),
-                              rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
-                              rocRoller::GPUArchitectureTarget("gfx942"),
-                              rocRoller::GPUArchitectureTarget("gfx942:sramecc+")}},
-                            {rocRoller::GPUCapability::Waitcnt0Disabled,
-                             {
-                                 rocRoller::GPUArchitectureTarget("gfx908"),
-                                 rocRoller::GPUArchitectureTarget("gfx90a"),
-                                 rocRoller::GPUArchitectureTarget("gfx940"),
-                                 rocRoller::GPUArchitectureTarget("gfx941"),
-                                 rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
-                                 rocRoller::GPUArchitectureTarget("gfx942"),
-                                 rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
-                             }},
-                            {rocRoller::GPUCapability::HasAccCD,
-                             {
-                                 rocRoller::GPUArchitectureTarget("gfx90a"),
-                                 rocRoller::GPUArchitectureTarget("gfx940"),
-                                 rocRoller::GPUArchitectureTarget("gfx941"),
-                                 rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
-                                 rocRoller::GPUArchitectureTarget("gfx942"),
-                                 rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
-                             }},
-                            {rocRoller::GPUCapability::ArchAccUnifiedRegs,
-                             {
-                                 rocRoller::GPUArchitectureTarget("gfx90a"),
-                                 rocRoller::GPUArchitectureTarget("gfx90a:sramecc+"),
-                                 rocRoller::GPUArchitectureTarget("gfx940"),
-                                 rocRoller::GPUArchitectureTarget("gfx941"),
-                                 rocRoller::GPUArchitectureTarget("gfx941:sramecc+"),
-                                 rocRoller::GPUArchitectureTarget("gfx942"),
-                                 rocRoller::GPUArchitectureTarget("gfx942:sramecc+"),
-                             }},
-                            {rocRoller::GPUCapability::HasWave64, SupportedISAs}};
-
-    inline bool Is10XGPU(rocRoller::GPUArchitectureTarget const& input)
-    {
-        return input.toString().find("gfx10") == 0;
-    }
-
-    inline bool Is9XGPU(rocRoller::GPUArchitectureTarget const& input)
-    {
-        return input.toString().find("gfx9") == 0;
-    }
-
-    inline bool Is908GPU(rocRoller::GPUArchitectureTarget const& input)
-    {
-        return input.toString().find("gfx908") == 0;
-    }
-
-    inline bool Is90aGPU(rocRoller::GPUArchitectureTarget const& input)
-    {
-        return input.toString().find("gfx90a") == 0;
-    }
-
-    inline bool Is94XGPU(rocRoller::GPUArchitectureTarget const& input)
-    {
-        return input.toString().find("gfx94") == 0;
-    }
+        ArchSpecificCaps
+        = {{rocRoller::GPUCapability::Waitcnt0Disabled,
+            {
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX940},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941,
+                                                 {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942,
+                                                 {.sramecc = true}},
+            }},
+           {rocRoller::GPUCapability::HasAccCD,
+            {
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX940},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941,
+                                                 {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942,
+                                                 {.sramecc = true}},
+            }},
+           {rocRoller::GPUCapability::ArchAccUnifiedRegs,
+            {
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A,
+                                                 {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX940},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941,
+                                                 {.sramecc = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942,
+                                                 {.sramecc = true}},
+            }},
+           {rocRoller::GPUCapability::HasWave64, SupportedArchitectures}};
 
     inline std::vector<rocRoller::GPUArchitectureTarget> gfx9ISAs()
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
-        std::copy_if(SupportedISAs.begin(),
-                     SupportedISAs.end(),
+        std::copy_if(SupportedArchitectures.begin(),
+                     SupportedArchitectures.end(),
                      std::back_inserter(retval),
-                     [](rocRoller::GPUArchitectureTarget const& x) -> bool { return Is9XGPU(x); });
+                     [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.is9XGPU(); });
         return retval;
     }
 
@@ -201,11 +176,11 @@ namespace GPUArchitectureGenerator
     inline std::vector<rocRoller::GPUArchitectureTarget> cdnaISAs_1_2()
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
-        std::copy_if(SupportedISAs.begin(),
-                     SupportedISAs.end(),
+        std::copy_if(SupportedArchitectures.begin(),
+                     SupportedArchitectures.end(),
                      std::back_inserter(retval),
                      [](rocRoller::GPUArchitectureTarget const& x) -> bool {
-                         return Is908GPU(x) || Is90aGPU(x);
+                         return x.is908GPU() || x.is90aGPU();
                      });
         return retval;
     }
@@ -213,10 +188,11 @@ namespace GPUArchitectureGenerator
     inline std::vector<rocRoller::GPUArchitectureTarget> gfx94XISAs()
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
-        std::copy_if(SupportedISAs.begin(),
-                     SupportedISAs.end(),
-                     std::back_inserter(retval),
-                     [](rocRoller::GPUArchitectureTarget const& x) -> bool { return Is94XGPU(x); });
+        std::copy_if(
+            SupportedArchitectures.begin(),
+            SupportedArchitectures.end(),
+            std::back_inserter(retval),
+            [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.is94XGPU(); });
         return retval;
     }
 
@@ -225,23 +201,25 @@ namespace GPUArchitectureGenerator
                              std::function<bool(const rocRoller::GPUArchitectureTarget&)>,
                              rocRoller::GPUCapability::Hash>
         PredicateCaps = {
-            {rocRoller::GPUCapability::SeparateVscnt, Is10XGPU},
+            {rocRoller::GPUCapability::SeparateVscnt,
+             [](rocRoller::GPUArchitectureTarget x) -> bool { return x.is10XGPU(); }},
 
             {rocRoller::GPUCapability::CMPXWritesSGPR,
-             [](rocRoller::GPUArchitectureTarget x) -> bool { return !Is10XGPU(x); }},
+             [](rocRoller::GPUArchitectureTarget x) -> bool { return !x.is10XGPU(); }},
 
             {rocRoller::GPUCapability::UnalignedSGPRs,
-             [](rocRoller::GPUArchitectureTarget x) -> bool { return Is10XGPU(x); }},
+             [](rocRoller::GPUArchitectureTarget x) -> bool { return x.is10XGPU(); }},
 
-            {rocRoller::GPUCapability::HasWave32, Is10XGPU},
+            {rocRoller::GPUCapability::HasWave32,
+             [](rocRoller::GPUArchitectureTarget x) -> bool { return x.is10XGPU(); }},
 
             {rocRoller::GPUCapability::HasXnack,
-             [](rocRoller::GPUArchitectureTarget x) -> bool {
-                 return x.toString().find("xnack+") != std::string::npos;
-             }},
+             [](rocRoller::GPUArchitectureTarget x) -> bool { return x.features.xnack; }},
 
             {rocRoller::GPUCapability::PackedWorkitemIDs,
-             [](rocRoller::GPUArchitectureTarget x) -> bool { return Is90aGPU(x) || Is94XGPU(x); }},
+             [](rocRoller::GPUArchitectureTarget x) -> bool {
+                 return x.is90aGPU() || x.is94XGPU();
+             }},
 
     };
     // This is the way to add a set of instructions that have the same wait value and wait queues.
@@ -775,7 +753,7 @@ namespace GPUArchitectureGenerator
     const std::vector<std::tuple<std::vector<rocRoller::GPUArchitectureTarget>,
                                  std::vector<rocRoller::GPUInstructionInfo>>>
         InstructionInfos
-        = {{SupportedISAs,
+        = {{SupportedArchitectures,
             {
                 rocRoller::GPUInstructionInfo(
                     "s_endpgm", -1, {rocRoller::GPUWaitQueueType::FinalInstruction}),

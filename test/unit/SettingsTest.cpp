@@ -26,7 +26,7 @@ namespace rocRollerTest
 
     class EnvSettings : public GenericContextFixture
     {
-        void SetUp()
+        void SetUp() override
         {
             for(auto const& setting : SettingsOptionBase::instances())
             {
@@ -47,7 +47,7 @@ namespace rocRollerTest
             GenericContextFixture::SetUp();
         }
 
-        void TearDown()
+        void TearDown() override
         {
             for(auto& env : m_envVars)
             {

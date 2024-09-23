@@ -27,11 +27,6 @@ namespace rocRoller
             return GPUInstructionInfo::isVCMPX(inst.getOpCode());
         };
 
-        bool CMPXWriteExec::writeTrigger() const
-        {
-            return true;
-        }
-
         int CMPXWriteExec::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isMFMA(inst.getOpCode())

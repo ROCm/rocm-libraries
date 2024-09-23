@@ -54,7 +54,7 @@ namespace rocRoller
                 m_assemblyFile.flush();
             }
 
-            static bool required(ContextPtr)
+            static bool required(GPUArchitectureTarget const& target)
             {
                 return Settings::getInstance()->get(Settings::SaveAssembly);
             }

@@ -29,7 +29,7 @@ namespace rocRollerTest
     class HazardObserverTest : public GenericContextFixture
     {
     protected:
-        std::string targetArchitecture() override
+        GPUArchitectureTarget targetArchitecture() override
         {
             // clang-format off
             static_assert(
@@ -42,15 +42,15 @@ namespace rocRollerTest
             // clang-format on
 
             if constexpr(std::is_same_v<Arch, Gfx908>)
-                return "gfx908";
+                return {GPUArchitectureGFX::GFX908};
             else if constexpr(std::is_same_v<Arch, Gfx90a>)
-                return "gfx90a";
+                return {GPUArchitectureGFX::GFX90A};
             else if constexpr(std::is_same_v<Arch, Gfx940>)
-                return "gfx940";
+                return {GPUArchitectureGFX::GFX940};
             else if constexpr(std::is_same_v<Arch, Gfx941>)
-                return "gfx941";
+                return {GPUArchitectureGFX::GFX941};
             else
-                return "gfx942";
+                return {GPUArchitectureGFX::GFX942};
         }
 
         void peekAndSchedule(Instruction& inst, uint expectedNops = 0)

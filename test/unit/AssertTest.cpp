@@ -29,7 +29,7 @@ namespace AssertTest
     public:
         Expression::FastArithmetic fastArith{m_context};
 
-        void SetUp()
+        void SetUp() override
         {
             CurrentGPUContextFixture::SetUp();
             Settings::getInstance()->set(Settings::SaveAssembly, true);
@@ -47,11 +47,11 @@ namespace AssertTest
 
     TEST_P(AssertTestGPU, Assert)
     {
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9
-           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        if(!m_context->targetArchitecture().target().is9XGPU()
+           || m_context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX900)
         {
             GTEST_SKIP() << "Skipping GPU assert tests for "
-                         << m_context->targetArchitecture().target().getVersionString();
+                         << m_context->targetArchitecture().target().toString();
         }
 
         AssertOpKind assertOpKind;
@@ -175,11 +175,11 @@ namespace AssertTest
 
     TEST_P(AssertTestGPU, UnconditionalAssert)
     {
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9
-           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        if(!m_context->targetArchitecture().target().is9XGPU()
+           || m_context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX900)
         {
             GTEST_SKIP() << "Skipping GPU assert tests for "
-                         << m_context->targetArchitecture().target().getVersionString();
+                         << m_context->targetArchitecture().target().toString();
         }
 
         AssertOpKind assertOpKind;

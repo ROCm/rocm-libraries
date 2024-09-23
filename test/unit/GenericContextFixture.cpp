@@ -12,15 +12,15 @@ void GenericContextFixture::SetUp()
     EXPECT_EQ(true, m_context->targetArchitecture().HasCapability(GPUCapability::SupportedISA));
 }
 
+rocRoller::GPUArchitectureTarget GenericContextFixture::targetArchitecture()
+{
+    return rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1012,
+                                            {.xnack = true}};
+}
+
 rocRoller::ContextPtr GenericContextFixture::createContext()
 {
     using namespace rocRoller;
 
-    GPUArchitectureTarget target(targetArchitecture());
-    return Context::ForTarget(target, testKernelName(), m_kernelOptions);
-}
-
-std::string GenericContextFixture::targetArchitecture()
-{
-    return "gfx1012:xnack+";
+    return Context::ForTarget(targetArchitecture(), testKernelName(), m_kernelOptions);
 }

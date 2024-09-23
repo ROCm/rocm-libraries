@@ -51,7 +51,7 @@ namespace rocRoller
             throw std::runtime_error("Unable to create temporary directory");
 
         std::string outputName = kernelName.size() ? kernelName : "a";
-        outputName += "_" + target.toString();
+        outputName += "_" + toString(target);
         std::replace(outputName.begin(), outputName.end(), ':', '-');
         std::string tmpObjectFile       = std::string(tmpFolder) + "/" + outputName + ".o";
         std::string tmpSharedObjectFile = std::string(tmpFolder) + "/" + outputName + ".so";
@@ -59,8 +59,8 @@ namespace rocRoller
         try
         {
             assemble(machineCode.c_str(),
-                     target.getVersionString().c_str(),
-                     target.getLLVMFeatureString().c_str(),
+                     toString(target.gfx).c_str(),
+                     target.features.toLLVMString().c_str(),
                      tmpObjectFile.c_str());
             link(tmpObjectFile.c_str(), tmpSharedObjectFile.c_str());
         }

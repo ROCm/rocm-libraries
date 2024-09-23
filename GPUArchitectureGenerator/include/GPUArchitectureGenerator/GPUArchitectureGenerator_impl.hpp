@@ -145,7 +145,7 @@ namespace GPUArchitectureGenerator
     {
         GPUArchitectures.clear();
 
-        for(const auto& isaVersion : SupportedISAs)
+        for(const auto& isaVersion : SupportedArchitectures)
         {
             for(const auto& query : AssemblerQueries)
             {

@@ -15,11 +15,6 @@ namespace rocRoller
             return inst.getOpCode() == m_targetOpCode;
         };
 
-        bool DGEMM4x4x4Write::writeTrigger() const
-        {
-            return true;
-        }
-
         int DGEMM4x4x4Write::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isMFMA(inst.getOpCode()))

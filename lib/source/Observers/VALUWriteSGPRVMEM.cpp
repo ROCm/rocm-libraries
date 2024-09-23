@@ -15,11 +15,6 @@ namespace rocRoller
             return GPUInstructionInfo::isVALU(inst.getOpCode());
         }
 
-        bool VALUWriteSGPRVMEM::writeTrigger() const
-        {
-            return true;
-        }
-
         int VALUWriteSGPRVMEM::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isVMEM(inst.getOpCode()))

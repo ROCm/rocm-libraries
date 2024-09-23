@@ -140,14 +140,15 @@ namespace MemoryInstructionsTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(ScalarMemoryInstructionsTest,
-                             ScalarMemoryInstructionsTest,
-                             ::testing::Combine(::testing::Values("gfx90a",
-                                                                  "gfx908",
-                                                                  "gfx940",
-                                                                  "gfx941"
-                                                                  "gfx942"),
-                                                ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
+    INSTANTIATE_TEST_SUITE_P(
+        ScalarMemoryInstructionsTest,
+        ScalarMemoryInstructionsTest,
+        ::testing::Combine(::testing::Values(GPUArchitectureTarget{GPUArchitectureGFX::GFX90A},
+                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX908},
+                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX940},
+                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX941},
+                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX942}),
+                           ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
 
     struct FlatMemoryInstructionsTest : public GPUContextFixtureParam<int>
     {
@@ -1396,7 +1397,8 @@ namespace MemoryInstructionsTest
 
     INSTANTIATE_TEST_SUITE_P(MemoryInstructions942Test,
                              MemoryInstructions942Test,
-                             ::testing::Combine(::testing::Values("gfx942:sramecc+"),
+                             ::testing::Combine(::testing::Values(GPUArchitectureTarget{
+                                                    GPUArchitectureGFX::GFX942, {.sramecc = true}}),
                                                 ::testing::Values(rocRoller::DataType::FP8x4,
                                                                   rocRoller::DataType::BF8x4)));
 }

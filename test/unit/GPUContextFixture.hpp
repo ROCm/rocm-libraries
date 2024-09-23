@@ -54,7 +54,7 @@ inline auto currentGPUISA()
 {
     auto currentDevice
         = rocRoller::GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
-    return ::testing::Values(currentDevice.target().toString());
+    return ::testing::Values(currentDevice.target());
 }
 
 /**
@@ -89,7 +89,7 @@ protected:
     void SetUp() override;
 
     rocRoller::ContextPtr createContextLocalDevice();
-    rocRoller::ContextPtr createContextForArch(std::string const& device);
+    rocRoller::ContextPtr createContextForArch(rocRoller::GPUArchitectureTarget const& device);
 };
 
 class CurrentGPUContextFixture : public BaseGPUContextFixture
@@ -99,13 +99,14 @@ protected:
 };
 
 template <typename... Ts>
-class GPUContextFixtureParam : public BaseGPUContextFixture,
-                               public ::testing::WithParamInterface<std::tuple<std::string, Ts...>>
+class GPUContextFixtureParam
+    : public BaseGPUContextFixture,
+      public ::testing::WithParamInterface<std::tuple<rocRoller::GPUArchitectureTarget, Ts...>>
 {
 protected:
     virtual rocRoller::ContextPtr createContext() override
     {
-        std::string device = std::get<0>(this->GetParam());
+        rocRoller::GPUArchitectureTarget device = std::get<0>(this->GetParam());
 
         return this->createContextForArch(device);
     }
@@ -113,22 +114,22 @@ protected:
 
 using GPUContextFixture = GPUContextFixtureParam<>;
 
-#define REQUIRE_ARCH_CAP(cap)                                                                 \
-    do                                                                                        \
-    {                                                                                         \
-        if(!m_context->targetArchitecture().HasCapability(cap))                               \
-        {                                                                                     \
-            GTEST_SKIP() << m_context->targetArchitecture().target() << " has no capability " \
-                         << cap << std::endl;                                                 \
-        }                                                                                     \
+#define REQUIRE_ARCH_CAP(cap)                                                   \
+    do                                                                          \
+    {                                                                           \
+        if(!m_context->targetArchitecture().HasCapability(cap))                 \
+        {                                                                       \
+            GTEST_SKIP() << m_context->targetArchitecture().target().toString() \
+                         << " has no capability " << cap << std::endl;          \
+        }                                                                       \
     } while(0)
 
-#define REQUIRE_NOT_ARCH_CAP(cap)                                                                 \
-    do                                                                                            \
-    {                                                                                             \
-        if(m_context->targetArchitecture().HasCapability(cap))                                    \
-        {                                                                                         \
-            GTEST_SKIP() << m_context->targetArchitecture().target() << " has capability " << cap \
-                         << std::endl;                                                            \
-        }                                                                                         \
+#define REQUIRE_NOT_ARCH_CAP(cap)                                               \
+    do                                                                          \
+    {                                                                           \
+        if(m_context->targetArchitecture().HasCapability(cap))                  \
+        {                                                                       \
+            GTEST_SKIP() << m_context->targetArchitecture().target().toString() \
+                         << " has capability " << cap << std::endl;             \
+        }                                                                       \
     } while(0)

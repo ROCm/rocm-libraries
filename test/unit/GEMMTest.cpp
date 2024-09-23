@@ -478,7 +478,7 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
     {
-        if(m_context->targetArchitecture().target().getVersionString() == "gfx908")
+        if(m_context->targetArchitecture().target().is908GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMBeta0StreamK test";
         }
@@ -517,7 +517,7 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMStreamK)
     {
-        if(m_context->targetArchitecture().target().getVersionString() == "gfx908")
+        if(m_context->targetArchitecture().target().is908GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -554,7 +554,7 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
     {
-        if(m_context->targetArchitecture().target().getVersionString() != "gfx90a")
+        if(!m_context->targetArchitecture().target().is90aGPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -607,7 +607,7 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
-        if(m_context->targetArchitecture().target().getVersionString() != "gfx90a")
+        if(!m_context->targetArchitecture().target().is90aGPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }

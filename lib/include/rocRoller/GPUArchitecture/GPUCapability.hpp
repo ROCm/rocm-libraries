@@ -76,7 +76,6 @@ namespace rocRoller
             MaxExpcnt,
             SupportedSource,
 
-            HasEccHalf,
             Waitcnt0Disabled,
             SeparateVscnt,
             CMPXWritesSGPR,

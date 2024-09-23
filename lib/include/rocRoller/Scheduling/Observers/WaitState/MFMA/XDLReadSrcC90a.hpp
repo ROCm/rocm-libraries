@@ -18,14 +18,17 @@ namespace rocRoller
          */
             void observeHazard(Instruction const& inst) override;
 
-            static bool required(ContextPtr context)
+            constexpr static bool required(GPUArchitectureTarget const& target)
             {
-                return context->targetArchitecture().target().getVersionString() == "gfx90a";
+                return target.is90aGPU();
             }
 
-            int         getMaxNops(Instruction const& inst) const;
-            bool        trigger(Instruction const& inst) const;
-            bool        writeTrigger() const;
+            int                   getMaxNops(Instruction const& inst) const;
+            bool                  trigger(Instruction const& inst) const;
+            static constexpr bool writeTrigger()
+            {
+                return false;
+            }
             int         getNops(Instruction const& inst) const;
             std::string getComment() const
             {

@@ -16,9 +16,9 @@ namespace rocRollerTest
 {
     struct CostTest : public GenericContextFixture
     {
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx90a";
+            return {GPUArchitectureGFX::GFX90A};
         }
     };
 

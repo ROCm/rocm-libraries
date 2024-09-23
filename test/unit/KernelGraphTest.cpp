@@ -43,7 +43,7 @@ namespace KernelGraphTest
     public:
         Expression::FastArithmetic fastArith{m_context};
 
-        void SetUp()
+        void SetUp() override
         {
             Settings::getInstance()->set(Settings::SaveAssembly, true);
             CurrentGPUContextFixture::SetUp();
@@ -59,7 +59,7 @@ namespace KernelGraphTest
     public:
         Expression::FastArithmetic fastArith{m_context};
 
-        void SetUp()
+        void SetUp() override
         {
             GenericContextFixture::SetUp();
             fastArith = Expression::FastArithmetic(m_context);
@@ -2373,11 +2373,11 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, Conditional)
     {
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9
-           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        if(!m_context->targetArchitecture().target().is9XGPU()
+           || m_context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX900)
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for "
-                         << m_context->targetArchitecture().target().getVersionString();
+                         << m_context->targetArchitecture().target().toString();
         }
 
         rocRoller::KernelGraph::KernelGraph kgraph;
@@ -2416,11 +2416,11 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, ConditionalExecute)
     {
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9
-           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        if(!m_context->targetArchitecture().target().is9XGPU()
+           || m_context->targetArchitecture().target().gfx == GPUArchitectureGFX::GFX900)
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for "
-                         << m_context->targetArchitecture().target().getVersionString();
+                         << m_context->targetArchitecture().target().toString();
         }
 
         rocRoller::KernelGraph::KernelGraph kgraph;

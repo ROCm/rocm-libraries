@@ -30,7 +30,7 @@ public:
 
     void observe(Instruction const& inst) {}
 
-    static bool required(ContextPtr)
+    constexpr static bool required(GPUArchitectureTarget const& target)
     {
         return false;
     }
@@ -58,7 +58,7 @@ public:
 
     void observe(Instruction const& inst) {}
 
-    static bool required(ContextPtr)
+    constexpr static bool required(GPUArchitectureTarget const& target)
     {
         return true;
     }
@@ -99,8 +99,8 @@ TEST_F(MetaObserverTest, Required)
 
     rocRoller::ContextPtr m_context = std::make_shared<Context>();
 
-    EXPECT_TRUE(TrueTrueObserver::required(m_context));
-    EXPECT_FALSE(FalseFalseObserver::required(m_context));
-    EXPECT_FALSE(FalseTrueObserver::required(m_context));
-    EXPECT_FALSE(TrueFalseObserver::required(m_context));
+    EXPECT_TRUE(TrueTrueObserver::required(m_context->targetArchitecture().target()));
+    EXPECT_FALSE(FalseFalseObserver::required(m_context->targetArchitecture().target()));
+    EXPECT_FALSE(FalseTrueObserver::required(m_context->targetArchitecture().target()));
+    EXPECT_FALSE(TrueFalseObserver::required(m_context->targetArchitecture().target()));
 }

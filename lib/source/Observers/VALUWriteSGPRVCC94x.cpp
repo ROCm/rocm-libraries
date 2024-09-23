@@ -23,11 +23,6 @@ namespace rocRoller
                            || GPUInstructionInfo::isUIntInst(inst.getOpCode())));
         };
 
-        bool VALUWriteSGPRVCC94x::writeTrigger() const
-        {
-            return true;
-        }
-
         int VALUWriteSGPRVCC94x::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isVReadlane(inst.getOpCode())

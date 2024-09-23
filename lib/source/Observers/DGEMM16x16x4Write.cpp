@@ -20,11 +20,6 @@ namespace rocRoller
             return false;
         };
 
-        bool DGEMM16x16x4Write::writeTrigger() const
-        {
-            return true;
-        }
-
         int DGEMM16x16x4Write::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isMFMA(inst.getOpCode()))

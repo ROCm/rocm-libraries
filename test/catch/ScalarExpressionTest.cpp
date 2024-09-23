@@ -37,7 +37,7 @@ namespace ExpressionTest
             : AssemblyTestKernel(context)
         {
             auto arch = m_context->targetArchitecture().target();
-            if(arch.getMajorVersion() != 9)
+            if(!arch.is9XGPU())
                 SKIP("Test not yet supported on " << arch);
         }
 

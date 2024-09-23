@@ -24,7 +24,7 @@ namespace rocRoller
 
             void observe(Instruction const& inst);
 
-            static bool required(ContextPtr)
+            constexpr static bool required(GPUArchitectureTarget const& target)
             {
                 return true;
             }

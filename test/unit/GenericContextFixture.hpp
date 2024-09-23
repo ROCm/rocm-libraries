@@ -7,7 +7,7 @@ class GenericContextFixture : public ContextFixture
 protected:
     void SetUp() override;
 
-    virtual rocRoller::ContextPtr createContext() override;
+    rocRoller::ContextPtr createContext() override;
 
-    virtual std::string targetArchitecture();
+    virtual rocRoller::GPUArchitectureTarget targetArchitecture();
 };

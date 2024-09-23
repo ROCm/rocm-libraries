@@ -129,7 +129,7 @@ namespace rocRoller
             }
         }
 
-        bool RegisterLivenessObserver::required(ContextPtr)
+        bool RegisterLivenessObserver::required(GPUArchitectureTarget const& target)
         {
             return Settings::getInstance()->get(Settings::KernelAnalysis);
         }
@@ -199,6 +199,7 @@ namespace rocRoller
 
         void RegisterLivenessObserver::handleBranchLiveness()
         {
+            AssertFatal(!m_history.empty(), "No scheduled history to check");
             for(size_t inst = m_history.size() - 1; inst < m_history.size(); inst--)
             {
                 if(!m_history[inst].isBranch && !m_history[inst].label.empty())

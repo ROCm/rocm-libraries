@@ -14,9 +14,9 @@
 
 namespace rocRoller
 {
-    inline GPUArchitectureTarget const& GPUArchitecture::target() const
+    inline constexpr GPUArchitectureTarget const& GPUArchitecture::target() const
     {
-        return m_isaVersion;
+        return m_archTarget;
     }
 
     inline void GPUArchitecture::AddCapability(GPUCapability const& capability, int value)
@@ -76,13 +76,10 @@ namespace rocRoller
         }
     }
 
-    inline GPUArchitecture::GPUArchitecture()
-        : m_isaVersion(GPUArchitectureTarget())
-    {
-    }
+    inline GPUArchitecture::GPUArchitecture() {}
 
     inline GPUArchitecture::GPUArchitecture(GPUArchitectureTarget const& isaVersion)
-        : m_isaVersion(isaVersion)
+        : m_archTarget(isaVersion)
     {
     }
 
@@ -90,7 +87,7 @@ namespace rocRoller
         GPUArchitectureTarget const&                     isaVersion,
         std::map<GPUCapability, int> const&              capabilities,
         std::map<std::string, GPUInstructionInfo> const& instruction_infos)
-        : m_isaVersion(isaVersion)
+        : m_archTarget(isaVersion)
         , m_capabilities(capabilities)
         , m_instructionInfos(instruction_infos)
     {
@@ -114,19 +111,6 @@ namespace rocRoller
     {
         os << input.toString();
         return os;
-    }
-
-    inline std::ostream& operator<<(std::ostream& os, GPUArchitectureTarget const& input)
-    {
-        return (os << input.toString());
-    }
-
-    inline std::istream& operator>>(std::istream& is, GPUArchitectureTarget& input)
-    {
-        std::string recvd;
-        is >> recvd;
-        input.parseString(recvd);
-        return is;
     }
 
     template <std::integral T>

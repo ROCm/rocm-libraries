@@ -13,12 +13,12 @@ namespace rocRollerTest
     class FileWritingObserverTest : public GenericContextFixture
     {
     protected:
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx90a";
+            return {GPUArchitectureGFX::GFX90A};
         }
 
-        void SetUp()
+        void SetUp() override
         {
             Settings::getInstance()->set(Settings::SaveAssembly, true);
             Settings::getInstance()->set(Settings::AssemblyFile, testKernelName());
@@ -60,12 +60,12 @@ namespace rocRollerTest
     class FileWritingObserverNegativeTest : public GenericContextFixture
     {
     protected:
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx90a";
+            return {GPUArchitectureGFX::GFX90A};
         }
 
-        void SetUp()
+        void SetUp() override
         {
             Settings::getInstance()->set(Settings::SaveAssembly, false);
             Settings::getInstance()->set(Settings::AssemblyFile, testKernelName());

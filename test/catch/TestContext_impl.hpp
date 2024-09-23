@@ -38,15 +38,6 @@ TestContext TestContext::ForTarget(rocRoller::GPUArchitectureTarget const& arch,
 }
 
 template <typename... Params>
-TestContext TestContext::ForTarget(std::string const&              arch,
-                                   rocRoller::KernelOptions const& kernelOpts,
-                                   Params const&... params)
-{
-    rocRoller::GPUArchitectureTarget target(arch);
-    return ForTarget(target, kernelOpts, params...);
-}
-
-template <typename... Params>
 TestContext TestContext::ForTarget(rocRoller::GPUArchitecture const& arch,
                                    rocRoller::KernelOptions const&   kernelOpts,
                                    Params const&... params)
@@ -60,7 +51,7 @@ template <typename... Params>
 TestContext TestContext::ForDefaultTarget(rocRoller::KernelOptions const& kernelOpts,
                                           Params const&... params)
 {
-    return ForTarget("gfx90a", kernelOpts, params...);
+    return ForTarget({rocRoller::GPUArchitectureGFX::GFX90A}, kernelOpts, params...);
 }
 
 template <typename... Params>

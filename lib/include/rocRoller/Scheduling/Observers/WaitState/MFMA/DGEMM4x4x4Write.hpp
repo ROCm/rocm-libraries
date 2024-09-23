@@ -36,15 +36,17 @@ namespace rocRoller
             DGEMM4x4x4Write(ContextPtr context)
                 : WaitStateObserver<DGEMM4x4x4Write>(context){};
 
-            static bool required(ContextPtr context)
+            constexpr static bool required(GPUArchitectureTarget const& target)
             {
-                auto arch = context->targetArchitecture().target().getVersionString();
-                return arch == "gfx90a" || arch == "gfx940" || arch == "gfx941" || arch == "gfx942";
+                return target.is90aGPU() || target.is94XGPU();
             }
 
-            int         getMaxNops(Instruction const& inst) const;
-            bool        trigger(Instruction const& inst) const;
-            bool        writeTrigger() const;
+            int                   getMaxNops(Instruction const& inst) const;
+            bool                  trigger(Instruction const& inst) const;
+            static constexpr bool writeTrigger()
+            {
+                return true;
+            }
             int         getNops(Instruction const& inst) const;
             std::string getComment() const
             {
