@@ -457,11 +457,11 @@ namespace rocRoller
                             },
                             [](Operations::E_Abs const& op) -> Expression::ExpressionPtr {
                                 // TODO Implement E_Abs XOp
-                                Throw<FatalError>("Not implemented yet.");
+                                Throw<FatalError>("T_Execute E_Abs not implemented yet.");
                             },
                             [](Operations::E_Not const& op) -> Expression::ExpressionPtr {
                                 // TODO Implement E_Not XOp
-                                Throw<FatalError>("Not implemented yet.");
+                                Throw<FatalError>("T_Execute E_Not not implemented yet.");
                             },
                             [&](Operations::E_Cvt const& op) -> Expression::ExpressionPtr {
                                 switch(op.destType)
@@ -478,8 +478,11 @@ namespace rocRoller
                                 case DataType::BF8:
                                     return std::make_shared<Expression::Expression>(
                                         Expression::Convert<DataType::BF8>{dflow[0]});
+                                case DataType::BFloat16:
+                                    return std::make_shared<Expression::Expression>(
+                                        Expression::Convert<DataType::BFloat16>{dflow[0]});
                                 default:
-                                    Throw<FatalError>("Not implemented yet.");
+                                    Throw<FatalError>("T_Execute E_Cvt type not implemented yet.");
                                 }
                             },
                             [&](Operations::E_Add const& op) -> Expression::ExpressionPtr {
@@ -500,11 +503,11 @@ namespace rocRoller
                             },
                             [](Operations::E_And const& op) -> Expression::ExpressionPtr {
                                 // TODO Implement E_And XOp
-                                Throw<FatalError>("Not implemented yet.");
+                                Throw<FatalError>("T_Execute E_And not implemented yet.");
                             },
                             [](Operations::E_Or const& op) -> Expression::ExpressionPtr {
                                 // TODO Implement E_Or XOp
-                                Throw<FatalError>("Not implemented yet.");
+                                Throw<FatalError>("T_Execute E_Or not implemented yet.");
                             },
                             [&](Operations::E_GreaterThan const& op) -> Expression::ExpressionPtr {
                                 return std::make_shared<Expression::Expression>(

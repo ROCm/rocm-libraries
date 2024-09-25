@@ -267,7 +267,7 @@ namespace rocRoller
             break;
 
             default:
-                Throw<FatalError>("Not implemented yet.");
+                Throw<FatalError>("addLoadWaveTileCT waveTile.layout not implemented yet.");
             }
         }
 

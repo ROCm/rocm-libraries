@@ -217,7 +217,7 @@ namespace rocRoller
     // -----------------------------
     // Helper Functions
 
-    DataType getArithDataType(Register::ValuePtr reg)
+    DataType getArithDataType(Register::ValuePtr const reg)
     {
         AssertFatal(reg != nullptr, "Null argument");
 
@@ -231,7 +231,9 @@ namespace rocRoller
         return variableType.getArithmeticType();
     }
 
-    DataType promoteDataType(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    DataType promoteDataType(Register::ValuePtr const dst,
+                             Register::ValuePtr       lhs,
+                             Register::ValuePtr       rhs)
     {
         AssertFatal(lhs != nullptr, "Null argument");
         AssertFatal(rhs != nullptr, "Null argument");

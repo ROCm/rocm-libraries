@@ -551,7 +551,7 @@ namespace rocRollerTest
         Log::info("C = Convert(A) RNorm is {}", res.relativeNormL2);
     }
 
-    TEST_F(ConversionTest, Float2FP8_VGPR)
+    TEST_F(ConversionTest, GPU_FloatToFP8_VGPR)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
@@ -559,7 +559,7 @@ namespace rocRollerTest
         convertTo<rocRoller::FP8>(srcData, cs, false /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, Float2FP8_LDS)
+    TEST_F(ConversionTest, GPU_FloatToFP8_LDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
@@ -567,7 +567,7 @@ namespace rocRollerTest
         convertTo<rocRoller::FP8>(srcData, cs, true /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, Float2BF8_VGPR)
+    TEST_F(ConversionTest, GPU_FloatToBF8_VGPR)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
@@ -575,7 +575,7 @@ namespace rocRollerTest
         convertTo<rocRoller::BF8>(srcData, cs, false /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, Float2BF8_LDS)
+    TEST_F(ConversionTest, GPU_FloatToBF8_LDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
@@ -583,35 +583,49 @@ namespace rocRollerTest
         convertTo<rocRoller::BF8>(srcData, cs, true /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, Float2Half_VGPR)
+    TEST_F(ConversionTest, GPU_FloatToHalf_VGPR)
     {
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               srcData = cs.generateData<float>();
         convertTo<rocRoller::Half>(srcData, cs, false /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, Float2Half_LDS)
+    TEST_F(ConversionTest, GPU_FloatToHalf_LDS)
     {
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               srcData = cs.generateData<float>();
         convertTo<rocRoller::Half>(srcData, cs, true /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, Half2Float_VGPR)
+    TEST_F(ConversionTest, GPU_HalfToFloat_VGPR)
     {
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               srcData = cs.generateData<Half>();
         convertTo<float>(srcData, cs, false /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, Half2Float_LDS)
+    TEST_F(ConversionTest, GPU_HalfToFloat_LDS)
     {
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               srcData = cs.generateData<Half>();
         convertTo<float>(srcData, cs, true /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, AddFloat2Half_LDS)
+    TEST_F(ConversionTest, GPU_BF16ToFloat_LDS)
+    {
+        ConversionSettings cs(256, 512, 16, 8, 4, 4);
+        auto               srcData = cs.generateData<BFloat16>();
+        convertTo<float>(srcData, cs, true /* load A in LDS */);
+    }
+
+    TEST_F(ConversionTest, GPU_FloatToBF16_LDS)
+    {
+        ConversionSettings cs(256, 512, 16, 8, 4, 4);
+        auto               srcData = cs.generateData<float>();
+        convertTo<BFloat16>(srcData, cs, true /* load A in LDS */);
+    }
+
+    TEST_F(ConversionTest, GPU_AddFloatToHalf_LDS)
     {
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               a = cs.generateData<float>(12345u);
@@ -620,7 +634,7 @@ namespace rocRollerTest
         convertAdd<rocRoller::Half>(a, b, cs, true /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, AddFloat2Half_VGPR)
+    TEST_F(ConversionTest, GPU_AddFloatToHalf_VGPR)
     {
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               a = cs.generateData<float>(12345u);
@@ -629,7 +643,7 @@ namespace rocRollerTest
         convertAdd<rocRoller::Half>(a, b, cs, false /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, AddHalf2Float_LDS)
+    TEST_F(ConversionTest, GPU_AddHalfToFloat_LDS)
     {
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               a = cs.generateData<Half>(12345u);
@@ -638,7 +652,7 @@ namespace rocRollerTest
         convertAdd<float>(a, b, cs, true /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, AddHalf2Float_VGPR)
+    TEST_F(ConversionTest, GPU_AddHalfToFloat_VGPR)
     {
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               a = cs.generateData<Half>(12345u);
@@ -647,30 +661,29 @@ namespace rocRollerTest
         convertAdd<float>(a, b, cs, false /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, MatrixMultiplyABC_F32_Half)
+    TEST_F(ConversionTest, GPU_MatrixMultiplyABC_F32_Half)
     {
         // D (Half) = Convert( A (F32) * B (F32) + C (F32) )
         matrixMultiplyABC<float, float, Half>(32, 32, 2, 1, 2.e-6);
     }
 
-    TEST_F(ConversionTest, MatrixMultiplyABC_F32_FP8)
+    TEST_F(ConversionTest, GPU_MatrixMultiplyABC_F32_FP8)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
         // D (FP8) = Convert( A (FP8) * B (FP8) + C (F32) )
         matrixMultiplyABC<FP8, float, FP8>(16, 16, 32, 1, 2.e-6);
     }
 
-    TEST_F(ConversionTest, MatrixMultiplyABC_F32_BF8)
+    TEST_F(ConversionTest, GPU_MatrixMultiplyABC_F32_BF8)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
         // D (BF8) = Convert( A (BF8) * B (BF8) + C (F32) )
         matrixMultiplyABC<BF8, float, BF8>(16, 16, 32, 1, 2.e-6);
     }
 
-    TEST_F(ConversionTest, MatrixMultiply)
+    TEST_F(ConversionTest, GPU_MatrixMultiply)
     {
         // D (Half) = Convert( A (F32) * B (F32) )
         matrixMultiply<float, Half>(32, 32, 2, 1, 2.e-6);
     }
-
 }

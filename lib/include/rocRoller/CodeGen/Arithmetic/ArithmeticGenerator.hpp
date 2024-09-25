@@ -229,7 +229,7 @@ namespace rocRoller
 
     template <Expression::CBinary Operation>
     Generator<Instruction>
-        generateOp(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        generateOp(Register::ValuePtr const dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
         auto gen = GetGenerator<Operation>(dst, lhs, rhs);
         AssertFatal(gen != nullptr, "No generator");
@@ -276,17 +276,17 @@ namespace rocRoller
      * @param reg
      * @return DataType
      */
-    DataType getArithDataType(Register::ValuePtr reg);
+    DataType getArithDataType(Register::ValuePtr const reg);
 
     // Return the context from a list of register values.
-    inline ContextPtr getContextFromValues(Register::ValuePtr r)
+    inline ContextPtr getContextFromValues(Register::ValuePtr const r)
     {
         AssertFatal(r != nullptr, "No context");
         return r->context();
     }
 
     template <typename... Args>
-    inline ContextPtr getContextFromValues(Register::ValuePtr arg, Args... args)
+    inline ContextPtr getContextFromValues(Register::ValuePtr const arg, Args... args)
     {
         if(arg && arg->context())
         {
