@@ -551,7 +551,7 @@ namespace RegisterAllocatorTest
     {
     };
 
-    TEST_P(ARCH_RegisterAllocatorTest, AlignedSGPR)
+    TEST_P(ARCH_RegisterAllocatorTest, GPU_AlignedSGPR)
     {
         auto k = m_context->kernel();
 

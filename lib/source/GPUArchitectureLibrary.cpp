@@ -72,4 +72,10 @@ namespace rocRoller
         int idx;
         return GetDefaultHipDeviceArch(idx);
     }
+
+    bool GPUArchitectureLibrary::HasHipDevice()
+    {
+        int idx;
+        return hipGetDevice(&idx) == hipSuccess;
+    }
 }

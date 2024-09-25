@@ -92,7 +92,7 @@ namespace AddStreamKTest
                     ASSERT_EQ((coverage[{m, n, k}]), 1);
     }
 
-    struct AddStreamKTestGPU : public GPUContextFixtureParam<bool>
+    struct GPU_AddStreamKTest : public GPUContextFixtureParam<bool>
     {
     protected:
         void SetUp() override
@@ -136,7 +136,7 @@ namespace AddStreamKTest
     // Result will be: an M * N * K length array representing the
     // flattened tile-space.  The {m, n, k} entry in the array will be
     // the number of the WG that processed it.
-    TEST_P(AddStreamKTestGPU, GPU_BasicStreamKStore)
+    TEST_P(GPU_AddStreamKTest, GPU_BasicStreamKStore)
     {
         bool twoTile = std::get<1>(GetParam());
 
@@ -315,7 +315,7 @@ namespace AddStreamKTest
     // Result will be: a numCU length array.  The n'th WG will sum
     // the input values in it's local tile-space and store the result
     // in the n'th entry of the output array.
-    TEST_P(AddStreamKTestGPU, GPU_BasicStreamKLoad)
+    TEST_P(GPU_AddStreamKTest, GPU_BasicStreamKLoad)
     {
         bool twoTile = std::get<1>(GetParam());
         if(twoTile)
@@ -500,8 +500,8 @@ namespace AddStreamKTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(AddStreamKTestGPU,
-                             AddStreamKTestGPU,
+    INSTANTIATE_TEST_SUITE_P(GPU_AddStreamKTest,
+                             GPU_AddStreamKTest,
                              ::testing::Combine(currentGPUISA(), ::testing::Values(true, false)));
 
 }

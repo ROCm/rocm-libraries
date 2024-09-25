@@ -48,7 +48,7 @@ namespace rocRollerTest
         EXPECT_THROW(m_context->schedule(brancher.branchConditional(s0, s0, true)), FatalError);
     }
 
-    TEST_P(ARCH_BranchGeneratorTest, Basic)
+    TEST_P(ARCH_BranchGeneratorTest, GPU_Basic)
     {
         auto k = m_context->kernel();
 
@@ -102,7 +102,7 @@ namespace rocRollerTest
         EXPECT_GT(assembledKernel.size(), 0);
     }
 
-    TEST_P(ARCH_BranchGeneratorTest, Wait)
+    TEST_P(ARCH_BranchGeneratorTest, GPU_Wait)
     {
         auto k = m_context->kernel();
 
@@ -134,7 +134,7 @@ namespace rocRollerTest
         EXPECT_EQ(found, true);
     }
 
-    TEST_P(ARCH_BranchGeneratorTest, NoWait)
+    TEST_P(ARCH_BranchGeneratorTest, GPU_NoWait)
     {
         auto k = m_context->kernel();
 

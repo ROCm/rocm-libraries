@@ -50,7 +50,7 @@ namespace rocRollerTest
      * double_and_check(1000) checks for looping and will quit early. Also interleave comments
      * to see how they affect scheduling.
      **/
-    TEST_P(DependencyTest, ForLoopsWithVCC)
+    TEST_P(DependencyTest, GPU_ForLoopsWithVCC)
     {
 
         ASSERT_EQ(true, isLocalDevice());
@@ -218,7 +218,7 @@ namespace rocRollerTest
      * scalar_overflow will check if we overflow and set the result accordingly.
      * However, scalar_compare will overwrite scc before the branch checks scc.
      **/
-    TEST_P(DependencyTest, SCC)
+    TEST_P(DependencyTest, GPU_SCC)
     {
         ASSERT_EQ(true, isLocalDevice());
 
@@ -350,7 +350,7 @@ namespace rocRollerTest
         EXPECT_EQ(resultValue, 3014);
     }
 
-    TEST_P(DependencyTest, VCCCarry)
+    TEST_P(DependencyTest, GPU_VCCCarry)
     {
         auto k = m_context->kernel();
 
@@ -457,7 +457,7 @@ namespace rocRollerTest
      * VCC test that interleaves two streams that both set vcc to different values.
      * Output of the kernel is dependent on vcc value.
      **/
-    TEST_P(DependencyTest, VCC)
+    TEST_P(DependencyTest, GPU_VCC)
     {
         ASSERT_EQ(true, isLocalDevice());
 

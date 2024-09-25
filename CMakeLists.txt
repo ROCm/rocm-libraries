@@ -49,8 +49,6 @@ if(ROCROLLER_USE_HIP)
   find_package(LLD REQUIRED CONFIG HINTS ${LLVM_DIR}/../lld/)
 endif()
 
-find_package(OpenMP)
-
 include(FetchContent)
 FetchContent_Declare(
   googletest
@@ -609,10 +607,11 @@ add_executable(
   ${rocRollerTests_SOURCES}
 )
 
+find_package(OpenMP)
 target_compile_options(rocRollerTests PUBLIC ${EXTRA_COMPILE_OPTIONS})
 target_include_directories(rocRollerTests PUBLIC
-${CMAKE_CURRENT_SOURCE_DIR}/lib/include
-                           )
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
+)
 target_link_options(rocRollerTests PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
   rocRollerTests
@@ -730,14 +729,17 @@ if (NOT CODE_ANALYSIS)
   gtest_discover_tests(rocRollerTests
     XML_OUTPUT_DIR ${TEST_REPORT_DIR}
     TEST_FILTER "-*GPU_*"
+    DISCOVERY_MODE PRE_TEST
   )
   gtest_discover_tests(rocRollerTests
     XML_OUTPUT_DIR ${TEST_REPORT_DIR}
     TEST_FILTER "*GPU_*"
     PROPERTIES "LABELS" "GPU"
+    DISCOVERY_MODE PRE_TEST
   )
   gtest_discover_tests(ArchGenTests
     XML_OUTPUT_DIR ${TEST_REPORT_DIR}
+    DISCOVERY_MODE PRE_TEST
   )
 
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
@@ -748,16 +750,33 @@ catch_discover_tests(rocRollerTests_catch
     OUTPUT_SUFFIX ".xml"
     DISCOVERY_MODE PRE_TEST
     EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+    TEST_SPEC "[gpu]"
     PROPERTIES
       "LABELS" "CATCH"
-      SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped")
+      "LABELS" "GPU"
+      SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped"
+)
+
+include(Catch)
+catch_discover_tests(rocRollerTests_catch
+    REPORTER JUnit
+    OUTPUT_DIR ${TEST_REPORT_DIR}
+    OUTPUT_SUFFIX ".xml"
+    DISCOVERY_MODE PRE_TEST
+    EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+    TEST_SPEC "~[gpu]"
+    PROPERTIES
+      "LABELS" "CATCH"
+      SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped"
+)
 
   # Add script linting
   add_test(NAME PythonLint
            COMMAND flake8
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(PythonLint
-                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}")
+                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}"
+  )
 
   if (ROCROLLER_TESTS_SKIP_SLOW)
     set(PYTHON_TEST_SKIP "-m not slow")
@@ -768,7 +787,8 @@ catch_discover_tests(rocRollerTests_catch
            COMMAND pytest -s --cov-report html:python_cov_html --cov=rrperf scripts ${PYTHON_TEST_SKIP} --junit-xml=${TEST_REPORT_DIR}/python_tests.xml
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(PythonTest
-                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib")
+                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib"
+  )
 
 
   add_test(NAME GraupelInstall

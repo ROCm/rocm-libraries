@@ -6,7 +6,7 @@ filename = *.py,
     **/scripts/show_matrix,
     **/docker/user-image/start_user_container
 
-exclude = scripts/build*, build*, extern, .git, .pytest_cache, __pycache__
+exclude = scripts/build*, build*, extern, .git, .pytest_cache, __pycache__, .venv
 ignore = W503
 max-line-length = 127
 max-complexity = 10

@@ -34,6 +34,7 @@ namespace rocRoller
         GPUArchitecture GetHipDeviceArch(int deviceIdx);
         GPUArchitecture GetDefaultHipDeviceArch(int& deviceIdx);
         GPUArchitecture GetDefaultHipDeviceArch();
+        bool            HasHipDevice();
 
         void GetCurrentDevices(std::vector<GPUArchitecture>&, int&);
 

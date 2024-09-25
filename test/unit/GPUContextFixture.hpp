@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ContextFixture.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 #ifdef ROCROLLER_USE_HIP
@@ -52,9 +53,18 @@ inline auto mfmaSupportedISAValues()
  */
 inline auto currentGPUISA()
 {
-    auto currentDevice
-        = rocRoller::GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
-    return ::testing::Values(currentDevice.target());
+    if(rocRoller::GPUArchitectureLibrary::getInstance()->HasHipDevice())
+    {
+        auto currentDevice
+            = rocRoller::GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
+        return ::testing::Values(currentDevice.target());
+    }
+    else
+    {
+        // Give a dummy device
+        return ::testing::Values(
+            rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A});
+    }
 }
 
 /**
@@ -107,7 +117,6 @@ protected:
     virtual rocRoller::ContextPtr createContext() override
     {
         rocRoller::GPUArchitectureTarget device = std::get<0>(this->GetParam());
-
         return this->createContextForArch(device);
     }
 };

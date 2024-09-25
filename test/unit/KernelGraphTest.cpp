@@ -2371,7 +2371,7 @@ namespace KernelGraphTest
                   "node 0 maps to coordinate node 0, which doesn't exist.");
     }
 
-    TEST_F(KernelGraphTestGPU, Conditional)
+    TEST_F(KernelGraphTestGPU, GPU_Conditional)
     {
         if(!m_context->targetArchitecture().target().is9XGPU()
            || m_context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX900)
@@ -2414,7 +2414,7 @@ namespace KernelGraphTest
         EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v0, 0")); //False Body
     }
 
-    TEST_F(KernelGraphTestGPU, ConditionalExecute)
+    TEST_F(KernelGraphTestGPU, GPU_ConditionalExecute)
     {
         if(!m_context->targetArchitecture().target().is9XGPU()
            || m_context->targetArchitecture().target().gfx == GPUArchitectureGFX::GFX900)
@@ -2518,7 +2518,7 @@ namespace KernelGraphTest
         }
     }
 
-    TEST_F(KernelGraphTestGPU, DoWhileExecute)
+    TEST_F(KernelGraphTestGPU, GPU_DoWhileExecute)
     {
         rocRoller::KernelGraph::KernelGraph kgraph;
 

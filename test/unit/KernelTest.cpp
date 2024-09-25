@@ -214,7 +214,7 @@ amdhsa.kernels:
 #endif
     }
 
-    TEST_P(ARCH_KernelTest, WholeKernel)
+    TEST_P(ARCH_KernelTest, GPU_WholeKernel)
     {
         auto k = m_context->kernel();
 
@@ -309,7 +309,7 @@ amdhsa.kernels:
     {
     };
 
-    TEST_P(GPU_KernelTest, WholeKernel)
+    TEST_P(GPU_KernelTest, GPU_WholeKernel)
     {
         Settings::getInstance()->set(Settings::KernelAssembler, GetParam());
 

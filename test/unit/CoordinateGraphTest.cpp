@@ -1107,7 +1107,7 @@ namespace rocRollerTest
     {
     };
 
-    TEST_P(ARCH_CoordinateGraphTest, TensorTile2DLoadStore04)
+    TEST_P(ARCH_CoordinateGraphTest, GPU_TensorTile2DLoadStore04)
     {
         auto ct = CoordinateGraph();
 
