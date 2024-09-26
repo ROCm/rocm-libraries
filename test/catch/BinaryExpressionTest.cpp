@@ -45,7 +45,7 @@ namespace ExpressionTest
 
         {
             auto arch = m_context->targetArchitecture().target();
-            if(!arch.is9XGPU())
+            if(!arch.isCDNAGPU())
                 SKIP("Test not yet supported on " << arch);
         }
 

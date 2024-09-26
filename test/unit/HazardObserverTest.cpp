@@ -148,11 +148,11 @@ namespace rocRollerTest
 
         // Try with instruction encoding `_e32`
         {
-            std::vector<Instruction> insts = {
-                Instruction("v_cmp_ge_u32_e32", {this->m_context->getVCC()}, {v[0], v[1]}, {}, ""),
-                Instruction(
-                    "v_cndmask_b32_e32", {v[0]}, {v[2], v[3], this->m_context->getVCC()}, {}, ""),
-                Instruction("s_endpgm", {}, {}, {}, "")};
+            std::vector<Instruction> insts
+                = {Instruction("v_cmp_ge_u32", {this->m_context->getVCC()}, {v[0], v[1]}, {}, ""),
+                   Instruction(
+                       "v_cndmask_b32", {v[0]}, {v[2], v[3], this->m_context->getVCC()}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
 
             if constexpr(std::is_same_v<TypeParam, Gfx908> || std::is_same_v<TypeParam, Gfx90a>)
             {
@@ -196,11 +196,11 @@ namespace rocRollerTest
         auto vu = this->createRegisters(Register::Type::Vector, DataType::UInt32, 2);
 
         {
-            std::vector<Instruction> insts = {
-                Instruction("v_rcp_iflag_f32_e32", {v[0]}, {v[0]}, {}, ""),
-                Instruction(
-                    "v_mul_f32_e32", {v[0]}, {Register::Value::Literal(0x4f7ffffe), v[0]}, {}, ""),
-                Instruction("s_endpgm", {}, {}, {}, "")};
+            std::vector<Instruction> insts
+                = {Instruction("v_rcp_iflag_f32", {v[0]}, {v[0]}, {}, ""),
+                   Instruction(
+                       "v_mul_f32", {v[0]}, {Register::Value::Literal(0x4f7ffffe), v[0]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
 
             if constexpr(std::is_same_v<TypeParam, Gfx908> || std::is_same_v<TypeParam, Gfx90a>)
             {
@@ -222,11 +222,11 @@ namespace rocRollerTest
 
         // No hazard (2nd non-trans op accessing different VGPR)
         {
-            std::vector<Instruction> insts = {
-                Instruction("v_rcp_iflag_f32_e32", {v[0]}, {v[0]}, {}, ""),
-                Instruction(
-                    "v_mul_f32_e32", {v[1]}, {Register::Value::Literal(0x4f7ffffe), v[1]}, {}, ""),
-                Instruction("s_endpgm", {}, {}, {}, "")};
+            std::vector<Instruction> insts
+                = {Instruction("v_rcp_iflag_f32", {v[0]}, {v[0]}, {}, ""),
+                   Instruction(
+                       "v_mul_f32", {v[1]}, {Register::Value::Literal(0x4f7ffffe), v[1]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
 
             this->peekAndSchedule(insts[0]);
             this->peekAndSchedule(insts[1]);
@@ -238,8 +238,8 @@ namespace rocRollerTest
         // No hazard (2nd op is a trans op)
         {
             std::vector<Instruction> insts
-                = {Instruction("v_rcp_iflag_f32_e32", {v[0]}, {v[0]}, {}, ""),
-                   Instruction("v_rcp_f32_e32", {v[0]}, {v[0]}, {}, ""),
+                = {Instruction("v_rcp_iflag_f32", {v[0]}, {v[0]}, {}, ""),
+                   Instruction("v_rcp_f32", {v[0]}, {v[0]}, {}, ""),
                    Instruction("s_endpgm", {}, {}, {}, "")};
 
             this->peekAndSchedule(insts[0]);
@@ -251,12 +251,12 @@ namespace rocRollerTest
 
         // No hazard
         {
-            std::vector<Instruction> insts = {
-                Instruction("v_rcp_iflag_f32_e32", {v[0]}, {v[0]}, {}, ""),
-                Instruction("v_add_u32_e32", {vu[0]}, {vu[0], vu[1]}, {}, ""),
-                Instruction(
-                    "v_mul_f32_e32", {v[0]}, {Register::Value::Literal(0x4f7ffffe), v[0]}, {}, ""),
-                Instruction("s_endpgm", {}, {}, {}, "")};
+            std::vector<Instruction> insts
+                = {Instruction("v_rcp_iflag_f32", {v[0]}, {v[0]}, {}, ""),
+                   Instruction("v_add_u32", {vu[0]}, {vu[0], vu[1]}, {}, ""),
+                   Instruction(
+                       "v_mul_f32", {v[0]}, {Register::Value::Literal(0x4f7ffffe), v[0]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
 
             this->peekAndSchedule(insts[0]);
             this->peekAndSchedule(insts[1]);
@@ -381,31 +381,6 @@ namespace rocRollerTest
     TYPED_TEST(HazardObserverTest, OPSELxSDWA94X)
     {
         auto v = this->createRegisters(Register::Type::Vector, DataType::UInt32, 2);
-
-        {
-            // SDWA
-            std::vector<Instruction> insts
-                = {Instruction("v_xor_b32_sdwa", {v[1]}, {v[0], v[0]}, {}, ""),
-                   Instruction("v_mov_b32", {v[0]}, {v[1]}, {}, ""),
-                   Instruction("s_endpgm", {}, {}, {}, "")};
-
-            if constexpr(std::is_same_v<TypeParam, Gfx908> || std::is_same_v<TypeParam, Gfx90a>)
-            {
-                this->peekAndSchedule(insts[0]);
-                this->peekAndSchedule(insts[1]);
-
-                EXPECT_THAT(this->output(), Not(HasSubstr("s_nop")));
-            }
-            else
-            {
-                // NOPs are required on 94X arch
-                this->peekAndSchedule(insts[0]);
-                this->peekAndSchedule(insts[1], 1);
-
-                EXPECT_THAT(this->output(), HasSubstr("s_nop 0"));
-            }
-            this->clearOutput();
-        }
 
         {
             // OPSEL

@@ -486,9 +486,8 @@ namespace rocRollerTest
             m_context->schedule(alloc0);
             m_context->schedule(alloc1);
 
-            auto instPossible
-                = Instruction("v_add_u32_e32", {tmp_dst0}, {tmp_src0, tmp_src1}, {}, "");
-            peeked = m_context->observer()->peek(instPossible);
+            auto instPossible = Instruction("v_add_u32", {tmp_dst0}, {tmp_src0, tmp_src1}, {}, "");
+            peeked            = m_context->observer()->peek(instPossible);
             EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
             EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         }
@@ -513,9 +512,8 @@ namespace rocRollerTest
             m_context->schedule(alloc0);
             m_context->schedule(alloc1);
 
-            auto instPossible
-                = Instruction("v_add_u32_e32", {tmp_dst0}, {tmp_src0, tmp_src1}, {}, "");
-            peeked = m_context->observer()->peek(instPossible);
+            auto instPossible = Instruction("v_add_u32", {tmp_dst0}, {tmp_src0, tmp_src1}, {}, "");
+            peeked            = m_context->observer()->peek(instPossible);
             EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
             EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         }

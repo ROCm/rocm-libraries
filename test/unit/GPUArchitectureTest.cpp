@@ -67,9 +67,6 @@ TEST_F(GPUArchitectureTest, ValidateGeneratedDef)
                   {GPUArchitectureGFX::GFX908, {.xnack = false}}, GPUCapability::HasAtomicAdd),
               true);
 
-    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetCapability({GPUArchitectureGFX::GFX803},
-                                                                   GPUCapability::MaxVmcnt),
-              15);
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetCapability({GPUArchitectureGFX::GFX90A},
                                                                    GPUCapability::MaxVmcnt),
               63);
@@ -163,19 +160,6 @@ TEST_F(GPUArchitectureTest, Validate90aInstructions)
     }
 
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()
-                  ->GetInstructionInfo({GPUArchitectureGFX::GFX90A}, "exp")
-                  .getWaitCount(),
-              1);
-    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
-                  ->GetInstructionInfo({GPUArchitectureGFX::GFX90A}, "exp")
-                  .getWaitQueues()[0],
-              GPUWaitQueueType::EXPQueue);
-    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
-                  ->GetInstructionInfo({GPUArchitectureGFX::GFX90A}, "exp")
-                  .getLatency(),
-              0);
-
-    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
                   ->GetInstructionInfo({GPUArchitectureGFX::GFX90A}, "s_sendmsg")
                   .getWaitCount(),
               1);
@@ -215,6 +199,20 @@ TEST_F(GPUArchitectureTest, Validate90aInstructions)
 
 TEST_F(GPUArchitectureTest, Validate908Instructions)
 {
+
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo({GPUArchitectureGFX::GFX908}, "exp")
+                  .getWaitCount(),
+              1);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo({GPUArchitectureGFX::GFX908}, "exp")
+                  .getWaitQueues()[0],
+              GPUWaitQueueType::EXPQueue);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo({GPUArchitectureGFX::GFX908}, "exp")
+                  .getLatency(),
+              0);
+
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability({GPUArchitectureGFX::GFX90A},
                                                                    GPUCapability::v_mac_f32),
               true);

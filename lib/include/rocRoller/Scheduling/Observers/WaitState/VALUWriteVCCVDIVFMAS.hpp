@@ -25,7 +25,7 @@ namespace rocRoller
 
             constexpr static bool required(GPUArchitectureTarget const& target)
             {
-                return target.is9XGPU();
+                return target.isCDNAGPU();
             }
 
             int                   getMaxNops(Instruction const& inst) const;

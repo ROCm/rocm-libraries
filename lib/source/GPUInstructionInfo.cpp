@@ -145,11 +145,6 @@ namespace rocRoller
         return opCode.find("_u32") != std::string::npos || opCode.find("_u64") != std::string::npos;
     }
 
-    bool GPUInstructionInfo::isSDWA(std::string const& opCode)
-    {
-        return opCode.find("_sdwa") != std::string::npos;
-    }
-
     bool GPUInstructionInfo::isVAddInst(std::string const& opCode)
     {
         return opCode.rfind("v_add", 0) == 0;

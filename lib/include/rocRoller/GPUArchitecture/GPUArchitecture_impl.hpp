@@ -66,6 +66,7 @@ namespace rocRoller
         GPUArchitecture::GetInstructionInfo(std::string const& instruction) const
     {
         auto iter = m_instructionInfos.find(instruction);
+
         if(iter != m_instructionInfos.end())
         {
             return iter->second;

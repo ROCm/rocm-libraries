@@ -47,8 +47,7 @@ namespace AssertTest
 
     TEST_P(GPU_AssertTest, GPU_Assert)
     {
-        if(!m_context->targetArchitecture().target().is9XGPU()
-           || m_context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX900)
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping GPU assert tests for "
                          << m_context->targetArchitecture().target().toString();
@@ -175,8 +174,7 @@ namespace AssertTest
 
     TEST_P(GPU_AssertTest, GPU_UnconditionalAssert)
     {
-        if(!m_context->targetArchitecture().target().is9XGPU()
-           || m_context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX900)
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping GPU assert tests for "
                          << m_context->targetArchitecture().target().toString();

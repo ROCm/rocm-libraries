@@ -116,7 +116,7 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
     {
         Client::GEMMClient::Result result;
         auto arch = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch().target();
-        if(arch.is90aGPU())
+        if(arch.isCDNA2GPU())
         {
             Client::GEMMClient::TensileGEMMSolution<A, B, C, D> gemmKernel(solutionParams);
             result = gemmKernel.benchmark(runParams, checkResult, doVisualize, h_A, h_B, h_C, h_D);

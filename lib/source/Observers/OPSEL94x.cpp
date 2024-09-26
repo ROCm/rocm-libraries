@@ -14,10 +14,6 @@ namespace rocRoller
         {
             if(GPUInstructionInfo::isVALU(inst.getOpCode()))
             {
-                if(GPUInstructionInfo::isSDWA(inst.getOpCode()))
-                {
-                    return true;
-                }
                 for(auto const& mod : inst.getModifiers())
                 {
                     if(mod.rfind("op_sel", 0) == 0)

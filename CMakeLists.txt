@@ -174,6 +174,27 @@ set(ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE ${CMAKE_BINARY_DIR}/source/rocRoller
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/lib/source/DefaultArchitectureFilePath.cpp.in ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE})
 
 # ArchitectureGenerator
+
+FetchContent_Declare(
+  isa_spec_manager
+  GIT_REPOSITORY https://github.com/GPUOpen-Tools/isa_spec_manager.git
+  GIT_TAG        v1.0.0
+)
+
+FetchContent_MakeAvailable(isa_spec_manager)
+
+set(isa_spec_manager_SOURCES
+  ${isa_spec_manager_SOURCE_DIR}/source/common/isa_xml_reader.cpp
+  ${isa_spec_manager_SOURCE_DIR}/source/third_party/tinyxml2/tinyxml2.cpp
+  ${isa_spec_manager_SOURCE_DIR}/source/common/amdisa_utility.cpp
+)
+
+set(isa_spec_manager_INCLUDES
+  ${isa_spec_manager_SOURCE_DIR}/include
+  ${isa_spec_manager_SOURCE_DIR}/source/common
+  ${isa_spec_manager_SOURCE_DIR}/source/third_party/tinyxml2
+)
+
 add_executable(
   GPUArchitectureGenerator
   GPUArchitectureGenerator/source/GPUArchitectureGenerator.cpp
@@ -189,7 +210,16 @@ add_executable(
   lib/source/Logging.cpp
   lib/source/Scheduler.cpp
   ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE}
+  ${isa_spec_manager_SOURCES}
 )
+
+FetchContent_Declare(
+  mrisa_xml
+  URL      https://gpuopen.com/download/machine-readable-isa/AMD_GPU_MR_ISA_XML-2024_08_22.zip
+)
+
+FetchContent_MakeAvailable(mrisa_xml)
+
 add_dependencies(GPUArchitectureGenerator spdlog)
 target_compile_features(GPUArchitectureGenerator PUBLIC cxx_std_20)
 target_compile_options(GPUArchitectureGenerator PUBLIC  ${COROUTINES_COMPILE_OPTION} ${EXTRA_COMPILE_OPTIONS})
@@ -209,7 +239,9 @@ target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC
                            ${CMAKE_CURRENT_BINARY_DIR}/spdlog/include/
                            ${libdivide_SOURCE_DIR}/
                            ${LLVM_INCLUDE_DIRS}
-                           ${LLD_INCLUDE_DIRS})
+                           ${LLD_INCLUDE_DIRS}
+                           ${isa_spec_manager_INCLUDES}
+                           )
 
 if(YAML_BACKEND STREQUAL "YAML_CPP")
   target_link_libraries(GPUArchitectureGenerator PUBLIC yaml-cpp)
@@ -224,12 +256,12 @@ file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/source/rocRoller)
 
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.yaml
-  COMMAND ${CMAKE_BINARY_DIR}/GPUArchitectureGenerator ${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.yaml -Y
+  COMMAND ${CMAKE_BINARY_DIR}/GPUArchitectureGenerator ${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.yaml -Y --xml_dir ${mrisa_xml_SOURCE_DIR}
   DEPENDS GPUArchitectureGenerator
 )
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.msgpack
-  COMMAND ${CMAKE_BINARY_DIR}/GPUArchitectureGenerator ${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.msgpack
+  COMMAND ${CMAKE_BINARY_DIR}/GPUArchitectureGenerator ${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.msgpack --xml_dir ${mrisa_xml_SOURCE_DIR}
   DEPENDS GPUArchitectureGenerator
 )
 ADD_CUSTOM_TARGET(
@@ -681,6 +713,10 @@ endif()
 add_executable(
   ArchGenTests
   test/unit/GPUArchitectureGeneratorTest.cpp
+
+  ${isa_spec_manager_SOURCE_DIR}/source/common/isa_xml_reader.cpp
+  ${isa_spec_manager_SOURCE_DIR}/source/third_party/tinyxml2/tinyxml2.cpp
+  ${isa_spec_manager_SOURCE_DIR}/source/common/amdisa_utility.cpp
 )
 add_dependencies(ArchGenTests spdlog)
 target_compile_features(ArchGenTests PUBLIC cxx_std_20)
@@ -690,11 +726,15 @@ target_include_directories(ArchGenTests PUBLIC
                            GPUArchitectureGenerator/include
                            ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
                            ${CMAKE_CURRENT_SOURCE_DIR}/lib/include/rocRoller
+                           ${isa_spec_manager_SOURCE_DIR}/include
+                           ${isa_spec_manager_SOURCE_DIR}/source/common
                            )
 
 target_include_directories(ArchGenTests SYSTEM PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/spdlog/include/
                            ${LLVM_INCLUDE_DIRS}
-                           ${LLD_INCLUDE_DIRS})
+                           ${LLD_INCLUDE_DIRS}
+                           ${isa_spec_manager_SOURCE_DIR}/source/third_party/tinyxml2
+                           )
 
 if(ROCROLLER_USE_HIP)
   target_link_libraries(ArchGenTests PUBLIC hip::host)
