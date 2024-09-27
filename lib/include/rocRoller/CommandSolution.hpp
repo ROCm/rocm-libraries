@@ -269,8 +269,8 @@ namespace rocRoller
     public:
         CommandSolution(CommandPtr command);
 
-        void appendKernel(std::shared_ptr<CommandKernel> kernel);
-        std::vector<std::shared_ptr<CommandKernel>> const& kernels() const;
+        void                                 appendKernel(CommandKernelPtr kernel);
+        std::vector<CommandKernelPtr> const& kernels() const;
 
         void generateKernels();
 

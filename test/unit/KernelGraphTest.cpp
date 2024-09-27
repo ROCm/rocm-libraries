@@ -1641,7 +1641,7 @@ namespace KernelGraphTest
     }
 
     template <typename T>
-    void CopyStrideOverride(std::shared_ptr<CommandKernel>& commandKernel, bool override = false)
+    void CopyStrideOverride(CommandKernelPtr& commandKernel, bool override = false)
     {
         auto example = rocRollerTest::Graphs::TileCopy<T>();
 
@@ -1692,13 +1692,13 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopy)
     {
-        std::shared_ptr<CommandKernel> commandKernel;
+        CommandKernelPtr commandKernel;
         CopyStrideOverride<int>(commandKernel);
     }
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideHalf)
     {
-        std::shared_ptr<CommandKernel> commandKernel;
+        CommandKernelPtr commandKernel;
         CopyStrideOverride<Half>(commandKernel, true);
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
@@ -1723,7 +1723,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideFloat)
     {
-        std::shared_ptr<CommandKernel> commandKernel;
+        CommandKernelPtr commandKernel;
         CopyStrideOverride<float>(commandKernel, true);
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
@@ -1748,7 +1748,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideDouble)
     {
-        std::shared_ptr<CommandKernel> commandKernel;
+        CommandKernelPtr commandKernel;
         CopyStrideOverride<double>(commandKernel, true);
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);

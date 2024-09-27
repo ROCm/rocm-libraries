@@ -815,8 +815,9 @@ catch_discover_tests(rocRollerTests_catch
            COMMAND flake8
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(PythonLint
-                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}"
-  )
+                       PROPERTIES 
+                        ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}"
+                        "LABELS" "PYTHON")
 
   if (ROCROLLER_TESTS_SKIP_SLOW)
     set(PYTHON_TEST_SKIP "-m not slow")
@@ -827,9 +828,9 @@ catch_discover_tests(rocRollerTests_catch
            COMMAND pytest -s --cov-report html:python_cov_html --cov=rrperf scripts ${PYTHON_TEST_SKIP} --junit-xml=${TEST_REPORT_DIR}/python_tests.xml
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(PythonTest
-                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib"
-  )
-
+                       PROPERTIES
+                        ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib"
+                        "LABELS" "PYTHON")
 
   add_test(NAME GraupelInstall
            COMMAND npm install
