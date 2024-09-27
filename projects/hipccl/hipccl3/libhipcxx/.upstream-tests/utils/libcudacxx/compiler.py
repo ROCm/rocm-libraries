@@ -41,7 +41,7 @@ class CXXCompiler(object):
                  verify_flags=None, use_verify=False,
                  modules_flags=None, use_modules=False,
                  use_ccache=False, use_warnings=False, compile_env=None,
-                 cxx_type=None, cxx_version=None):
+                 cxx_type=None, cxx_version=None, cuda_path=None):
         self.source_lang = 'c++'
         self.compile_timeout = 100
         self.path = path
@@ -66,6 +66,7 @@ class CXXCompiler(object):
             self.compile_env = None
         self.type = cxx_type
         self.version = cxx_version
+        self.cuda_path = cuda_path
         if self.type is None or self.version is None:
             self._initTypeAndVersion()
 
@@ -258,6 +259,8 @@ class CXXCompiler(object):
             cmd += ['-o', out]
         if input_is_cxx:
             cmd += ['-x', self.source_lang]
+        if self.type == "clang"  and self.source_lang == 'cu' and self.cuda_path is not None:
+            cmd += ['--cuda-path=' + self.cuda_path]
         if isinstance(source_files, list):
             cmd += source_files
         elif isinstance(source_files, str):
@@ -444,6 +447,9 @@ class CXXCompiler(object):
             if self.type == 'hipcc' or self.type == 'hiprtcc' or self.type == 'clang++':
                 flags += ['-Wno-unused-command-line-argument']
             flags += ['-Werror', '-fsyntax-only']
+        if self.type == 'clang' and self.source_lang == 'cu':
+            flags += ['-Wno-unused-command-line-argument']
+        
         if self.type == 'hiprtcc':
             # NOTE(HIPRTC): HIPRTC does not like compiling empty files. 
             # "ERROR: hiprtcLinkComplete(rtc_link_state, &codePtr, &codeSize2) failed with error HIPRTC_ERROR_LINKING".
