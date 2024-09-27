@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -109,18 +109,11 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
-    std::vector<T> input;
-    if(std::is_floating_point<T>::value)
-    {
-        input = benchmark_utils::get_random_data<T>(size,
-                                                    static_cast<T>(-1000),
-                                                    static_cast<T>(1000));
-    } else
-    {
-        input = benchmark_utils::get_random_data<T>(size,
-                                                    std::numeric_limits<T>::min(),
-                                                    std::numeric_limits<T>::max());
-    }
+    std::vector<T> input
+        = benchmark_utils::get_random_data<T>(size,
+                                              benchmark_utils::generate_limits<T>::min(),
+                                              benchmark_utils::generate_limits<T>::max());
+
     T*   d_input;
     int* d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));

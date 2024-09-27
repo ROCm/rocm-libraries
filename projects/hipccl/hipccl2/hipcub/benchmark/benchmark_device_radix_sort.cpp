@@ -40,19 +40,10 @@ std::vector<Key> generate_keys(size_t size)
 {
     using key_type = Key;
 
-    if(std::is_floating_point<key_type>::value)
-    {
-        return benchmark_utils::get_random_data<key_type>(size,
-                                                          (key_type)-1000,
-                                                          (key_type) + 1000,
-                                                          size);
-    } else
-    {
-        return benchmark_utils::get_random_data<key_type>(size,
-                                                          std::numeric_limits<key_type>::min(),
-                                                          std::numeric_limits<key_type>::max(),
-                                                          size);
-    }
+    return benchmark_utils::get_random_data<key_type>(
+        size,
+        benchmark_utils::generate_limits<key_type>::min(),
+        benchmark_utils::generate_limits<key_type>::max());
 }
 
 template<bool Descending, class Key>
