@@ -309,13 +309,10 @@ void run_benchmark(benchmark::State&     state,
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
-    const auto input = std::is_floating_point<T>::value
-                           ? benchmark_utils::get_random_data<T>(size,
-                                                                 static_cast<T>(-1000),
-                                                                 static_cast<T>(1000))
-                           : benchmark_utils::get_random_data<T>(size,
-                                                                 std::numeric_limits<T>::min(),
-                                                                 std::numeric_limits<T>::max());
+    const std::vector<T> input
+        = benchmark_utils::get_random_data<T>(size,
+                                              benchmark_utils::generate_limits<T>::min(),
+                                              benchmark_utils::generate_limits<T>::max());
 
     T* d_input  = nullptr;
     T* d_output = nullptr;
@@ -380,13 +377,10 @@ void run_segmented_benchmark(benchmark::State&     state,
     const auto num_segments = num_blocks * segments_per_block;
     const auto size         = num_blocks * items_per_block;
 
-    const auto input = std::is_floating_point<T>::value
-                           ? benchmark_utils::get_random_data<T>(size,
-                                                                 static_cast<T>(-1000),
-                                                                 static_cast<T>(1000))
-                           : benchmark_utils::get_random_data<T>(size,
-                                                                 std::numeric_limits<T>::min(),
-                                                                 std::numeric_limits<T>::max());
+    const std::vector<T> input
+        = benchmark_utils::get_random_data<T>(size,
+                                              benchmark_utils::generate_limits<T>::min(),
+                                              benchmark_utils::generate_limits<T>::max());
 
     const auto segment_sizes
         = benchmark_utils::get_random_data<unsigned int>(num_segments, 0, max_segment_size);

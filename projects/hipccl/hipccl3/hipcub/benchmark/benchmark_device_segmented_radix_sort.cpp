@@ -83,18 +83,10 @@ void run_sort_keys_benchmark(benchmark::State& state,
     }
     offsets.push_back(size);
 
-    std::vector<key_type> keys_input;
-    if(std::is_floating_point<key_type>::value)
-    {
-        keys_input
-            = benchmark_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type) + 1000);
-    } else
-    {
-        keys_input
-            = benchmark_utils::get_random_data<key_type>(size,
-                                                         std::numeric_limits<key_type>::min(),
-                                                         std::numeric_limits<key_type>::max());
-    }
+    std::vector<key_type> keys_input = benchmark_utils::get_random_data<key_type>(
+        size,
+        benchmark_utils::generate_limits<key_type>::min(),
+        benchmark_utils::generate_limits<key_type>::max());
 
     offset_type* d_offsets;
     HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
@@ -230,18 +222,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     }
     offsets.push_back(size);
 
-    std::vector<key_type> keys_input;
-    if(std::is_floating_point<key_type>::value)
-    {
-        keys_input
-            = benchmark_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type) + 1000);
-    } else
-    {
-        keys_input
-            = benchmark_utils::get_random_data<key_type>(size,
-                                                         std::numeric_limits<key_type>::min(),
-                                                         std::numeric_limits<key_type>::max());
-    }
+    std::vector<key_type> keys_input = benchmark_utils::get_random_data<key_type>(
+        size,
+        benchmark_utils::generate_limits<key_type>::min(),
+        benchmark_utils::generate_limits<key_type>::max());
 
     std::vector<value_type> values_input(size);
     std::iota(values_input.begin(), values_input.end(), 0);

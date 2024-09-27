@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,9 +43,8 @@ template<class T,
          unsigned int ItemsPerThread,
          class CompareOp,
          unsigned int Trials>
-__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(const T*  input,
-                                                              T*        output,
-                                                              CompareOp compare_op)
+__global__ __launch_bounds__(BlockSize)
+void sort_keys_kernel(const T* input, T* output, CompareOp compare_op)
 {
     const unsigned int lid          = hipThreadIdx_x;
     const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -68,9 +67,8 @@ template<class T,
          unsigned int ItemsPerThread,
          class CompareOp,
          unsigned int Trials>
-__global__ __launch_bounds__(BlockSize) void sort_pairs_kernel(const T*  input,
-                                                               T*        output,
-                                                               CompareOp compare_op)
+__global__ __launch_bounds__(BlockSize)
+void sort_pairs_kernel(const T* input, T* output, CompareOp compare_op)
 {
     const unsigned int lid          = hipThreadIdx_x;
     const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -111,16 +109,11 @@ void run_benchmark(benchmark::State& state,
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
-    std::vector<T> input;
-    if(std::is_floating_point<T>::value)
-    {
-        input = benchmark_utils::get_random_data<T>(size, (T)-1000, (T) + 1000);
-    } else
-    {
-        input = benchmark_utils::get_random_data<T>(size,
-                                                    std::numeric_limits<T>::min(),
-                                                    std::numeric_limits<T>::max());
-    }
+    std::vector<T> input
+        = benchmark_utils::get_random_data<T>(size,
+                                              benchmark_utils::generate_limits<T>::min(),
+                                              benchmark_utils::generate_limits<T>::max());
+
     T* d_input;
     T* d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -143,7 +136,8 @@ void run_benchmark(benchmark::State& state,
                 d_input,
                 d_output,
                 CompareOp());
-        } else if(benchmark_kind == benchmark_kinds::sort_pairs)
+        }
+        else if(benchmark_kind == benchmark_kinds::sort_pairs)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(sort_pairs_kernel<T, BlockSize, ItemsPerThread, CompareOp, Trials>),
