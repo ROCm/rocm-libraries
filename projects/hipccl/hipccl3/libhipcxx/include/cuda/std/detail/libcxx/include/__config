@@ -1432,6 +1432,18 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 #  define _LIBCUDACXX_HIP_RDTSC_NANOSECONDS_PER_CYCLE 40  // 25 MHz for s_memrealtime -> 1*1e9/25*1e6 ns/cycle = 40 ns/cycle (gfx90a and gfx908 only!)
 #endif
 
+#  if (defined(__CUDACC_VER_MAJOR__) && __CUDACC_VER_MAJOR__ <= 11) \
+    && (defined(__CUDACC_VER_MINOR__) && __CUDACC_VER_MINOR__ <= 2)
+#    define _LIBCUDACXX_CONSTEXPR_GLOBAL const
+#  else
+#    define _LIBCUDACXX_CONSTEXPR_GLOBAL constexpr
+#  endif
+#  if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+#    define _LIBCUDACXX_CPO_ACCESSIBILITY __device__ _LIBCUDACXX_CONSTEXPR_GLOBAL
+#  else
+#    define _LIBCUDACXX_CPO_ACCESSIBILITY _LIBCUDACXX_INLINE_VAR constexpr
+#  endif
+
 #if !defined(_LIBCUDACXX_DISABLE_EXEC_CHECK)
 #if defined(__HIPCC__)                       \
 && !defined(_LIBCUDACXX_COMPILER_NVRTC)      \
