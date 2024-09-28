@@ -111,7 +111,7 @@ using ::strftime;
 #  if _CCCL_STD_VER > 2014 && defined(_LIBCUDACXX_HAS_TIMESPEC_GET)
 using ::timespec_get;
 #  endif
-#endif // _CCCL_COMPILER_NVRTC && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#endif // _CCCL_COMPILER_NVRTC && !defined(_CCCL_COMPILER_HIPRTC)
 
 _LIBCUDACXX_END_NAMESPACE_STD
 

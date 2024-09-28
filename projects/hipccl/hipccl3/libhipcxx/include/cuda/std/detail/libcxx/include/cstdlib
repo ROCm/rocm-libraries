@@ -178,7 +178,7 @@ using ::quick_exit;
 #  if _CCCL_STD_VER > 2014 && defined(_LIBCUDACXX_HAS_C11_FEATURES)
 using ::aligned_alloc;
 #  endif
-#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 
 _LIBCUDACXX_END_NAMESPACE_STD
 

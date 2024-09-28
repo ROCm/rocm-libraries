@@ -101,16 +101,14 @@
 #  define TEST_COMPILER_EDG
 #endif
 
-#if defined(__NVCC__)
-// This is not mutually exclusive with other compilers, as NVCC uses a host
-// compiler.
+#if defined(_CCCL_CUDA_COMPILER_NVCC)
 #  define TEST_COMPILER_NVCC
 #  define TEST_COMPILER_EDG
-#elif defined(_NVHPC_CUDA)
+#elif defined(_CCCL_CUDA_COMPILER_NVHPC)
 #  define TEST_COMPILER_NVHPC_CUDA
-#elif defined(__CUDA__) && defined(_LIBCUDACXX_COMPILER_CLANG)
+#elif defined(_CCCL_CUDA_COMPILER_CLANG)
 #  define TEST_COMPILER_CLANG_CUDA
-#endif
+#endif // no cuda compiler
 
 #if defined(__HIPCC__)
 // This is not mutually exclusive with other compilers, as NVCC uses a host

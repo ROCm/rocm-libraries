@@ -81,7 +81,7 @@
 // Provide compatability between `std::pair` and `cuda::std::pair`
 #if  !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <utility>
-#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
@@ -385,7 +385,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     _CCCL_TRAIT(is_nothrow_constructible, _T1, _U1) && _CCCL_TRAIT(is_nothrow_constructible, _T2, _U2))
       : __base(_CUDA_VSTD::forward<_U1>(__p.first), _CUDA_VSTD::forward<_U2>(__p.second))
   {}
-#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 
   // assignments
   _CCCL_HIDE_FROM_ABI pair& operator=(const pair&) = default;
@@ -434,7 +434,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     this->second = _CUDA_VSTD::forward<_T2>(__p.second);
     return *this;
   }
-#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 
 #if _CCCL_STD_VER >= 2023
   _LIBCUDACXX_HIDE_FROM_ABI constexpr const pair& operator=(pair const& __p) const
@@ -455,7 +455,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     this->second = __p.second;
     return *this;
   }
-#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 
   _LIBCUDACXX_HIDE_FROM_ABI constexpr const pair& operator=(pair&& __p) const
     noexcept(_CCCL_TRAIT(is_nothrow_assignable, const _T1&, _T1) && _CCCL_TRAIT(is_nothrow_assignable, const _T2&, _T2))
@@ -475,7 +475,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     this->second = _CUDA_VSTD::forward<_T2>(__p.second);
     return *this;
   }
-#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 
   template <class _U1, class _U2>
   _LIBCUDACXX_HIDE_FROM_ABI constexpr const pair& operator=(const pair<_U1, _U2>& __p) const
@@ -495,7 +495,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     this->second = __p.second;
     return *this;
   }
-#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 
   template <class _U1, class _U2>
   _LIBCUDACXX_HIDE_FROM_ABI constexpr const pair& operator=(pair<_U1, _U2>&& __p) const
@@ -515,7 +515,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     this->second = _CUDA_VSTD::forward<_U2>(__p.second);
     return *this;
   }
-#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #endif // _CCCL_STD_VER >= 2023
 
   _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX20 void
@@ -541,7 +541,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
   {
     return {this->first, this->second};
   }
-#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 };
 
 #if _CCCL_STD_VER > 2014 && !defined(_LIBCUDACXX_HAS_NO_DEDUCTION_GUIDES)
