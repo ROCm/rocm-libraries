@@ -26,11 +26,11 @@ namespace rocRoller
     {
         /**
          * @brief Kernel graph container: control and coordinate graphs, control-to-coordinate mapper.
-	 * @ingroup KernelGraph
+         * @ingroup KernelGraph
          */
         class KernelGraph
         {
-            std::vector<GraphConstraint> m_constraints{&NoDanglingMappings};
+            std::vector<GraphConstraint> m_constraints{&NoDanglingMappings, &SingleControlRoot};
 
         public:
             ControlGraph::ControlGraph       control;
@@ -84,18 +84,18 @@ namespace rocRoller
 
         /**
          * Translate from Command to (initial) KernelGraph.
-	 *
+         *
          * Resulting KernelGraph matches the Command operations
          * closely.
-	 *
-	 * @ingroup KernelGraph
+         *
+         * @ingroup KernelGraph
          */
         KernelGraph translate(CommandPtr);
 
         /**
          * Generate assembly from a KernelGraph.
-	 *
-	 * @ingroup KernelGraph
+     *
+     * @ingroup KernelGraph
          */
         Generator<Instruction> generate(KernelGraph, AssemblyKernelPtr);
 

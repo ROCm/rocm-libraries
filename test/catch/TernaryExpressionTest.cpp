@@ -28,17 +28,42 @@ using namespace rocRoller;
 
 namespace ExpressionTest
 {
+    enum class DestRegisterStatus
+    {
+        NullPointer = 0,
+        Placeholder,
+        Allocated,
+        Count
+    };
+
+    std::ostream& operator<<(std::ostream& stream, DestRegisterStatus status)
+    {
+        switch(status)
+        {
+        case DestRegisterStatus::NullPointer:
+            return stream << "NullPointer";
+        case DestRegisterStatus::Placeholder:
+            return stream << "Placeholder";
+        case DestRegisterStatus::Allocated:
+            return stream << "Allocated";
+        case DestRegisterStatus::Count:
+            return stream << "Count";
+        }
+        Throw<rocRoller::FatalError>("Bad value!");
+    }
+
     struct TernaryExpressionKernel : public AssemblyTestKernel
     {
         using ExpressionFunc = std::function<Expression::ExpressionPtr(
             Expression::ExpressionPtr, Expression::ExpressionPtr, Expression::ExpressionPtr)>;
-        TernaryExpressionKernel(ContextPtr     context,
-                                ExpressionFunc func,
-                                DataType       resultType,
-                                DataType       aType,
-                                DataType       bType,
-                                DataType       cType,
-                                Register::Type regType = Register::Type::Vector)
+        TernaryExpressionKernel(ContextPtr         context,
+                                ExpressionFunc     func,
+                                DataType           resultType,
+                                DataType           aType,
+                                DataType           bType,
+                                DataType           cType,
+                                Register::Type     regType     = Register::Type::Vector,
+                                DestRegisterStatus destRegMode = DestRegisterStatus::Placeholder)
             : AssemblyTestKernel(context)
             , m_func(func)
             , m_resultType(resultType)
@@ -46,6 +71,7 @@ namespace ExpressionTest
             , m_bType(bType)
             , m_cType(cType)
             , m_regType(regType)
+            , m_destRegMode(destRegMode)
 
         {
             auto arch = m_context->targetArchitecture().target();
@@ -94,9 +120,43 @@ namespace ExpressionTest
                 co_yield m_context->copier()->copy(v_b, s_b, "Move value");
                 co_yield m_context->copier()->copy(v_c, s_c, "Move value");
 
-                Register::ValuePtr resultValue
-                    = Register::Value::Placeholder(m_context, m_regType, m_resultType, 1);
-                co_yield Expression::generate(resultValue, expr, m_context);
+                Register::ValuePtr resultValue, expressionDest;
+                if(m_destRegMode == DestRegisterStatus::Placeholder)
+                {
+                    // resultValue and expressionDest are both pointing to the same object, which is an unallocated register.
+                    expressionDest
+                        = Register::Value::Placeholder(m_context, m_regType, m_resultType, 1);
+                    resultValue = expressionDest;
+                }
+                else if(m_destRegMode == DestRegisterStatus::Allocated)
+                {
+                    // resultValue and expressionDest pointing to the different objects, which are allocated and aliased to the same register.
+                    expressionDest
+                        = Register::Value::Placeholder(m_context, m_regType, m_resultType, 1);
+                    expressionDest->allocateNow();
+                    resultValue = expressionDest->element({0});
+                    REQUIRE(expressionDest != resultValue);
+                }
+
+                co_yield Expression::generate(expressionDest, expr, m_context);
+
+                if(m_destRegMode == DestRegisterStatus::NullPointer)
+                {
+                    // both pointers were null, but expressionDest isn't any more.
+                    REQUIRE(expressionDest != nullptr);
+                    REQUIRE(resultValue == nullptr);
+                    resultValue = expressionDest;
+                }
+                else if(m_destRegMode == DestRegisterStatus::Placeholder)
+                {
+                    // the pointers should still equal each other.
+                    REQUIRE(expressionDest == resultValue);
+                }
+                else if(m_destRegMode == DestRegisterStatus::Allocated)
+                {
+                    // the pointers should still not equal each other.
+                    REQUIRE(expressionDest != resultValue);
+                }
 
                 Register::ValuePtr v_resultValue;
                 if(m_regType == Register::Type::Vector)
@@ -119,9 +179,10 @@ namespace ExpressionTest
         }
 
     protected:
-        ExpressionFunc m_func;
-        DataType       m_resultType, m_aType, m_bType, m_cType;
-        Register::Type m_regType;
+        ExpressionFunc     m_func;
+        DataType           m_resultType, m_aType, m_bType, m_cType;
+        Register::Type     m_regType;
+        DestRegisterStatus m_destRegMode;
     };
 
     TEST_CASE("Run ternary expression kernel 1", "[expression][ternary][fma][gpu]")
@@ -164,24 +225,30 @@ namespace ExpressionTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            auto context = TestContext::ForTarget(arch);
+            auto destMode = GENERATE(DestRegisterStatus::NullPointer,
+                                     DestRegisterStatus::Placeholder,
+                                     DestRegisterStatus::Allocated);
+            DYNAMIC_SECTION(destMode)
+            {
+                auto context = TestContext::ForTarget(arch);
 
-            auto expr = [](Expression::ExpressionPtr a,
-                           Expression::ExpressionPtr b,
-                           Expression::ExpressionPtr c) { //
-                return a * b + c;
-            };
+                auto expr = [](Expression::ExpressionPtr a,
+                               Expression::ExpressionPtr b,
+                               Expression::ExpressionPtr c) { //
+                    return a * b + c;
+                };
 
-            TernaryExpressionKernel kernel(context.get(),
-                                           expr,
-                                           DataType::Float,
-                                           DataType::Float,
-                                           DataType::Float,
-                                           DataType::Float);
+                TernaryExpressionKernel kernel(context.get(),
+                                               expr,
+                                               DataType::Float,
+                                               DataType::Float,
+                                               DataType::Float,
+                                               DataType::Float);
 
-            CHECK(kernel.getAssembledKernel().size() > 0);
-            using namespace Catch::Matchers;
-            CHECK_THAT(context.output(), ContainsSubstring("v_fma_f32"));
+                CHECK(kernel.getAssembledKernel().size() > 0);
+                using namespace Catch::Matchers;
+                CHECK_THAT(context.output(), ContainsSubstring("v_fma_f32"));
+            }
         }
     }
 
@@ -190,38 +257,47 @@ namespace ExpressionTest
         auto regType = GENERATE(Register::Type::Scalar, Register::Type::Vector);
         DYNAMIC_SECTION(regType)
         {
-            auto context = TestContext::ForTestDevice({}, regType);
-
-            auto expr = [](Expression::ExpressionPtr a,
-                           Expression::ExpressionPtr b,
-                           Expression::ExpressionPtr c) {
-                namespace Ex = Expression;
-                return convert<DataType::UInt64>(((b << Ex::literal(3)) * a) >> Ex::literal(4))
-                       + convert(DataType::Int64, c);
-            };
-
-            TernaryExpressionKernel kernel(context.get(),
-                                           expr,
-                                           DataType::UInt64,
-                                           DataType::Int32,
-                                           DataType::Int64,
-                                           DataType::UInt64);
-
-            auto d_result = make_shared_device<uint64_t>();
-
-            for(auto a : TestValues::int32Values)
+            auto destMode = GENERATE(DestRegisterStatus::NullPointer,
+                                     DestRegisterStatus::Placeholder,
+                                     DestRegisterStatus::Allocated);
+            DYNAMIC_SECTION(destMode)
             {
-                for(auto b : TestValues::int64Values)
+                auto context = TestContext::ForTestDevice({}, regType, destMode);
+
+                auto expr = [](Expression::ExpressionPtr a,
+                               Expression::ExpressionPtr b,
+                               Expression::ExpressionPtr c) {
+                    namespace Ex = Expression;
+                    return convert<DataType::UInt64>(convert<DataType::UInt64>(
+                               ((b << Ex::literal(3)) * a) >> Ex::literal(4)))
+                           + convert(DataType::Int64, c);
+                };
+
+                TernaryExpressionKernel kernel(context.get(),
+                                               expr,
+                                               DataType::UInt64,
+                                               DataType::Int32,
+                                               DataType::Int64,
+                                               DataType::UInt64,
+                                               regType,
+                                               destMode);
+
+                auto d_result = make_shared_device<uint64_t>();
+
+                for(auto a : TestValues::int32Values)
                 {
-                    for(auto c : TestValues::uint64Values)
+                    for(auto b : TestValues::int64Values)
                     {
-                        auto r
-                            = static_cast<uint64_t>(((b << 3) * a) >> 4) + static_cast<int64_t>(c);
-                        CAPTURE(a, b, c, r);
+                        for(auto c : TestValues::uint64Values)
+                        {
+                            auto r = static_cast<uint64_t>(((b << 3) * a) >> 4)
+                                     + static_cast<int64_t>(c);
+                            CAPTURE(a, b, c, r);
 
-                        kernel({}, d_result.get(), a, b, c);
+                            kernel({}, d_result.get(), a, b, c);
 
-                        REQUIRE_THAT(d_result, HasDeviceScalarEqualTo(r));
+                            REQUIRE_THAT(d_result, HasDeviceScalarEqualTo(r));
+                        }
                     }
                 }
             }
@@ -233,26 +309,32 @@ namespace ExpressionTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            auto context = TestContext::ForTarget(arch);
+            auto destMode = GENERATE(DestRegisterStatus::NullPointer,
+                                     DestRegisterStatus::Placeholder,
+                                     DestRegisterStatus::Allocated);
+            DYNAMIC_SECTION(destMode)
+            {
+                auto context = TestContext::ForTarget(arch);
 
-            auto expr = [](Expression::ExpressionPtr a,
-                           Expression::ExpressionPtr b,
-                           Expression::ExpressionPtr c) {
-                namespace Ex = Expression;
-                return convert<DataType::UInt64>(((b << Ex::literal(3)) * a) >> Ex::literal(4))
-                       + convert(DataType::Int64, c);
-            };
+                auto expr = [](Expression::ExpressionPtr a,
+                               Expression::ExpressionPtr b,
+                               Expression::ExpressionPtr c) {
+                    namespace Ex = Expression;
+                    return convert<DataType::UInt64>(((b << Ex::literal(3)) * a) >> Ex::literal(4))
+                           + convert(DataType::Int64, c);
+                };
 
-            TernaryExpressionKernel kernel(context.get(),
-                                           expr,
-                                           DataType::UInt64,
-                                           DataType::Int32,
-                                           DataType::Int64,
-                                           DataType::UInt64);
+                TernaryExpressionKernel kernel(context.get(),
+                                               expr,
+                                               DataType::UInt64,
+                                               DataType::Int32,
+                                               DataType::Int64,
+                                               DataType::UInt64);
 
-            CHECK(kernel.getAssembledKernel().size() > 0);
-            using namespace Catch::Matchers;
-            CHECK_THAT(context.output(), !ContainsSubstring("v_fma_f32"));
+                CHECK(kernel.getAssembledKernel().size() > 0);
+                using namespace Catch::Matchers;
+                CHECK_THAT(context.output(), !ContainsSubstring("v_fma_f32"));
+            }
         }
     }
 
@@ -451,6 +533,55 @@ namespace ExpressionTest
             CHECK(kernel.getAssembledKernel().size() > 0);
             using namespace Catch::Matchers;
             CHECK_THAT(context.output(), !ContainsSubstring("v_fma_f32"));
+        }
+    }
+
+    TEST_CASE("Run ternary conversion expression kernel 5", "[expression][conversions][gpu]")
+    {
+        auto regType = GENERATE(Register::Type::Scalar, Register::Type::Vector);
+        DYNAMIC_SECTION(regType)
+        {
+            auto destMode = GENERATE(DestRegisterStatus::NullPointer,
+                                     DestRegisterStatus::Placeholder,
+                                     DestRegisterStatus::Allocated);
+            DYNAMIC_SECTION(destMode)
+            {
+                auto context = TestContext::ForTestDevice({}, regType, destMode);
+
+                auto expr = [](Expression::ExpressionPtr a,
+                               Expression::ExpressionPtr b,
+                               Expression::ExpressionPtr c) {
+                    namespace Ex = Expression;
+                    return convert<DataType::UInt64>(a);
+                };
+
+                TernaryExpressionKernel kernel(context.get(),
+                                               expr,
+                                               DataType::UInt64,
+                                               DataType::UInt64,
+                                               DataType::UInt64,
+                                               DataType::UInt64,
+                                               regType,
+                                               destMode);
+
+                auto d_result = make_shared_device<uint64_t>();
+
+                for(auto a : TestValues::uint64Values)
+                {
+                    for(auto b : TestValues::uint64Values)
+                    {
+                        for(auto c : TestValues::uint64Values)
+                        {
+                            auto r = a;
+                            CAPTURE(a, b, c, r);
+
+                            kernel({}, d_result.get(), a, b, c);
+
+                            REQUIRE_THAT(d_result, HasDeviceScalarEqualTo(r));
+                        }
+                    }
+                }
+            }
         }
     }
 

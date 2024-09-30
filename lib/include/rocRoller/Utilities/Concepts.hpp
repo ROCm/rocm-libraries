@@ -10,6 +10,13 @@
 
 namespace rocRoller
 {
+    template <typename T, typename... U>
+    concept CIsAnyOf = (std::same_as<T, U> || ...);
+
+    static_assert(CIsAnyOf<int, int, float>);
+    static_assert(CIsAnyOf<std::string, int, std::string>);
+    static_assert(!CIsAnyOf<std::string, int, float>);
+
     // clang-format off
     template <typename T>
     concept CHasToStringMember = requires(T const& x)

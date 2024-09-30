@@ -677,6 +677,7 @@ set(
   test/catch/CustomMatcherTest.cpp
   test/catch/ExpressionTest.cpp
   test/catch/KernelArgumentsTest.cpp
+  test/catch/KernelGraphConstraintsTest.cpp
   test/catch/ScalarExpressionTest.cpp
   test/catch/TernaryExpressionTest.cpp
   test/catch/TestContextTest.cpp
