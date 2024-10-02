@@ -3,7 +3,7 @@
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-// SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES.
+// SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
 //
 //===----------------------------------------------------------------------===//
 
@@ -33,27 +33,18 @@
 // UNSUPPORTED: msvc-19.16
 // UNSUPPORTED: nvrtc, hiprtc
 
-// cuda::mr::async_resource_ref properties
+// cuda::mr::resource_ref properties
 
 #include <cuda/memory_resource>
 #include <cuda/std/cassert>
 #include <cuda/std/cstdint>
-#include <cuda/stream_ref>
 
-template <class T>
-struct property
-{
-  using value_type = T;
-};
-
-template <class T>
-struct property_without_value
-{};
+#include "types.h"
 
 namespace properties_test
 {
-static_assert(cuda::property_with_value<property<int>>, "");
-static_assert(cuda::property_with_value<property<struct someStruct>>, "");
+static_assert(cuda::property_with_value<property_with_value<int>>, "");
+static_assert(cuda::property_with_value<property_with_value<struct someStruct>>, "");
 
 static_assert(!cuda::property_with_value<property_without_value<int>>, "");
 static_assert(!cuda::property_with_value<property_without_value<struct otherStruct>>, "");
@@ -62,55 +53,23 @@ static_assert(!cuda::property_with_value<property_without_value<struct otherStru
 namespace resource_test
 {
 
-template <class... Properties>
-struct async_resource
-{
-  void* allocate(std::size_t, std::size_t)
-  {
-    return nullptr;
-  }
-
-  void deallocate(void* ptr, std::size_t, std::size_t) noexcept {}
-
-  void* allocate_async(std::size_t, std::size_t, cuda::stream_ref)
-  {
-    return nullptr;
-  }
-
-  void deallocate_async(void* ptr, std::size_t, std::size_t, cuda::stream_ref) {}
-
-  bool operator==(const async_resource& other) const
-  {
-    return true;
-  }
-  bool operator!=(const async_resource& other) const
-  {
-    return false;
-  }
-
-  int _val = 0;
-
-  _LIBCUDACXX_TEMPLATE(class Property)
-  _LIBCUDACXX_REQUIRES((!cuda::property_with_value<Property>) && _CUDA_VSTD::_One_of<Property, Properties...>) //
-  friend void get_property(const async_resource&, Property) noexcept {}
-
-  _LIBCUDACXX_TEMPLATE(class Property)
-  _LIBCUDACXX_REQUIRES(cuda::property_with_value<Property>&& _CUDA_VSTD::_One_of<Property, Properties...>) //
-  friend typename Property::value_type get_property(const async_resource& res, Property) noexcept
-  {
-    return static_cast<typename Property::value_type>(res._val);
-  }
-};
-
 // Ensure we have the right size
-static_assert(sizeof(cuda::mr::async_resource_ref<property<short>, property<int>>) == (4 * sizeof(void*)), "");
-static_assert(sizeof(cuda::mr::async_resource_ref<property<short>, property_without_value<int>>) == (3 * sizeof(void*)),
-              "");
-static_assert(sizeof(cuda::mr::async_resource_ref<property_without_value<short>, property<int>>) == (3 * sizeof(void*)),
-              "");
-static_assert(sizeof(cuda::mr::async_resource_ref<property_without_value<short>, property_without_value<int>>)
-                == (2 * sizeof(void*)),
-              "");
+static_assert(
+  sizeof(cuda::mr::resource_ref<cuda::mr::host_accessible, property_with_value<short>, property_with_value<int>>)
+    == (4 * sizeof(void*)),
+  "");
+static_assert(
+  sizeof(cuda::mr::resource_ref<cuda::mr::host_accessible, property_with_value<short>, property_without_value<int>>)
+    == (3 * sizeof(void*)),
+  "");
+static_assert(
+  sizeof(cuda::mr::resource_ref<cuda::mr::host_accessible, property_without_value<short>, property_with_value<int>>)
+    == (3 * sizeof(void*)),
+  "");
+static_assert(
+  sizeof(cuda::mr::resource_ref<cuda::mr::host_accessible, property_without_value<short>, property_without_value<int>>)
+    == (2 * sizeof(void*)),
+  "");
 
 _LIBCUDACXX_TEMPLATE(class Property, class Ref)
 _LIBCUDACXX_REQUIRES((!cuda::property_with_value<Property>) ) //
@@ -142,11 +101,11 @@ int InvokeIfWithoutValue(const Ref& ref)
 }
 
 template <class... Properties>
-void test_async_resource_ref()
+void test_resource_ref()
 {
   constexpr int expected_initially = 42;
-  async_resource<Properties...> input{expected_initially};
-  cuda::mr::async_resource_ref<Properties...> ref{input};
+  resource<cuda::mr::host_accessible, Properties...> input{expected_initially};
+  cuda::mr::resource_ref<cuda::mr::host_accessible, Properties...> ref{input};
 
   // Check all the potentially stateful properties
   const int properties_with_value[] = {InvokeIfWithValue<Properties>(ref)...};
@@ -177,35 +136,38 @@ void test_async_resource_ref()
 
 void test_property_forwarding()
 {
-  using res = async_resource<property<short>, property<int>>;
-  using ref = cuda::mr::async_resource_ref<property<short>>;
+  using res = resource<cuda::mr::host_accessible, property_with_value<short>, property_with_value<int>>;
+  using ref = cuda::mr::resource_ref<cuda::mr::host_accessible, property_with_value<short>>;
 
-  static_assert(cuda::mr::async_resource_with<res, property<short>, property<int>>, "");
-  static_assert(!cuda::mr::async_resource_with<ref, property<short>, property<int>>, "");
+  static_assert(
+    cuda::mr::resource_with<res, cuda::mr::host_accessible, property_with_value<short>, property_with_value<int>>, "");
+  static_assert(
+    !cuda::mr::resource_with<ref, cuda::mr::host_accessible, property_with_value<short>, property_with_value<int>>, "");
 
-  static_assert(cuda::mr::async_resource_with<res, property<short>>, "");
+  static_assert(cuda::mr::resource_with<res, cuda::mr::host_accessible, property_with_value<short>>, "");
 }
 
-void test_async_resource_ref()
+void test_resource_ref()
 {
   // Test some basic combinations of properties w/o state
-  test_async_resource_ref<property<short>, property<int>>();
-  test_async_resource_ref<property<short>, property_without_value<int>>();
-  test_async_resource_ref<property_without_value<short>, property_without_value<int>>();
+  test_resource_ref<property_with_value<short>, property_with_value<int>>();
+  test_resource_ref<property_with_value<short>, property_without_value<int>>();
+  test_resource_ref<property_without_value<short>, property_without_value<int>>();
 
   // Test duplicated properties
-  test_async_resource_ref<property<short>, property<int>, property<short>>();
+  test_resource_ref<property_with_value<short>, property_with_value<int>, property_with_value<short>>();
 
-  test_async_resource_ref<property_without_value<short>, property_without_value<int>, property_without_value<short>>();
+  test_resource_ref<property_without_value<short>, property_without_value<int>, property_without_value<short>>();
 
   // Ensure we only forward requested properties
   test_property_forwarding();
 }
+
 } // namespace resource_test
 
 int main(int, char**)
 {
-  NV_IF_TARGET(NV_IS_HOST, (resource_test::test_async_resource_ref();))
+  NV_IF_TARGET(NV_IS_HOST, (resource_test::test_resource_ref();))
 
   return 0;
 }
