@@ -132,7 +132,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint32_t __x)
     }
     return 32;
   }
-#  endif // _LIBCUDACXX_IS_CONSTANT_EVALUATED && !defined(__CUDA_ARCH__)
+#  endif // _CCCL_BUILTIN_IS_CONSTANT_EVALUATED && !defined(__CUDA_ARCH__)
 
   return __binary_ctz32(static_cast<uint64_t>(__x), 0);
 }
@@ -161,7 +161,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint64_t __x)
 #    endif
     return 64;
   }
-#  endif // _LIBCUDACXX_IS_CONSTANT_EVALUATED && !defined(__CUDA_ARCH__)
+#  endif // _CCCL_BUILTIN_IS_CONSTANT_EVALUATED && !defined(__CUDA_ARCH__)
 
   return __binary_ctz64(__x);
 }

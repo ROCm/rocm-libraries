@@ -522,11 +522,7 @@ void throws_in_constructor_test()
     bool operator()() const
     {
       assert(false);
-#  if defined(TEST_COMPILER_MSVC)
-      __assume(0);
-#  else
-      __builtin_unreachable();
-#  endif
+      _CCCL_UNREACHABLE();
     }
   };
   {
