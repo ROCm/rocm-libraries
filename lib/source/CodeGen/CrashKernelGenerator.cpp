@@ -27,9 +27,10 @@ namespace rocRoller
         case AssertOpKind::STrap:
             co_yield sTrap();
             break;
+        case AssertOpKind::NoOp:
+            Throw<FatalError>("Unexpected AssertOpKind::NoOp");
         default:
-            AssertFatal(0, "Unexpected AssertOpKind");
-            break;
+            Throw<FatalError>("Unknown AssertOpKind");
         }
     }
 
@@ -38,7 +39,7 @@ namespace rocRoller
         auto context     = m_context.lock();
         auto invalidAddr = std::make_shared<Register::Value>(
             context, Register::Type::Scalar, DataType::Int64, 1);
-        co_yield context->copier()->copy(invalidAddr, Register::Value::Literal(0));
+        co_yield context->copier()->copy(invalidAddr, Register::Value::Literal(0L));
 
         auto dummyData = std::make_shared<Register::Value>(
             context, Register::Type::Scalar, DataType::Int32, 1);
