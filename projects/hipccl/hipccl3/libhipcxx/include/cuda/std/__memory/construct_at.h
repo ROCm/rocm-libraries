@@ -54,7 +54,6 @@
 #include <cuda/std/__utility/declval.h>
 #include <cuda/std/__utility/forward.h>
 #include <cuda/std/__utility/move.h>
-#include <cuda/std/detail/libcxx/include/__assert>
 
 // NOTE(HIP/AMD): We need to include new header to get the correct device definitions.
 #if defined(__HIPCC_RTC__)
@@ -142,7 +141,7 @@ _LIBCUDACXX_HIDE_FROM_ABI
 _CCCL_CONSTEXPR_CXX20 __enable_if_t<!__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
 construct_at(_Tp* __location, _Args&&... __args)
 {
-  _LIBCUDACXX_ASSERT(__location != nullptr, "null pointer given to construct_at");
+  _CCCL_ASSERT(__location != nullptr, "null pointer given to construct_at");
   // Need to go through `std::construct_at` as that is the explicitly blessed function
   if (__libcpp_is_constant_evaluated())
   {
@@ -159,7 +158,7 @@ _LIBCUDACXX_HIDE_FROM_ABI
 _CCCL_CONSTEXPR_CXX20 __enable_if_t<__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
 construct_at(_Tp* __location, _Args&&... __args)
 {
-  _LIBCUDACXX_ASSERT(__location != nullptr, "null pointer given to construct_at");
+  _CCCL_ASSERT(__location != nullptr, "null pointer given to construct_at");
   // Need to go through `std::construct_at` as that is the explicitly blessed function
   if (__libcpp_is_constant_evaluated())
   {
@@ -177,7 +176,7 @@ _LIBCUDACXX_HIDE_FROM_ABI
 _CCCL_CONSTEXPR_CXX20 __enable_if_t<!__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
 __construct_at(_Tp* __location, _Args&&... __args)
 {
-  _LIBCUDACXX_ASSERT(__location != nullptr, "null pointer given to construct_at");
+  _CCCL_ASSERT(__location != nullptr, "null pointer given to construct_at");
 #if _CCCL_STD_VER >= 2020
   // Need to go through `std::construct_at` as that is the explicitly blessed function
   if (__libcpp_is_constant_evaluated())
@@ -194,7 +193,7 @@ _LIBCUDACXX_HIDE_FROM_ABI
 _CCCL_CONSTEXPR_CXX20 __enable_if_t<__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
 __construct_at(_Tp* __location, _Args&&... __args)
 {
-  _LIBCUDACXX_ASSERT(__location != nullptr, "null pointer given to construct_at");
+  _CCCL_ASSERT(__location != nullptr, "null pointer given to construct_at");
 #if _CCCL_STD_VER >= 2020
   // Need to go through `std::construct_at` as that is the explicitly blessed function
   if (__libcpp_is_constant_evaluated())
@@ -219,7 +218,7 @@ template <class _Tp,
           __enable_if_t<!_CCCL_TRAIT(is_trivially_destructible, _Tp), int> = 0>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 void __destroy_at(_Tp* __loc)
 {
-  _LIBCUDACXX_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
+  _CCCL_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
   __loc->~_Tp();
 }
 
@@ -229,14 +228,14 @@ template <class _Tp,
           __enable_if_t<_CCCL_TRAIT(is_trivially_destructible, _Tp), int> = 0>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 void __destroy_at(_Tp* __loc)
 {
-  _LIBCUDACXX_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
+  _CCCL_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
   (void) __loc;
 }
 
 template <class _Tp, __enable_if_t<_CCCL_TRAIT(is_array, _Tp), int> = 0>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 void __destroy_at(_Tp* __loc)
 {
-  _LIBCUDACXX_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
+  _CCCL_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
   _CUDA_VSTD::__destroy(_CUDA_VSTD::begin(*__loc), _CUDA_VSTD::end(*__loc));
 }
 
@@ -266,7 +265,7 @@ __reverse_destroy(_BidirectionalIterator __first, _BidirectionalIterator __last)
 template <class _Tp, __enable_if_t<!_CCCL_TRAIT(is_array, _Tp), int> = 0>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX20 void destroy_at(_Tp* __loc)
 {
-  _LIBCUDACXX_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
+  _CCCL_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
   __loc->~_Tp();
 }
 

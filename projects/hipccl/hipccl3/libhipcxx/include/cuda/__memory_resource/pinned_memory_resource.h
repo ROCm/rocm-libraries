@@ -70,7 +70,7 @@ public:
   constexpr pinned_memory_resource(const unsigned int __flags = hipHostAllocDefault) noexcept
       : __flags_(__flags & __available_flags)
   {
-    _LIBCUDACXX_ASSERT(__flags_ == __flags, "Unexpected flags passed to pinned_memory_resource");
+    _CCCL_ASSERT(__flags_ == __flags, "Unexpected flags passed to pinned_memory_resource");
   }
 
   //! @brief Allocate host memory of size at least \p __bytes.
@@ -100,8 +100,7 @@ public:
   deallocate(void* __ptr, const size_t, const size_t __alignment = default_cuda_malloc_host_alignment) const noexcept
   {
     // We need to ensure that the provided alignment matches the minimal provided alignment
-    _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment),
-                       "Invalid alignment passed to pinned_memory_resource::deallocate.");
+    _CCCL_ASSERT(__is_valid_alignment(__alignment), "Invalid alignment passed to pinned_memory_resource::deallocate.");
     _CCCL_ASSERT_CUDA_API(::hipFreeHost, "pinned_memory_resource::deallocate failed", __ptr);
     (void) __alignment;
   }

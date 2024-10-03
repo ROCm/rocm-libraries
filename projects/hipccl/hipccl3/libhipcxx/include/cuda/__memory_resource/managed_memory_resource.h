@@ -68,7 +68,7 @@ public:
   constexpr managed_memory_resource(const unsigned int __flags = hipMemAttachGlobal) noexcept
       : __flags_(__flags & __available_flags)
   {
-    _LIBCUDACXX_ASSERT(__flags_ == __flags, "Unexpected flags passed to managed_memory_resource");
+    _CCCL_ASSERT(__flags_ == __flags, "Unexpected flags passed to managed_memory_resource");
   }
 
   //! @brief Allocate CUDA unified memory of size at least \p __bytes.
@@ -97,8 +97,7 @@ public:
   void deallocate(void* __ptr, const size_t, const size_t __alignment = default_cuda_malloc_alignment) const noexcept
   {
     // We need to ensure that the provided alignment matches the minimal provided alignment
-    _LIBCUDACXX_ASSERT(__is_valid_alignment(__alignment),
-                       "Invalid alignment passed to managed_memory_resource::deallocate.");
+    _CCCL_ASSERT(__is_valid_alignment(__alignment), "Invalid alignment passed to managed_memory_resource::deallocate.");
     _CCCL_ASSERT_CUDA_API(::hipFree, "managed_memory_resource::deallocate failed", __ptr);
     (void) __alignment;
   }

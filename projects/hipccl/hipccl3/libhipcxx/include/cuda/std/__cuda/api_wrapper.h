@@ -60,7 +60,7 @@
 #define _CCCL_ASSERT_CUDA_API(_NAME, _MSG, ...)        \
   {                                                    \
     const ::hipError_t __status = _NAME(__VA_ARGS__); \
-    _LIBCUDACXX_ASSERT(__status == hipSuccess, _MSG); \
+    _CCCL_ASSERT(__status == cudaSuccess, _MSG);       \
     (void) __status;                                   \
   }
 
