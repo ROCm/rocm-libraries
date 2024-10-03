@@ -53,15 +53,9 @@ namespace GPUArchitectureGenerator
             }
         }
 
-        if(!isBranch && spec)
+        if(!isBranch && spec && alias_lookup.contains(instruction))
         {
-            try
-            {
-                isBranch = alias_lookup.at(instruction).is_branch;
-            }
-            catch(const std::exception& e)
-            {
-            }
+            isBranch = alias_lookup.at(instruction).is_branch;
         }
 
         bool isImplicit
@@ -163,13 +157,13 @@ namespace GPUArchitectureGenerator
         return std::get<0>(result) == 0 && std::get<1>(result).length() == 0;
     }
 
-    std::map<std::string, amdisa::Instruction> buildISALookup(amdisa::IsaSpec spec)
+    std::map<std::string, amdisa::Instruction> buildISALookup(amdisa::IsaSpec const& spec)
     {
         std::map<std::string, amdisa::Instruction> alias_lookup;
-        for(const auto& specInstruction : spec.instructions)
+        for(auto const& specInstruction : spec.instructions)
         {
             auto instruction = specInstruction.name;
-            for(const auto& alias : specInstruction.aliased_names)
+            for(auto const& alias : specInstruction.aliased_names)
             {
                 auto lowerAlias = alias;
                 std::transform(lowerAlias.begin(), lowerAlias.end(), lowerAlias.begin(), ::tolower);
@@ -194,7 +188,7 @@ namespace GPUArchitectureGenerator
 
         if(!xmlDir.empty())
         {
-            for(const auto& file : std::filesystem::directory_iterator(xmlDir))
+            for(auto const& file : std::filesystem::directory_iterator(xmlDir))
             {
                 if(!file.is_regular_file() || file.path().extension() != ".xml")
                 {
@@ -223,7 +217,7 @@ namespace GPUArchitectureGenerator
 
         auto specMap = LoadSpecs(xmlDir);
 
-        for(const auto& isaVersion : SupportedArchitectures)
+        for(auto const& isaVersion : SupportedArchitectures)
         {
             std::shared_ptr<amdisa::IsaSpec>           spec;
             std::map<std::string, amdisa::Instruction> alias_lookup;
@@ -235,7 +229,7 @@ namespace GPUArchitectureGenerator
                 alias_lookup = std::get<1>(specMap.at(archName));
             }
 
-            for(const auto& query : AssemblerQueries)
+            for(auto const& query : AssemblerQueries)
             {
                 if(TryAssembler(
                        hipcc, isaVersion, std::get<0>(query.second), std::get<1>(query.second)))
@@ -243,14 +237,14 @@ namespace GPUArchitectureGenerator
                     AddCapability(isaVersion, query.first, 0);
                 }
             }
-            for(const auto& cap : ArchSpecificCaps)
+            for(auto const& cap : ArchSpecificCaps)
             {
                 if(std::find(cap.second.begin(), cap.second.end(), isaVersion) != cap.second.end())
                 {
                     AddCapability(isaVersion, cap.first, 0);
                 }
             }
-            for(const auto& cap : PredicateCaps)
+            for(auto const& cap : PredicateCaps)
             {
                 if(cap.second(isaVersion))
                 {
@@ -281,24 +275,24 @@ namespace GPUArchitectureGenerator
 
             AddCapability(isaVersion, rocRoller::GPUCapability::MaxLdsSize, 1 << 16);
 
-            for(const auto& info : InstructionInfos)
+            for(auto const& info : InstructionInfos)
             {
                 if(std::find(std::get<0>(info).begin(), std::get<0>(info).end(), isaVersion)
                    != std::get<0>(info).end())
                 {
-                    for(const auto& instruction : std::get<1>(info))
+                    for(auto const& instruction : std::get<1>(info))
                     {
                         AddInstructionInfo(isaVersion, instruction, spec, alias_lookup);
                     }
                 }
             }
 
-            for(const auto& group : GroupedInstructionInfos)
+            for(auto const& group : GroupedInstructionInfos)
             {
                 if(std::find(std::get<0>(group).begin(), std::get<0>(group).end(), isaVersion)
                    != std::get<0>(group).end())
                 {
-                    for(const auto& instruction : std::get<0>(std::get<1>(group)))
+                    for(auto const& instruction : std::get<0>(std::get<1>(group)))
                     {
                         AddInstructionInfo(
                             isaVersion,
@@ -315,7 +309,7 @@ namespace GPUArchitectureGenerator
                 }
             }
 
-            for(const auto& instruction : ImplicitReadInstructions)
+            for(auto const& instruction : ImplicitReadInstructions)
             {
                 if(std::find(instruction.second.begin(), instruction.second.end(), isaVersion)
                    != instruction.second.end())
@@ -333,7 +327,7 @@ namespace GPUArchitectureGenerator
 
             if(spec)
             {
-                for(const auto& specInstruction : alias_lookup)
+                for(auto const& specInstruction : alias_lookup)
                 {
                     auto converted = ConvertSpecInstruction(specInstruction.second);
                     if(!GPUArchitectures[isaVersion].HasInstructionInfo(converted.getInstruction()))
