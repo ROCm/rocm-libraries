@@ -17,7 +17,6 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-
         template <CObserver... Types>
         class MetaObserver : public IObserver
         {
@@ -43,8 +42,6 @@ namespace rocRoller
 
             //> This instruction _will_ be scheduled now, record any side effects.
             virtual void observe(Instruction const& inst) override;
-
-            constexpr static bool required(GPUArchitectureTarget const& target);
 
         private:
             Tup m_tuple;

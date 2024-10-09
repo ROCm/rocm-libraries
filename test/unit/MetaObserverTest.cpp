@@ -89,18 +89,3 @@ TEST_F(MetaObserverTest, MultipleObserverTest)
                                                 Scheduling::WaitcntObserver>;
     m_context->observer() = std::make_shared<MyObserver>(constructedObservers);
 }
-
-TEST_F(MetaObserverTest, Required)
-{
-    using FalseFalseObserver = Scheduling::MetaObserver<TestFalseObserver, TestFalseObserver>;
-    using TrueTrueObserver   = Scheduling::MetaObserver<TestTrueObserver, TestTrueObserver>;
-    using FalseTrueObserver  = Scheduling::MetaObserver<TestFalseObserver, TestTrueObserver>;
-    using TrueFalseObserver  = Scheduling::MetaObserver<TestTrueObserver, TestFalseObserver>;
-
-    rocRoller::ContextPtr m_context = std::make_shared<Context>();
-
-    EXPECT_TRUE(TrueTrueObserver::required(m_context->targetArchitecture().target()));
-    EXPECT_FALSE(FalseFalseObserver::required(m_context->targetArchitecture().target()));
-    EXPECT_FALSE(FalseTrueObserver::required(m_context->targetArchitecture().target()));
-    EXPECT_FALSE(TrueFalseObserver::required(m_context->targetArchitecture().target()));
-}

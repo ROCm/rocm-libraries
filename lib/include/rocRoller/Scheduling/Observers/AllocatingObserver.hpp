@@ -91,6 +91,6 @@ namespace rocRoller
             std::weak_ptr<Context> m_context;
         };
 
-        static_assert(CObserver<AllocatingObserver>);
+        static_assert(CObserverConst<AllocatingObserver>);
     }
 }

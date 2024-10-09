@@ -129,7 +129,7 @@ namespace rocRoller
             }
         }
 
-        bool RegisterLivenessObserver::required(GPUArchitectureTarget const& target)
+        bool RegisterLivenessObserver::runtimeRequired()
         {
             return Settings::getInstance()->get(Settings::KernelAnalysis);
         }

@@ -149,6 +149,20 @@ namespace rocRoller
         return target.name();
     }
 
+    constexpr std::array<rocRoller::GPUArchitectureTarget, 13> SupportedArchitectures
+        = {GPUArchitectureTarget{GPUArchitectureGFX::GFX908},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX908, {.xnack = true}},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX908, {.sramecc = true}},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX90A},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX90A, {.sramecc = true}},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX940},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX941},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX941, {.sramecc = true}},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX942},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX942, {.sramecc = true}},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX1012},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX1012, {.xnack = true}},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX1030}};
 }
 
 #include "GPUArchitectureTarget_impl.hpp"

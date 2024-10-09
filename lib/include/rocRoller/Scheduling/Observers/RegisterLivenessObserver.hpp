@@ -63,7 +63,7 @@ namespace rocRoller
              */
             void observe(Instruction const& inst);
 
-            static bool required(GPUArchitectureTarget const& target);
+            static bool runtimeRequired();
 
         private:
             std::weak_ptr<Context>            m_context;
@@ -122,6 +122,6 @@ namespace rocRoller
             std::string livenessString() const;
         };
 
-        static_assert(CObserver<RegisterLivenessObserver>);
+        static_assert(CObserverRuntime<RegisterLivenessObserver>);
     }
 }
