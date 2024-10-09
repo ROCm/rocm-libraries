@@ -12,15 +12,13 @@ if(BUILD_CLIENT)
   list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
   find_package(hip)
 
+  add_subdirectory(../extern/CLI11 CLI11)
+
   add_executable(gemm
     GraphInspector.cpp
-    Parser.cpp
     gemm.cpp
     GEMMParameters.cpp
-    BenchmarkSolution.cpp
-    TensileGEMMSolution.cpp
     visualize.cpp
-
   )
 
   target_compile_options(gemm PUBLIC ${EXTRA_COMPILE_OPTIONS})
@@ -40,6 +38,7 @@ if(BUILD_CLIENT)
     gtest_main
     gmock
     openblas
+    CLI11::CLI11
   )
 
   target_link_libraries(gemm PUBLIC hip::host)
@@ -68,7 +67,6 @@ if(BUILD_CLIENT)
 
   add_executable(codegen_stress
     codegen_stress_test.cpp
-    Parser.cpp
   )
 
   target_compile_options(codegen_stress PUBLIC ${EXTRA_COMPILE_OPTIONS})
@@ -88,6 +86,7 @@ if(BUILD_CLIENT)
     gtest_main
     gmock
     openblas
+    CLI11::CLI11
   )
 
   target_link_libraries(codegen_stress PUBLIC hip::host)

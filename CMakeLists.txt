@@ -169,9 +169,20 @@ ExternalProject_Add(spdlog
  -DSPDLOG_BUILD_SHARED=OFF
 )
 
+# Default ARCHITECTURE_FILE_PATH
 set(ROCROLLER_DEFAULT_ARCHITECTURE_FILE_PATH "${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.msgpack")
 set(ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE ${CMAKE_BINARY_DIR}/source/rocRoller/DefaultArchitectureFilePath.cpp)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/lib/source/DefaultArchitectureFilePath.cpp.in ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE})
+
+# Git hash
+execute_process(
+    COMMAND git describe --always --dirty
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    OUTPUT_VARIABLE ROCROLLER_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+set(ROCROLLER_GIT_VERSION_CPP_FILE ${CMAKE_BINARY_DIR}/source/rocRoller/Utilities/Version.cpp)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/lib/source/Utilities/Version.cpp.in ${ROCROLLER_GIT_VERSION_CPP_FILE})
 
 # ArchitectureGenerator
 
@@ -470,6 +481,7 @@ set(rocroller_src
  lib/source/Schedulers/SequentialScheduler.cpp
 
  ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE}
+ ${ROCROLLER_GIT_VERSION_CPP_FILE}
 )
 
 if(ROCROLLER_USE_HIP)

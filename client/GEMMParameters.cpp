@@ -6,18 +6,13 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
-
             std::string SolutionParameters::generateKernelName() const
             {
                 std::ostringstream rv;
-                rv << "GEMM_" << toString(problemParams.transA) << toString(problemParams.transB);
+                rv << "GEMM_" << toString(transA) << toString(transB);
 
                 rv << "_";
-                for(auto const& t : {problemParams.typeA,
-                                     problemParams.typeB,
-                                     problemParams.typeC,
-                                     problemParams.typeD,
-                                     problemParams.typeAcc})
+                for(auto const& t : {typeA, typeB, typeC, typeD, typeAcc})
                     rv << t.substr(0, 1);
 
                 rv << "_MT";
@@ -39,6 +34,9 @@ namespace rocRoller
                         rv, std::vector{prefetchInFlight, prefetchLDSFactor}, "x");
                 }
 
+                rv << "_MI";
+                rocRoller::streamJoin(rv, std::vector{waveM, waveN, waveK, waveB}, "x");
+
                 rv << "_" << scheduler;
 
                 if(streamK)
@@ -48,7 +46,6 @@ namespace rocRoller
                     {
                         rv << "2T";
                     }
-                    rv << numWGs;
                 }
 
                 return rv.str();
@@ -66,6 +63,54 @@ namespace rocRoller
                     rocRoller::Throw<rocRoller::FatalError>("Unknown transpose type");
                 }
             }
+
+            std::ostream& operator<<(std::ostream& s, TransposeType const& x)
+            {
+                s << toString(x);
+                return s;
+            }
+
+            std::ostream& operator<<(std::ostream& s, ProblemParameters const& x)
+            {
+                s << "MxNxK:     " << x.m << "x" << x.n << "x" << x.k << std::endl;
+                s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
+                  << " D:" << x.typeD << " ACC:" << x.typeAcc << std::endl;
+                s << "Tranpose:  " << toString(x.transA) << toString(x.transB) << std::endl;
+                return s;
+            }
+
+            std::ostream& operator<<(std::ostream& s, SolutionParameters const& x)
+            {
+                if(x.scheduler == "TENSILE_ASM")
+                {
+                    s << "Algorithm: TENSILE" << std::endl;
+                    return s;
+                }
+                if(x.streamK)
+                {
+                    s << "Algorithm: StreamK twoTile:" << x.streamKTwoTile << std::endl;
+                }
+                else
+                {
+                    s << "Algorithm: DataParallel" << std::endl;
+                }
+                s << "Tiling:    " << x.macM << "x" << x.macN << "x" << x.macK << std::endl;
+                s << "MI:        " << x.waveM << "x" << x.waveN << "x" << x.waveK << "x" << x.waveB
+                  << std::endl;
+                s << "LDS:       " << x.loadLDSA << x.loadLDSB << x.storeLDSD << std::endl;
+                s << "Prefetch:  "
+                  << "enabled:" << x.prefetch << " inflight:" << x.prefetchInFlight
+                  << " LDS:" << x.prefetchLDSFactor << std::endl;
+                s << "Unroll:    X:" << x.unrollX << " Y:" << x.unrollY << std::endl;
+                s << "Scheduler: " << x.scheduler << std::endl;
+                s << "WG size:   " << x.workgroupSizeX * x.workgroupSizeY << std::endl;
+                s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
+                  << " D:" << x.typeD << " ACC:" << x.typeAcc << std::endl;
+                s << "Tranpose:  " << toString(x.transA) << toString(x.transB) << std::endl;
+                s << "Version:   " << x.version << std::endl;
+                return s;
+            }
+
         }
     }
 }

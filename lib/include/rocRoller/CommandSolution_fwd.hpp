@@ -4,12 +4,12 @@
 
 namespace rocRoller
 {
-    class CommandKernel;
-    class CommandLaunchParameters;
     class CommandParameters;
+    class CommandLaunchParameters;
+    class CommandKernel;
     class CommandSolution;
 
+    using CommandParametersPtr       = std::shared_ptr<CommandParameters>;
     using CommandKernelPtr           = std::shared_ptr<CommandKernel>;
     using CommandLaunchParametersPtr = std::shared_ptr<CommandLaunchParameters>;
-    using CommandParametersPtr       = std::shared_ptr<CommandParameters>;
 }

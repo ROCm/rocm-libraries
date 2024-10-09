@@ -250,13 +250,14 @@ namespace rocRoller
                                               std::vector<DeferredConnection>& loadConnections,
                                               int                              macTileTag,
                                               VariableType                     varType,
-                                              const LoopInfo&                  loopInfo,
+                                              LoopInfo const&                  loopInfo,
+                                              ArgumentInfo const&              argInfo,
                                               CommandParametersPtr             params,
                                               ContextPtr                       context)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
-            auto numWorkgroupsX = literal(params->numScratchTiles);
+            auto numWorkgroupsX = argInfo.numWGs;
             auto numWorkgroupsY = literal(1u);
 
             auto sizeX = simplify(numWorkgroupsX * literal(static_cast<uint>(macTile.sizes[0])));
@@ -509,6 +510,7 @@ namespace rocRoller
                              DataType                               dataType,
                              std::vector<int> const&                epilogueOperations,
                              LoopInfo const&                        loopInfo,
+                             ArgumentInfo const&                    argInfo,
                              CommandParametersPtr                   params,
                              ContextPtr                             context)
         {
@@ -548,7 +550,7 @@ namespace rocRoller
             auto flagRegister = graph.coordinates.addElement(VGPR());
             auto loadFlagTag  = graph.control.addElement(LoadSGPR(DataType::UInt32, bufOpts));
 
-            auto numScratch     = Expression::literal(params->numScratchTiles);
+            auto numScratch     = argInfo.numWGs;
             auto boundsCheckTag = graph.control.addElement(
                 ConditionalOp{(DF(workgroup) + one < numScratch), "Bounds Check"});
 
@@ -1086,8 +1088,7 @@ namespace rocRoller
             if(accumInfo.accumulatorTile != -1)
             {
                 // Create scratch space for flags
-                auto flagsScratch = newScratchCoordinate(
-                    literal(params->numScratchTiles), DataType::UInt32, context);
+                auto flagsScratch = newScratchCoordinate(argInfo.numWGs, DataType::UInt32, context);
                 auto flagsScratchTag = graph.coordinates.addElement(flagsScratch);
 
                 // Create scratch space for partially accumulated tiles
@@ -1098,6 +1099,7 @@ namespace rocRoller
                                                             accumInfo.accumulatorTile,
                                                             accumInfo.accumulatorVarType,
                                                             loopInfo,
+                                                            argInfo,
                                                             params,
                                                             context);
 
@@ -1127,6 +1129,7 @@ namespace rocRoller
                                           accumInfo.accumulatorVarType.dataType,
                                           epilogueOperations,
                                           loopInfo,
+                                          argInfo,
                                           params,
                                           context);
 
