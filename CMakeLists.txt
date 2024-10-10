@@ -59,7 +59,7 @@ FetchContent_MakeAvailable(googletest)
 FetchContent_Declare(
   libdivide
   GIT_REPOSITORY https://github.com/ridiculousfish/libdivide.git
-  GIT_TAG 5.0
+  GIT_TAG v5.1
   CONFIGURE_COMMAND ""
   BUILD_COMMAND ""
   INSTALL_COMMAND ""
