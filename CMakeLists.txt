@@ -354,6 +354,7 @@ set(rocroller_src
  lib/source/ExpressionTransformations/LaunchTimeSubExpressions.cpp
  lib/source/ExpressionTransformations/RestoreCommandArguments.cpp
  lib/source/ExpressionTransformations/Simplify.cpp
+ lib/source/ExpressionTransformations/LowerPRNG.cpp
 
  lib/source/CodeGen/Arithmetic/Add.cpp
  lib/source/CodeGen/Arithmetic/AddShiftL.cpp
@@ -386,6 +387,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/ShiftL.cpp
  lib/source/CodeGen/Arithmetic/ShiftLAdd.cpp
  lib/source/CodeGen/Arithmetic/Subtract.cpp
+ lib/source/CodeGen/Arithmetic/RandomNumber.cpp
  lib/source/CodeGen/Arithmetic/Utility.cpp
  lib/source/CodeGen/ArgumentLoader.cpp
  lib/source/CodeGen/Buffer.cpp
@@ -715,6 +717,7 @@ set(
   test/catch/TernaryExpressionTest.cpp
   test/catch/TestContextTest.cpp
   test/catch/UtilsTest.cpp
+  test/catch/RandomNumberExpressionTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})

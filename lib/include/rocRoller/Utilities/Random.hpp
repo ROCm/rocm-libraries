@@ -52,6 +52,11 @@ namespace rocRoller
     private:
         std::mt19937 m_gen;
     };
+
+    inline uint32_t constexpr LFSRRandomNumberGenerator(uint32_t const seed)
+    {
+        return ((seed << 1) ^ (((seed >> 31) & 1) ? 0xc5 : 0x00));
+    }
 }
 
 #include "Random_impl.hpp"

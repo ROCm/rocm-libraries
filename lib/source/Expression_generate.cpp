@@ -910,6 +910,9 @@ namespace rocRoller
                 destStr = dest->toString();
             co_yield Instruction::Comment("Generate " + toString(expr) + " into " + destStr);
 
+            // Replace RandomNumber expression with expressions that implement the PRNG algorithm.
+            expr = lowerPRNG(expr);
+
             {
                 auto fast = FastArithmetic(context);
 

@@ -341,6 +341,8 @@ namespace rocRoller
 
         EXPRESSION_INFO(Negate);
 
+        EXPRESSION_INFO(RandomNumber);
+
         EXPRESSION_INFO(Convert<DataType::Half>);
         EXPRESSION_INFO(Convert<DataType::Halfx2>);
         EXPRESSION_INFO(Convert<DataType::FP8>);
