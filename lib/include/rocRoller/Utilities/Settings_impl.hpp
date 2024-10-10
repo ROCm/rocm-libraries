@@ -16,19 +16,19 @@ namespace rocRoller
     template <typename Option>
     typename Option::Type Settings::get(Option const& opt)
     {
-        // opt exists in m_values
-        auto itr = m_values.find(opt.name);
-        if(itr != m_values.end())
         {
-            return std::any_cast<typename Option::Type>(itr->second);
+            Settings::MapReaderLock readerLock{m_mapLock};
+            // opt exists in m_values
+            auto itr = m_values.find(opt.name);
+            if(itr != m_values.end())
+            {
+                return std::any_cast<typename Option::Type>(itr->second);
+            }
         }
         // opt does not exist in m_values
-        else
-        {
-            typename Option::Type val = opt.getValue();
-            set(opt, val);
-            return val;
-        }
+        typename Option::Type val = opt.getValue();
+        set(opt, val);
+        return val;
     }
 
     template <typename Option>
@@ -73,6 +73,7 @@ namespace rocRoller
     {
         if constexpr(std::is_same_v<typename Option::Type, T>)
         {
+            Settings::MapWriterLock writerLock{m_mapLock};
             m_values[opt.name] = val;
         }
         else
@@ -127,10 +128,12 @@ namespace rocRoller
                 {
                     if(auto envVar = setting->getFromEnv())
                     {
+                        Settings::MapWriterLock writerLock{m_mapLock};
                         m_values[setting->name] = *envVar;
                     }
                     else
                     {
+                        Settings::MapWriterLock writerLock{m_mapLock};
                         m_values[setting->name] = bitfield.test(setting->getBitIndex());
                     }
                 }

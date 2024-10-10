@@ -644,7 +644,6 @@ set(
   test/unit/CostTest.cpp
   test/unit/SchedulerTest.cpp
   test/unit/ScopeTest.cpp
-  test/unit/SettingsTest.cpp
   test/unit/SourceMatcherTest.cpp
   test/unit/SupportedInstructionObserverTest.cpp
   test/unit/TileTransposeAdd.cpp
@@ -718,6 +717,7 @@ set(
   test/catch/TestContextTest.cpp
   test/catch/UtilsTest.cpp
   test/catch/RandomNumberExpressionTest.cpp
+  test/catch/SettingsTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})
