@@ -63,6 +63,11 @@ namespace rocRoller
         static Instruction Label(Register::ValuePtr label);
         static Instruction Label(Register::ValuePtr label, std::string const& comment);
 
+        static Instruction InoutInstruction(std::string const&                        opcode,
+                                            std::initializer_list<Register::ValuePtr> inout,
+                                            std::initializer_list<std::string>        modifiers,
+                                            std::string const&                        comment);
+
         static Instruction Wait(WaitCount const& wait);
         static Instruction Wait(WaitCount&& wait);
 
@@ -172,10 +177,13 @@ namespace rocRoller
 
         Scheduling::Dependency m_dependency = Scheduling::Dependency::None;
 
+        std::array<Register::ValuePtr, MaxDstRegisters> m_inoutDsts;
         std::array<Register::ValuePtr, MaxDstRegisters> m_dst;
         std::array<Register::ValuePtr, MaxSrcRegisters> m_src;
 
         std::array<std::string, MaxModifiers> m_modifiers;
+
+        bool m_operandsAreInout = false;
     };
 }
 

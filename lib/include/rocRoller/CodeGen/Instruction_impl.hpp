@@ -186,6 +186,23 @@ namespace rocRoller
         return rv;
     }
 
+    inline Instruction
+        Instruction::InoutInstruction(std::string const&                        opcode,
+                                      std::initializer_list<Register::ValuePtr> inout,
+                                      std::initializer_list<std::string>        modifiers,
+                                      std::string const&                        comment)
+    {
+        // Store registers as srcs
+        Instruction rv = Instruction(opcode, {}, inout, modifiers, comment);
+        AssertFatal(inout.size() <= rv.m_inoutDsts.size(),
+                    ShowValue(inout.size()),
+                    ShowValue(rv.m_inoutDsts.size()));
+        // Duplicate registers in m_inoutDsts. Leave m_dst empty.
+        std::copy(inout.begin(), inout.end(), rv.m_inoutDsts.begin());
+        rv.m_operandsAreInout = true;
+        return rv;
+    }
+
     inline Instruction Instruction::Wait(WaitCount const& wait)
     {
         Instruction rv;
@@ -230,7 +247,8 @@ namespace rocRoller
     inline std::array<Register::ValuePtr, Instruction::MaxDstRegisters> const&
         Instruction::getDsts() const
     {
-        return m_dst;
+        // For in/out operands, m_src and m_inoutDsts are populated and m_dst is empty
+        return m_operandsAreInout ? m_inoutDsts : m_dst;
     }
 
     inline bool Instruction::hasRegisters() const
