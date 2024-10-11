@@ -391,6 +391,35 @@ namespace RegisterAllocatorTest
             {
                 auto allocator
                     = std::make_shared<Register::Allocator>(Register::Type::Scalar, 16, scheme);
+                Register::AllocationOptions opt{.contiguousChunkWidth = 3, .alignment = 2};
+
+                auto alloc0 = std::make_shared<Register::Allocation>(
+                    m_context, Register::Type::Scalar, DataType::Float, 12, opt);
+                allocator->allocate(alloc0);
+
+                auto expected = scheme == Register::AllocatorScheme::PerfectFit
+                                    ? std::vector{0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14}
+                                    : std::vector{12, 13, 14, 8, 9, 10, 4, 5, 6, 0, 1, 2};
+                EXPECT_EQ(expected, alloc0->registerIndices());
+            }
+            {
+                auto allocator
+                    = std::make_shared<Register::Allocator>(Register::Type::Scalar, 17, scheme);
+                Register::AllocationOptions opt{.contiguousChunkWidth = 5, .alignment = 3};
+
+                auto alloc0 = std::make_shared<Register::Allocation>(
+                    m_context, Register::Type::Scalar, DataType::Float, 15, opt);
+                allocator->allocate(alloc0);
+
+                auto expected
+                    = scheme == Register::AllocatorScheme::PerfectFit
+                          ? std::vector{0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16}
+                          : std::vector{12, 13, 14, 15, 16, 6, 7, 8, 9, 10, 0, 1, 2, 3, 4};
+                EXPECT_EQ(expected, alloc0->registerIndices());
+            }
+            {
+                auto allocator
+                    = std::make_shared<Register::Allocator>(Register::Type::Scalar, 16, scheme);
                 Register::AllocationOptions opt{.contiguousChunkWidth = 1, .alignment = 1};
 
                 auto alloc0 = std::make_shared<Register::Allocation>(

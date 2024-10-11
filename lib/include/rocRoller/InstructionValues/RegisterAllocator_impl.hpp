@@ -309,7 +309,9 @@ namespace rocRoller
                     // Check if register is not free, or if it's in our reserved list
                     if(!isFree(i)
                        || std::find(reservedIndices.begin(), reservedIndices.end(), i)
-                              != reservedIndices.end())
+                              != reservedIndices.end()
+                       || (regCount > 1 && regCount % options.alignment != 0
+                           && i - start == regCount))
                     {
                         break;
                     }
