@@ -3,9 +3,10 @@
 Documentation for rocPRIM is available at
 [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## Unreleased rocPRIM-3.3.0 for ROCm 6.3.0
+## (Unreleased) rocPRIM-3.3.0 for ROCm 6.3.0
 
-### Additions
+### Added
+
 * Add --test smoke option in rtest.py. It will run a subset of tests such that the total test time is in 5 minutes. Use python3 ./rtest.py --test smoke or python3 ./rtest.py -t smoke to execute smoke test.
 * Option `--seed` to benchmarks to specify a seed for the generation of random inputs. The default behavior is to keep using a random seed per benchmark measurement.
 * Added configuration autotuning to device partition (`rocprim::partition`, `rocprim::partition_two_way`, and `rocprim::partition_three_way`), device select (`rocprim::select`, `rocprim::unique`, and `rocprim::unique_by_key`), and device reduce by key (`rocprim::reduce_by_key`) for improved performance on selected architectures.
@@ -15,12 +16,13 @@ Documentation for rocPRIM is available at
 * Added deterministic (bitwise reproducible) algorithm variants `rocprim::deterministic_inclusive_scan`, `rocprim::deterministic_exclusive_scan`, `rocprim::deterministic_inclusive_scan_by_key`, `rocprim::deterministic_exclusive_scan_by_key`, and `rocprim::deterministic_reduce_by_key`. These provide run-to-run stable results with non-associative operators such as float operations, at the cost of reduced performance.
 * Added a parallel `partial_sort` and `partial_sort_copy` device function similar to `std::partial_sort` and `std::partial_sort_copy`, these functions rearranges elements such that the elements are the same as a sorted list up to and including the middle index.
 
-### Changes
+### Changed
 
 * Modified the input size in device adjacent difference benchmarks. Observed performance with these benchmarks might be different.
 * Changed the default seed for `device_benchmark_segmented_reduce`.
 
-### Fixes
+### Resolved issues
+
 * Fixed an issue in rtest.py where if the build folder was made without release or debug directory it would crash the program
 * Fixed an issue where while running rtest.py on windows and passing in an absolute path to `--install_dir` causes a `FileNotFound` error.
 * rocPRIM functions are no longer forcefully inlined on Windows, significantly reducing the build
@@ -32,9 +34,9 @@ Documentation for rocPRIM is available at
 * Fixed a bug for `rocprim::thread_load` and `rocprim::thread_store` where `float` and `double` were not casted to the correct type resulting in wrong results.
 * Fix tests failing when compiling with `-D_GLIBCXX_ASSERTIONS=ON`.
 
-### Deprecations
+### Upcoming changes
 
-* `rocprim::thread_load` and `rocprim::thread_store`, use dereference instead. Not all of those functions are available on every device architecture, and their usage can hurt performance, because inline assembly inhibits optimizations.
+* `rocprim::thread_load` and `rocprim::thread_store` will be deprecated. Use dereference instead. Not all of those functions are available on every device architecture, and their usage can hurt performance, because inline assembly inhibits optimizations.
 
 ## rocPRIM-3.2.1 for ROCm 6.2.1
 
