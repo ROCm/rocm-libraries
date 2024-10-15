@@ -337,38 +337,6 @@ namespace rocRoller
 
 namespace rocRoller
 {
-    template <typename TA, typename TB, typename TC>
-    void GenerateRandomInput(std::mt19937::result_type seed,
-                             std::vector<TA>&          A,
-                             size_t                    sizeA,
-                             std::vector<TB>&          B,
-                             size_t                    sizeB,
-                             std::vector<TC>&          C,
-                             size_t                    sizeC)
-    {
-        auto rngA = RandomGenerator(seed + 1);
-        auto rngB = RandomGenerator(seed + 2);
-        auto rngC = RandomGenerator(seed + 3);
-
-#pragma omp parallel sections
-        {
-#pragma omp section
-            {
-                A = rngA.vector<TA>(sizeA, -1.f, 1.f);
-            }
-
-#pragma omp section
-            {
-                B = rngB.vector<TB>(sizeB, -1.f, 1.f);
-            }
-
-#pragma omp section
-            {
-                C = rngC.vector<TC>(sizeC, -1.f, 1.f);
-            }
-        }
-    }
-
     template <typename T>
     void SetIdentityMatrix(std::vector<T>& mat, size_t cols, size_t rows)
     {

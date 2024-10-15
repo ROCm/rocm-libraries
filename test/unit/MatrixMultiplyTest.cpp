@@ -19,6 +19,7 @@
 #include "SourceMatcher.hpp"
 #include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
+#include <common/mxDataGen.hpp>
 
 using namespace rocRoller;
 
@@ -100,10 +101,9 @@ namespace MatrixMultiplyTest
             auto NY = std::make_shared<Expression::Expression>(workgroup_size_y);
             auto NZ = std::make_shared<Expression::Expression>(1u);
 
-            RandomGenerator random(9861u);
-
-            auto A = random.vector<T>(M * K, -1.f, 1.f);
-            auto B = random.vector<T>(K * N, -1.f, 1.f);
+            auto seed = 9861u;
+            auto A    = DGenVector<T>(M, K, -1.f, 1.f, seed + 1);
+            auto B    = DGenVector<T>(K, N, -1.f, 1.f, seed + 2);
 
             auto d_A = make_shared_device(A);
             auto d_B = make_shared_device(B);
@@ -240,10 +240,9 @@ namespace MatrixMultiplyTest
             auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
             auto NZ = std::make_shared<Expression::Expression>(1u);
 
-            RandomGenerator random(61u);
-
-            auto A = random.vector<T>(M * K, -1.f, 1.f);
-            auto B = random.vector<T>(K * N, -1.f, 1.f);
+            auto seed = 9861u;
+            auto A    = DGenVector<T>(M, K, -1.f, 1.f, seed + 1);
+            auto B    = DGenVector<T>(K, N, -1.f, 1.f, seed + 2);
 
             auto d_A = make_shared_device(A);
             auto d_B = make_shared_device(B);
@@ -350,11 +349,11 @@ namespace MatrixMultiplyTest
             auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
             auto NZ = std::make_shared<Expression::Expression>(1u);
 
-            RandomGenerator random(61u);
+            auto seed = 9861u;
 
-            auto A = random.vector<T>(M * K, -1.f, 1.f);
-            auto B = random.vector<T>(K * N, -1.f, 1.f);
-            auto C = random.vector<T>(M * N, -1.f, 1.f);
+            auto A = DGenVector<T>(M, K, -1.f, 1.f, seed + 1);
+            auto B = DGenVector<T>(K, N, -1.f, 1.f, seed + 2);
+            auto C = DGenVector<T>(M, N, -1.f, 1.f, seed + 3);
 
             auto d_A = make_shared_device(A);
             auto d_B = make_shared_device(B);

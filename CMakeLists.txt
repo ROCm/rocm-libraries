@@ -563,8 +563,12 @@ ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
 
 # rocRoller unit tests
 
+include_directories(${CMAKE_SOURCE_DIR}/extern/mxDataGenerator)
+add_subdirectory(extern/mxDataGenerator)
+
 add_library(common_test_utilities
   test/common/Utilities.cpp
+  test/common/mxDataGen.cpp
 )
 
 target_compile_features(common_test_utilities PUBLIC cxx_std_20)
@@ -637,6 +641,7 @@ set(
   test/unit/MFMAHazardObserverTest.cpp
   test/unit/MFMAUnitObserverTest.cpp
   test/unit/MixedArithmeticTest.cpp
+  test/unit/mxDataGenTest.cpp
   test/unit/RandomTest.cpp
   test/unit/RegisterAllocatorTest.cpp
   test/unit/RegisterTest.cpp

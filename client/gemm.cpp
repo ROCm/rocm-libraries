@@ -15,6 +15,7 @@
 #include <rocRoller/Utilities/Version.hpp>
 
 #include <common/Utilities.hpp>
+#include <common/mxDataGen.hpp>
 
 #include "include/DataParallelGEMMSolution.hpp"
 #include "include/GEMMParameters.hpp"
@@ -232,11 +233,11 @@ namespace rocRoller::Client::GEMMClient
 
         // Host Data
         std::cout << "Generating input data..." << std::endl;
-        RandomGenerator random(31415u);
-        std::vector<A>  h_A = random.vector<A>(problemParams.m * problemParams.k, -1.0, 1.0);
-        std::vector<B>  h_B = random.vector<B>(problemParams.k * problemParams.n, -1.0, 1.0);
-        std::vector<C>  h_C = random.vector<C>(problemParams.m * problemParams.n, -1.0, 1.0);
-        std::vector<D>  h_D(problemParams.m * problemParams.n, static_cast<D>(0.0));
+        auto           seed = 31415u;
+        std::vector<A> h_A  = DGenVector<A>(problemParams.m, problemParams.k, -1.0, 1.0, seed + 1);
+        std::vector<B> h_B  = DGenVector<B>(problemParams.k, problemParams.n, -1.0, 1.0, seed + 2);
+        std::vector<C> h_C  = DGenVector<C>(problemParams.m, problemParams.n, -1.0, 1.0, seed + 3);
+        std::vector<D> h_D(problemParams.m * problemParams.n, static_cast<D>(0.0));
 
         auto d_A = make_shared_device(h_A);
         auto d_B = make_shared_device(h_B);

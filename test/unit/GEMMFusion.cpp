@@ -24,6 +24,7 @@
 #include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 #include <common/GEMMProblem.hpp>
+#include <common/mxDataGen.hpp>
 
 namespace GEMMDriverTest
 {
@@ -101,7 +102,7 @@ namespace GEMMDriverTest
             std::vector<T> hostB;
             std::vector<T> hostC;
 
-            GenerateRandomInput(31415u, hostA, M * K, hostB, K * N, hostC, M * N);
+            DGenInput(hostA, hostB, hostC, M, N, K, 31415u);
 
             if(setIdentity)
             {
