@@ -273,7 +273,7 @@ namespace std
 namespace ranges
 {
 template <>
-_LIBCUDACXX_INLINE_VAR constexpr bool enable_borrowed_range<ForwardBorrowedRange> = true;
+_CCCL_INLINE_VAR constexpr bool enable_borrowed_range<ForwardBorrowedRange> = true;
 }
 } // namespace std
 } // namespace cuda
@@ -303,7 +303,7 @@ namespace std
 namespace ranges
 {
 template <>
-_LIBCUDACXX_INLINE_VAR constexpr bool enable_borrowed_range<ConvertibleForwardBorrowedRange> = true;
+_CCCL_INLINE_VAR constexpr bool enable_borrowed_range<ConvertibleForwardBorrowedRange> = true;
 }
 } // namespace std
 } // namespace cuda
@@ -350,7 +350,7 @@ namespace std
 namespace ranges
 {
 template <>
-_LIBCUDACXX_INLINE_VAR constexpr bool enable_borrowed_range<ForwardBorrowedRangeDifferentSentinel> = true;
+_CCCL_INLINE_VAR constexpr bool enable_borrowed_range<ForwardBorrowedRangeDifferentSentinel> = true;
 }
 } // namespace std
 } // namespace cuda
@@ -404,7 +404,7 @@ namespace std
 namespace ranges
 {
 template <>
-_LIBCUDACXX_INLINE_VAR constexpr bool enable_borrowed_range<DifferentSentinelWithSizeMember> = true;
+_CCCL_INLINE_VAR constexpr bool enable_borrowed_range<DifferentSentinelWithSizeMember> = true;
 }
 } // namespace std
 } // namespace cuda
