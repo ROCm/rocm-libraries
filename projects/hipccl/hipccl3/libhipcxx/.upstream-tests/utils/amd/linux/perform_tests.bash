@@ -89,7 +89,7 @@ function section_separator {
 LIBCXX_LOG=$(mktemp)
 LIBCUDACXX_LOG=$(mktemp)
 
-KNOWN_COMPUTE_ARCHS="gfx940 gfx941 gfx942 gfx90a gfx908"
+KNOWN_COMPUTE_ARCHS="gfx940 gfx941 gfx942 gfx90a gfx908 gfx1100"
 
 function report_and_exit {
   # If any of the lines searched for below aren't present in the log files, the
