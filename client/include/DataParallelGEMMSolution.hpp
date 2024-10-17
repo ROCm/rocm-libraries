@@ -317,6 +317,41 @@ namespace rocRoller
 
                     return commandArgs;
                 }
+
+                virtual void setPredicates(CommandKernelPtr          commandKernel,
+                                           SolutionParameters const& solutionParams) override
+                {
+                    using namespace rocRoller::Expression;
+                    // predicate building blocks
+                    // A sizes
+                    auto aSizes
+                        = std::get<Operations::Tensor>(*(this->m_command->findTag(m_tagTensorA)))
+                              .sizes();
+                    std::vector<ExpressionPtr> aSizeExps(aSizes.size());
+                    std::transform(aSizes.begin(), aSizes.end(), aSizeExps.begin(), [](auto arg) {
+                        return arg->expression();
+                    });
+
+                    // parameters
+                    auto unrollKExp = literal(commandKernel->getCommandParameters()->unrollK);
+                    auto macKExp    = literal(solutionParams.macK);
+
+                    // constants
+                    auto zero = literal(0u);
+                    auto one  = literal(1u);
+
+                    // sanitize parameters
+                    auto sanUnrollKExp = convert(DataType::UInt32,
+                                                 conditional(unrollKExp == zero, one, unrollKExp));
+
+                    // predicates
+                    // unrollK size match predicates
+                    auto unrollKPredicate = (aSizeExps[1] % (macKExp * sanUnrollKExp) == zero);
+                    setComment(unrollKPredicate,
+                               "K must be a multiple of macK * unrollK (unrollK may be "
+                               "set by prefetchInFlight)");
+                    commandKernel->addPredicate(unrollKPredicate);
+                }
             };
         }
     }

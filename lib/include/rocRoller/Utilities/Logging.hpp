@@ -41,6 +41,21 @@ namespace rocRoller
         using LoggerPtr = std::shared_ptr<spdlog::logger>;
         LoggerPtr getLogger();
 
+        inline void log(spdlog::level::level_enum level, const std::string& str)
+        {
+            static auto defaultLog = getLogger();
+            defaultLog->log(level, str);
+        }
+
+        template <typename... Args>
+        inline void log(spdlog::level::level_enum        level,
+                        spdlog::format_string_t<Args...> fmt,
+                        Args&&... args)
+        {
+            static auto defaultLog = getLogger();
+            defaultLog->log(level, fmt, std::forward<Args>(args)...);
+        }
+
         inline void trace(const std::string& str)
         {
             static auto defaultLog = getLogger();
