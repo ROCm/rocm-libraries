@@ -1,3 +1,21 @@
+# Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+
 name: Bug Report
 description: Create a report to help us improve
 title: '[BUG]: '
@@ -9,7 +27,7 @@ body:
       label: Is this a duplicate?
       description: Check for duplicate issues.
       options:
-        - label: I confirmed there appear to be no [duplicate issues](https://github.com/NVIDIA/cccl/issues) for this bug and that I agree to the [Code of Conduct](CODE_OF_CONDUCT.md)
+        - label: I confirmed there appear to be no [duplicate issues](https://github.com/ROCm/libhipcxx/issues) for this bug.
           required: true
 
   - type: dropdown
@@ -24,20 +42,6 @@ body:
         - Compile-time Error
         - Performance
         - Something else
-    validations:
-      required: true
-
-  - type: dropdown
-    id: component
-    attributes:
-      label: Component
-      description: Which CCCL component does this apply to?
-      multiple: false
-      options:
-        - Thrust
-        - CUB
-        - libcu++
-        - Not sure
     validations:
       required: true
 
@@ -57,11 +61,11 @@ body:
       description: Steps used to reproduce the bug.
       placeholder: |
         0. See godbolt link below for exact reproducer
-        1. Construct a `cuda::std::tuple`
+        1. Construct a `hip::std::tuple`
         2. Use structured bindings to destructure the elements of the tuple.
         3. Compilation fails with the error message:
         ```
-        <source>(5): error: cannot bind to non-public member "cuda::std::__4::tuple<_Tp...>::__base_ [with _Tp=<int, int>]"
+        <source>(5): error: cannot bind to non-public member "hip::std::__4::tuple<_Tp...>::__base_ [with _Tp=<int, int>]"
         auto [a,b] = t;
         ```
     validations:
@@ -72,18 +76,9 @@ body:
     attributes:
       label: Expected behavior
       description: A clear and concise description of what you expected to happen.
-      placeholder: "Using structured bindings with `cuda::std::tuple` should successfully compile and destructure the elements of the tuple."
+      placeholder: "Using structured bindings with `hip::std::tuple` should successfully compile and destructure the elements of the tuple."
     validations:
       required: true
-
-  - type: input
-    id: reproduction-link
-    attributes:
-      label: Reproduction link
-      description: If applicable, please provide a Compiler Explorer (godbolt) link to help explain your problem.
-      placeholder:  https://godbolt.org/z/dT5nMcf7W
-    validations:
-      required: false
 
   - type: markdown
     attributes:
@@ -100,36 +95,31 @@ body:
       required: false
 
   - type: textarea
-    id: nvidia-smi-output
+    id: rocm-smi-output
     attributes:
-      label: nvidia-smi output
-      description: If applicable, the output from running the `nvidia-smi` command.
+      label: rocm-smi output
+      description: If applicable, the output from running the `rocm-smi --showhw` command.
       placeholder: |
-        +-----------------------------------------------------------------------------+
-        | NVIDIA-SMI 495.29.05    Driver Version: 495.29.05    CUDA Version: 11.5     |
-        |-------------------------------+----------------------+----------------------+
-        | GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
-        | Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
-        |                               |                      |               MIG M. |
-        |===============================+======================+======================|
-        |   0  NVIDIA GeForce ...  Off  | 00000000:41:00.0  On |                  N/A |
-        |  0%   25C    P8     8W / 320W |    491MiB / 10015MiB |      0%      Default |
-        |                               |                      |                  N/A |
-        +-------------------------------+----------------------+----------------------+
+        ======================= ROCm System Management Interface =======================
+        ============================ Concise Hardware Info =============================
+        GPU  DID   GFX RAS  SDMA RAS  UMC RAS  VBIOS            BUS           
+        0    740f  ENABLED  ENABLED   ENABLED  113-D67301V-073  0000:4A:00.0  
+        ================================================================================
+        ============================= End of ROCm SMI Log ==============================
     validations:
       required: false
 
   - type: textarea
-    id: nvcc-version
+    id: hipcc-version
     attributes:
-      label: NVCC version
-      description: If applicable, the version of nvcc you're using.
+      label: hipcc version
+      description: If applicable, the version of hipcc you're using.
       placeholder: |
-        nvcc --version
-        nvcc: NVIDIA (R) Cuda compiler driver
-        Copyright (c) 2005-2021 NVIDIA Corporation
-        Built on Thu_Nov_18_09:45:30_PST_2021
-        Cuda compilation tools, release 11.5, V11.5.119
-        Build cuda_11.5.r11.5/compiler.30672275_0
+        HIP version: 6.2.41133-dd7f95766
+        AMD clang version 18.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.2.0 24292 26466ce804ac523b398608f17388eb6d605a3f09)
+        Target: x86_64-unknown-linux-gnu
+        Thread model: posix
+        InstalledDir: /opt/rocm-6.2.0/lib/llvm/bin
+        Configuration file: /opt/rocm-6.2.0/lib/llvm/bin/clang++.cfg
     validations:
       required: false
