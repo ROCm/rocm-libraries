@@ -747,7 +747,7 @@ class Configuration(object):
                     pre_gfx940 = True
                 elif arch == "gfx90a":
                     pre_gfx940 = True
-                if arch in ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942"]:
+                if arch in ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx1100"]:
                   arch_flag = '--offload-arch={0}'.format(arch)
                   self.cxx.compile_flags += [arch_flag]
         if pre_gfx908:
