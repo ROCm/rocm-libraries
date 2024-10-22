@@ -30,6 +30,7 @@
 
 // <cuda/std/latch>
 
+#include <cuda/latch>
 #include <cuda/std/cassert>
 #include <cuda/std/latch>
 

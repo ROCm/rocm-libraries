@@ -38,6 +38,17 @@
 #error latch is not supported on AMD hardware and should not be included
 #endif
 
+#include <cuda/std/detail/__config>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <cuda/__latch/latch.h>
 #include <cuda/std/latch>
 
 #endif // _CUDA_LATCH

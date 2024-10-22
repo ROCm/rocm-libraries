@@ -30,6 +30,7 @@
 
 // <cuda/std/latch>
 
+#include <cuda/latch>
 #include <cuda/std/latch>
 
 #include "concurrent_agents.h"
