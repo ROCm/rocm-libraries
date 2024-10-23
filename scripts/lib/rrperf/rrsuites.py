@@ -610,6 +610,16 @@ def all():
     yield from codegen()
 
 
+def all_gfx942():
+    yield from sgemm()
+    yield from hgemm()
+    yield from hgemm_no_store_LDS()
+    yield from tensile_benchmarks()
+    # yield from streamk() # FIXME
+    yield from scalar_is_zero()
+    yield from codegen()
+
+
 def hgemm_guideposts():
     yield from guidepost_1()
     yield from guidepost_2()

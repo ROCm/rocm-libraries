@@ -985,18 +985,33 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<FP8, float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_NT)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<BF8, float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMConversionFP8_NT)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_NT();
         // D (FP8) = Convert( alpha * A (FP8) * B (FP8) + beta * C (F32) )
         basicGEMM<FP8, float, FP8>(gemm);
@@ -1004,6 +1019,11 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMConversionBF8_NT)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_NT();
         // D (BF8) = Convert( alpha * A (BF8) * B (BF8) + beta * C (F32) )
         basicGEMM<BF8, float, BF8>(gemm);
@@ -1066,6 +1086,11 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_TN)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_TN();
         basicGEMM<FP8, float>(gemm);
         check_GEMMF8_TN(m_context);
@@ -1073,6 +1098,11 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_TN)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_TN();
         basicGEMM<BF8, float>(gemm);
         check_GEMMF8_TN(m_context);

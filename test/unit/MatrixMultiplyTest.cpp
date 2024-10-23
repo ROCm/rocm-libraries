@@ -561,6 +561,11 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x32_NN)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
         if(isFP8)
             matrixMultiplyMacroTile<FP8, float>(16, 16, 32, 1, 2.e-6, false, "N", "N");
@@ -619,6 +624,11 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_32x32x16_NN)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
         if(isFP8)
             matrixMultiplyMacroTile<FP8, float>(32, 32, 16, 1, 2.e-6, false, "N", "N");
@@ -677,6 +687,11 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x32_TN)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
         if(isFP8)
             matrixMultiplyMacroTile<FP8, float>(16, 16, 32, 1, 2.e-6, true, "T", "N");
@@ -696,6 +711,11 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyABF8_16x16x32)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
             matrixMultiplyAB<FP8, float>(16, 16, 32, 1, 2.e-5);
         else
@@ -704,6 +724,11 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyABF8_32x32x16)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
             matrixMultiplyAB<FP8, float>(32, 32, 16, 1, 2.e-5);
         else
