@@ -560,6 +560,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
 # rocRoller unit tests
 
 add_library(common_test_utilities
+  test/common/CommonGraphs.cpp
   test/common/Utilities.cpp
 )
 
@@ -579,8 +580,8 @@ target_include_directories(common_test_utilities PUBLIC
 set(
   rocRollerTests_SOURCES
   test/unit/ContextFixture.cpp
-  test/unit/GenericContextFixture.cpp
   test/unit/GPUContextFixture.cpp
+  test/unit/GenericContextFixture.cpp
 
   test/unit/AddStreamKTest.cpp
   test/unit/AllocatingObserverTest.cpp
@@ -598,18 +599,21 @@ set(
   test/unit/ConversionInstructions/Convert_F16_F32.cpp
   test/unit/CoordinateGraphTest.cpp
   test/unit/CopyGeneratorTest.cpp
+  test/unit/CostTest.cpp
   test/unit/DataTypesTest.cpp
   test/unit/DependencyTest.cpp
   test/unit/ErrorTest.cpp
   test/unit/ExpressionTransformationTest.cpp
+  test/unit/F6Test.cpp
+  test/unit/F8Test.cpp
+  test/unit/FP4Test.cpp
   test/unit/FastDivisionTest.cpp
-  test/unit/LowerExponentialTest.cpp
   test/unit/FastMultiplicationTest.cpp
   test/unit/FileWritingObserverTest.cpp
+  test/unit/GEMMFusion.cpp
+  test/unit/GEMMTest.cpp
   test/unit/GPUArchitectureTest.cpp
   test/unit/GPUInstructionInfoTest.cpp
-  test/unit/GEMMTest.cpp
-  test/unit/GEMMFusion.cpp
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
   test/unit/ConversionTest.cpp
@@ -627,20 +631,21 @@ set(
   test/unit/KernelIndexTest.cpp
   test/unit/KernelOptionsTest.cpp
   test/unit/KernelTest.cpp
-  test/unit/LabelTest.cpp
   test/unit/LDSTest.cpp
+  test/unit/LabelTest.cpp
   test/unit/LockTest.cpp
-  test/unit/MemoryInstructionsTest.cpp
-  test/unit/MatrixMultiplyTest.cpp
-  test/unit/MetaObserverTest.cpp
+  test/unit/LowerExponentialTest.cpp
   test/unit/MFMAHazardObserverTest.cpp
   test/unit/MFMAUnitObserverTest.cpp
+  test/unit/MatrixMultiplyTest.cpp
+  test/unit/MemoryInstructionsTest.cpp
+  test/unit/MetaObserverTest.cpp
   test/unit/MixedArithmeticTest.cpp
+  test/unit/OperationTagTest.cpp
   test/unit/RandomTest.cpp
   test/unit/RegisterAllocatorTest.cpp
-  test/unit/RegisterTest.cpp
   test/unit/RegisterLivenessObserverTest.cpp
-  test/unit/CostTest.cpp
+  test/unit/RegisterTest.cpp
   test/unit/SchedulerTest.cpp
   test/unit/ScopeTest.cpp
   test/unit/SettingsTest.cpp
@@ -654,7 +659,6 @@ set(
   test/unit/VectorAddBenchmark.cpp
   test/unit/WaitCountObserverTest.cpp
   test/unit/WaitCountTest.cpp
-  test/unit/OperationTagTest.cpp
 )
 
 if (NOT ROCROLLER_TESTS_SKIP_GUIDEPOSTS)

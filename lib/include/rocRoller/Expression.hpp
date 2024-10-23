@@ -708,6 +708,8 @@ namespace rocRoller
 
         std::string getComment(ExpressionPtr const& expr);
         std::string getComment(Expression const& expr);
+        std::string getComment(ExpressionPtr const& expr, bool includeRegisterComments);
+        std::string getComment(Expression const& expr, bool includeRegisterComments);
 
         /**
          * Copies any comments from src into dst.  If dst is not of a type that allows

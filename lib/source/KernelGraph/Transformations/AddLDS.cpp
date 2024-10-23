@@ -1325,6 +1325,8 @@ namespace rocRoller
                 for(auto multiply : filter(k.control.isElemType<Multiply>(),
                                            k.control.depthFirstVisit(forLoop, GD::Downstream)))
                 {
+                    auto node = k.control.getNode<Multiply>(multiply);
+
                     auto [macroTileTagLHS, macLHS] = k.getDimension<MacroTile>(
                         multiply, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
                     auto [macroTileTagRHS, macRHS] = k.getDimension<MacroTile>(
@@ -1333,6 +1335,29 @@ namespace rocRoller
                     AssertFatal(macroTileToCoordVal.at(macroTileTagLHS)
                                     == macroTileToCoordVal.at(macroTileTagRHS),
                                 "The LHS and RHS of a multiply must be part of the same unroll.");
+
+                    if(node.scaleA == Operations::ScaleMode::Separate)
+                    {
+                        auto [macroTileTagLHSScale, macLHSScale] = k.getDimension<MacroTile>(
+                            multiply,
+                            Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
+
+                        AssertFatal(
+                            macroTileToCoordVal.at(macroTileTagLHS)
+                                == macroTileToCoordVal.at(macroTileTagLHSScale),
+                            "The LHS and LHS_SCALE of a multiply must be part of the same unroll.");
+                    }
+
+                    if(node.scaleB == Operations::ScaleMode::Separate)
+                    {
+                        auto [macroTileTagRHSScale, macRHSScale] = k.getDimension<MacroTile>(
+                            multiply,
+                            Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
+                        AssertFatal(
+                            macroTileToCoordVal.at(macroTileTagLHS)
+                                == macroTileToCoordVal.at(macroTileTagRHSScale),
+                            "The LHS and RHS_SCALE of a multiply must be part of the same unroll.");
+                    }
 
                     operationUnroll[multiply] = macroTileToCoordVal.at(macroTileTagLHS);
                 }

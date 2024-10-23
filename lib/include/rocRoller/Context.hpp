@@ -124,13 +124,6 @@ namespace rocRoller
 
         friend class ::ContextFixture;
 
-        // XXX DELETE THIS
-        void setScale(uint8_t scaleA, uint8_t scaleB)
-        {
-            m_kernelOptions.scaleA = scaleA;
-            m_kernelOptions.scaleB = scaleB;
-        }
-
     private:
         static ContextPtr Create(int                    deviceIndex,
                                  GPUArchitecture const& arch,

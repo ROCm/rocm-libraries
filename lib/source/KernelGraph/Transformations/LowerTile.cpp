@@ -1593,11 +1593,8 @@ namespace rocRoller
 
                 AssertFatal(macTile.rank == 2, "Rank /= 2 not implemented yet.");
 
-                logger->debug("  User({}), MacroTile({}), MacroTile size: {}x{}",
-                              userTag,
-                              macTileTag,
-                              macTile.sizes[0],
-                              macTile.sizes[1]);
+                logger->debug(
+                    "  User({}), MacroTile({}), Size: {}", userTag, macTileTag, macTile.sizes);
 
                 std::vector<DeferredConnection> connections;
 
@@ -1640,7 +1637,8 @@ namespace rocRoller
                                       m_context);
                     break;
                 default:
-                    Throw<FatalError>("LoadTiled: MacroTile memory type not supported yet.");
+                    Throw<FatalError>("LoadTiled: MacroTile memory type not supported yet.",
+                                      ShowValue(macTile.memoryType));
                 }
 
                 for(auto& dc : connections)

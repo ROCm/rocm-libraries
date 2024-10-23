@@ -283,6 +283,25 @@ namespace rocRoller
             }
         };
 
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::ControlGraph::Multiply, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, KernelGraph::ControlGraph::Multiply& op, Context&)
+            {
+                iot::mapRequired(io, "scaleA", op.scaleA);
+                iot::mapRequired(io, "scaleB", op.scaleB);
+            }
+
+            static void mapping(IO& io, KernelGraph::ControlGraph::Multiply& op)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, op, ctx);
+            }
+        };
+
         template <typename Op, typename IO, typename Context>
         requires(
             CIsAnyOf<Op,
@@ -321,6 +340,10 @@ namespace rocRoller
             {
                 iot::mapRequired(io, "aDims", op.aDims);
                 iot::mapRequired(io, "bDims", op.bDims);
+                iot::mapRequired(io, "scaleModeA", op.scaleModeA);
+                iot::mapRequired(io, "scaleModeB", op.scaleModeB);
+                iot::mapRequired(io, "scaleStridesA", op.scaleStridesA);
+                iot::mapRequired(io, "scaleStridesB", op.scaleStridesB);
             }
 
             static void mapping(IO& io, KernelGraph::ControlGraph::TensorContraction& op)

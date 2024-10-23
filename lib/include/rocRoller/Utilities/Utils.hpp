@@ -188,6 +188,16 @@ namespace rocRoller
     }
 
     template <typename... Ts>
+    inline std::string concatenate_join(std::string const& sep, Ts const&... vals)
+    {
+        std::ostringstream msg;
+        msg.setf(std::ios::showpoint);
+        streamJoinTuple(msg, sep, std::forward_as_tuple(vals...));
+
+        return msg.str();
+    }
+
+    template <typename... Ts>
     inline std::string concatenate(Ts const&... vals)
     {
         std::ostringstream msg;
@@ -201,16 +211,6 @@ namespace rocRoller
     inline std::string concatenate<std::string>(std::string const& val)
     {
         return val;
-    }
-
-    template <typename... Ts>
-    inline std::string concatenate_join(std::string const& sep, Ts const&... vals)
-    {
-        std::ostringstream msg;
-        msg.setf(std::ios::showpoint);
-        streamJoinTuple(msg, sep, std::forward_as_tuple(vals...));
-
-        return msg.str();
     }
 
     template <bool T_Enable, typename... Ts>

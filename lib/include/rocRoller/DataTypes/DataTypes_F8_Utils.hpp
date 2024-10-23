@@ -404,4 +404,26 @@ namespace rocRoller
     struct BF8;
     float bf8_to_float(const BF8 v);
     BF8   float_to_bf8(const float v);
+
+    inline float scaleToFloat(uint8_t scale)
+    {
+        return std::pow(2.0f, int(scale) - 127);
+    }
+
+    inline uint8_t floatToScale(float value)
+    {
+        struct
+        {
+            uint mantissa : 23;
+            uint exponent : 8;
+            bool sign : 1;
+        } parts;
+
+        static_assert(sizeof(parts) == 4);
+
+        memcpy(&parts, &value, sizeof(parts));
+
+        return parts.exponent;
+    }
+
 }

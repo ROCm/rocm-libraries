@@ -26,5 +26,7 @@ namespace rocRoller
 
     F8Mode getDefaultF8ModeForCurrentHipDevice();
 
+    const char* getDefaultArchitectureFilePath();
+
     class Settings;
 }

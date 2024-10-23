@@ -113,6 +113,12 @@ namespace rocRollerTest
             CommandPtr  getCommand();
             KernelGraph getKernelGraph();
 
+            void setTileSize(int m, int n, int k);
+            void setMFMA(int m, int n, int k, int b);
+            void setUseLDS(bool a, bool b, bool d);
+
+            std::shared_ptr<CommandParameters> getCommandParameters() const;
+
         private:
             void createCommand();
 
@@ -122,6 +128,13 @@ namespace rocRollerTest
 
             rocRoller::Operations::ScaleMode m_aMode;
             rocRoller::Operations::ScaleMode m_bMode;
+
+            int  m_macM, m_macN, m_macK;
+            int  m_waveM, m_waveN, m_waveK, m_waveB;
+            bool m_useLDSA = false, m_useLDSB = false, m_useLDSD = false;
+
+            rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagD;
+            rocRoller::Operations::OperationTag m_tagScaleA, m_tagScaleB;
 
             CommandPtr m_command;
         };
