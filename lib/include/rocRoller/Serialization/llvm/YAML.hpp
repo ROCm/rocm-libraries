@@ -29,6 +29,7 @@
 #include <rocRoller/Serialization/Base.hpp>
 #include <rocRoller/Serialization/HasTraits.hpp>
 
+#include <rocRoller/Utilities/Concepts.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 #include <llvm/ObjectYAML/YAML.h>
@@ -325,24 +326,27 @@ namespace llvm
         };
 
         /**
-         * Add serialization for fp16 type. Defer to built-in fp32 serialization with conversion.
+         * Add serialization for small floating point types. Defer to built-in fp32 serialization with conversion.
          */
-        template <>
-        struct ScalarTraits<rocRoller::Half>
+        template <typename T>
+        requires(rocRoller::CIsAnyOf<rocRoller::Half,
+                                     rocRoller::BFloat16,
+                                     rocRoller::FP8,
+                                     rocRoller::BF8>) struct ScalarTraits<T>
         {
-            static void output(const rocRoller::Half& value, void* ctx, llvm::raw_ostream& out)
+            static void output(const T& value, void* ctx, llvm::raw_ostream& out)
             {
                 float floatVal = value;
                 ScalarTraits<float>::output(value, ctx, out);
             }
 
-            static StringRef input(StringRef scalar, void* ctx, rocRoller::Half& value)
+            static StringRef input(StringRef scalar, void* ctx, T& value)
             {
                 float floatVal = 0.0f;
 
                 auto rv = ScalarTraits<float>::input(scalar, ctx, floatVal);
 
-                value = floatVal;
+                value = T(floatVal);
 
                 return rv;
             }
