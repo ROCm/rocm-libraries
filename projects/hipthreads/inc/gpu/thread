@@ -72,7 +72,7 @@ class thread {
         other.worknode_d = nullptr;
     }
 #else
-        : worknode_d(std::move(other.worknode_d)), worknodeSize(other.worknodeSize) {}
+        : worknode_d(std::move(other.worknode_d)) {}
 #endif
     __host__ __device__ thread &operator=(const thread&) = delete;
     __host__ __device__ thread &operator=(thread &&other) noexcept;
@@ -117,8 +117,6 @@ class thread {
     WorkNode_Header *worknode_d = nullptr;
 #else
     std::shared_ptr<WorkNode_Header> worknode_d = nullptr;
-    // Stores the sizeof(WorkNode<T>), so we can do a memcpy without knowing T.
-    size_t worknodeSize;
 #endif
 };
 
@@ -151,6 +149,9 @@ struct WorkNode_Header {
     // next == nullptr because there's nobody waiting and next == nullptr because next has been locked.
     bool hasWaiting = false;
     uint32_t width = 1; // How many threads per block/vthread are active
+    // Stores the sizeof(WorkNode<T>), so we can do a memcpy without knowing T.
+    // Not initialized when a WorkNode is constructed from device code because we don't need it.
+    size_t worknodeSize;
     // TODO: fix vthread_id - it's currently non-functional
     thread::id vthread_id = {}; // TODO: should this be a MAX_THREAD_WIDTH array? For now we just store the lowest id.
 };
@@ -244,6 +245,7 @@ __device__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : f
 template <class Callable_t>
 __host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : fn(std::move(callable)) {
     width = w;
+    worknodeSize = sizeof(WorkNode<Callable_t>);
     // Only way to pass the device the information about how to invoke WorkNode<Callable_t>.fn is by launching a kernel.
     // Thus, we initialize wrapper_fn later in insertWorkNodeFromHost.
     // Since we have to incur the overhead of launching a kernel anyways, we also use that kernel to initialize
@@ -338,8 +340,6 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
         });
     }
 
-    worknodeSize = sizeof(*worknode_h);
-
     // Pointer to the last worknode_d we constructed that had the same Fn_t and Args_t template arguments.
     static std::weak_ptr<WorkNode_Header> previous_worknode_weak;
     std::shared_ptr<WorkNode_Header> previous_worknode = previous_worknode_weak.lock();
@@ -417,7 +417,6 @@ inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_f
     static_assert(std::is_trivially_destructible_v<decltype(*typed_worknode_ptr)>);
 
     worknode_d = typed_worknode_ptr;
-    // TODO: Should we bother initializing worknodeSize? It's never used in device code...
 
     insertWorkNodeIntoMainQueue(worknode_d);
 #endif // __HIP_DEVICE_COMPILE__
