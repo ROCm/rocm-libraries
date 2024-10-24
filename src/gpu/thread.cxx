@@ -257,8 +257,8 @@ static __global__ void threading_main() {
     }
 }
 
-static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t worknodeSize) {
-    WorkNode_Header *newWorkNode = static_cast<WorkNode_Header *>(::malloc(worknodeSize));
+static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
+    WorkNode_Header *newWorkNode = static_cast<WorkNode_Header *>(::malloc(oldWorkNode->worknodeSize));
 
     // Lock the worknode (unless the workitem finishes before we can get the lock).
     // Note that detachWorkNode is the only function that can potentially invalidate a worknode pointer, so we're
@@ -283,7 +283,7 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode, uint32_t wor
     oldWorkNode->link_to_self = nullptr;
     // TODO: Technically this is not standards compliant. Even though WorkNode<T> is TriviallyCopyable, it is not a
     // StandardLayoutType, so WorkNode_Header and WorkNode<T> pointers are not interchangeable.
-    gpu::memcpy(newWorkNode, oldWorkNode, worknodeSize);
+    gpu::memcpy(newWorkNode, oldWorkNode, oldWorkNode->worknodeSize);
 
     // If there is a waiting worknode, update its link_to_self value so it points at newWorkNode->next.
     if (oldWorkNode->hasWaiting) {
@@ -352,14 +352,12 @@ __host__ __device__ thread &thread::operator=(thread &&other) noexcept {
 
     worknode_d = other.worknode_d;
     other.worknode_d = nullptr;
-    // We can skip setting worknodeSize b/c it's only needed for thread::detach in host code.
 #else // __HIP_DEVICE_COMPILE__
     if (joinable()) {
         std::terminate();
     }
 
     worknode_d = std::move(other.worknode_d);
-    worknodeSize = other.worknodeSize;
 #endif // !__HIP_DEVICE_COMPILE__
     return *this;
 }
@@ -478,7 +476,7 @@ __host__ __device__ void thread::detach() {
     if (!joinable()) {
         throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::detach failed");
     }
-    hipLaunchKernelGGL(detachWorkNode, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get(), worknodeSize);
+    hipLaunchKernelGGL(detachWorkNode, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
     worknode_d = nullptr;
 #endif // !__HIP_DEVICE_COMPILE__
 }
