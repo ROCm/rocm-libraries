@@ -545,7 +545,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
 
 # rocRoller unit tests
 
-include_directories(${CMAKE_SOURCE_DIR}/extern/mxDataGenerator)
+include_directories(${CMAKE_SOURCE_DIR}/extern/mxDataGenerator/lib/include)
 add_subdirectory(extern/mxDataGenerator)
 
 add_library(common_test_utilities
@@ -623,7 +623,6 @@ set(
   test/unit/MFMAHazardObserverTest.cpp
   test/unit/MFMAUnitObserverTest.cpp
   test/unit/MixedArithmeticTest.cpp
-  test/unit/mxDataGenTest.cpp
   test/unit/RandomTest.cpp
   test/unit/RegisterAllocatorTest.cpp
   test/unit/RegisterTest.cpp
@@ -705,6 +704,7 @@ set(
   test/catch/UtilsTest.cpp
   test/catch/RandomNumberExpressionTest.cpp
   test/catch/SettingsTest.cpp
+  test/catch/mxDataGeneratorTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})

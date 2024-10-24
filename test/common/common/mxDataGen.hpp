@@ -1,4 +1,4 @@
-#include <lib/include/DataGenerator.hpp>
+#include <DataGenerator.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 
 using namespace DGen;
