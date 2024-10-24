@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.16)
 
 project(rocRoller VERSION 1.0)
 
+set(CMAKE_CXX_STANDARD 20)
+
 option(ROCROLLER_ENABLE_TIMERS         "Enable rocRoller timer code." OFF)
 option(ROCROLLER_TESTS_SKIP_GUIDEPOSTS "Skip compiling guidepost tests." ON)
 option(ROCROLLER_TESTS_SKIP_SLOW       "Skip slow tests (currently only Python tests)" ON)
@@ -85,25 +87,20 @@ if(NOT libdivide_POPULATED)
   FetchContent_Populate(libdivide)
 endif()
 
-# TODO Switch to pre-built spdlog when build bugs are fixed, v1.9.3 will have fixed fmt lib
-
-# FetchContent_Declare(
-#   spdlog
-#   GIT_REPOSITORY https://github.com/gabime/spdlog.git
-#   GIT_TAG v1.9.2
-# )
-# if(NOT spdlog_POPULATED)
-#   FetchContent_Populate(spdlog)
-#   add_subdirectory(${spdlog_SOURCE_DIR} ${spdlog_BINARY_DIR})
-#   set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
-# endif()
-
-# FetchContent_Declare(
-#   fmt
-#   GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-#   GIT_TAG 8.1.1
-# )
-# FetchContent_MakeAvailable(fmt)
+FetchContent_Declare(
+  spdlog
+  GIT_REPOSITORY https://github.com/gabime/spdlog.git
+  GIT_TAG 27cb4c76708608465c413f6d0e6b8d99a4d84302 # release 1.14.1
+)
+if(NOT spdlog_POPULATED)
+  FetchContent_Populate(spdlog)
+  add_subdirectory(${spdlog_SOURCE_DIR} ${spdlog_BINARY_DIR})
+  set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_compile_definitions(spdlog PRIVATE SPDLOG_USE_STD_FORMAT)
+endif()
+FetchContent_MakeAvailable(spdlog)
+set(spdlog_INCLUDES ${spdlog_SOURCE_DIR}/include)
+add_compile_definitions(SPDLOG_USE_STD_FORMAT)
 
 add_definitions(-DMSGPACK_NO_BOOST)
 set(MSGPACK_USE_BOOST OFF CACHE INTERNAL "")
@@ -158,21 +155,6 @@ endif()
 enable_testing()
 include(CTest)
 
-if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/extern/spdlog)
-  execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} submodule update --init -- extern/spdlog)
-endif ()
-include(ExternalProject)
-ExternalProject_Add(spdlog
- PREFIX spdlog
- SOURCE_DIR ${PROJECT_SOURCE_DIR}/extern/spdlog
- CMAKE_ARGS -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
- -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
- -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
- -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
- -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/spdlog
- -DSPDLOG_BUILD_SHARED=OFF
-)
-
 # Default ARCHITECTURE_FILE_PATH
 set(ROCROLLER_DEFAULT_ARCHITECTURE_FILE_PATH "${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.msgpack")
 set(ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE ${CMAKE_BINARY_DIR}/source/rocRoller/DefaultArchitectureFilePath.cpp)
@@ -193,7 +175,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/lib/source/Utilities/Version.cpp.in $
 FetchContent_Declare(
   isa_spec_manager
   GIT_REPOSITORY https://github.com/GPUOpen-Tools/isa_spec_manager.git
-  GIT_TAG        v1.0.0
+  GIT_TAG        1c6fcc8072c7a94ceedb734cf06fd8a08487c4b3 # release 1.0.0 + cstdint fix
 )
 
 FetchContent_MakeAvailable(isa_spec_manager)
@@ -268,11 +250,11 @@ target_include_directories(GPUArchitectureGenerator PUBLIC
                            )
 
 target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC
-                           ${CMAKE_CURRENT_BINARY_DIR}/spdlog/include/
                            ${libdivide_SOURCE_DIR}/
                            ${LLVM_INCLUDE_DIRS}
                            ${LLD_INCLUDE_DIRS}
                            ${isa_spec_manager_INCLUDES}
+                           ${spdlog_INCLUDES}
                            )
 
 if(YAML_BACKEND STREQUAL "YAML_CPP")
@@ -524,11 +506,7 @@ target_include_directories(rocroller PUBLIC
 # Using SYSTEM include paths for third party libraries speeds up cppcheck a lot
 target_include_directories(rocroller SYSTEM PUBLIC
                            ${libdivide_SOURCE_DIR}/
-                           ${CMAKE_CURRENT_BINARY_DIR}/spdlog/include/)
-# target_link_libraries(rocroller
-#   PRIVATE spdlog::spdlog
-#   PUBLIC fmt::fmt
-# )
+                           ${spdlog_INCLUDES})
 
 if(YAML_BACKEND STREQUAL "YAML_CPP")
   target_link_libraries(rocroller PUBLIC yaml-cpp)
@@ -776,7 +754,7 @@ target_include_directories(ArchGenTests PUBLIC
                            ${isa_spec_manager_SOURCE_DIR}/source/common
                            )
 
-target_include_directories(ArchGenTests SYSTEM PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/spdlog/include/
+target_include_directories(ArchGenTests SYSTEM PUBLIC ${spdlog_INCLUDES}
                            ${LLVM_INCLUDE_DIRS}
                            ${LLD_INCLUDE_DIRS}
                            ${isa_spec_manager_SOURCE_DIR}/source/third_party/tinyxml2
