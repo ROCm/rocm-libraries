@@ -89,7 +89,7 @@ _CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __throw_cuda_error(::hipError_t __
 class cuda_error
 {
 public:
-  cuda_error(::hipError_t, const char*) noexcept {}
+  _LIBCUDACXX_HIDE_FROM_ABI cuda_error(::hipError_t, const char*) noexcept {}
 };
 
 _CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __throw_cuda_error(::hipError_t, const char*)
