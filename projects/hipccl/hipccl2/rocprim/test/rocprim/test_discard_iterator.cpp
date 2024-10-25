@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -46,17 +46,17 @@ TEST(RocprimDiscardIteratorTests, Equal)
 
         Iterator x(test_utils::get_random_value<size_t>(0, 200, seed_value));
             Iterator y = x;
-            ASSERT_EQ(x, y);
+            ASSERT_TRUE(x == y);
 
             x += 100;
             for(size_t i = 0; i < 100; i++)
             {
                 y++;
             }
-            ASSERT_EQ(x, y);
+            ASSERT_TRUE(x == y);
 
             y--;
-            ASSERT_NE(x, y);
+            ASSERT_TRUE(x != y);
     }
 }
 
@@ -75,14 +75,14 @@ TEST(RocprimDiscardIteratorTests, Less)
 
         Iterator x(test_utils::get_random_value<size_t>(0, 200, seed_value));
         Iterator y = x + 1;
-        ASSERT_LT(x, y);
+        ASSERT_TRUE(x < y);
 
         x += 100;
         for(size_t i = 0; i < 100; i++)
         {
             y++;
         }
-        ASSERT_LT(x, y);
+        ASSERT_TRUE(x < y);
     }
 }
 

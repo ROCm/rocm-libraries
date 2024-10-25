@@ -552,22 +552,28 @@ template<unsigned int BlockSize,
          class ValuesInputIterator,
          class ValuesOutputIterator,
          class OffsetT,
-         class BinaryFunction,
-         class ValueType = typename std::iterator_traits<ValuesInputIterator>::value_type>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_sort_kernel_impl(KeysInputIterator    keys_input,
-                                                                KeysOutputIterator   keys_output,
-                                                                ValuesInputIterator  values_input,
-                                                                ValuesOutputIterator values_output,
-                                                                const OffsetT        input_size,
-                                                                BinaryFunction compare_function)
+         class BinaryFunction>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+void block_sort_kernel_impl(KeysInputIterator    keys_input,
+                            KeysOutputIterator   keys_output,
+                            ValuesInputIterator  values_input,
+                            ValuesOutputIterator values_output,
+                            const OffsetT        input_size,
+                            const unsigned int   num_blocks,
+                            BinaryFunction       compare_function)
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
-    const unsigned int     flat_block_id   = block_id<0>();
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    const OffsetT      block_offset        = flat_block_id * items_per_block;
+    const unsigned int flat_block_id = ::rocprim::flat_block_id();
+    if(flat_block_id >= num_blocks)
+    {
+        return;
+    }
+
+    const OffsetT      block_offset        = static_cast<OffsetT>(flat_block_id) * items_per_block;
     const unsigned int valid_in_last_block = input_size - block_offset;
     const bool         is_incomplete_block = flat_block_id == (input_size / items_per_block);
 
@@ -593,38 +599,40 @@ template<unsigned int BlockSize,
          class ValuesOutputIterator,
          class OffsetT,
          class BinaryFunction>
-ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_oddeven_kernel(KeysInputIterator    keys_input,
-                                                              KeysOutputIterator   keys_output,
-                                                              ValuesInputIterator  values_input,
-                                                              ValuesOutputIterator values_output,
-                                                              const OffsetT        input_size,
-                                                              const OffsetT  sorted_block_size,
-                                                              BinaryFunction compare_function)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void block_merge_oddeven_kernel(KeysInputIterator    keys_input,
+                                KeysOutputIterator   keys_output,
+                                ValuesInputIterator  values_input,
+                                ValuesOutputIterator values_output,
+                                const OffsetT        input_size,
+                                const OffsetT        sorted_block_size,
+                                BinaryFunction       compare_function)
 {
     using key_type             = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type           = typename std::iterator_traits<ValuesInputIterator>::value_type;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
-    constexpr unsigned int items_per_block     = BlockSize * ItemsPerThread;
-    const unsigned int     flat_id             = ::rocprim::detail::block_thread_id<0>();
-    const unsigned int     flat_block_id       = ::rocprim::detail::block_id<0>();
-    const bool             is_incomplete_block = flat_block_id == (input_size / items_per_block);
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+
+    const unsigned int flat_id             = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_block_id       = ::rocprim::detail::block_id<0>();
+    const bool         is_incomplete_block = flat_block_id == (input_size / items_per_block);
     // ^ bounds-checking: if input_size is not a multiple of items_per_block and
     // this is the last block: true, false otherwise
-    const OffsetT block_offset        = flat_block_id * items_per_block;
-    const OffsetT valid_in_last_block = input_size - block_offset;
+    const OffsetT      block_offset        = static_cast<OffsetT>(flat_block_id) * items_per_block;
+    const unsigned int valid_in_last_block = input_size - block_offset;
 
-    const OffsetT thread_offset = flat_id * ItemsPerThread;
-    if(thread_offset >= valid_in_last_block)
-    {
-        return;
-    }
+    const unsigned int thread_offset = flat_id * ItemsPerThread;
 
     key_type   keys[ItemsPerThread];
     value_type values[ItemsPerThread];
 
     if(is_incomplete_block)
     {
+        if(thread_offset >= valid_in_last_block)
+        {
+            return;
+        }
         block_load_direct_blocked(flat_id, keys_input + block_offset, keys, valid_in_last_block);
 
         if ROCPRIM_IF_CONSTEXPR(with_values)
@@ -648,8 +656,8 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_oddeven_kernel(KeysInputIterator 
     const unsigned int mask                = merged_tiles_number - 1;
     // tilegroup_id is the id of the input sorted_block
     const unsigned int tilegroup_id = ~mask & flat_block_id;
-    const unsigned int block_is_odd = merged_tiles_number & tilegroup_id;
-    const OffsetT      block_start  = tilegroup_id * items_per_block;
+    const bool         block_is_odd = (merged_tiles_number & tilegroup_id) != 0;
+    const OffsetT      block_start  = static_cast<OffsetT>(tilegroup_id) * items_per_block;
     const OffsetT      next_block_start_
         = block_is_odd ? block_start - sorted_block_size : block_start + sorted_block_size;
     const OffsetT next_block_start = min(next_block_start_, input_size);
@@ -664,7 +672,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_oddeven_kernel(KeysInputIterator 
             ROCPRIM_UNROLL
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const unsigned int id = block_offset + thread_offset + i;
+                const OffsetT id = block_offset + thread_offset + i;
                 if(id < input_size)
                 {
                     keys_output[id] = keys[i];
@@ -680,8 +688,8 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_oddeven_kernel(KeysInputIterator 
             ROCPRIM_UNROLL
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const unsigned int id = block_offset + thread_offset + i;
-                keys_output[id]       = keys[i];
+                const OffsetT id = block_offset + thread_offset + i;
+                keys_output[id]  = keys[i];
                 if ROCPRIM_IF_CONSTEXPR(with_values)
                 {
                     values_output[id] = values[i];

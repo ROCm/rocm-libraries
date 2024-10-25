@@ -3,6 +3,22 @@
 Documentation for rocPRIM is available at
 [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## (Unreleased) rocPRIM 3.4.0 for ROCm 6.4.0
+
+### Added
+
+* Added the parallel `find_first_of` device function with autotuned configurations, this function is similar to `std::find_first_of`, it searches for the first occurrence of any of the provided elements.
+
+### Changed
+
+### Resolved issues
+
+* Fixed an issue where `rocprim::partial_sort_copy` would yield a compile error if the input iterator is const.
+* Fixed incorrect 128-bit signed and unsigned integers type traits.
+* Fixed compilation issue when `rocprim::radix_key_codec<...>` is specialized with a 128-bit integer.
+
+### Upcoming changes
+
 ## (Unreleased) rocPRIM-3.3.0 for ROCm 6.3.0
 
 ### Added
@@ -15,6 +31,7 @@ Documentation for rocPRIM is available at
 * Added a parallel `nth_element` device function similar to `std::nth_element`, this function rearranges elements smaller than the n-th before and bigger than the n-th after the n-th element.
 * Added deterministic (bitwise reproducible) algorithm variants `rocprim::deterministic_inclusive_scan`, `rocprim::deterministic_exclusive_scan`, `rocprim::deterministic_inclusive_scan_by_key`, `rocprim::deterministic_exclusive_scan_by_key`, and `rocprim::deterministic_reduce_by_key`. These provide run-to-run stable results with non-associative operators such as float operations, at the cost of reduced performance.
 * Added a parallel `partial_sort` and `partial_sort_copy` device function similar to `std::partial_sort` and `std::partial_sort_copy`, these functions rearranges elements such that the elements are the same as a sorted list up to and including the middle index.
+* Added support of sizes larger than 2^32 in `device_merge_sort`.
 
 ### Changed
 

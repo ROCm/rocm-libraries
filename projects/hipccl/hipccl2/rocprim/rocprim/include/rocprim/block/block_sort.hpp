@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,10 +41,36 @@ BEGIN_ROCPRIM_NAMESPACE
 enum class block_sort_algorithm
 {
     /// \brief A bitonic sort based algorithm.
+    ///
+    /// \par Stability
+    /// \p bitonic_sort is <b>not stable</b>: it doesn't necessarily preserve the relative ordering
+    /// of equivalent keys.
+    /// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+    ///   * \p a precedes \p b in the input keys, and
+    ///   * op(a, b) and op(b, a) are both false,
+    /// then it is <b>not guaranteed</b> that \p a will precede \p b as well in the output
+    /// (ordered) keys.
     bitonic_sort,
     /// \brief A merge sort based algorithm.
+    ///
+    /// \par Stability
+    /// \p merge_sort <b>may</b> use \p stable_merge_sort as the underlying implementation.
+    /// However, \p merge_sort is <b>not guaranteed to be stable</b>: it doesn't necessarily
+    /// preserve the relative ordering of equivalent keys.
+    /// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+    ///   * \p a precedes \p b in the input keys, and
+    ///   * op(a, b) and op(b, a) are both false,
+    /// then it is <b>not guaranteed</b> that \p a will precede \p b as well in the output
+    /// (ordered) keys.
     merge_sort,
     /// \brief A merged sort based algorithm which sorts stably.
+    ///
+    /// \par Stability
+    /// \p stable_merge_sort is \b stable: it preserves the relative ordering of equivalent keys.
+    /// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+    ///   * \p a precedes \p b in the input keys, and
+    ///   * op(a, b) and op(b, a) are both false,
+    /// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
     stable_merge_sort,
     /// \brief Default block_sort algorithm.
     default_algorithm = bitonic_sort,
@@ -107,7 +133,8 @@ struct select_block_sort_impl<block_sort_algorithm::stable_merge_sort>
 /// The total range will be BlockSize * ItemsPerThread long
 /// \tparam Value - the value type. Default type empty_type indicates
 /// a keys-only sort.
-/// \tparam Algorithm - selected sort algorithm, block_sort_algorithm::default_algorithm by default.
+/// \tparam Algorithm - selected sort algorithm. The available algorithms and default choice are
+/// documented in \ref block_sort_algorithm.
 ///
 /// \par Overview
 /// * Accepts custom compare_functions for sorting across a block.
@@ -118,18 +145,18 @@ struct select_block_sort_impl<block_sort_algorithm::stable_merge_sort>
 /// \par Examples
 /// \parblock
 /// In the examples sort is performed on a block of 256 threads, each thread provides
-/// one \p int value, results are returned using the same variable as for input.
+/// 8 \p int values, results are returned using the same variable as for input.
 ///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
-///     // specialize block_sort for int, block of 256 threads,
+///     // specialize block_sort for int, block of 256 threads, and 8 items per thread
 ///     // key-only sort
-///     using block_sort_int = rocprim::block_sort<int, 256>;
+///     using block_sort_int = rocprim::block_sort<int, 256, 8>;
 ///     // allocate storage in shared memory
 ///     __shared__ block_sort_int::storage_type storage;
 ///
-///     int input = ...;
+///     int input[8] = ...;
 ///     // execute block sort (ascending)
 ///     block_sort_int().sort(
 ///         input,
@@ -219,7 +246,7 @@ public:
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
-    ///     // specialize block_sort for int, block of 256 threads,
+    ///     // specialize block_sort for int, block of 256 threads
     ///     // key-only sort
     ///     using block_sort_int = rocprim::block_sort<int, 256>;
     ///     // allocate storage in shared memory
@@ -306,17 +333,17 @@ public:
     ///
     /// \parblock
     /// In the examples sort is performed on a block of 256 threads, each thread provides
-    /// one \p int key and one \p int value, results are returned using the same variable as for input.
+    /// 8 \p int keys and one \p int value, results are returned using the same variable as for input.
     ///
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
-    ///     // specialize block_sort for int, block of 256 threads,
-    ///     using block_sort_int = rocprim::block_sort<int, 256, int>;
+    ///     // specialize block_sort for int, block of 256 threads, and 8 items per thread
+    ///     using block_sort_int = rocprim::block_sort<int, 256, 8, int>;
     ///     // allocate storage in shared memory
     ///     __shared__ block_sort_int::storage_type storage;
     ///
-    ///     int key = ...;
+    ///     int key[8] = ...;
     ///     int value = ...;
     ///     // execute block sort (ascending)
     ///     block_sort_int().sort(

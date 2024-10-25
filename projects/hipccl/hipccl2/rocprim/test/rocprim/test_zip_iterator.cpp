@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -107,23 +107,23 @@ TEST(RocprimZipIteratorTests, Basics)
 
     // <, >, <=, >=, ==, !=
     auto zit2 = rocprim::zip_iterator<decltype(iterator_tuple)>(iterator_tuple);
-    ASSERT_LT(zit2, zit);
-    ASSERT_GT(zit, zit2);
+    ASSERT_TRUE(zit2 < zit);
+    ASSERT_TRUE(zit > zit2);
 
-    ASSERT_LE(zit2, zit);
-    ASSERT_LE(zit, zit);
-    ASSERT_LE(zit2, zit2);
-    ASSERT_GE(zit, zit2);
-    ASSERT_GE(zit, zit);
-    ASSERT_GE(zit2, zit2);
+    ASSERT_TRUE(zit2 <= zit);
+    ASSERT_TRUE(zit <= zit);
+    ASSERT_TRUE(zit2 <= zit2);
+    ASSERT_TRUE(zit >= zit2);
+    ASSERT_TRUE(zit >= zit);
+    ASSERT_TRUE(zit2 >= zit2);
 
-    ASSERT_NE(zit2, zit);
-    ASSERT_NE(zit, zit2);
-    ASSERT_NE(zit2, ++rocprim::zip_iterator<decltype(iterator_tuple)>(iterator_tuple));
+    ASSERT_TRUE(zit2 != zit);
+    ASSERT_TRUE(zit != zit2);
+    ASSERT_TRUE(zit2 != ++rocprim::zip_iterator<decltype(iterator_tuple)>(iterator_tuple));
 
-    ASSERT_EQ(zit2, zit2);
-    ASSERT_EQ(zit, zit);
-    ASSERT_EQ(zit2, rocprim::zip_iterator<decltype(iterator_tuple)>(iterator_tuple));
+    ASSERT_TRUE(zit2 == zit2);
+    ASSERT_TRUE(zit == zit);
+    ASSERT_TRUE(zit2 == rocprim::zip_iterator<decltype(iterator_tuple)>(iterator_tuple));
 
     // distance
     ASSERT_EQ(zit - zit2, 1);

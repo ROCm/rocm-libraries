@@ -25,3 +25,4 @@
    * :ref:`dev-memcpy`
    * :ref:`dev-nth_element`
    * :ref:`dev-partial_sort`
+   * :ref:`dev-find_first_of`

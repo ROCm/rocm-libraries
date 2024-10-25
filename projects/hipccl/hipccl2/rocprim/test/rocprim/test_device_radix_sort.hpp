@@ -514,6 +514,7 @@ auto invoke_sort_pairs(void*        d_temporary_storage,
     }
 }
 
+// This test also ensures that (device) radix_sort is stable
 template<typename TestFixture>
 void sort_pairs()
 {
@@ -1098,6 +1099,7 @@ auto invoke_sort_pairs(void*                          d_temporary_storage,
     }
 }
 
+// This test also ensures that (device) radix_sort with rocprim::double_buffer is stable
 template<typename TestFixture>
 void sort_pairs_double_buffer()
 {

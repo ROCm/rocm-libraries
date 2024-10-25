@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -85,7 +85,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, Equal)
         {
             y++;
         }
-        ASSERT_EQ(x, y);
+        ASSERT_TRUE(x == y);
     }
 }
 

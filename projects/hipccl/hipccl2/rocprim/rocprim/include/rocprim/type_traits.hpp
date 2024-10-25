@@ -36,8 +36,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \brief Behaves like std::is_floating_point, but also includes half-precision and bfloat16-precision
-/// floating point type (rocprim::half).
+/// \brief Extension of `std::is_floating_point`, which includes support for \ref rocprim::half and \ref rocprim::bfloat16.
 template<class T>
 struct is_floating_point
     : std::integral_constant<
@@ -47,60 +46,95 @@ struct is_floating_point
         std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
     > {};
 
-/// \brief Alias for std::is_integral.
+/// \brief Extension of `std::is_integral`, which includes support for 128-bit integers.
 template<class T>
-using is_integral = std::is_integral<T>;
+struct is_integral
+    : std::integral_constant<
+          bool,
+          std::is_integral<T>::value
+              || std::is_same<__int128_t, typename std::remove_cv<T>::type>::value
+              || std::is_same<__uint128_t, typename std::remove_cv<T>::type>::value>
+{};
 
-/// \brief Behaves like std::is_arithmetic, but also includes half-precision and bfloat16-precision
-/// floating point type (\ref rocprim::half).
+/// \brief Extension of `std::is_arithmetic`, which includes support for \ref rocprim::half , \ref rocprim::bfloat16 and 128-bit integers.
 template<class T>
 struct is_arithmetic
     : std::integral_constant<
-        bool,
-        std::is_arithmetic<T>::value ||
-        std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value ||
-        std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
-    > {};
+          bool,
+          std::is_arithmetic<T>::value
+              || std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value
+              || std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
+              || std::is_same<__int128_t, typename std::remove_cv<T>::type>::value
+              || std::is_same<__uint128_t, typename std::remove_cv<T>::type>::value>
+{};
 
-/// \brief Behaves like std::is_fundamental, but also includes half-precision and bfloat16-precision
-/// floating point type (\ref rocprim::half).
+/// \brief Extension of `std::is_fundamental`, which includes support for \ref rocprim::half , \ref rocprim::bfloat16 and 128-bit integers.
 template<class T>
 struct is_fundamental
-  : std::integral_constant<
-        bool,
-        std::is_fundamental<T>::value ||
-        std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value ||
-        std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
-> {};
+    : std::integral_constant<
+          bool,
+          std::is_fundamental<T>::value
+              || std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value
+              || std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
+              || std::is_same<__int128_t, typename std::remove_cv<T>::type>::value
+              || std::is_same<__uint128_t, typename std::remove_cv<T>::type>::value>
+{};
 
-/// \brief Alias for std::is_unsigned.
+/// \brief Extension of `std::is_unsigned`, which includes support for 128-bit integers.
 template<class T>
-using is_unsigned = std::is_unsigned<T>;
+struct is_unsigned
+    : std::integral_constant<
+          bool,
+          std::is_unsigned<T>::value
+              || std::is_same<__uint128_t, typename std::remove_cv<T>::type>::value>
+{};
 
-/// \brief Behaves like std::is_signed, but also includes half-precision and bfloat16-precision
-/// floating point type (\ref rocprim::half).
+/// \brief Extension of `std::is_signed`, which includes support for \ref rocprim::half , \ref rocprim::bfloat16 and 128-bit integers.
 template<class T>
 struct is_signed
     : std::integral_constant<
-        bool,
-        std::is_signed<T>::value ||
-        std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value ||
-        std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
-    > {};
+          bool,
+          std::is_signed<T>::value
+              || std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value
+              || std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
+              || std::is_same<__int128_t, typename std::remove_cv<T>::type>::value>
+{};
 
-/// \brief Behaves like std::is_scalar, but also includes half-precision and bfloat16-precision
-/// floating point type (\ref rocprim::half).
+/// \brief Extension of `std::is_scalar`, which includes support for \ref rocprim::half , \ref rocprim::bfloat16 and 128-bit integers.
 template<class T>
 struct is_scalar
     : std::integral_constant<
-        bool,
-        std::is_scalar<T>::value ||
-        std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value ||
-        std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
-    > {};
+          bool,
+          std::is_scalar<T>::value
+              || std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value
+              || std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
+              || std::is_same<__int128_t, typename std::remove_cv<T>::type>::value
+              || std::is_same<__uint128_t, typename std::remove_cv<T>::type>::value>
+{};
 
-/// \brief Behaves like std::is_compound, but also supports half-precision
-/// floating point type (\ref rocprim::half). `value` for rocprim::half is `false`.
+/// \brief Extension of `std::make_unsigned`, which includes support for 128-bit integers.
+template<class T>
+struct make_unsigned : std::make_unsigned<T>
+{};
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // skip specialized versions
+template<>
+struct make_unsigned<__int128_t>
+{
+    using type = __uint128_t;
+};
+
+template<>
+struct make_unsigned<__uint128_t>
+{
+    using type = __uint128_t;
+};
+#endif
+
+static_assert(std::is_same<make_unsigned<__int128_t>::type, __uint128_t>::value,
+              "'__int128_t' needs to implement 'make_unsigned' trait.");
+
+/// \brief Extension of `std::is_compound`, which includes support for \ref rocprim::half , \ref rocprim::bfloat16 and 128-bit integers.
 template<class T>
 struct is_compound
     : std::integral_constant<
@@ -142,6 +176,12 @@ template<typename T>
 struct get_unsigned_bits_type<T,8>
 {
   typedef uint64_t unsigned_type;
+};
+
+template<typename T>
+struct get_unsigned_bits_type<T, 16>
+{
+    typedef __uint128_t unsigned_type;
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 

@@ -265,39 +265,11 @@ inline OutputIter segmented_generate_n(OutputIter it, size_t size, Generator&& g
             std::generate_n(it + segment_size * segment_index, segment_size, gen);
         }
     }
+    // Generate the remaining items
+    std::generate_n(it + segment_size * random_data_generation_segments,
+                    size - segment_size * random_data_generation_segments,
+                    gen);
     return it + size;
-}
-
-template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
-    -> std::enable_if_t<std::is_same<it_value_t<OutputIter>, __int128_t>::value, OutputIter>
-{
-    using T = it_value_t<OutputIter>;
-
-    using dis_type = typename std::conditional<
-        is_valid_for_int_distribution<T>::value,
-        T,
-        typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
-    std::uniform_int_distribution<dis_type> distribution(test_utils::saturate_cast<dis_type>(min),
-                                                         test_utils::saturate_cast<dis_type>(max));
-
-    return segmented_generate_n(it, size, [&]() { return static_cast<T>(distribution(gen)); });
-}
-
-template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
-    -> std::enable_if_t<std::is_same<it_value_t<OutputIter>, __uint128_t>::value, OutputIter>
-{
-    using T = it_value_t<OutputIter>;
-
-    using dis_type = typename std::conditional<
-        is_valid_for_int_distribution<T>::value,
-        T,
-        typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
-    std::uniform_int_distribution<dis_type> distribution(test_utils::saturate_cast<dis_type>(min),
-                                                         test_utils::saturate_cast<dis_type>(max));
-
-    return segmented_generate_n(it, size, [&]() { return static_cast<T>(distribution(gen)); });
 }
 
 template<class OutputIter, class U, class V, class Generator>
@@ -309,10 +281,7 @@ inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Gen
     using dis_type = typename std::conditional<
         is_valid_for_int_distribution<T>::value,
         T,
-        typename std::conditional<std::is_signed<T>::value,
-                                  int,
-                                  unsigned int>::type
-        >::type;
+        typename std::conditional<rocprim::is_signed<T>::value, int, unsigned int>::type>::type;
     std::uniform_int_distribution<dis_type> distribution(test_utils::saturate_cast<dis_type>(min),
                                                          test_utils::saturate_cast<dis_type>(max));
 
@@ -494,14 +463,15 @@ std::vector<size_t> get_sizes(T seed_value)
 template<class T>
 std::vector<size_t> get_large_sizes(T seed_value)
 {
-    // clang-format off
     std::vector<size_t> sizes = {
-        (size_t{1} << 30) - 1, size_t{1} << 30,
-        (size_t{1} << 32) - 1, size_t{1} << 32,
+        (size_t{1} << 30) - 1,
+        size_t{1} << 31,
+        (size_t{1} << 32) - 15,
+        (size_t{1} << 33) + (size_t{1} << 32) - 876543,
+        (size_t{1} << 34) - 12346,
         (size_t{1} << 35) + 1,
         (size_t{1} << 37) - 1,
     };
-    // clang-format on
     const std::vector<size_t> random_sizes
         = test_utils::get_random_data<size_t>(2,
                                               (size_t{1} << 30) + 1,

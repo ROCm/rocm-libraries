@@ -29,6 +29,7 @@
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 
+#include "detail/common.hpp"
 #include "detail/device_merge.hpp"
 #include "detail/device_merge_sort.hpp"
 #include "detail/device_merge_sort_mergepath.hpp"
@@ -51,13 +52,14 @@ template<class Config,
          class OffsetT,
          class BinaryFunction>
 ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().block_sort_config.block_size) void block_sort_kernel(
-        KeysInputIterator    keys_input,
-        KeysOutputIterator   keys_output,
-        ValuesInputIterator  values_input,
-        ValuesOutputIterator values_output,
-        const OffsetT        sorted_block_size,
-        BinaryFunction       compare_function)
+    __launch_bounds__(device_params<Config>().block_sort_config.block_size)
+void block_sort_kernel(KeysInputIterator    keys_input,
+                       KeysOutputIterator   keys_output,
+                       ValuesInputIterator  values_input,
+                       ValuesOutputIterator values_output,
+                       const OffsetT        size,
+                       const unsigned int   num_blocks,
+                       BinaryFunction       compare_function)
 {
     static constexpr merge_sort_block_sort_config_params params = device_params<Config>();
     block_sort_kernel_impl<params.block_sort_config.block_size,
@@ -65,7 +67,8 @@ ROCPRIM_KERNEL
                                                                       keys_output,
                                                                       values_input,
                                                                       values_output,
-                                                                      sorted_block_size,
+                                                                      size,
+                                                                      num_blocks,
                                                                       compare_function);
 }
 
@@ -79,13 +82,14 @@ template<class Config,
 ROCPRIM_KERNEL __launch_bounds__(
     device_params<Config>()
         .merge_oddeven_config
-        .block_size) void device_block_merge_oddeven_kernel(KeysInputIterator    keys_input,
-                                                            KeysOutputIterator   keys_output,
-                                                            ValuesInputIterator  values_input,
-                                                            ValuesOutputIterator values_output,
-                                                            const OffsetT        input_size,
-                                                            const OffsetT        sorted_block_size,
-                                                            BinaryFunction       compare_function)
+        .block_size)
+void device_block_merge_oddeven_kernel(KeysInputIterator    keys_input,
+                                       KeysOutputIterator   keys_output,
+                                       ValuesInputIterator  values_input,
+                                       ValuesOutputIterator values_output,
+                                       const OffsetT        input_size,
+                                       const OffsetT        sorted_block_size,
+                                       BinaryFunction       compare_function)
 {
     static constexpr merge_sort_block_merge_config_params params = device_params<Config>();
     block_merge_oddeven_kernel<params.merge_oddeven_config.block_size,
@@ -108,14 +112,16 @@ template<class Config,
 ROCPRIM_KERNEL __launch_bounds__(
     device_params<Config>()
         .merge_mergepath_config
-        .block_size) void device_block_merge_mergepath_kernel(KeysInputIterator    keys_input,
-                                                              KeysOutputIterator   keys_output,
-                                                              ValuesInputIterator  values_input,
-                                                              ValuesOutputIterator values_output,
-                                                              const OffsetT        input_size,
-                                                              const OffsetT  sorted_block_size,
-                                                              BinaryFunction compare_function,
-                                                              const OffsetT* merge_partitions)
+        .block_size)
+void device_block_merge_mergepath_kernel(KeysInputIterator    keys_input,
+                                         KeysOutputIterator   keys_output,
+                                         ValuesInputIterator  values_input,
+                                         ValuesOutputIterator values_output,
+                                         const OffsetT        input_size,
+                                         const OffsetT        sorted_block_size,
+                                         const unsigned int   num_blocks,
+                                         BinaryFunction       compare_function,
+                                         const OffsetT*       merge_partitions)
 {
     static constexpr merge_sort_block_merge_config_params params = device_params<Config>();
     block_merge_mergepath_kernel<params.merge_mergepath_config.block_size,
@@ -125,20 +131,10 @@ ROCPRIM_KERNEL __launch_bounds__(
                                                                                  values_output,
                                                                                  input_size,
                                                                                  sorted_block_size,
+                                                                                 num_blocks,
                                                                                  compare_function,
                                                                                  merge_partitions);
 }
-
-#define ROCPRIM_DETAIL_HIP_SYNC(name, size, start) \
-    if(debug_synchronous) \
-    { \
-        std::cout << name << "(" << size << ")"; \
-        auto error = hipStreamSynchronize(stream); \
-        if(error != hipSuccess) return error; \
-        auto end = std::chrono::high_resolution_clock::now(); \
-        auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-        std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
-    }
 
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
@@ -159,40 +155,45 @@ template<typename Config, typename KeysInputIterator, typename OffsetT, typename
 ROCPRIM_KERNEL __launch_bounds__(
     device_params<Config>()
         .merge_mergepath_partition_config
-        .block_size) void device_block_merge_mergepath_partition_kernel(KeysInputIterator keys,
-                                                                        const OffsetT input_size,
-                                                                        const unsigned int
-                                                                                 num_partitions,
-                                                                        OffsetT* merge_partitions,
-                                                                        const CompareOpT compare_op,
-                                                                        const OffsetT
-                                                                            sorted_block_size)
+        .block_size)
+void device_block_merge_mergepath_partition_kernel(KeysInputIterator  keys,
+                                                   const OffsetT      input_size,
+                                                   const unsigned int num_partitions,
+                                                   OffsetT*           merge_partitions,
+                                                   const CompareOpT   compare_op,
+                                                   const OffsetT      sorted_block_size)
 {
     static constexpr merge_sort_block_merge_config_params params = device_params<Config>();
-    static constexpr unsigned int                         ItemsPerTile
+    static constexpr unsigned int                         items_per_tile
         = params.merge_mergepath_config.block_size * params.merge_mergepath_config.items_per_thread;
-    const OffsetT partition_id
+
+    const unsigned int partition_id
         = blockIdx.x * params.merge_mergepath_partition_config.block_size + threadIdx.x;
 
-    if (partition_id >= num_partitions)
+    if(partition_id >= num_partitions)
     {
         return;
     }
 
-    const unsigned int merged_tiles = sorted_block_size / ItemsPerTile;
+    const unsigned int merged_tiles        = sorted_block_size / items_per_tile;
     const unsigned int target_merged_tiles = merged_tiles * 2;
-    const unsigned int mask = target_merged_tiles - 1;
-    const unsigned int tilegroup_start_id = ~mask & partition_id; // id of the first tile in the current tile-group
-    const OffsetT tilegroup_start = ItemsPerTile * tilegroup_start_id; // index of the first item in the current tile-group
+    const unsigned int mask                = target_merged_tiles - 1;
 
-    const unsigned int local_tile_id = mask & partition_id; // id of the current tile in the current tile-group
+    // id of the first tile in the current tile-group
+    const unsigned int tilegroup_start_id = ~mask & partition_id;
+    // id of the current tile in the current tile-group
+    const unsigned int local_tile_id = mask & partition_id;
+
+    // index of the first item in the current tile-group
+    const OffsetT tilegroup_start = static_cast<OffsetT>(tilegroup_start_id) * items_per_tile;
 
     const OffsetT keys1_beg = rocprim::min(input_size, tilegroup_start);
     const OffsetT keys1_end = rocprim::min(input_size, tilegroup_start + sorted_block_size);
     const OffsetT keys2_beg = keys1_end;
     const OffsetT keys2_end = rocprim::min(input_size, keys2_beg + sorted_block_size);
 
-    const OffsetT partition_at = rocprim::min<OffsetT>(keys2_end - keys1_beg, ItemsPerTile * local_tile_id);
+    const OffsetT partition_at
+        = rocprim::min(keys2_end - keys1_beg, static_cast<OffsetT>(local_tile_id) * items_per_tile);
 
     const OffsetT partition_diag = ::rocprim::detail::merge_path(keys + keys1_beg,
                                                                  keys + keys2_beg,
@@ -352,13 +353,14 @@ inline hipError_t merge_sort_block_merge(
                     block);
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(
                     "device_block_merge_mergepath_partition_kernel",
-                    size,
+                    merge_num_partitions,
                     start);
 
                 if(debug_synchronous)
                     start = std::chrono::high_resolution_clock::now();
                 hipLaunchKernelGGL(HIP_KERNEL_NAME(device_block_merge_mergepath_kernel<config>),
-                                   dim3(merge_mergepath_number_of_blocks),
+                                   calculate_grid_dim(merge_mergepath_number_of_blocks,
+                                                      merge_mergepath_block_size),
                                    dim3(merge_mergepath_block_size),
                                    0,
                                    stream,
@@ -368,6 +370,7 @@ inline hipError_t merge_sort_block_merge(
                                    values_output_,
                                    size,
                                    block,
+                                   merge_mergepath_number_of_blocks,
                                    compare_function,
                                    d_merge_partitions);
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_block_merge_mergepath_kernel",
@@ -378,6 +381,8 @@ inline hipError_t merge_sort_block_merge(
             {
                 if(debug_synchronous)
                     start = std::chrono::high_resolution_clock::now();
+                // As this kernel is only called with small sizes, it is safe to use 32-bit integers
+                // for size and block.
                 hipLaunchKernelGGL(HIP_KERNEL_NAME(device_block_merge_oddeven_kernel<config>),
                                    dim3(merge_oddeven_number_of_blocks),
                                    dim3(merge_oddeven_block_size),
@@ -387,8 +392,8 @@ inline hipError_t merge_sort_block_merge(
                                    keys_output_,
                                    values_input_,
                                    values_output_,
-                                   size,
-                                   block,
+                                   static_cast<unsigned int>(size),
+                                   static_cast<unsigned int>(block),
                                    compare_function);
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_block_merge_oddeven_kernel",
                                                             size,
@@ -444,7 +449,7 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
                                         KeysOutputIterator   keys_output,
                                         ValuesInputIterator  values_input,
                                         ValuesOutputIterator values_output,
-                                        const unsigned int   size,
+                                        const size_t         size,
                                         unsigned int&        sort_items_per_block,
                                         BinaryFunction       compare_function,
                                         const hipStream_t    stream,
@@ -482,17 +487,19 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
     if(debug_synchronous)
         start = std::chrono::high_resolution_clock::now();
 
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(block_sort_kernel<config>),
-                       dim3(sort_number_of_blocks),
-                       dim3(params.block_sort_config.block_size),
-                       0,
-                       stream,
-                       keys_input,
-                       keys_output,
-                       values_input,
-                       values_output,
-                       size,
-                       compare_function);
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(block_sort_kernel<config>),
+        calculate_grid_dim(sort_number_of_blocks, params.block_sort_config.block_size),
+        dim3(params.block_sort_config.block_size),
+        0,
+        stream,
+        keys_input,
+        keys_output,
+        values_input,
+        values_output,
+        size,
+        sort_number_of_blocks,
+        compare_function);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_sort_kernel", size, start);
 
     return hipSuccess;
@@ -550,7 +557,7 @@ inline hipError_t merge_sort_impl(
     KeysOutputIterator                                              keys_output,
     ValuesInputIterator                                             values_input,
     ValuesOutputIterator                                            values_output,
-    const unsigned int                                              size,
+    const size_t                                                    size,
     BinaryFunction                                                  compare_function,
     const hipStream_t                                               stream,
     bool                                                            debug_synchronous,
@@ -630,7 +637,6 @@ inline hipError_t merge_sort_impl(
 }
 
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
-#undef ROCPRIM_DETAIL_HIP_SYNC
 
 } // end of detail namespace
 
@@ -644,6 +650,13 @@ inline hipError_t merge_sort_impl(
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for sorting across the device.
+///
+/// \par Stability
+/// \p merge_sort is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `merge_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
@@ -736,6 +749,13 @@ hipError_t merge_sort(void * temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for sorting across the device.
+///
+/// \par Stability
+/// \p merge_sort is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `merge_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the

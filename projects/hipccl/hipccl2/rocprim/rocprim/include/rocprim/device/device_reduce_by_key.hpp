@@ -345,7 +345,7 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
                     d_global_head_count,
                     d_previous_accumulated);
             });
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_init_kernel",
                                                     number_of_tiles_launch,
                                                     start);
 

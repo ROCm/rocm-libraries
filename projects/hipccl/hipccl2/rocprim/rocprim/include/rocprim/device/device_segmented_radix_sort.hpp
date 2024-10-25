@@ -640,6 +640,13 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \par Stability
+/// \p segmented_radix_sort_keys is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
+///
 /// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
@@ -761,6 +768,13 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \par Stability
+/// \p segmented_radix_sort_keys_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
+///
 /// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
@@ -864,7 +878,7 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 
 /// \brief Parallel ascending radix sort-by-key primitive for device level.
 ///
-/// \p segmented_radix_sort_pairs_desc function performs a device-wide radix sort across multiple,
+/// \p segmented_radix_sort_pairs function performs a device-wide radix sort across multiple,
 /// non-overlapping sequences of (key, value) pairs. Function sorts input pairs in ascending order of keys.
 ///
 /// \par Overview
@@ -882,6 +896,13 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p segmented_radix_sort_pairs is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
@@ -1023,6 +1044,14 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \par Stability
+/// \p segmented_radix_sort_pairs_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
+/// (ordered) keys.
+///
 /// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
@@ -1163,6 +1192,13 @@ hipError_t segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \par Stability
+/// \p segmented_radix_sort_keys is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
+///
 /// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
@@ -1290,6 +1326,13 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \par Stability
+/// \p segmented_radix_sort_keys_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
+///
 /// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
@@ -1394,7 +1437,7 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 
 /// \brief Parallel ascending radix sort-by-key primitive for device level.
 ///
-/// \p segmented_radix_sort_pairs_desc function performs a device-wide radix sort across multiple,
+/// \p segmented_radix_sort_pairs function performs a device-wide radix sort across multiple,
 /// non-overlapping sequences of (key, value) pairs. Function sorts input pairs in ascending order of keys.
 ///
 /// \par Overview
@@ -1416,6 +1459,14 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p segmented_radix_sort_pairs is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
+/// (ordered) keys.
 ///
 /// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
@@ -1558,6 +1609,14 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p segmented_radix_sort_pairs_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
+/// (ordered) keys.
 ///
 /// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.

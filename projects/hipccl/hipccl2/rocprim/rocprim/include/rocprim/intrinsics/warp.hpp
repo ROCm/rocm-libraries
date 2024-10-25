@@ -52,19 +52,10 @@ unsigned int masked_bit_count(lane_mask_type x, unsigned int add = 0)
     int c;
 #ifndef __HIP_CPU_RT__
     #if ROCPRIM_WAVEFRONT_SIZE == 32
-        #ifdef __HIP__
     c = ::__builtin_amdgcn_mbcnt_lo(x, add);
-        #else
-    c = ::__mbcnt_lo(x, add);
-        #endif
     #else
-        #ifdef __HIP__
     c = ::__builtin_amdgcn_mbcnt_lo(static_cast<int>(x), add);
     c = ::__builtin_amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
-        #else
-    c = ::__mbcnt_lo(static_cast<int>(x), add);
-    c = ::__mbcnt_hi(static_cast<int>(x >> 32), c);
-        #endif
     #endif
 #else
     using namespace hip::detail;

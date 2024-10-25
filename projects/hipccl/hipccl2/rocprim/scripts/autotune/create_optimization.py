@@ -622,6 +622,14 @@ class AlgorithmDeviceReduceByKey(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceFindFirstOf(Algorithm):
+    algorithm_name = "device_find_first_of"
+    cpp_configuration_template_name = "find_first_of_config_template"
+    config_selection_params = [
+        SelectionType(name="value_type", is_optional=False, select_on_size_only=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 def filt_algo_regex(e: FallbackCase, algorithm_name):
     if e.algo_regex:
         return re.match(e.algo_regex, algorithm_name) is not None
@@ -679,6 +687,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDeviceSelectUniqueByKey(fallback_entries)
     elif algorithm_name == 'device_reduce_by_key':
         return AlgorithmDeviceReduceByKey(fallback_entries)
+    elif algorithm_name == 'device_find_first_of':
+        return AlgorithmDeviceFindFirstOf(fallback_entries)
     else:
         raise(NotSupportedError(f'Algorithm "{algorithm_name}" is not supported (yet)'))
 

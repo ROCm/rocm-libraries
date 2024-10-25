@@ -178,6 +178,14 @@ hipError_t
 /// * Accepts custom compare_functions for nth_element across the device.
 /// * Streams in graph capture mode are not supported
 ///
+/// \par Stability
+/// \p nth_element is <b>not stable</b>: it doesn't necessarily preserve the relative ordering
+/// of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is <b>not guaranteed</b> that \p a will precede \p b as well in the output keys.
+///
 /// \tparam Config [optional] configuration of the primitive. It has to be `nth_element_config`.
 /// \tparam KeysIterator [inferred] random-access iterator type of the input range. Must meet the
 ///   requirements of a C++ InputIterator concept. It can be a simple pointer type.
@@ -273,6 +281,14 @@ ROCPRIM_INLINE hipError_t nth_element(void*          temporary_storage,
 /// if `temporary_storage` is a null pointer.
 /// * Accepts custom compare_functions for nth_element across the device.
 /// * Streams in graph capture mode are not supported
+///
+/// \par Stability
+/// \p nth_element is <b>not stable</b>: it doesn't necessarily preserve the relative ordering
+/// of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is <b>not guaranteed</b> that \p a will precede \p b as well in the output keys.
 ///
 /// \tparam Config [optional] configuration of the primitive. It has to be `nth_element_config`.
 /// \tparam KeysInputIterator [inferred] random-access iterator type of the input range. Must meet the

@@ -27,6 +27,8 @@
 #include "rocprim/block/block_store.hpp"
 #include "test_utils_types.hpp"
 
+#include <hip/hip_vector_types.h>
+
 #include <gtest/gtest.h>
 
 #include <rocprim/rocprim.hpp>
@@ -424,53 +426,53 @@ typedef ::testing::Types<
     ClassParamsThirdPart;
 
 typedef ::testing::Types<vector_params<int, int, 3, false>,
-                         vector_params<int, rocprim::detail::int4, 4, true>,
+                         vector_params<int, int4, 4, true>,
                          vector_params<int, int, 7, false>,
-                         vector_params<int, rocprim::detail::int4, 8, true>,
+                         vector_params<int, int4, 8, true>,
                          vector_params<int, int, 11, false>,
-                         vector_params<int, rocprim::detail::int4, 16, true>,
+                         vector_params<int, int4, 16, true>,
 
                          vector_params<char, char, 3, false>,
-                         vector_params<char, rocprim::detail::char4, 4, true>,
+                         vector_params<char, char4, 4, true>,
                          vector_params<char, char, 7, false>,
-                         vector_params<char, rocprim::detail::char4, 8, true>,
+                         vector_params<char, char4, 8, true>,
                          vector_params<char, char, 11, false>,
-                         vector_params<char, rocprim::detail::char4, 16, true>,
+                         vector_params<char, char4, 16, true>,
 
                          vector_params<short, short, 3, false>,
-                         vector_params<short, rocprim::detail::short4, 4, true>,
+                         vector_params<short, short4, 4, true>,
                          vector_params<short, short, 7, false>,
-                         vector_params<short, rocprim::detail::short4, 8, true>,
+                         vector_params<short, short4, 8, true>,
                          vector_params<short, short, 11, false>,
-                         vector_params<short, rocprim::detail::short4, 16, true>,
+                         vector_params<short, short4, 16, true>,
 
                          vector_params<float, int, 3, false>,
-                         vector_params<float, rocprim::detail::int4, 4, true>,
+                         vector_params<float, int4, 4, true>,
                          vector_params<float, int, 7, false>,
-                         vector_params<float, rocprim::detail::int4, 8, true>,
+                         vector_params<float, int4, 8, true>,
                          vector_params<float, int, 11, false>,
-                         vector_params<float, rocprim::detail::int4, 16, true>,
+                         vector_params<float, int4, 16, true>,
 
-                         vector_params<int2, rocprim::detail::int2, 3, false>,
-                         vector_params<int2, rocprim::detail::int4, 4, true>,
-                         vector_params<int2, rocprim::detail::int2, 7, false>,
-                         vector_params<int2, rocprim::detail::int4, 8, true>,
-                         vector_params<int2, rocprim::detail::int2, 11, false>,
-                         vector_params<int2, rocprim::detail::int4, 16, true>,
+                         vector_params<int2, int2, 3, false>,
+                         vector_params<int2, int4, 4, true>,
+                         vector_params<int2, int2, 7, false>,
+                         vector_params<int2, int4, 8, true>,
+                         vector_params<int2, int2, 11, false>,
+                         vector_params<int2, int4, 16, true>,
 
-                         vector_params<float2, rocprim::detail::int2, 3, false>,
-                         vector_params<float2, rocprim::detail::int4, 4, true>,
-                         vector_params<float2, rocprim::detail::int2, 7, false>,
-                         vector_params<float2, rocprim::detail::int4, 8, true>,
-                         vector_params<float2, rocprim::detail::int2, 11, false>,
-                         vector_params<float2, rocprim::detail::int4, 16, true>,
+                         vector_params<float2, int2, 3, false>,
+                         vector_params<float2, int4, 4, true>,
+                         vector_params<float2, int2, 7, false>,
+                         vector_params<float2, int4, 8, true>,
+                         vector_params<float2, int2, 11, false>,
+                         vector_params<float2, int4, 16, true>,
 
                          vector_params<char4, int, 3, false>,
-                         vector_params<char4, rocprim::detail::int4, 4, true>,
+                         vector_params<char4, int4, 4, true>,
                          vector_params<char4, int, 7, false>,
-                         vector_params<char4, rocprim::detail::int4, 8, true>,
+                         vector_params<char4, int4, 8, true>,
                          vector_params<char4, int, 11, false>,
-                         vector_params<char4, rocprim::detail::int4, 16, true>>
+                         vector_params<char4, int4, 16, true>>
     VectorParams;
 
 template<rocprim::block_load_method  LoadMethod,

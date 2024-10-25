@@ -21,6 +21,8 @@
 #ifndef TEST_BOUNDS_CHECKING_ITERATOR_HPP_
 #define TEST_BOUNDS_CHECKING_ITERATOR_HPP_
 
+#include "../common_test_header.hpp"
+
 namespace test_utils
 {
 

@@ -58,7 +58,25 @@ namespace detail
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int atomic_wrapinc(unsigned int * address, unsigned int value)
+    unsigned int atomic_min(unsigned int* address, unsigned int value)
+    {
+        return ::atomicMin(address, value);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned long atomic_min(unsigned long* address, unsigned long value)
+    {
+        return ::atomicMin(address, value);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned long long atomic_min(unsigned long long* address, unsigned long long value)
+    {
+        return ::atomicMin(address, value);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned int atomic_wrapinc(unsigned int* address, unsigned int value)
     {
         return ::atomicInc(address, value);
     }

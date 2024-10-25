@@ -24,9 +24,10 @@
 #include "../config.hpp"
 #include "../detail/various.hpp"
 
-#include "../intrinsics.hpp"
 #include "../functional.hpp"
+#include "../intrinsics.hpp"
 #include "../types.hpp"
+#include <cstddef>
 
 /// \addtogroup blockmodule
 /// @{
@@ -90,11 +91,13 @@ class block_exchange
     // Minimize LDS bank conflicts for power-of-two strides, i.e. when items accessed
     // using `thread_id * ItemsPerThread` pattern where ItemsPerThread is power of two
     // (all exchanges from/to blocked).
-    static constexpr bool has_bank_conflicts =
-        ItemsPerThread >= 2 && ::rocprim::detail::is_power_of_two(ItemsPerThread);
+    static constexpr bool has_bank_conflicts
+        = ItemsPerThread >= 2 && ::rocprim::detail::is_power_of_two(ItemsPerThread);
     static constexpr unsigned int banks_no = ::rocprim::detail::get_lds_banks_no();
-    static constexpr unsigned int bank_conflicts_padding =
-        has_bank_conflicts ? (BlockSize * ItemsPerThread / banks_no) : 0;
+    static constexpr unsigned int buffer_size
+        = static_cast<unsigned int>(rocprim::max(size_t{1}, size_t{4} / sizeof(T)));
+    static constexpr unsigned int bank_conflicts_padding
+        = has_bank_conflicts ? (BlockSize * ItemsPerThread / banks_no) : 0;
 
     static constexpr unsigned int storage_count
         = BlockSize * ItemsPerThread + bank_conflicts_padding;
@@ -780,7 +783,7 @@ private:
     unsigned int index(unsigned int n)
     {
         // Move every 32-bank wide "row" (32 banks * 4 bytes) by one item
-        return has_bank_conflicts ? (n + n / banks_no) : n;
+        return has_bank_conflicts ? (n + (n / (banks_no * buffer_size)) * buffer_size) : n;
     }
 };
 

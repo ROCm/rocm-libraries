@@ -79,66 +79,9 @@ struct radix_key_codec_integral<Key,
 };
 
 template<class Key, class BitKey>
-struct radix_key_codec_integral<
-    Key,
-    BitKey,
-    typename std::enable_if<std::is_same<Key, __uint128_t>::value>::type>
-{
-    using bit_key_type = BitKey;
-
-    ROCPRIM_HOST_DEVICE static bit_key_type encode(Key key)
-    {
-        return ::rocprim::detail::bit_cast<bit_key_type>(key);
-    }
-
-    ROCPRIM_HOST_DEVICE static Key decode(bit_key_type bit_key)
-    {
-        return ::rocprim::detail::bit_cast<Key>(bit_key);
-    }
-
-    template<bool Descending>
-    ROCPRIM_HOST_DEVICE static unsigned int
-        extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
-    {
-        unsigned int mask = (1u << length) - 1;
-        return static_cast<unsigned int>(bit_key >> start) & mask;
-    }
-};
-
-template<class Key, class BitKey>
 struct radix_key_codec_integral<Key,
                                 BitKey,
                                 typename std::enable_if<::rocprim::is_signed<Key>::value>::type>
-{
-    using bit_key_type = BitKey;
-
-    static constexpr bit_key_type sign_bit = bit_key_type(1) << (sizeof(bit_key_type) * 8 - 1);
-
-    ROCPRIM_HOST_DEVICE static bit_key_type encode(Key key)
-    {
-        const auto bit_key = ::rocprim::detail::bit_cast<bit_key_type>(key);
-        return sign_bit ^ bit_key;
-    }
-
-    ROCPRIM_HOST_DEVICE static Key decode(bit_key_type bit_key)
-    {
-        bit_key ^= sign_bit;
-        return ::rocprim::detail::bit_cast<Key>(bit_key);
-    }
-
-    template<bool Descending>
-    ROCPRIM_HOST_DEVICE static unsigned int
-        extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
-    {
-        unsigned int mask = (1u << length) - 1;
-        return static_cast<unsigned int>(bit_key >> start) & mask;
-    }
-};
-
-template<class Key, class BitKey>
-struct radix_key_codec_integral<Key,
-                                BitKey,
-                                typename std::enable_if<std::is_same<Key, __int128_t>::value>::type>
 {
     using bit_key_type = BitKey;
 
@@ -222,19 +165,7 @@ struct radix_key_codec_base
 
 template<class Key>
 struct radix_key_codec_base<Key, typename std::enable_if<::rocprim::is_integral<Key>::value>::type>
-    : radix_key_codec_integral<Key, typename std::make_unsigned<Key>::type>
-{};
-
-template<class Key>
-struct radix_key_codec_base<Key,
-                            typename std::enable_if<std::is_same<Key, __int128_t>::value>::type>
-    : radix_key_codec_integral<Key, __uint128_t>
-{};
-
-template<class Key>
-struct radix_key_codec_base<Key,
-                            typename std::enable_if<std::is_same<Key, __uint128_t>::value>::type>
-    : radix_key_codec_integral<Key, __uint128_t>
+    : radix_key_codec_integral<Key, typename ::rocprim::make_unsigned<Key>::type>
 {};
 
 template<>
@@ -279,21 +210,29 @@ template<>
 struct radix_key_codec_base<double> : radix_key_codec_floating<double, unsigned long long>
 {};
 
-template<class T, class = void>
-struct radix_key_fundamental
+template<class T>
+struct has_bit_key_type
 {
-    static constexpr bool value = false;
+    template<class U>
+    static std::true_type check(typename U::bit_key_type*);
+
+    template<class U>
+    static std::false_type check(...);
+
+    using result = decltype(check<T>(nullptr));
 };
 
 template<class T>
-struct radix_key_fundamental<
-    T,
-    ::rocprim::detail::void_t<typename radix_key_codec_base<T>::bit_key_type>>
-{
-    static constexpr bool value = true;
-};
+using radix_key_fundamental = typename has_bit_key_type<radix_key_codec_base<T>>::result;
 
-} // end namespace detail
+static_assert(radix_key_fundamental<int>::value, "'int' should be fundamental");
+static_assert(!radix_key_fundamental<int*>::value, "'int*' should not be fundamental");
+static_assert(radix_key_fundamental<__int128_t>::value, "'__int128_t' should be fundamental");
+static_assert(radix_key_fundamental<__uint128_t>::value, "'__uint128_t' should be fundamental");
+static_assert(!radix_key_fundamental<__int128_t*>::value,
+              "'__int128_t*' should not be fundamental");
+
+} // namespace detail
 
 /// \brief Key encoder, decoder and bit-extractor for radix-based sorts.
 ///

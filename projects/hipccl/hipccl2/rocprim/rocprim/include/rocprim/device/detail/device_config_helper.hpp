@@ -1082,6 +1082,46 @@ struct nth_element_config : public detail::nth_element_config_params
 #endif
 };
 
+namespace detail
+{
+
+struct find_first_of_config_params
+{
+    kernel_config_params kernel_config{};
+};
+
+} // namespace detail
+
+/// \brief Configuration of device-level find_first_of
+///
+/// \tparam BlockSize number of threads in a block.
+/// \tparam ItemsPerThread number of items processed by each thread.
+template<unsigned int BlockSize, unsigned int ItemsPerThread>
+struct find_first_of_config : public detail::find_first_of_config_params
+{
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    constexpr find_first_of_config()
+        : detail::find_first_of_config_params{
+            {BlockSize, ItemsPerThread, 0}
+    }
+    {}
+#endif
+};
+
+namespace detail
+{
+
+template<class Value>
+struct default_find_first_of_config_base
+{
+    static constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+
+    using type = find_first_of_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+};
+
+} // namespace detail
+
 END_ROCPRIM_NAMESPACE
 
 /// @}

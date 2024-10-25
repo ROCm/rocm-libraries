@@ -55,6 +55,15 @@ BEGIN_ROCPRIM_NAMESPACE
 /// * Accepts custom compare_functions for sorting across a warp.
 /// * Number of threads executing warp_sort's function must be a multiple of \p WarpSize.
 ///
+/// \par Stability
+/// \p warp_sort is <b>not stable</b>: it doesn't necessarily preserve the relative ordering
+/// of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is <b>not guaranteed</b> that \p a will precede \p b as well in the output
+/// (ordered) keys.
+///
 /// \par Example:
 /// \parblock
 /// Every thread within the warp uses the warp_sort class by first specializing the
