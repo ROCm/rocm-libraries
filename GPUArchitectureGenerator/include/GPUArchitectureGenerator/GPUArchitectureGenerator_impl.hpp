@@ -329,7 +329,8 @@ namespace GPUArchitectureGenerator
             {
                 for(auto const& specInstruction : alias_lookup)
                 {
-                    auto converted = ConvertSpecInstruction(specInstruction.second);
+                    auto converted
+                        = ConvertSpecInstruction(specInstruction.second, specInstruction.first);
                     if(!GPUArchitectures[isaVersion].HasInstructionInfo(converted.getInstruction()))
                     {
                         AddInstructionInfo(isaVersion, converted, spec, alias_lookup);
@@ -360,10 +361,11 @@ namespace GPUArchitectureGenerator
         outputFile.close();
     }
 
-    rocRoller::GPUInstructionInfo ConvertSpecInstruction(const amdisa::Instruction& instruction)
+    rocRoller::GPUInstructionInfo ConvertSpecInstruction(const amdisa::Instruction& instruction,
+                                                         const std::string&         name)
     {
-        auto name = instruction.name;
-        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-        return rocRoller::GPUInstructionInfo(name, -1, {}, 0, false, instruction.is_branch, 0);
+        std::string inst_name = name.empty() ? instruction.name : name;
+        std::transform(inst_name.begin(), inst_name.end(), inst_name.begin(), ::tolower);
+        return rocRoller::GPUInstructionInfo(inst_name, -1, {}, 0, false, instruction.is_branch, 0);
     }
 }

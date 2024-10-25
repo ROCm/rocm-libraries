@@ -253,7 +253,7 @@ namespace rocRoller
     {
         if(typeName == "float")
             return DataType::Float;
-        else if(typeName == "half" || "fp16")
+        else if(typeName == "half" || typeName == "fp16")
             return DataType::Half;
         else if(typeName == "bf16")
             return DataType::BFloat16;

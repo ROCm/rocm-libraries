@@ -36,9 +36,6 @@ namespace ExpressionTest
         ScalarExpressionKernel(rocRoller::ContextPtr context)
             : AssemblyTestKernel(context)
         {
-            auto arch = m_context->targetArchitecture().target();
-            if(!arch.isCDNAGPU())
-                SKIP("Test not yet supported on " << arch);
         }
 
         void generate() override

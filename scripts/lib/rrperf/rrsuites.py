@@ -604,7 +604,8 @@ def all():
     yield from sgemm()
     yield from hgemm()
     yield from hgemm_no_store_LDS()
-    yield from tensile_benchmarks()
+    # TODO: fix tensile benchmarks with newer Tensile version
+    # yield from tensile_benchmarks()
     yield from streamk()
     yield from scalar_is_zero()
     yield from codegen()
@@ -614,7 +615,8 @@ def all_gfx942():
     yield from sgemm()
     yield from hgemm()
     yield from hgemm_no_store_LDS()
-    yield from tensile_benchmarks()
+    # TODO: fix tensile benchmarks with newer Tensile version
+    # yield from tensile_benchmarks()
     # yield from streamk() # FIXME
     yield from scalar_is_zero()
     yield from codegen()
