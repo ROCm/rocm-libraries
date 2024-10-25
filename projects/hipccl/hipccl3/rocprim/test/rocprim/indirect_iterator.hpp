@@ -63,7 +63,7 @@ private:
     T* _ptr;
 };
 
-// Iterator used in tests to check situtations when value_type of the
+// Iterator used in tests to check situations when value_type of the
 // iterator is not the same as the return type of operator[].
 // It is a simplified version of device_vector::iterator from thrust.
 template<class T>
@@ -163,14 +163,14 @@ private:
     T* ptr_;
 };
 
-template<bool Wrap, class T>
+template<bool Wrap, typename T>
 inline auto wrap_in_indirect_iterator(T* ptr) ->
     typename std::enable_if<Wrap, indirect_iterator<T>>::type
 {
     return indirect_iterator<T>(ptr);
 }
 
-template<bool Wrap, class T>
+template<bool Wrap, typename T>
 inline auto wrap_in_indirect_iterator(T* ptr) -> typename std::enable_if<!Wrap, T*>::type
 {
     return ptr;

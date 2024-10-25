@@ -35,17 +35,17 @@ namespace detail
 {
 
 template<typename LookBackScanState, typename AccessFunction>
-ROCPRIM_DEVICE ROCPRIM_INLINE void
-    access_indexed_lookback_value(LookBackScanState  lookback_scan_state,
-                                  const unsigned int number_of_blocks,
-                                  unsigned int       save_index,
-                                  unsigned int       flat_thread_id,
-                                  AccessFunction     access_function)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void access_indexed_lookback_value(LookBackScanState  lookback_scan_state,
+                                   const unsigned int number_of_blocks,
+                                   unsigned int       save_index,
+                                   unsigned int       flat_thread_id,
+                                   AccessFunction     access_function)
 {
-    // If the thread that resets the reduction of save_index in init_lookback_scan_state is
-    // participating, this thread saves the value. Otherwise, the first thread saves it
+    // If the thread that will reset the reduction of save_index in init_lookback_scan_state later
+    // is participating, this very thread saves the value. Otherwise the first thread saves it
     // (it will not be reset by any thread in init_lookback_scan_state).
-    if((number_of_blocks <= save_index && flat_thread_id == 0) || flat_thread_id == save_index)
+    if(flat_thread_id == (save_index < number_of_blocks ? save_index : 0))
     {
         typename LookBackScanState::value_type value;
         prefix_flag                            dummy_flag;

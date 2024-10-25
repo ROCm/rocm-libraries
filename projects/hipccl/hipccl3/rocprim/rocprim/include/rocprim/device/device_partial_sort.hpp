@@ -58,6 +58,132 @@ namespace detail
     }                                     \
     while(0)
 
+template<bool inplace>
+struct partial_sort_nth_element_helper
+{
+    template<class Config,
+             class KeysInputIterator,
+             class KeysInputIteratorNthElement,
+             class KeysOutputIterator,
+             class BinaryFunction>
+    ROCPRIM_INLINE
+    hipError_t
+        merge_sort_impl(void*                       temporary_storage,
+                        size_t&                     storage_size,
+                        KeysInputIterator           keys_input,
+                        KeysInputIteratorNthElement keys_input_nth_element,
+                        KeysOutputIterator          keys_output,
+                        const size_t                size,
+                        BinaryFunction              compare_function,
+                        const hipStream_t           stream,
+                        bool                        debug_synchronous,
+                        typename std::iterator_traits<KeysInputIterator>::value_type* keys_buffer
+                        = nullptr)
+    {
+        (void)keys_input_nth_element;
+        return detail::merge_sort_impl<Config>(temporary_storage,
+                                               storage_size,
+                                               keys_input,
+                                               keys_output,
+                                               static_cast<empty_type*>(nullptr),
+                                               static_cast<empty_type*>(nullptr),
+                                               size,
+                                               compare_function,
+                                               stream,
+                                               debug_synchronous,
+                                               keys_buffer);
+    }
+
+    template<class Config, class KeysIterator, class KeysIteratorNthElement, class BinaryFunction>
+    ROCPRIM_INLINE
+    hipError_t nth_element_impl(
+        void*                                                    temporary_storage,
+        size_t&                                                  storage_size,
+        KeysIterator                                             keys,
+        KeysIteratorNthElement                                   keys_nth_element,
+        size_t                                                   nth,
+        size_t                                                   size,
+        BinaryFunction                                           compare_function,
+        hipStream_t                                              stream,
+        bool                                                     debug_synchronous,
+        typename std::iterator_traits<KeysIterator>::value_type* keys_double_buffer)
+    {
+        (void)keys_nth_element;
+        return detail::nth_element_impl<Config>(temporary_storage,
+                                                storage_size,
+                                                keys,
+                                                nth,
+                                                size,
+                                                compare_function,
+                                                stream,
+                                                debug_synchronous,
+                                                keys_double_buffer);
+    }
+};
+
+template<>
+struct partial_sort_nth_element_helper<false>
+{
+    template<class Config,
+             class KeysInputIterator,
+             class KeysInputIteratorNthElement,
+             class KeysOutputIterator,
+             class BinaryFunction>
+    ROCPRIM_INLINE
+    hipError_t
+        merge_sort_impl(void*                       temporary_storage,
+                        size_t&                     storage_size,
+                        KeysInputIterator           keys_input,
+                        KeysInputIteratorNthElement keys_input_nth_element,
+                        KeysOutputIterator          keys_output,
+                        const size_t                size,
+                        BinaryFunction              compare_function,
+                        const hipStream_t           stream,
+                        bool                        debug_synchronous,
+                        typename std::iterator_traits<KeysInputIterator>::value_type* keys_buffer
+                        = nullptr)
+    {
+        (void)keys_input;
+        return detail::merge_sort_impl<Config>(temporary_storage,
+                                               storage_size,
+                                               keys_input_nth_element,
+                                               keys_output,
+                                               static_cast<empty_type*>(nullptr),
+                                               static_cast<empty_type*>(nullptr),
+                                               size,
+                                               compare_function,
+                                               stream,
+                                               debug_synchronous,
+                                               keys_buffer);
+    }
+
+    template<class Config, class KeysIterator, class KeysIteratorNthElement, class BinaryFunction>
+    ROCPRIM_INLINE
+    hipError_t nth_element_impl(
+        void*                                                    temporary_storage,
+        size_t&                                                  storage_size,
+        KeysIterator                                             keys,
+        KeysIteratorNthElement                                   keys_nth_element,
+        size_t                                                   nth,
+        size_t                                                   size,
+        BinaryFunction                                           compare_function,
+        hipStream_t                                              stream,
+        bool                                                     debug_synchronous,
+        typename std::iterator_traits<KeysIterator>::value_type* keys_double_buffer)
+    {
+        (void)keys;
+        return detail::nth_element_impl<Config>(temporary_storage,
+                                                storage_size,
+                                                keys_nth_element,
+                                                nth,
+                                                size,
+                                                compare_function,
+                                                stream,
+                                                debug_synchronous,
+                                                keys_double_buffer);
+    }
+};
+
 template<class Config,
          class KeysInputIterator,
          class KeysOutputIterator,
@@ -74,52 +200,58 @@ hipError_t partial_sort_impl(void*              temporary_storage,
                              bool               debug_synchronous)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using input_reference_type = typename std::iterator_traits<KeysInputIterator>::reference;
     using config = default_or_custom_config<Config, detail::default_partial_sort_config<key_type>>;
     using config_merge_sort  = typename config::merge_sort;
     using config_nth_element = typename config::nth_element;
+
+    static_assert(!std::is_const<std::remove_reference_t<input_reference_type>>::value || !inplace,
+                  "Key input iterator must be mutable with in-place partial sort");
 
     if(size != 0 && middle >= size)
     {
         return hipErrorInvalidValue;
     }
 
+    partial_sort_nth_element_helper<inplace> helper;
+
     size_t storage_size_nth_element{};
     // non-null placeholder so that no buffer is allocated for keys
     key_type* keys_buffer_placeholder = reinterpret_cast<key_type*>(1);
-
-    const bool full_sort = middle + 1 == size;
-    if(!full_sort)
-    {
-        RETURN_ON_ERROR(nth_element_impl<config_nth_element>(nullptr,
-                                                             storage_size_nth_element,
-                                                             keys_in,
-                                                             middle,
-                                                             size,
-                                                             compare_function,
-                                                             stream,
-                                                             debug_synchronous,
-                                                             keys_buffer_placeholder));
-    }
-    size_t storage_size_merge_sort{};
-
-    RETURN_ON_ERROR(
-        merge_sort_impl<config_merge_sort>(nullptr,
-                                           storage_size_merge_sort,
-                                           keys_in,
-                                           keys_out,
-                                           static_cast<empty_type*>(nullptr), // values_input
-                                           static_cast<empty_type*>(nullptr), // values_output
-                                           (!inplace || full_sort) ? middle + 1 : middle,
-                                           compare_function,
-                                           stream,
-                                           debug_synchronous,
-                                           keys_buffer_placeholder, // keys_buffer
-                                           static_cast<empty_type*>(nullptr))); // values_buffer
 
     void*     temporary_storage_nth_element = nullptr;
     void*     temporary_storage_merge_sort  = nullptr;
     key_type* keys_buffer                   = nullptr;
     key_type* keys_output_nth_element       = nullptr;
+
+    const bool full_sort = middle + 1 == size;
+    if(!full_sort)
+    {
+        RETURN_ON_ERROR(
+            helper.template nth_element_impl<config_nth_element>(nullptr,
+                                                                 storage_size_nth_element,
+                                                                 keys_in,
+                                                                 keys_output_nth_element,
+                                                                 middle,
+                                                                 size,
+                                                                 compare_function,
+                                                                 stream,
+                                                                 debug_synchronous,
+                                                                 keys_buffer_placeholder));
+    }
+    size_t storage_size_merge_sort{};
+
+    RETURN_ON_ERROR(helper.template merge_sort_impl<config_merge_sort>(
+        nullptr,
+        storage_size_merge_sort,
+        keys_in,
+        keys_output_nth_element,
+        keys_out,
+        (!inplace || full_sort) ? middle + 1 : middle,
+        compare_function,
+        stream,
+        debug_synchronous,
+        keys_buffer_placeholder)); // keys_buffer
 
     const hipError_t partition_result = temp_storage::partition(
         temporary_storage,
@@ -152,22 +284,10 @@ hipError_t partial_sort_impl(void*              temporary_storage,
 
     if(!full_sort)
     {
-        if(inplace)
-        {
-            RETURN_ON_ERROR(nth_element_impl<config_nth_element>(temporary_storage_nth_element,
+        RETURN_ON_ERROR(
+            helper.template nth_element_impl<config_nth_element>(temporary_storage_nth_element,
                                                                  storage_size_nth_element,
                                                                  keys_in,
-                                                                 middle,
-                                                                 size,
-                                                                 compare_function,
-                                                                 stream,
-                                                                 debug_synchronous,
-                                                                 keys_buffer));
-        }
-        else
-        {
-            RETURN_ON_ERROR(nth_element_impl<config_nth_element>(temporary_storage_nth_element,
-                                                                 storage_size_nth_element,
                                                                  keys_output_nth_element,
                                                                  middle,
                                                                  size,
@@ -175,7 +295,6 @@ hipError_t partial_sort_impl(void*              temporary_storage,
                                                                  stream,
                                                                  debug_synchronous,
                                                                  keys_buffer));
-        }
     }
 
     if(middle == 0)
@@ -192,38 +311,17 @@ hipError_t partial_sort_impl(void*              temporary_storage,
         return hipSuccess;
     }
 
-    if(inplace)
-    {
-        return merge_sort_impl<config_merge_sort>(
-            temporary_storage_merge_sort,
-            storage_size_merge_sort,
-            keys_in,
-            keys_out,
-            static_cast<empty_type*>(nullptr), // values_input
-            static_cast<empty_type*>(nullptr), // values_output
-            full_sort ? middle + 1 : middle,
-            compare_function,
-            stream,
-            debug_synchronous,
-            keys_buffer, // keys_buffer
-            static_cast<empty_type*>(nullptr)); // values_buffer
-    }
-    else
-    {
-        return merge_sort_impl<config_merge_sort>(
-            temporary_storage_merge_sort,
-            storage_size_merge_sort,
-            keys_output_nth_element,
-            keys_out,
-            static_cast<empty_type*>(nullptr), // values_input
-            static_cast<empty_type*>(nullptr), // values_output
-            middle + 1,
-            compare_function,
-            stream,
-            debug_synchronous,
-            keys_buffer, // keys_buffer
-            static_cast<empty_type*>(nullptr)); // values_buffer
-    }
+    return helper.template merge_sort_impl<config_merge_sort>(temporary_storage_merge_sort,
+                                                              storage_size_merge_sort,
+                                                              keys_in,
+                                                              keys_output_nth_element,
+                                                              keys_out,
+                                                              (!inplace || full_sort) ? middle + 1
+                                                                                      : middle,
+                                                              compare_function,
+                                                              stream,
+                                                              debug_synchronous,
+                                                              keys_buffer); // keys_buffer
 }
 
 } // namespace detail
@@ -236,6 +334,15 @@ hipError_t partial_sort_impl(void*              temporary_storage,
 /// if `temporary_storage` is a null pointer.
 /// * Accepts custom compare_functions for partial_sort_copy across the device.
 /// * Streams in graph capture mode are not supported
+///
+/// \par Stability
+/// \p partial_sort_copy is <b>not stable</b>: it doesn't necessarily preserve the relative ordering
+/// of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is <b>not guaranteed</b> that \p a will precede \p b as well in the output
+/// (ordered) keys.
 ///
 /// \tparam Config [optional] configuration of the primitive. It has to be `partial_sort_config`.
 /// \tparam KeysInputIterator [inferred] random-access iterator type of the input range. Must meet the
@@ -342,6 +449,15 @@ hipError_t partial_sort_copy(void*              temporary_storage,
 /// if `temporary_storage` is a null pointer.
 /// * Accepts custom compare_functions for partial_sort across the device.
 /// * Streams in graph capture mode are not supported
+///
+/// \par Stability
+/// \p partial_sort is <b>not stable</b>: it doesn't necessarily preserve the relative ordering
+/// of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is <b>not guaranteed</b> that \p a will precede \p b as well in the output
+/// (ordered) keys.
 ///
 /// \tparam Config [optional] configuration of the primitive. It has to be `partial_sort_config`.
 /// \tparam KeysIterator [inferred] random-access iterator type of the input range. Must meet the

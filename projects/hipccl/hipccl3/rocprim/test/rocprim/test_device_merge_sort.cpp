@@ -23,8 +23,10 @@
 #include "../common_test_header.hpp"
 
 // required rocprim headers
-#include <rocprim/functional.hpp>
 #include <rocprim/device/device_merge_sort.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/iterator/counting_iterator.hpp>
+#include <rocprim/iterator/transform_iterator.hpp>
 
 // required test headers
 #include "test_utils_custom_float_type.hpp"
@@ -218,6 +220,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
     }
 }
 
+// This test also ensures that merge_sort is stable
 TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -405,4 +408,114 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             }
         }
     }
+}
+
+void testLargeIndices()
+{
+    using key_type = uint8_t;
+
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    hipStream_t stream            = 0; // default
+    const bool  debug_synchronous = false;
+
+    // Use this custom config with smaller items_per_thread to launch more than 2^32 threads with
+    // at least some sizes that fit into device memory.
+    using config = rocprim::merge_sort_config<256, 256, 1, 128, 128, 1, (1 << 17)>;
+
+    for(size_t size : test_utils::get_large_sizes(seeds[0]))
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        const auto input
+            = rocprim::make_transform_iterator(rocprim::make_counting_iterator<size_t>(0),
+                                               rocprim::identity<key_type>());
+
+        key_type*  d_output;
+        hipError_t malloc_status
+            = test_common_utils::hipMallocHelper(&d_output, size * sizeof(*d_output));
+        if(malloc_status == hipErrorOutOfMemory)
+        {
+            std::cout << "Out of memory. Skipping size = " << size << std::endl;
+            break;
+        }
+        HIP_CHECK(malloc_status);
+
+        // compare function
+        rocprim::less<key_type> compare_op;
+
+        // temp storage
+        size_t temp_storage_size_bytes;
+        void*  d_temp_storage = nullptr;
+        // Get size of d_temp_storage
+        HIP_CHECK(rocprim::merge_sort<config>(d_temp_storage,
+                                              temp_storage_size_bytes,
+                                              input,
+                                              d_output,
+                                              size,
+                                              compare_op,
+                                              stream,
+                                              debug_synchronous));
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(temp_storage_size_bytes, 0);
+
+        // allocate temporary storage
+        malloc_status
+            = test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes);
+        if(malloc_status == hipErrorOutOfMemory)
+        {
+            std::cout << "Out of memory. Skipping size = " << size << std::endl;
+            HIP_CHECK(hipFree(d_output));
+            break;
+        }
+        HIP_CHECK(malloc_status);
+
+        // Run
+        HIP_CHECK(rocprim::merge_sort<config>(d_temp_storage,
+                                              temp_storage_size_bytes,
+                                              input,
+                                              d_output,
+                                              size,
+                                              compare_op,
+                                              stream,
+                                              debug_synchronous));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Copy output to host
+        std::vector<key_type> output(size);
+        HIP_CHECK(hipMemcpy(output.data(),
+                            d_output,
+                            output.size() * sizeof(*d_output),
+                            hipMemcpyDeviceToHost));
+
+        // Check if output values are as expected
+        const size_t unique_keys    = size_t(std::numeric_limits<key_type>::max()) + 1;
+        const size_t segment_length = rocprim::detail::ceiling_div(size, unique_keys);
+        const size_t full_segments  = size % unique_keys == 0 ? unique_keys : size % unique_keys;
+        for(size_t i = 0; i < size; i += 4321)
+        {
+            key_type expected;
+            if(i / segment_length < full_segments)
+            {
+                expected = key_type(i / segment_length);
+            }
+            else
+            {
+                expected = key_type((i - full_segments * segment_length) / (segment_length - 1)
+                                    + full_segments);
+            }
+            ASSERT_EQ(output[i], expected) << "with index = " << i;
+        }
+
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_temp_storage));
+    }
+}
+
+TEST(RocprimDeviceSortTests, LargeIndices)
+{
+    testLargeIndices();
 }

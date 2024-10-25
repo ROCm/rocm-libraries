@@ -27,6 +27,8 @@
 #include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 
+#include "../common_test_header.hpp"
+
 // Identity iterator
 #include "identity_iterator.hpp"
 // Bounds checking iterator
@@ -471,6 +473,18 @@ void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
 template<unsigned int LogicalWarpSize>
 __device__ constexpr bool device_test_enabled_for_warp_size_v
     = ::rocprim::device_warp_size() >= LogicalWarpSize;
+
+template<bool MakeConst, typename T>
+inline auto wrap_in_const(T* ptr) -> typename std::enable_if_t<MakeConst, const T*>
+{
+    return ptr;
+}
+
+template<bool MakeConst, typename T>
+inline auto wrap_in_const(T* ptr) -> typename std::enable_if_t<!MakeConst, T*>
+{
+    return ptr;
+}
 
 } // end test_utils namespace
 

@@ -134,18 +134,12 @@ struct match_vector_type
 
     using vector_4 = typename make_vector_type<vector_base_type, 4>::type;
     using vector_2 = typename make_vector_type<vector_base_type, 2>::type;
-    using vector_1 = typename make_vector_type<vector_base_type, 1>::type;
 
-    using type =
-        typename std::conditional<
-            size % sizeof(vector_4) == 0,
-            vector_4,
-            typename std::conditional<
-                size % sizeof(vector_2) == 0,
-                vector_2,
-                vector_1
-            >::type
-        >::type;
+    using type = typename std::conditional<
+        size % sizeof(vector_4) == 0,
+        vector_4,
+        typename std::conditional<size % sizeof(vector_2) == 0, vector_2, vector_base_type>::type>::
+        type;
 };
 
 // Checks if Items is odd and ensures that size of T is smaller than vector_type.

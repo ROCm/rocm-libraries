@@ -31,6 +31,7 @@ include:
       - /deps-rocm.yaml
       - /deps-vcpkg.yaml
       - /deps-windows.yaml
+      - /deps-compiler-acceleration.yaml
       - /gpus-rocm.yaml
       - /rules.yaml
 
@@ -68,10 +69,12 @@ copyright-date:
     - .deps:rocm
     - .deps:cmake-minimum
     - .deps:vcpkg
+    - .deps:compiler-acceleration
   before_script:
     - !reference [".deps:rocm", before_script]
     - !reference [".deps:cmake-minimum", before_script]
     - !reference [".deps:vcpkg", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
     - $VCPKG_DIR/vcpkg install
         gtest
         benchmark
@@ -80,9 +83,11 @@ copyright-date:
   extends:
     - .deps:rocm
     - .deps:cmake-minimum
+    - .deps:compiler-acceleration
   before_script:
     - !reference [".deps:rocm", before_script]
     - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
     - $SUDO_CMD apt-get install -y -qq
         libgtest-dev
         libbenchmark-dev
@@ -107,6 +112,8 @@ copyright-date:
       -D BUILD_BENCHMARK=ON
       -D GPU_TARGETS=$GPU_TARGETS
       -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
       -S $CI_PROJECT_DIR
       -B $BUILD_DIR
     - cmake
@@ -131,17 +138,21 @@ build:cmake-minimum-apt:
   extends:
     - .deps:rocm
     - .deps:cmake-latest
+    - .deps:compiler-acceleration
   before_script:
     - !reference [".deps:rocm", before_script]
     - !reference [".deps:cmake-latest", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
 
 .cmake-minimum:
   extends:
     - .deps:rocm
     - .deps:cmake-minimum
+    - .deps:compiler-acceleration
   before_script:
     - !reference [".deps:rocm", before_script]
     - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
 
 .build:common:
   stage: build
@@ -166,6 +177,8 @@ build:cmake-minimum-apt:
       -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror $EXTRA_CMAKE_CXX_FLAGS"
       -D CMAKE_BUILD_TYPE="$BUILD_TYPE"
       -D BUILD_$BUILD_TARGET=ON
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
       -D BUILD_EXAMPLE=ON
       -D GPU_TARGETS=$GPU_TARGETS
       -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
@@ -299,6 +312,8 @@ autotune:build:
       -D BUILD_BENCHMARK=ON
       -D BENCHMARK_CONFIG_TUNING=ON
       -D GPU_TARGETS=$GPU_TARGETS
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
     - cmake --build . --target $BENCHMARK_TARGETS
     - 'rm -rf $BUILD_DIR/benchmark/benchmark*.parallel'
     # The autotune benchmarks get very large, above GitLabs upload limit. Fortunately they compress well.
@@ -450,6 +465,7 @@ benchmark:
   variables:
     BENCHMARK_FILENAME_REGEX: ^benchmark
     BENCHMARK_ALGORITHM_REGEX: ""
+    BENCHMARK_SEED: random
   script:
     - 'printf "CI Variables used in benchmarks:\nBENCHMARK_RESULT_DIR: %s\nBENCHMARK_FILENAME_REGEX: %s\nBENCHMARK_ALGORITHM_REGEX: %s \n" "$BENCHMARK_RESULT_DIR" "$BENCHMARK_FILENAME_REGEX" "$BENCHMARK_ALGORITHM_REGEX"'
     - cd "${CI_PROJECT_DIR}"
@@ -461,6 +477,7 @@ benchmark:
       --benchmark_output_dir "${BENCHMARK_RESULT_DIR}"
       --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
       --benchmark_filter_regex "${BENCHMARK_ALGORITHM_REGEX}"
+      --seed "${BENCHMARK_SEED}"
   artifacts:
     paths:
       - ${BENCHMARK_RESULT_DIR}

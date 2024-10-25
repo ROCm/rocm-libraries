@@ -153,7 +153,7 @@ __global__ __launch_bounds__(BlockSize) void sort_key_value_kernel(key_type*   d
     }
 }
 
-// Test for radix sort
+// Test for radix sort with keys only
 template<class Key,
          class Value,
          unsigned int Method,
@@ -256,6 +256,7 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
 
 }
 
+// Test for radix_sort with keys and values. Also ensures that (block) radix_sort is stable
 template<class Key,
          class Value,
          unsigned int Method,
@@ -316,7 +317,8 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
                                                rng_engine);
         }
 
-        std::vector<value_type> values_output = test_utils::get_random_data<value_type>(size, 0, 100, seed_value);
+        std::vector<value_type> values_output(size);
+        std::iota(values_output.begin(), values_output.end(), 0u);
 
         using key_value = std::pair<key_type, value_type>;
 

@@ -50,6 +50,11 @@ Data Movement
 * ``load`` the complementary operations of the above ones.
 * ``memcpy`` copies bytes between device sources and destinations
 
+Sequence Search
+===============
+
+* ``find_first_of`` searches for the first occurrence of any of the provided elements.
+
 Other operations
 ======================
 

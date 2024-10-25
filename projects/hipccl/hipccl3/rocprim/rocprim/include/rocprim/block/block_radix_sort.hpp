@@ -63,6 +63,13 @@ BEGIN_ROCPRIM_NAMESPACE
 ///   can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 ///   [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \par Stability
+/// \p block_radix_sort is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
+///
 /// \par Examples
 /// \parblock
 /// In the examples radix sort is performed on a block of 256 threads, each thread provides
