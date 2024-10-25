@@ -52,6 +52,25 @@ bool started = false;
     // return reinterpret_cast<WorkNode_Header *>(worknode);
 }
 
+// Lock a worknode we already have a pointer to. For convenience, returns worknode->link_to_self (which might be nullptr
+// if the node has finished executing). This function is not safe to call from the scheduler, and is only meant for use
+// in join and detach, where we can be sure that the worknode pointer isn't going to be invalidated unexpectedly while
+// we are trying to acquire the lock for it.
+static inline __device__ WorkNode_Header **lockWorkNode(WorkNode_Header *worknode) {
+    // Even if we know worknode will remain valid, worknode->link_to_self might change/be invalidated while we try to
+    // acquire the lock. That's OK though, because the CAS will only succeed if we have an up-to-date value for
+    // link_to_self AND nobody is currently holding a lock on worknode.
+    WorkNode_Header **link_to_self;
+    for (link_to_self = reinterpret_cast<WorkNode_Header **>(atomicAdd(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), 0));
+         link_to_self != nullptr /* While worknode has not finished executing and ... */ &&
+         atomicCAS(reinterpret_cast<uintptr_t *>(link_to_self), reinterpret_cast<uintptr_t>(worknode), 0) !=
+             reinterpret_cast<uintptr_t>(worknode) /* ... we failed to acquire the lock, keep trying. */;
+         link_to_self = reinterpret_cast<WorkNode_Header **>(atomicAdd(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), 0))) {
+        //__builtin_amdgcn_s_sleep(1);
+    }
+    return link_to_self;
+}
+
 // For use in functions like get_width where worknode hasn't moved anywhere, and we know *link_to_self == nullptr.
 static inline __device__ void unlockActiveWorkNode(WorkNode_Header *worknode) {
     __threadfence();
@@ -260,19 +279,7 @@ static __global__ void threading_main() {
 static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
     WorkNode_Header *newWorkNode = static_cast<WorkNode_Header *>(::malloc(oldWorkNode->worknodeSize));
 
-    // Lock the worknode (unless the workitem finishes before we can get the lock).
-    // Note that detachWorkNode is the only function that can potentially invalidate a worknode pointer, so we're
-    // guaranteed that oldWorkNode will remain valid. However, oldWorkNode->link_to_self might change/be invalidated
-    // while we try to acquire the lock, but that's OK, the CAS will only succeed if we have an up-to-date value for
-    // link_to_self AND nobody is currently holding a lock on oldWorkNode.
-    WorkNode_Header **link_to_self;
-    for (link_to_self = reinterpret_cast<WorkNode_Header **>(atomicAdd(reinterpret_cast<uintptr_t*>(&oldWorkNode->link_to_self), 0));
-         link_to_self != nullptr /* while workitem is not finished executing */ &&
-         atomicCAS(reinterpret_cast<uintptr_t *>(link_to_self), reinterpret_cast<uintptr_t>(oldWorkNode), 0) !=
-             reinterpret_cast<uintptr_t>(oldWorkNode) /* and we failed to acquire the lock, keep trying */;
-         link_to_self = reinterpret_cast<WorkNode_Header **>(atomicAdd(reinterpret_cast<uintptr_t*>(&oldWorkNode->link_to_self), 0))) {
-        //__builtin_amdgcn_s_sleep(1);
-    }
+    WorkNode_Header **link_to_self = lockWorkNode(oldWorkNode);
     if (link_to_self == nullptr) {
         // workitem has already finished, so the scheduler has no way of finding oldWorkNode. Thus, we don't have to
         // worry about updating its state or copying it. Just return so the gpu::thread destructor can free oldWorkNode.
@@ -292,9 +299,9 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
         moveAndUnlockWorkNode(next, &newWorkNode->next);
     }
 
-    // Unlock
-    __threadfence();
-    atomicExch(reinterpret_cast<uintptr_t*>(link_to_self), reinterpret_cast<uintptr_t>(newWorkNode));
+    // This does an extra unnecessary load of newWorkNode->link_to_self to check if it's null, but that's unlikely to
+    // have a major performance impact.
+    moveAndUnlockWorkNode(newWorkNode, link_to_self);
 }
 
 } // namespace internal
