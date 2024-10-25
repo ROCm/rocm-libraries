@@ -9,7 +9,7 @@ import com.amd.project.*
 import com.amd.docker.*
 import java.nio.file.Path;
 
-def runCI = 
+def runCI =
 {
     nodeDetails, jobName->
 
@@ -17,6 +17,7 @@ def runCI =
 
     prj.defaults.ccache = true
     prj.timeout.compile = 420
+    prj.libraryDependencies = ["rocPRIM"]
 
     // Define test architectures, optional rocm version argument is available
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
@@ -43,29 +44,31 @@ def runCI =
     def packageCommand =
     {
         platform, project->
-        
+
         commonGroovy.runPackageCommand(platform, project)
     }
 
     buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)
 }
 
-ci: { 
+ci: {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
-    def propertyList = ["compute-rocm-dkms-no-npi":[pipelineTriggers([cron('0 1 * * 0')])], 
+    def propertyList = ["compute-rocm-dkms-no-npi":[pipelineTriggers([cron('0 1 * * 0')])],
                         "compute-rocm-dkms-no-npi-hipclang":[pipelineTriggers([cron('0 1 * * 0')])],
                         "rocm-docker":[]]
     propertyList = auxiliary.appendPropertyList(propertyList)
 
     Set standardJobNameSet = ["compute-rocm-dkms-no-npi", "compute-rocm-dkms-no-npi-hipclang", "rocm-docker"]
 
-    def jobNameList = ["compute-rocm-dkms-no-npi":([ubuntu16:['gfx900'],centos7:['gfx906'],sles15sp1:['gfx908']]), 
-                       "compute-rocm-dkms-no-npi-hipclang":([ubuntu16:['gfx900'],centos7:['gfx906'],sles15sp1:['gfx908']]), 
+    def jobNameList = ["compute-rocm-dkms-no-npi":([ubuntu16:['gfx900'],centos7:['gfx906'],sles15sp1:['gfx908']]),
+                       "compute-rocm-dkms-no-npi-hipclang":([ubuntu16:['gfx900'],centos7:['gfx906'],sles15sp1:['gfx908']]),
                        "rocm-docker":([ubuntu16:['gfx900'],centos7:['gfx906'],sles15sp1:['gfx908']])]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
-    propertyList.each 
+    auxiliary.registerDependencyBranchParameter(["rocPRIM"])
+
+    propertyList.each
     {
         jobName, property->
         if (urlJobName == jobName)
@@ -73,7 +76,7 @@ ci: {
     }
 
     Set seenJobNames = []
-    jobNameList.each 
+    jobNameList.each
     {
         jobName, nodeDetails->
         seenJobNames.add(jobName)
@@ -85,7 +88,6 @@ ci: {
     if(!seenJobNames.contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * *')])]))
-        runCI([ubuntu16:['gfx906']], urlJobName)       
+        runCI([ubuntu16:['gfx906']], urlJobName)
     }
 }
-
