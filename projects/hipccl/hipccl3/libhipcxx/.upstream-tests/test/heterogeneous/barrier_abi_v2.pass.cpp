@@ -25,7 +25,7 @@
 
 // UNSUPPORTED: hipcc, hiprtc
 // UNSUPPORTED: nvrtc, pre-sm-70
-// XFAIL: clang && (!nvcc)
+// UNSUPPORTED: clang && (!nvcc)
 
 // uncomment for a really verbose output detailing what test steps are being launched
 // #define DEBUG_TESTERS
