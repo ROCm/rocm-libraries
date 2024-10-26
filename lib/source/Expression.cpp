@@ -222,6 +222,15 @@ namespace rocRoller
                 return {argVal.regType, DATATYPE};
             }
 
+            template <DataType DATATYPE>
+            ResultType operator()(SRConvert<DATATYPE> const& expr)
+            {
+                // SR conversion currently only supports FP8 and BF8
+                static_assert(DATATYPE == DataType::FP8 || DATATYPE == DataType::BF8);
+                auto argVal = call(expr.lhs);
+                return {argVal.regType, DATATYPE};
+            }
+
             template <typename T>
             requires(CBinary<T>&& CComparison<T>) ResultType operator()(T const& expr)
             {

@@ -86,9 +86,10 @@ namespace rocRollerTest
          *  Testing: C = Convert(A)
         */
         template <typename DestType, typename SrcType>
-        void convertTo(std::vector<SrcType>&     srcData,
-                       ConversionSettings const& cs,
-                       bool const                loadLDS_A);
+        void convertTo(std::vector<SrcType>&         srcData,
+                       ConversionSettings const&     cs,
+                       bool const                    loadLDS_A,
+                       std::optional<uint32_t> const seed = std::nullopt);
     };
 
     template <typename TypeAB, typename TypeC, typename TypeD>
@@ -283,26 +284,13 @@ namespace rocRollerTest
 
         CommandArguments commandArgs = command->createArguments();
 
-        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_A.get());
-        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
-        // tiled?
-        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_B.get());
-        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
+        TensorDescriptor descA(dataTypeAB, {size_t(M), size_t(K)}, "N");
+        TensorDescriptor descB(dataTypeAB, {size_t(K), size_t(N)}, "N");
+        TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
-        commandArgs.setArgument(tagTensorD, ArgumentType::Value, d_D.get());
-        commandArgs.setArgument(tagTensorD, ArgumentType::Limit, (size_t)M * N);
-        commandArgs.setArgument(tagTensorD, ArgumentType::Size, 0, (size_t)M);
-        commandArgs.setArgument(tagTensorD, ArgumentType::Size, 1, (size_t)N);
-        commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 0, (size_t)1);
-        commandArgs.setArgument(tagTensorD, ArgumentType::Stride, 1, (size_t)M);
+        setCommandTensorArg(commandArgs, tagTensorA, descA, d_A.get());
+        setCommandTensorArg(commandArgs, tagTensorB, descB, d_B.get());
+        setCommandTensorArg(commandArgs, tagTensorD, descD, d_D.get());
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -383,27 +371,14 @@ namespace rocRollerTest
         auto d_a = make_shared_device(a);
         auto d_b = make_shared_device(b);
         auto d_c = make_shared_device<DestType>(a.size());
-        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
-        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
-        commandArgs.setArgument(tagTensorC, ArgumentType::Value, d_c.get());
 
-        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, a.size());
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)cs.nx);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)cs.ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)cs.ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
+        TensorDescriptor descA(srcDataType, {size_t(cs.nx), size_t(cs.ny)}, "T");
+        TensorDescriptor descB(srcDataType, {size_t(cs.nx), size_t(cs.ny)}, "T");
+        TensorDescriptor descC(destDataType, {size_t(cs.nx), size_t(cs.ny)}, "T");
 
-        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, b.size());
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)cs.nx);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)cs.ny);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)cs.ny);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)1);
-
-        commandArgs.setArgument(tagTensorC, ArgumentType::Limit, a.size());
-        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)cs.nx);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)cs.ny);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 0, (size_t)cs.ny);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 1, (size_t)1);
+        setCommandTensorArg(commandArgs, tagTensorA, descA, d_a.get());
+        setCommandTensorArg(commandArgs, tagTensorB, descB, d_b.get());
+        setCommandTensorArg(commandArgs, tagTensorC, descC, d_c.get());
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -459,9 +434,10 @@ namespace rocRollerTest
     }
 
     template <typename DestType, typename SrcType>
-    void ConversionTest::convertTo(std::vector<SrcType>&     srcData,
-                                   ConversionSettings const& cs,
-                                   bool const                loadLDS_A)
+    void ConversionTest::convertTo(std::vector<SrcType>&         srcData,
+                                   ConversionSettings const&     cs,
+                                   bool const                    loadLDS_A,
+                                   std::optional<uint32_t> const seed)
     {
         static_assert(!std::is_same_v<DestType, SrcType>,
                       "Source and destination types for conversion must be different");
@@ -482,10 +458,20 @@ namespace rocRollerTest
         auto tagTensorA = command->addOperation(rocRoller::Operations::Tensor(2, srcDataType));
         auto tagLoadA   = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
-        auto const destDataType = TypeInfo<DestType>::Var.dataType;
-        auto       execute      = rocRoller::Operations::T_Execute(command->getNextTag());
-        auto       tagCvtA      = execute.addXOp(
-            rocRoller::Operations::E_Cvt(tagLoadA, destDataType)); // Convert A to destination type
+        auto const               destDataType = TypeInfo<DestType>::Var.dataType;
+        Operations::OperationTag tagSeed, tagLoadSeed;
+        if(seed.has_value())
+        {
+            tagSeed     = command->addOperation(rocRoller::Operations::Scalar(DataType::UInt32));
+            tagLoadSeed = command->addOperation(rocRoller::Operations::T_Load_Scalar(tagSeed));
+        }
+
+        auto execute = rocRoller::Operations::T_Execute(command->getNextTag());
+        // Convert A to destination type
+        auto tagCvtA = seed.has_value()
+                           ? execute.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
+                               tagLoadA, tagLoadSeed, destDataType))
+                           : execute.addXOp(rocRoller::Operations::E_Cvt(tagLoadA, destDataType));
         command->addOperation(std::move(execute));
 
         auto tagTensorC = command->addOperation(rocRoller::Operations::Tensor(2, destDataType));
@@ -493,21 +479,16 @@ namespace rocRollerTest
 
         CommandArguments commandArgs = command->createArguments();
 
-        auto d_a = make_shared_device(srcData);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
-        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)cs.nx * cs.ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)cs.nx);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)cs.ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)cs.ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
+        auto             d_a = make_shared_device(srcData);
+        TensorDescriptor descA(srcDataType, {size_t(cs.nx), size_t(cs.ny)}, "T");
+        setCommandTensorArg(commandArgs, tagTensorA, descA, d_a.get());
 
-        auto d_c = make_shared_device<DestType>(srcData.size());
-        commandArgs.setArgument(tagTensorC, ArgumentType::Value, d_c.get());
-        commandArgs.setArgument(tagTensorC, ArgumentType::Limit, (size_t)cs.nx * cs.ny);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)cs.nx);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)cs.ny);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 0, (size_t)cs.ny);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 1, (size_t)1);
+        auto             d_c = make_shared_device<DestType>(srcData.size());
+        TensorDescriptor descC(destDataType, {size_t(cs.nx), size_t(cs.ny)}, "T");
+        setCommandTensorArg(commandArgs, tagTensorC, descC, d_c.get());
+
+        if(seed.has_value())
+            commandArgs.setArgument(tagSeed, ArgumentType::Value, seed.value());
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -543,7 +524,34 @@ namespace rocRollerTest
         std::vector<DestType> cpuResult;
         cpuResult.reserve(gpuResult.size());
         for(auto v : srcData)
-            cpuResult.emplace_back(DestType(v));
+        {
+            if(not seed.has_value())
+            {
+                cpuResult.emplace_back(DestType(v));
+            }
+            else
+            {
+                if constexpr(std::is_same_v<DestType, FP8> || std::is_same_v<DestType, BF8>)
+                {
+                    int constexpr exp_width      = std::is_same_v<DestType, FP8> ? 4 : 5;
+                    int constexpr mantissa_width = 7 - exp_width;
+
+                    cpuResult.emplace_back(0);
+                    cpuResult.back().data = DataTypes::cast_to_f8<mantissa_width,
+                                                                  exp_width,
+                                                                  float,
+                                                                  true /*negative_zero_nan*/,
+                                                                  true /*clip*/>(
+                        v /* value to be converted   */,
+                        true /* is stochastic rounding? */,
+                        seed.value() /* seed for stochastic rounding */);
+                }
+                else
+                {
+                    AssertFatal(true, "Destionation tyoe of SR conversion can only be FP8/BF8");
+                }
+            }
+        }
 
         auto tol = AcceptableError{epsilon<double>(), "Should be exact."};
         auto res = compare(gpuResult, cpuResult, tol);
@@ -685,5 +693,41 @@ namespace rocRollerTest
     {
         // D (Half) = Convert( A (F32) * B (F32) )
         matrixMultiply<float, Half>(32, 32, 2, 1, 2.e-6);
+    }
+
+    TEST_F(ConversionTest, GPU_SR_Float2FP8_VGPR)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+        ConversionSettings cs(256, 512, 16, 8, 4, 4);
+        auto               srcData = cs.generateData<float>();
+        convertTo<rocRoller::FP8>(
+            srcData, cs, false /* load A in LDS */, 12345u /* seed for SR conversion */);
+    }
+
+    TEST_F(ConversionTest, GPU_SR_Float2BF8_VGPR)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+        ConversionSettings cs(256, 512, 16, 8, 4, 4);
+        auto               srcData = cs.generateData<float>();
+        convertTo<rocRoller::BF8>(
+            srcData, cs, false /* load A in LDS */, 12345u /* seed for SR conversion */);
+    }
+
+    TEST_F(ConversionTest, GPU_SR_Float2FP8_LDS)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+        ConversionSettings cs(256, 512, 16, 8, 4, 4);
+        auto               srcData = cs.generateData<float>();
+        convertTo<rocRoller::FP8>(
+            srcData, cs, true /* load A in LDS */, 12345u /* seed for SR conversion */);
+    }
+
+    TEST_F(ConversionTest, GPU_SR_Float2BF8_LDS)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+        ConversionSettings cs(256, 512, 16, 8, 4, 4);
+        auto               srcData = cs.generateData<float>();
+        convertTo<rocRoller::BF8>(
+            srcData, cs, true /* load A in LDS */, 12345u /* seed for SR conversion */);
     }
 }

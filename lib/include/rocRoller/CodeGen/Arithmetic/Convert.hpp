@@ -76,4 +76,62 @@ namespace rocRoller
 
         inline static const std::string Name;
     };
+
+    /**
+     *  Below are for Stochastic Rounding (SR) conversion.
+     *  SR conversion takes two args: the first arg is the value to be converted, and
+     *  the second arg is a seed for stochastic rounding.
+     */
+    template <>
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::SRConvert<DataType::FP8>>>
+        GetGenerator<Expression::SRConvert<DataType::FP8>>(Register::ValuePtr dst,
+                                                           Register::ValuePtr lhs,
+                                                           Register::ValuePtr rhs);
+
+    template <>
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::SRConvert<DataType::BF8>>>
+        GetGenerator<Expression::SRConvert<DataType::BF8>>(Register::ValuePtr dst,
+                                                           Register::ValuePtr lhs,
+                                                           Register::ValuePtr rhs);
+
+    // Templated Generator class based on the return type.
+    template <DataType DATATYPE>
+    class SRConvertGenerator : public BinaryArithmeticGenerator<Expression::SRConvert<DATATYPE>>
+    {
+    public:
+        SRConvertGenerator(ContextPtr c)
+            : BinaryArithmeticGenerator<Expression::SRConvert<DATATYPE>>(c)
+        {
+        }
+
+        // Match function required by Component system for selecting the correct
+        // generator.
+        static bool Match(
+            typename BinaryArithmeticGenerator<Expression::SRConvert<DATATYPE>>::Argument const&)
+        {
+
+            return true;
+        }
+
+        // Build function required by Component system to return the generator.
+        static std::shared_ptr<
+            typename BinaryArithmeticGenerator<Expression::SRConvert<DATATYPE>>::Base>
+            Build(
+                typename BinaryArithmeticGenerator<Expression::SRConvert<DATATYPE>>::Argument const&
+                    arg)
+        {
+            if(!Match(arg))
+                return nullptr;
+
+            return std::make_shared<SRConvertGenerator<DATATYPE>>(std::get<0>(arg));
+        }
+
+        // Method to generate instructions
+        Generator<Instruction> generate(Register::ValuePtr dst,
+                                        Register::ValuePtr lhs,
+                                        Register::ValuePtr rhs) override;
+
+        inline static const std::string Name;
+    };
+
 }

@@ -260,6 +260,20 @@ namespace rocRoller
             constexpr static inline int                 Complexity = 1;
         };
 
+        /*
+         * SRConversion performs a stochastic rounding conversion.
+         * The lhs is the value to be converted, the rhs is the seed
+         * for stochastic rounding.
+         */
+        template <DataType DATATYPE>
+        struct SRConvert : Binary
+        {
+            constexpr static inline auto DestinationType = DATATYPE;
+            constexpr static inline auto Type            = Category::Conversion;
+            constexpr static inline auto EvalTimes       = EvaluationTimes::All();
+            constexpr static inline int  Complexity      = 2;
+        };
+
         struct Ternary
         {
             ExpressionPtr lhs, r1hs, r2hs;
@@ -549,6 +563,12 @@ namespace rocRoller
         concept CLogical = requires
         {
             requires static_cast<Category>(T::Type) == Category::Logical;
+        };
+
+        template <typename T>
+        concept CConversion = requires
+        {
+            requires static_cast<Category>(T::Type) == Category::Conversion;
         };
 
         template <typename T>

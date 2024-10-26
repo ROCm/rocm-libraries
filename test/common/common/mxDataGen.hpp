@@ -73,6 +73,21 @@ namespace rocRoller
                                  const DataPattern pattern      = DataPattern::Bounded)
     {
         auto dgen = getDataGenerator<rrDT>(dim1, dim2, min, max, seed, blockScaling, pattern);
+        if constexpr(std::is_same_v<rrDT, FP8> or std::is_same_v<rrDT, BF8>)
+        {
+            // The random values (FP8/BF8) returned by data generator consist
+            // of DataBytes and ScaleBytes, while rocRoller does not separate
+            // data and scale (just need a 8-bit representation). To handle this,
+            // we ask data generator to return the values in float and
+            // cast them into corresponding types.
+            auto              refFloat = dgen.getReferenceFloat();
+            std::vector<rrDT> rrData;
+            std::transform(refFloat.begin(),
+                           refFloat.end(),
+                           std::back_inserter(rrData),
+                           [](auto value) { return rrDT(value); });
+            return rrData;
+        }
         std::vector<uint8_t> dataByte = dgen.getDataBytes();
         std::vector<rrDT>&   rrData   = reinterpret_cast<std::vector<rrDT>&>(dataByte);
         return rrData;

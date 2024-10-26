@@ -484,6 +484,22 @@ namespace rocRoller
                                     Throw<FatalError>("T_Execute E_Cvt type not implemented yet.");
                                 }
                             },
+                            [&](Operations::E_StochasticRoundingCvt const& op)
+                                -> Expression::ExpressionPtr {
+                                // Stochastic conversion
+                                switch(op.destType)
+                                {
+                                case DataType::FP8:
+                                    return std::make_shared<Expression::Expression>(
+                                        Expression::SRConvert<DataType::FP8>{dflow[0], dflow[1]});
+                                case DataType::BF8:
+                                    return std::make_shared<Expression::Expression>(
+                                        Expression::SRConvert<DataType::BF8>{dflow[0], dflow[1]});
+                                default:
+                                    Throw<FatalError>("Not implemented yet.");
+                                }
+                            },
+
                             [&](Operations::E_Add const& op) -> Expression::ExpressionPtr {
                                 return std::make_shared<Expression::Expression>(
                                     Expression::Add{dflow[0], dflow[1]});

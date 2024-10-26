@@ -60,6 +60,9 @@ namespace rocRoller
         template <DataType DATATYPE>
         struct Convert;
 
+        template <DataType DATATYPE>
+        struct SRConvert;
+
         struct DataFlowTag;
         using WaveTilePtr = std::shared_ptr<KernelGraph::CoordinateGraph::WaveTile>;
 
@@ -121,6 +124,10 @@ namespace rocRoller
             Convert<DataType::Int64>,
             Convert<DataType::UInt32>,
             Convert<DataType::UInt64>,
+
+            // --- Stochastic Rounding Convert ---
+            SRConvert<DataType::FP8>,
+            SRConvert<DataType::BF8>,
 
             // --- Values ---
             // Literal: Always available

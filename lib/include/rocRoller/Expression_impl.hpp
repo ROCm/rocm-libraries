@@ -358,6 +358,9 @@ namespace rocRoller
         EXPRESSION_INFO(Convert<DataType::UInt32>);
         EXPRESSION_INFO(Convert<DataType::UInt64>);
 
+        EXPRESSION_INFO(SRConvert<DataType::FP8>);
+        EXPRESSION_INFO(SRConvert<DataType::BF8>);
+
         EXPRESSION_INFO_CUSTOM(Register::ValuePtr, "Register Value");
         EXPRESSION_INFO_CUSTOM(CommandArgumentPtr, "Command Argument");
         EXPRESSION_INFO_CUSTOM(CommandArgumentValue, "Literal Value");

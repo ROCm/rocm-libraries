@@ -30,11 +30,12 @@ namespace GEMMDriverTest
     struct GEMMTestGPU : public CurrentGPUContextFixture
     {
         template <typename T, typename TC = T, typename TD = TC>
-        void basicGEMM(const GEMMProblem& gemm,
-                       bool               debuggable  = false,
-                       bool               setIdentity = false,
-                       int                numIters    = 1,
-                       bool               notSetC     = false)
+        void basicGEMM(const GEMMProblem&      gemm,
+                       bool                    debuggable  = false,
+                       bool                    setIdentity = false,
+                       int                     numIters    = 1,
+                       bool                    notSetC     = false,
+                       std::optional<uint32_t> seed        = std::nullopt)
 
         {
             REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -192,16 +193,31 @@ namespace GEMMDriverTest
 
             auto tagTensorD = command->addOperation(
                 rocRoller::Operations::Tensor(2, dataTypeD, oneStridesN)); // D
+            Operations::OperationTag tagScalarSeed;
             if constexpr(std::is_same_v<TC, TD>)
             {
                 command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
             }
             else
             {
+                Operations::OperationTag tagLoadSeed;
                 // If Matrix C and D are of different types, an explicit type conversion is required
-                auto cvtOp  = rocRoller::Operations::T_Execute(command->getNextTag());
-                auto tagCvt = cvtOp.addXOp(rocRoller::Operations::E_Cvt(tagStoreD, dataTypeD));
-                command->addOperation(std::move(cvtOp)); // Convert( alpha * (A * B) + beta * C )
+                if(seed.has_value())
+                {
+                    tagScalarSeed = command->addOperation(
+                        rocRoller::Operations::Scalar(DataType::UInt32)); // alpha
+                    tagLoadSeed = command->addOperation(
+                        rocRoller::Operations::T_Load_Scalar(tagScalarSeed));
+                }
+
+                auto cvtOp = rocRoller::Operations::T_Execute(command->getNextTag());
+                // (SR)Convert( alpha * (A * B) + beta * C )
+                auto tagCvt
+                    = seed.has_value()
+                          ? cvtOp.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
+                              tagStoreD, tagLoadSeed, dataTypeD))
+                          : cvtOp.addXOp(rocRoller::Operations::E_Cvt(tagStoreD, dataTypeD));
+                command->addOperation(std::move(cvtOp));
                 command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
             }
 
@@ -316,6 +332,8 @@ namespace GEMMDriverTest
 
             commandArgs.setArgument(tagScalarAlpha, ArgumentType::Value, alpha);
             commandArgs.setArgument(tagScalarBeta, ArgumentType::Value, beta);
+            if(seed.has_value())
+                commandArgs.setArgument(tagScalarSeed, ArgumentType::Value, seed.value());
 
             // Create scratch space
             if(gemm.streamK)
@@ -358,8 +376,32 @@ namespace GEMMDriverTest
                                  beta,
                                  gemm.transA == "T",
                                  gemm.transB == "T");
+                bool const isSRConversion = seed.has_value();
                 for(size_t i = 0; i < h_C.size(); i++)
-                    h_result[i] = TD(h_C[i]);
+                {
+                    if(isSRConversion)
+                    {
+                        // SR conversion currently only supports F32 to FP8/BF8
+                        AssertFatal((std::is_same_v<TC, float>),
+                                    "Source type of SR conversion only accepts float");
+                        AssertFatal((std::is_same_v<TD, FP8>) || (std::is_same_v<TD, BF8>),
+                                    "Destionation type of SR conversion can only be FP8/BF8");
+
+                        int constexpr exp_width      = std::is_same_v<TD, FP8> ? 4 : 5;
+                        int constexpr mantissa_width = 7 - exp_width;
+
+                        h_result[i].data = DataTypes::cast_to_f8<mantissa_width,
+                                                                 exp_width,
+                                                                 float,
+                                                                 true /*negative_zero_nan*/,
+                                                                 true /*clip*/>(
+                            h_C[i],
+                            true /* is stochastic rounding? */,
+                            seed.value() /* seed for stochastic rounding */);
+                    }
+                    else
+                        h_result[i] = TD(h_C[i]);
+                }
             }
 
             // Device result
@@ -985,33 +1027,18 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
     {
-        if(m_context->targetArchitecture().target().isCDNA3GPU())
-        {
-            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
-        }
-
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<FP8, float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_NT)
     {
-        if(m_context->targetArchitecture().target().isCDNA3GPU())
-        {
-            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
-        }
-
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<BF8, float>(gemm);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMConversionFP8_NT)
     {
-        if(m_context->targetArchitecture().target().isCDNA3GPU())
-        {
-            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
-        }
-
         auto gemm = setup_GEMMF8_NT();
         // D (FP8) = Convert( alpha * A (FP8) * B (FP8) + beta * C (F32) )
         basicGEMM<FP8, float, FP8>(gemm);
@@ -1019,14 +1046,49 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMConversionBF8_NT)
     {
-        if(m_context->targetArchitecture().target().isCDNA3GPU())
-        {
-            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
-        }
-
         auto gemm = setup_GEMMF8_NT();
         // D (BF8) = Convert( alpha * A (BF8) * B (BF8) + beta * C (F32) )
         basicGEMM<BF8, float, BF8>(gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMSRConversionFP8_NT)
+    {
+        auto gemm = setup_GEMMF8_NT();
+        // D (FP8) = StochasticRoundingConvert( alpha * A (FP8) * B (FP8) + beta * C (F32) )
+        basicGEMM<FP8, float, FP8>(gemm,
+                                   /* debuggable  */ false,
+                                   /* setIdentity */ false,
+                                   /* numIters    */ 1,
+                                   /* notSetC     */ false,
+                                   /* seed        */ 56789u);
+
+        // Check stochastic rounding instruction has be generated
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        {
+            std::string const generatedCode = m_context->instructions()->toString();
+            EXPECT_NE(generatedCode.find("v_cvt_sr_fp8_f32"), std::string::npos);
+            EXPECT_EQ(generatedCode.find("v_cvt_pk_fp8_f32"), std::string::npos);
+        }
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMSRConversionBF8_NT)
+    {
+        auto gemm = setup_GEMMF8_NT();
+        // D (BF8) = StochasticRoundingConvert( alpha * A (BF8) * B (BF8) + beta * C (F32) )
+        basicGEMM<BF8, float, BF8>(gemm,
+                                   /* debuggable  */ false,
+                                   /* setIdentity */ false,
+                                   /* numIters    */ 1,
+                                   /* notSetC     */ false,
+                                   /* seed        */ 56789u);
+
+        // Check stochastic rounding instruction has be generated
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        {
+            std::string const generatedCode = m_context->instructions()->toString();
+            EXPECT_NE(generatedCode.find("v_cvt_sr_bf8_f32"), std::string::npos);
+            EXPECT_EQ(generatedCode.find("v_cvt_pk_bf8_f32"), std::string::npos);
+        }
     }
 
     GEMMProblem setup_GEMMF8_TN()
@@ -1086,11 +1148,6 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP8_TN)
     {
-        if(m_context->targetArchitecture().target().isCDNA3GPU())
-        {
-            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
-        }
-
         auto gemm = setup_GEMMF8_TN();
         basicGEMM<FP8, float>(gemm);
         check_GEMMF8_TN(m_context);
@@ -1098,11 +1155,6 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMBF8_TN)
     {
-        if(m_context->targetArchitecture().target().isCDNA3GPU())
-        {
-            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
-        }
-
         auto gemm = setup_GEMMF8_TN();
         basicGEMM<BF8, float>(gemm);
         check_GEMMF8_TN(m_context);

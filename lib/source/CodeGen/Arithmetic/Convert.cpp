@@ -448,4 +448,69 @@ namespace rocRoller
         Throw<FatalError>("Convert to Double not supported");
     }
 
+    RegisterComponentTemplateSpec(SRConvertGenerator, DataType::FP8);
+    RegisterComponentTemplateSpec(SRConvertGenerator, DataType::BF8);
+
+#define DefineSpecializedGetGeneratorSRConvert(dtype)                                             \
+    template <>                                                                                   \
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::SRConvert<DataType::dtype>>>            \
+        GetGenerator<Expression::SRConvert<DataType::dtype>>(                                     \
+            Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)               \
+    {                                                                                             \
+        return Component::Get<BinaryArithmeticGenerator<Expression::SRConvert<DataType::dtype>>>( \
+            getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);   \
+    }
+
+    DefineSpecializedGetGeneratorSRConvert(FP8);
+    DefineSpecializedGetGeneratorSRConvert(BF8);
+#undef DefineSpecializedGetSRGeneratorConvert
+
+    template <>
+    Generator<Instruction> SRConvertGenerator<DataType::FP8>::generate(Register::ValuePtr dest,
+                                                                       Register::ValuePtr lhs,
+                                                                       Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr && rhs != nullptr);
+
+        auto dataType = getArithDataType(lhs);
+
+        switch(dataType)
+        {
+        case DataType::Float:
+        {
+            co_yield m_context->copier()->copy(dest->subset({0}),
+                                               Register::Value::Literal(0),
+                                               "Zero out register for converting F32 to FP8");
+            co_yield_(Instruction("v_cvt_sr_fp8_f32", {dest}, {lhs, rhs}, {}, ""));
+        }
+        break;
+        default:
+            Throw<FatalError>("Unsupported datatype for SR convert to FP8: ", ShowValue(dataType));
+        }
+    }
+
+    template <>
+    Generator<Instruction> SRConvertGenerator<DataType::BF8>::generate(Register::ValuePtr dest,
+                                                                       Register::ValuePtr lhs,
+                                                                       Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr && rhs != nullptr);
+
+        auto dataType = getArithDataType(lhs);
+
+        switch(dataType)
+        {
+        case DataType::Float:
+        {
+            co_yield m_context->copier()->copy(dest->subset({0}),
+                                               Register::Value::Literal(0),
+                                               "Zero out register for converting F32 to BF8");
+            co_yield_(Instruction("v_cvt_sr_bf8_f32", {dest}, {lhs, rhs}, {}, ""));
+        }
+        break;
+        default:
+            Throw<FatalError>("Unsupported datatype for SR convert to BF8: ", ShowValue(dataType));
+        }
+    }
+
 }
