@@ -21,7 +21,11 @@
 # even if we never exercise them in the current support matrix
 add_custom_target(libcudacxx.test.internal_headers)
 
-find_package(CUDAToolkit)
+if ("NVHPC" STREQUAL "${CMAKE_CXX_COMPILER_ID}")
+  find_package(NVHPC)
+else()
+  find_package(CUDAToolkit)
+endif()
 
 # Grep all internal headers
 file(GLOB_RECURSE internal_headers
@@ -48,11 +52,16 @@ function(libcudacxx_create_internal_header_test header_name, headertest_src, fal
   # cuda internal headers should not be tested against a host compiler
   # NOTE(HIP/AMD): PTX tests are skipped for AMD devices.
   if(header_name MATCHES "__ptx.*")
-    return()
-    add_library(headertest_${header_name} SHARED "${headertest_src}.cu")
-  else()
-    add_library(headertest_${header_name} SHARED "${headertest_src}.cu" "${headertest_src}.cpp")
+    return()  
   endif()
+
+  if(header_name MATCHES "__memory_resource.*")
+    return()
+  endif()
+
+  # cuda internal headers should not be tested against a host compiler
+  add_library(headertest_${header_name} SHARED "${headertest_src}.cu")
+
   set_source_files_properties("${headertest_src}.cpp" PROPERTIES LANGUAGE HIP)
   target_include_directories(headertest_${header_name} PRIVATE "${libhipcxx_SOURCE_DIR}/include")
   target_compile_options(headertest_${header_name}
@@ -66,6 +75,8 @@ function(libcudacxx_create_internal_header_test header_name, headertest_src, fal
   if(fallback)
     target_compile_definitions(headertest_${header_name} PRIVATE "-D${fallback}")
   endif()
+  target_compile_definitions(headertest_${header_name} PRIVATE "-DLIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE")
+
   add_dependencies(libcudacxx.test.internal_headers headertest_${header_name})
 endfunction()
 
@@ -76,7 +87,6 @@ function(libcudacxx_add_internal_header_test header)
   # Create the source file for the header target from the template and add the file to the global project
   set(headertest_src "headers/${header_name}")
   configure_file("${CMAKE_CURRENT_SOURCE_DIR}/header_test.cpp.in" "${headertest_src}.cu")
-  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/header_test.cpp.in" "${headertest_src}.cpp")
 
   # Create the default target for that file
   libcudacxx_create_internal_header_test(${header_name}, ${headertest_src}, "")
