@@ -55,7 +55,7 @@ namespace TransposeLoadsTest
         const uint     bytesPerWorkitem     = bytesPerTrLoad * /*numberOfLDSTrLoads*/ 2;
         const uint     bytesPerWord         = 4;
         const uint     registerCountPerLoad = bytesPerTrLoad / packBytes;
-        const uint     threadTrLoadOffset   = 16 * (bytesPerTrLoad + extraLdsBytes);
+        const uint     threadTrLoadOffset   = MN * (bytesPerTrLoad + extraLdsBytes);
         std::string    ds_tr_read_mnemonic  = dsReadTRMnemonic<elementBits>();
 
         auto k = m_context->kernel();
@@ -205,7 +205,6 @@ namespace TransposeLoadsTest
 
             co_yield generateOp<Expression::Multiply>(
                 vLinearWorkitemOffset, vWorkitemX, vBytesPerWorkitem);
-            co_yield generateOp<Expression::Multiply>(vLinearWordOffset, vWorkitemX, vBytesPerWord);
 
             co_yield generateOp<Expression::Add>(vAPtr, vAPtr, vLinearWorkitemOffset);
             if constexpr(elementBits == 6)
@@ -234,6 +233,7 @@ namespace TransposeLoadsTest
                 vLDSPtr, vA1, bytesPerTrLoad + extraLdsBytes, bytesPerTrLoad);
             co_yield m_context->mem()->barrier();
 
+            co_yield generateOp<Expression::Multiply>(vLinearWordOffset, vWorkitemX, vBytesPerWord);
             co_yield generateOp<Expression::Add>(vTrLoadIdxAddr, vTrLoadIdxAddr, vLinearWordOffset);
             co_yield m_context->mem()->loadFlat(
                 vTransposeWorkitemIdx, vTrLoadIdxAddr, /*offset*/ 0, bytesPerWord);
@@ -283,7 +283,6 @@ namespace TransposeLoadsTest
                 co_yield m_context->copier()->copy(vA0, vA0T);
                 co_yield m_context->copier()->copy(vA1, vA1T);
 
-                const uint regCount = bitsPerTrLoad<elementBits>() / 32;
                 co_yield m_context->mem()->storeFlat(vResultPtr,
                                                      vA0,
                                                      /*offset*/ 0,
@@ -379,7 +378,7 @@ namespace TransposeLoadsTest
         std::vector<StoredAsType> data(MN * K);
         for(int i = 0; i < MN; i++)
             for(int j = 0; j < K; j++)
-                data[i * K + j] = rand() % 16;
+                data[i * K + j] = rand() % 10;
 
         auto packedData = pack<StoredAsType, elementBits>(data);
         ASSERT_TRUE(packedData.size() > 0);
@@ -387,9 +386,22 @@ namespace TransposeLoadsTest
         std::vector<uint32_t> result(packedData.size());
 
         std::vector<uint32_t> trLoadIdx(64);
-        for(int x = 0; x < 4; x++)
-            for(int y = 0; y < 16; y++)
-                trLoadIdx[16 * x + y] = 32 * x + y;
+        {
+            const int factor = 2;
+            const int NX1    = MN / 16;
+            const int NX0    = 4 / NX1;
+            // each thread points to 64b or 96b
+            const int NY0 = bitsPerTrLoad<elementBits>() / elementBits;
+            const int NY1 = 16 / NY0;
+            for(int x0 = 0; x0 < NX0; x0++)
+                for(int x1 = 0; x1 < NX1; x1++)
+                    for(int y0 = 0; y0 < NY0; y0++)
+                        for(int y1 = 0; y1 < NY1; y1++)
+                        {
+                            trLoadIdx[NX1 * NY0 * NY1 * x0 + NY0 * NY1 * x1 + NY1 * y0 + y1]
+                                = factor * NX1 * NY0 * NY1 * x0 + NX1 * NY1 * y0 + NY1 * x1 + y1;
+                        }
+        }
 
         generateTransposeLoad<ElementType, PackType, unalignedVGPRs>(m_context, MN, K);
         CommandKernel commandKernel;
@@ -414,38 +426,31 @@ namespace TransposeLoadsTest
         auto result_unpacked = unpack<StoredAsType, elementBits>(result);
         ASSERT_TRUE(packedData.size() > 0);
 
-        if constexpr(elementBits == 6)
         {
-            // Each block of 16 lanes is transposed as a 16x16 submatrix
-            const int NX = 16; // lanes
-            const int NY = 96 / elementBits;
-            // Data is swizzled as if 4 SIMDs is a 2x2 grid
-            const int NT = 2; // 2x DS_READ_B96_TR_B6
-            const int NW = 2; // SIMD X
-            const int NZ = 2; // SIMD Y
-            for(int t = 0; t < NT; t++)
-                for(int w = 0; w < NW; w++)
-                    for(int z = 0; z < NZ; z++)
-                        for(int x = 0; x < NX; x++)
-                            for(int y = 0; y < NY; y++)
-                                EXPECT_EQ(
-                                    data[(4 * t + 2 * z + w) * NX * NY + NY * x + y],
-                                    result_unpacked[(4 * w + 2 * t + z) * NX * NY + NX * y + x]);
-        }
-        else
-        {
-            // scale MN & K to check 32x64 as 16x128 layout
-            const int scale = MN / 16;
-            const int NW    = 4;
-            const int NZ    = MN / NW / scale;
-            const int NX    = 32 / elementBits;
-            const int NY    = (K * scale) / NX;
-            for(int z = 0; z < NZ; z++)
-                for(int w = 0; w < NW; w++)
-                    for(int x = 0; x < NX; x++)
-                        for(int y = 0; y < NY; y++)
-                            ASSERT_EQ(data[(w * NZ + z) * NX * NY + x * NY + y],
-                                      result_unpacked[(z * NW + w) * NX * NY + y * NX + x]);
+            int NY0 = 4;
+            int NY2 = 32 / elementBits;
+            if constexpr(elementBits == 6)
+            {
+                NY0 = 2;
+                NY2 = 96 / elementBits;
+            }
+
+            const int NY1 = K / NY2 / NY0;
+            const int NX0 = MN / 16;
+
+            for(int y0 = 0; y0 < NY0; y0++)
+                for(int y1 = 0; y1 < NY1; y1++)
+                    for(int x0 = 0; x0 < NX0; x0++)
+                        for(int x1 = 0; x1 < 4; x1++)
+                            for(int x2 = 0; x2 < 4; x2++)
+                                for(int y2 = 0; y2 < NY2; y2++)
+                                {
+                                    ASSERT_EQ(data[y1 * NY0 * NY2 * NX0 * 16 + y0 * NY2 * NX0 * 16
+                                                   + y2 * NX0 * 16 + x0 * 16 + x1 * 4 + x2],
+                                              result_unpacked[y0 * NY1 * NX0 * NY2 * 16
+                                                              + y1 * NX0 * NY2 * 16 + x0 * 16 * NY2
+                                                              + x1 * 4 * NY2 + x2 * NY2 + y2]);
+                                }
         }
     }
 
