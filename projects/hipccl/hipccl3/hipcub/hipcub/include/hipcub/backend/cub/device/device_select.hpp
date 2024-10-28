@@ -35,6 +35,8 @@
 
 #include <cub/device/device_select.cuh>
 
+#include <type_traits>
+
 BEGIN_HIPCUB_NAMESPACE
 
 class DeviceSelect
@@ -44,14 +46,15 @@ public:
              typename FlagIterator,
              typename OutputIteratorT,
              typename NumSelectedIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t Flagged(void*                d_temp_storage,
-                                                      size_t&              temp_storage_bytes,
-                                                      InputIteratorT       d_in,
-                                                      FlagIterator         d_flags,
-                                                      OutputIteratorT      d_out,
-                                                      NumSelectedIteratorT d_num_selected_out,
-                                                      int                  num_items,
-                                                      hipStream_t          stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Flagged(void*                d_temp_storage,
+                              size_t&              temp_storage_bytes,
+                              InputIteratorT       d_in,
+                              FlagIterator         d_flags,
+                              OutputIteratorT      d_out,
+                              NumSelectedIteratorT d_num_selected_out,
+                              int                  num_items,
+                              hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceSelect::Flagged(d_temp_storage,
                                                                    temp_storage_bytes,
@@ -67,16 +70,16 @@ public:
              typename FlagIterator,
              typename OutputIteratorT,
              typename NumSelectedIteratorT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        Flagged(void*                d_temp_storage,
-                size_t&              temp_storage_bytes,
-                InputIteratorT       d_in,
-                FlagIterator         d_flags,
-                OutputIteratorT      d_out,
-                NumSelectedIteratorT d_num_selected_out,
-                int                  num_items,
-                hipStream_t          stream,
-                bool                 debug_synchronous)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Flagged(void*                d_temp_storage,
+                              size_t&              temp_storage_bytes,
+                              InputIteratorT       d_in,
+                              FlagIterator         d_flags,
+                              OutputIteratorT      d_out,
+                              NumSelectedIteratorT d_num_selected_out,
+                              int                  num_items,
+                              hipStream_t          stream,
+                              bool                 debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return Flagged(d_temp_storage,
@@ -89,18 +92,60 @@ public:
                        stream);
     }
 
+    template<typename IteratorT, typename FlagIterator, typename NumSelectedIteratorT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Flagged(void*                d_temp_storage,
+                              size_t&              temp_storage_bytes,
+                              IteratorT            d_data,
+                              FlagIterator         d_flags,
+                              NumSelectedIteratorT d_num_selected_out,
+                              int                  num_items,
+                              hipStream_t          stream = 0)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceSelect::Flagged(d_temp_storage,
+                                                                   temp_storage_bytes,
+                                                                   d_data,
+                                                                   d_flags,
+
+                                                                   d_num_selected_out,
+                                                                   num_items,
+                                                                   stream));
+    }
+
+    template<typename IteratorT, typename FlagIterator, typename NumSelectedIteratorT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Flagged(void*                d_temp_storage,
+                              size_t&              temp_storage_bytes,
+                              IteratorT            d_data,
+                              FlagIterator         d_flags,
+                              NumSelectedIteratorT d_num_selected_out,
+                              int                  num_items,
+                              hipStream_t          stream,
+                              bool                 debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return Flagged(d_temp_storage,
+                       temp_storage_bytes,
+                       d_data,
+                       d_flags,
+                       d_num_selected_out,
+                       num_items,
+                       stream);
+    }
+
     template<typename InputIteratorT,
              typename OutputIteratorT,
              typename NumSelectedIteratorT,
              typename SelectOp>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t If(void*                d_temp_storage,
-                                                 size_t&              temp_storage_bytes,
-                                                 InputIteratorT       d_in,
-                                                 OutputIteratorT      d_out,
-                                                 NumSelectedIteratorT d_num_selected_out,
-                                                 int                  num_items,
-                                                 SelectOp             select_op,
-                                                 hipStream_t          stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t If(void*                d_temp_storage,
+                         size_t&              temp_storage_bytes,
+                         InputIteratorT       d_in,
+                         OutputIteratorT      d_out,
+                         NumSelectedIteratorT d_num_selected_out,
+                         int                  num_items,
+                         SelectOp             select_op,
+                         hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceSelect::If(d_temp_storage,
                                                               temp_storage_bytes,
@@ -116,16 +161,16 @@ public:
              typename OutputIteratorT,
              typename NumSelectedIteratorT,
              typename SelectOp>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        If(void*                d_temp_storage,
-           size_t&              temp_storage_bytes,
-           InputIteratorT       d_in,
-           OutputIteratorT      d_out,
-           NumSelectedIteratorT d_num_selected_out,
-           int                  num_items,
-           SelectOp             select_op,
-           hipStream_t          stream,
-           bool                 debug_synchronous)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t If(void*                d_temp_storage,
+                         size_t&              temp_storage_bytes,
+                         InputIteratorT       d_in,
+                         OutputIteratorT      d_out,
+                         NumSelectedIteratorT d_num_selected_out,
+                         int                  num_items,
+                         SelectOp             select_op,
+                         hipStream_t          stream,
+                         bool                 debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return If(d_temp_storage,
@@ -138,14 +183,55 @@ public:
                   stream);
     }
 
+    template<typename IteratorT, typename NumSelectedIteratorT, typename SelectOp>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t If(void*                d_temp_storage,
+                         size_t&              temp_storage_bytes,
+                         IteratorT            d_data,
+                         NumSelectedIteratorT d_num_selected_out,
+                         int                  num_items,
+                         SelectOp             select_op,
+                         hipStream_t          stream = 0)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceSelect::If(d_temp_storage,
+                                                              temp_storage_bytes,
+                                                              d_data,
+                                                              d_num_selected_out,
+                                                              num_items,
+                                                              select_op,
+                                                              stream));
+    }
+
+    template<typename IteratorT, typename NumSelectedIteratorT, typename SelectOp>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t If(void*                d_temp_storage,
+                         size_t&              temp_storage_bytes,
+                         IteratorT            d_data,
+                         NumSelectedIteratorT d_num_selected_out,
+                         int                  num_items,
+                         SelectOp             select_op,
+                         hipStream_t          stream,
+                         bool                 debug_synchronous)
+    {
+        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
+        return If(d_temp_storage,
+                  temp_storage_bytes,
+                  d_data,
+                  d_num_selected_out,
+                  num_items,
+                  select_op,
+                  stream);
+    }
+
     template<typename InputIteratorT, typename OutputIteratorT, typename NumSelectedIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t Unique(void*                d_temp_storage,
-                                                     size_t&              temp_storage_bytes,
-                                                     InputIteratorT       d_in,
-                                                     OutputIteratorT      d_out,
-                                                     NumSelectedIteratorT d_num_selected_out,
-                                                     int                  num_items,
-                                                     hipStream_t          stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Unique(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             NumSelectedIteratorT d_num_selected_out,
+                             int                  num_items,
+                             hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceSelect::Unique(d_temp_storage,
                                                                   temp_storage_bytes,
@@ -157,15 +243,15 @@ public:
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename NumSelectedIteratorT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        Unique(void*                d_temp_storage,
-               size_t&              temp_storage_bytes,
-               InputIteratorT       d_in,
-               OutputIteratorT      d_out,
-               NumSelectedIteratorT d_num_selected_out,
-               int                  num_items,
-               hipStream_t          stream,
-               bool                 debug_synchronous)
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Unique(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             NumSelectedIteratorT d_num_selected_out,
+                             int                  num_items,
+                             hipStream_t          stream,
+                             bool                 debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return Unique(d_temp_storage,
@@ -181,16 +267,51 @@ public:
              typename ValueIteratorT,
              typename OutputKeyIteratorT,
              typename OutputValueIteratorT,
-             typename NumSelectedIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t UniqueByKey(void*                d_temp_storage,
-                                                          size_t&              temp_storage_bytes,
-                                                          KeyIteratorT         d_keys_input,
-                                                          ValueIteratorT       d_values_input,
-                                                          OutputKeyIteratorT   d_keys_output,
-                                                          OutputValueIteratorT d_values_output,
-                                                          NumSelectedIteratorT d_num_selected_out,
-                                                          int                  num_items,
-                                                          hipStream_t          stream = 0)
+             typename NumSelectedIteratorT,
+             typename NumItemsT,
+             typename EqualityOpT>
+    HIPCUB_RUNTIME_FUNCTION
+    static
+        typename std::enable_if_t<!std::is_convertible<EqualityOpT, hipStream_t>::value, hipError_t>
+        UniqueByKey(void*                d_temp_storage,
+                    size_t&              temp_storage_bytes,
+                    KeyIteratorT         d_keys_input,
+                    ValueIteratorT       d_values_input,
+                    OutputKeyIteratorT   d_keys_output,
+                    OutputValueIteratorT d_values_output,
+                    NumSelectedIteratorT d_num_selected_out,
+                    NumItemsT            num_items,
+                    EqualityOpT          equality_op,
+                    hipStream_t          stream = 0)
+    {
+        return hipCUDAErrorTohipError(::cub::DeviceSelect::UniqueByKey(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       d_keys_input,
+                                                                       d_values_input,
+                                                                       d_keys_output,
+                                                                       d_values_output,
+                                                                       d_num_selected_out,
+                                                                       num_items,
+                                                                       equality_op,
+                                                                       stream));
+    }
+
+    template<typename KeyIteratorT,
+             typename ValueIteratorT,
+             typename OutputKeyIteratorT,
+             typename OutputValueIteratorT,
+             typename NumSelectedIteratorT,
+             typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t UniqueByKey(void*                d_temp_storage,
+                                  size_t&              temp_storage_bytes,
+                                  KeyIteratorT         d_keys_input,
+                                  ValueIteratorT       d_values_input,
+                                  OutputKeyIteratorT   d_keys_output,
+                                  OutputValueIteratorT d_values_output,
+                                  NumSelectedIteratorT d_num_selected_out,
+                                  NumItemsT            num_items,
+                                  hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceSelect::UniqueByKey(d_temp_storage,
                                                                        temp_storage_bytes,
@@ -207,18 +328,19 @@ public:
              typename ValueIteratorT,
              typename OutputKeyIteratorT,
              typename OutputValueIteratorT,
-             typename NumSelectedIteratorT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION static hipError_t
-        UniqueByKey(void*                d_temp_storage,
-                    size_t&              temp_storage_bytes,
-                    KeyIteratorT         d_keys_input,
-                    ValueIteratorT       d_values_input,
-                    OutputKeyIteratorT   d_keys_output,
-                    OutputValueIteratorT d_values_output,
-                    NumSelectedIteratorT d_num_selected_out,
-                    int                  num_items,
-                    hipStream_t          stream,
-                    bool                 debug_synchronous)
+             typename NumSelectedIteratorT,
+             typename NumItemsT>
+    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
+    static hipError_t UniqueByKey(void*                d_temp_storage,
+                                  size_t&              temp_storage_bytes,
+                                  KeyIteratorT         d_keys_input,
+                                  ValueIteratorT       d_values_input,
+                                  OutputKeyIteratorT   d_keys_output,
+                                  OutputValueIteratorT d_values_output,
+                                  NumSelectedIteratorT d_num_selected_out,
+                                  NumItemsT            num_items,
+                                  hipStream_t          stream,
+                                  bool                 debug_synchronous)
     {
         HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
         return UniqueByKey(d_temp_storage,

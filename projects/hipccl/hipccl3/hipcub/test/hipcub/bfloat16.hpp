@@ -35,7 +35,7 @@
 #include <stdint.h>
 #include <hipcub/util_type.hpp>
 
-#include <iosfwd>
+#include <ostream>
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
 #include <cuda_bf16.h>
@@ -80,8 +80,23 @@ struct bfloat16_t
 #endif
 
     /// Constructor from integer
-    __host__ __device__ __forceinline__
-    bfloat16_t(int a)
+    __host__ __device__ __forceinline__ bfloat16_t(int a)
+    {
+        *this = bfloat16_t(float(a));
+    }
+
+    /// Constructor from std::size_t
+    __host__ __device__ __forceinline__ bfloat16_t(std::size_t a)
+    {
+        *this = bfloat16_t(float(a));
+    }
+
+    /// Constructor from unsigned long long int
+    template<typename T,
+             typename = typename std::enable_if<
+                 std::is_same<T, unsigned long long int>::value
+                 && (!std::is_same<std::size_t, unsigned long long int>::value)>::type>
+    __host__ __device__ __forceinline__ bfloat16_t(T a)
     {
         *this = bfloat16_t(float(a));
     }

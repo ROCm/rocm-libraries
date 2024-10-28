@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2022, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -87,9 +87,9 @@ public:
                    T (&input)[ITEMS_PER_THREAD],
                    FlagOp flag_op)
     {
-        HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         base_type::flag_heads(head_flags, input, flag_op, temp_storage_);
-        HIPCUB_CLANG_SUPPRESS_WARNING_POP
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
@@ -100,9 +100,9 @@ public:
                    FlagOp flag_op,
                    T tile_predecessor_item)
     {
-        HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         base_type::flag_heads(head_flags, tile_predecessor_item, input, flag_op, temp_storage_);
-        HIPCUB_CLANG_SUPPRESS_WARNING_POP
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
@@ -112,9 +112,9 @@ public:
                    T (&input)[ITEMS_PER_THREAD],
                    FlagOp flag_op)
     {
-        HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         base_type::flag_tails(tail_flags, input, flag_op, temp_storage_);
-        HIPCUB_CLANG_SUPPRESS_WARNING_POP
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
@@ -125,9 +125,9 @@ public:
                    FlagOp flag_op,
                    T tile_successor_item)
     {
-        HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         base_type::flag_tails(tail_flags, tile_successor_item, input, flag_op, temp_storage_);
-        HIPCUB_CLANG_SUPPRESS_WARNING_POP
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
@@ -138,12 +138,12 @@ public:
                            T (&input)[ITEMS_PER_THREAD],
                            FlagOp flag_op)
     {
-        HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         base_type::flag_heads_and_tails(
             head_flags, tail_flags, input,
             flag_op, temp_storage_
         );
-        HIPCUB_CLANG_SUPPRESS_WARNING_POP
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
@@ -155,12 +155,12 @@ public:
                            T (&input)[ITEMS_PER_THREAD],
                            FlagOp flag_op)
     {
-        HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         base_type::flag_heads_and_tails(
             head_flags, tail_flags, tile_successor_item, input,
             flag_op, temp_storage_
         );
-        HIPCUB_CLANG_SUPPRESS_WARNING_POP
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
@@ -172,12 +172,12 @@ public:
                            T (&input)[ITEMS_PER_THREAD],
                            FlagOp flag_op)
     {
-        HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         base_type::flag_heads_and_tails(
             head_flags, tile_predecessor_item, tail_flags, input,
             flag_op, temp_storage_
         );
-        HIPCUB_CLANG_SUPPRESS_WARNING_POP
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template<int ITEMS_PER_THREAD, typename FlagT, typename FlagOp>
@@ -190,12 +190,12 @@ public:
                            T (&input)[ITEMS_PER_THREAD],
                            FlagOp flag_op)
     {
-        HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         base_type::flag_heads_and_tails(
             head_flags, tile_predecessor_item, tail_flags, tile_successor_item, input,
             flag_op, temp_storage_
         );
-        HIPCUB_CLANG_SUPPRESS_WARNING_POP
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 
     template <int ITEMS_PER_THREAD, typename OutputType, typename DifferenceOpT>

@@ -28,15 +28,16 @@
 
 #include <type_traits>
 
-#include "test_utils_half.hpp"
 #include "test_utils_bfloat16.hpp"
 #include "test_utils_custom_test_types.hpp"
+#include "test_utils_half.hpp"
 
 namespace test_utils
 {
 
 template<typename T>
-HIPCUB_HOST_DEVICE T set_half_bits(uint16_t value)
+HIPCUB_HOST_DEVICE
+T set_half_bits(uint16_t value)
 {
     T              half_value{};
     unsigned char* char_representation = reinterpret_cast<unsigned char*>(&half_value);
@@ -48,13 +49,15 @@ HIPCUB_HOST_DEVICE T set_half_bits(uint16_t value)
 // Numeric limits which also supports custom_test_type<U> classes
 template<class T>
 struct numeric_limits : std::numeric_limits<T>
-{
-};
+{};
 
-template<> struct numeric_limits<test_utils::half> : public std::numeric_limits<test_utils::half> {
-    public:
+template<>
+struct numeric_limits<test_utils::half> : public std::numeric_limits<test_utils::half>
+{
+public:
     using T = test_utils::half;
-    static inline T min() {
+    static inline T min()
+    {
         return T(0.00006104f);
     };
     static inline T max()
@@ -69,10 +72,12 @@ template<> struct numeric_limits<test_utils::half> : public std::numeric_limits<
     {
         return set_half_bits<T>(0x7c00);
     };
-    static inline T quiet_NaN() {
+    static inline T quiet_NaN()
+    {
         return T(std::numeric_limits<float>::quiet_NaN());
     };
-    static inline T signaling_NaN() {
+    static inline T signaling_NaN()
+    {
         return T(std::numeric_limits<float>::signaling_NaN());
     };
     static inline T infinity_neg()
@@ -81,8 +86,10 @@ template<> struct numeric_limits<test_utils::half> : public std::numeric_limits<
     };
 };
 
-template<> class numeric_limits<test_utils::bfloat16> : public std::numeric_limits<test_utils::bfloat16> {
-    public:
+template<>
+class numeric_limits<test_utils::bfloat16> : public std::numeric_limits<test_utils::bfloat16>
+{
+public:
     using T = test_utils::bfloat16;
     static inline T max()
     {
@@ -100,10 +107,12 @@ template<> class numeric_limits<test_utils::bfloat16> : public std::numeric_limi
     {
         return set_half_bits<T>(0x7f80);
     };
-    static inline T quiet_NaN() {
+    static inline T quiet_NaN()
+    {
         return T(std::numeric_limits<float>::quiet_NaN());
     };
-    static inline T signaling_NaN() {
+    static inline T signaling_NaN()
+    {
         return T(std::numeric_limits<float>::signaling_NaN());
     };
     static inline T infinity_neg()
@@ -258,20 +267,26 @@ inline auto convert_to_fundamental(T value)
 
 // Helper class to generate a vector of special values for any type
 template<class T>
-struct special_values {
-    private:
+struct special_values
+{
+private:
     // sign_bit_flip needed because host-side operators for __half are missing. (e.g. -__half unary operator or (-1*) __half*__half binary operator
-    static T sign_bit_flip(T value){
+    static T sign_bit_flip(T value)
+    {
         uint8_t* data = reinterpret_cast<uint8_t*>(&value);
-        data[sizeof(T)-1] ^= 0x80;
+        data[sizeof(T) - 1] ^= 0x80;
         return value;
     }
 
-    public:
-    static std::vector<T> vector(){
-        if(std::is_integral<T>::value){
+public:
+    static std::vector<T> vector()
+    {
+        if(std::is_integral<T>::value)
+        {
             return std::vector<T>();
-        }else {
+        }
+        else
+        {
             using traits          = hipcub::NumericTraits<T>;
             using unsigned_bits   = typename traits::UnsignedBits;
             auto nan_with_payload = [](const unsigned_bits& payload)
@@ -309,7 +324,7 @@ template<class T>
 void add_special_values(std::vector<T>& source, int seed_value)
 {
     std::default_random_engine gen(seed_value);
-    std::vector<T> special_values = test_utils::special_values<T>::vector();
+    std::vector<T>             special_values = test_utils::special_values<T>::vector();
     if(source.size() > special_values.size())
     {
         unsigned int start = gen() % (source.size() - special_values.size());
@@ -320,33 +335,28 @@ void add_special_values(std::vector<T>& source, int seed_value)
 // std::uniform_int_distribution is undefined for anything other than
 // short, int, long, long long, unsigned short, unsigned int, unsigned long, or unsigned long long.
 // Actually causes problems with signed/unsigned char on Windows using clang.
-template <typename T>
-struct is_valid_for_int_distribution :
-    std::integral_constant<bool,
-                           std::is_same<short, T>::value ||
-                               std::is_same<unsigned short, T>::value ||
-                               std::is_same<int, T>::value ||
-                               std::is_same<unsigned int, T>::value ||
-                               std::is_same<long, T>::value ||
-                               std::is_same<unsigned long, T>::value ||
-                               std::is_same<long long, T>::value ||
-                               std::is_same<unsigned long long, T>::value
-                           > {};
+template<typename T>
+struct is_valid_for_int_distribution
+    : std::integral_constant<
+          bool,
+          std::is_same<short, T>::value || std::is_same<unsigned short, T>::value
+              || std::is_same<int, T>::value || std::is_same<unsigned int, T>::value
+              || std::is_same<long, T>::value || std::is_same<unsigned long, T>::value
+              || std::is_same<long long, T>::value || std::is_same<unsigned long long, T>::value>
+{};
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max, int seed_value)
-    -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
+inline auto get_random_data(size_t size, T min, T max, int seed_value) ->
+    typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
 {
     std::default_random_engine gen(seed_value);
     using dis_type = typename std::conditional<
         is_valid_for_int_distribution<T>::value,
         T,
-        typename std::conditional<std::is_signed<T>::value,
-                                  int,
-                                  unsigned int>::type
-        >::type;
-    std::uniform_int_distribution<dis_type> distribution(static_cast<dis_type>(min), static_cast<dis_type>(max));
-    std::vector<T> data(size);
+        typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
+    std::uniform_int_distribution<dis_type> distribution(static_cast<dis_type>(min),
+                                                         static_cast<dis_type>(max));
+    std::vector<T>                          data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
     return data;
 }
@@ -361,13 +371,10 @@ inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
     std::default_random_engine gen(seed_value);
     using dis_type =
         typename std::conditional<test_utils::is_special_floating_point<T>::value, float, T>::type;
-    std::uniform_real_distribution<dis_type> distribution(static_cast<dis_type>(min), static_cast<dis_type>(max));
-    std::vector<T> data(size);
-    std::generate(
-        data.begin(),
-        data.end(),
-        [&]() { return static_cast<T>(distribution(gen)); }
-    );
+    std::uniform_real_distribution<dis_type> distribution(static_cast<dis_type>(min),
+                                                          static_cast<dis_type>(max));
+    std::vector<T>                           data(size);
+    std::generate(data.begin(), data.end(), [&]() { return static_cast<T>(distribution(gen)); });
     return data;
 }
 
@@ -414,11 +421,13 @@ inline auto get_random_data(size_t                 size,
         typename T::value_type,
         typename std::conditional<std::is_signed<typename T::value_type>::value,
                                   int,
-                                  unsigned int>::type
-        >::type;
-    std::uniform_int_distribution<dis_type> distribution(static_cast<dis_type>(min), static_cast<dis_type>(max));
-    std::vector<T> data(size);
-    std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
+                                  unsigned int>::type>::type;
+    std::uniform_int_distribution<dis_type> distribution(static_cast<dis_type>(min),
+                                                         static_cast<dis_type>(max));
+    std::vector<T>                          data(size);
+    std::generate(data.begin(),
+                  data.end(),
+                  [&]() { return T(distribution(gen), distribution(gen)); });
     return data;
 }
 
@@ -431,10 +440,12 @@ inline auto get_random_data(size_t                 size,
                                 && std::is_floating_point<typename T::value_type>::value,
                             std::vector<T>>::type
 {
-    std::default_random_engine gen(seed_value);
+    std::default_random_engine                             gen(seed_value);
     std::uniform_real_distribution<typename T::value_type> distribution(min, max);
-    std::vector<T> data(size);
-    std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
+    std::vector<T>                                         data(size);
+    std::generate(data.begin(),
+                  data.end(),
+                  [&]() { return T(distribution(gen), distribution(gen)); });
     return data;
 }
 
@@ -448,10 +459,10 @@ inline auto get_random_value(T min, T max, int seed_value) ->
 template<class T>
 inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
 {
-    const size_t max_random_size = 1024 * 1024;
-    std::default_random_engine gen(seed_value);
+    const size_t                max_random_size = 1024 * 1024;
+    std::default_random_engine  gen(seed_value);
     std::bernoulli_distribution distribution(p);
-    std::vector<T> data(size);
+    std::vector<T>              data(size);
     std::generate(data.begin(),
                   data.begin() + std::min(size, max_random_size),
                   [&]() { return convert_to_device<T>(distribution(gen)); });
@@ -480,6 +491,24 @@ inline std::vector<size_t> get_large_sizes(int seed_value)
     return sizes;
 }
 
+template<class T>
+inline std::vector<size_t> get_sizes(T seed_value)
+{
+    // clang-format off
+    std::vector<size_t> sizes = {
+        1024, 2048, 4096, 1792,
+        1, 10, 53, 211, 500, 2345,
+        11001, 34567, 100000,
+        (1 << 16) - 1220,
+        (1 << 20) + 123
+    };
+    // clang-format on
+    const std::vector<size_t> random_sizes
+        = test_utils::get_random_data<size_t>(10, 1, 100000, seed_value);
+    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
+    return sizes;
+}
+
 } // namespace test_utils
 
-#endif  // HIPCUB_TEST_HIPCUB_TEST_UTILS_DATA_GENERATION_HPP_
+#endif // HIPCUB_TEST_HIPCUB_TEST_UTILS_DATA_GENERATION_HPP_
