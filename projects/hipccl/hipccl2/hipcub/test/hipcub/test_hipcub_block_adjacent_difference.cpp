@@ -153,7 +153,7 @@ void flag_heads_kernel(Type* device_input, long long* device_heads)
 
     FlagType head_flags[ItemsPerThread];
 
-    HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     if(hipBlockIdx_x % 2 == 1)
     {
         const Type tile_predecessor_item = device_input[block_offset - 1];
@@ -163,7 +163,7 @@ void flag_heads_kernel(Type* device_input, long long* device_heads)
     {
         bAdjacentDiff.FlagHeads(head_flags, input, FlagOpType());
     }
-    HIPCUB_CLANG_SUPPRESS_WARNING_POP
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
     hipcub::StoreDirectBlocked(lid, device_heads + block_offset, head_flags);
 }
@@ -190,7 +190,7 @@ void flag_tails_kernel(Type* device_input, long long* device_tails)
 
     FlagType tail_flags[ItemsPerThread];
 
-    HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     if(hipBlockIdx_x % 2 == 0)
     {
         const Type tile_successor_item = device_input[block_offset + items_per_block];
@@ -200,7 +200,7 @@ void flag_tails_kernel(Type* device_input, long long* device_tails)
     {
         bAdjacentDiff.FlagTails(tail_flags, input, FlagOpType());
     }
-    HIPCUB_CLANG_SUPPRESS_WARNING_POP
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
     hipcub::StoreDirectBlocked(lid, device_tails + block_offset, tail_flags);
 }
@@ -228,7 +228,7 @@ void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, lo
     FlagType head_flags[ItemsPerThread];
     FlagType tail_flags[ItemsPerThread];
 
-    HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH("-Wdeprecated")
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
     if(hipBlockIdx_x % 4 == 0)
     {
         const Type tile_successor_item = device_input[block_offset + items_per_block];
@@ -249,7 +249,7 @@ void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, lo
     {
         bAdjacentDiff.FlagHeadsAndTails(head_flags, tail_flags, input, FlagOpType());
     }
-    HIPCUB_CLANG_SUPPRESS_WARNING_POP
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
     hipcub::StoreDirectBlocked(lid, device_heads + block_offset, head_flags);
     hipcub::StoreDirectBlocked(lid, device_tails + block_offset, tail_flags);

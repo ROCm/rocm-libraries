@@ -104,22 +104,22 @@ struct transform_op
     }
 };
 
-template<
-    class SampleType,
-    unsigned int Bins,
-    int LowerLevel,
-    int UpperLevel,
-    class LevelType = SampleType,
-    class CounterType = int
->
+template<class SampleType,
+         unsigned int Bins,
+         int          LowerLevel,
+         int          UpperLevel,
+         class LevelType   = SampleType,
+         class CounterType = int,
+         bool UseGraphs    = false>
 struct params1
 {
-    using sample_type = SampleType;
-    static constexpr unsigned int bins = Bins;
-    static constexpr int lower_level = LowerLevel;
-    static constexpr int upper_level = UpperLevel;
-    using level_type = LevelType;
-    using counter_type = CounterType;
+    using sample_type                         = SampleType;
+    static constexpr unsigned int bins        = Bins;
+    static constexpr int          lower_level = LowerLevel;
+    static constexpr int          upper_level = UpperLevel;
+    using level_type                          = LevelType;
+    using counter_type                        = CounterType;
+    static constexpr bool use_graphs          = UseGraphs;
 };
 
 template<class Params>
@@ -138,7 +138,8 @@ typedef ::testing::Types<params1<int, 10, 0, 10>,
                          params1<test_utils::bfloat16, 55, -123, +123, test_utils::bfloat16>,
                          params1<double, 10, 0, 1000, double, int>,
                          params1<int, 123, 100, 5635, int>,
-                         params1<double, 55, -123, +123, double>>
+                         params1<double, 55, -123, +123, double>,
+                         params1<int, 10, 0, 10, int, int, true>>
     Params1;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramEven, Params1);
@@ -172,7 +173,12 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
         GTEST_SKIP();
     }
 
-    hipStream_t stream = 0;
+    hipStream_t stream = 0; // default
+    if(TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for(auto dim : get_dims())
     {
@@ -264,6 +270,12 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             if(rows == 1)
             {
                 HIP_CHECK(hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
@@ -291,6 +303,12 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
                                                                  stream));
             }
 
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+            }
+
             std::vector<counter_type> histogram(bins);
             HIP_CHECK(
                 hipMemcpy(
@@ -308,28 +326,38 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
             {
                 ASSERT_EQ(histogram[i], histogram_expected[i]);
             }
+
+            if(TestFixture::params::use_graphs)
+            {
+                test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
+    }
+
+    if(TestFixture::params::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
-template<
-    class SampleType,
-    unsigned int Bins,
-    int StartLevel = 0,
-    unsigned int MinBinWidth = 1,
-    unsigned int MaxBinWidth = 10,
-    class LevelType = SampleType,
-    class CounterType = int
->
+template<class SampleType,
+         unsigned int Bins,
+         int          StartLevel  = 0,
+         unsigned int MinBinWidth = 1,
+         unsigned int MaxBinWidth = 10,
+         class LevelType          = SampleType,
+         class CounterType        = int,
+         bool UseGraphs           = false>
 struct params2
 {
-    using sample_type = SampleType;
-    static constexpr unsigned int bins = Bins;
-    static constexpr int start_level = StartLevel;
+    using sample_type                            = SampleType;
+    static constexpr unsigned int bins           = Bins;
+    static constexpr int          start_level    = StartLevel;
     static constexpr unsigned int min_bin_length = MinBinWidth;
     static constexpr unsigned int max_bin_length = MaxBinWidth;
-    using level_type = LevelType;
-    using counter_type = CounterType;
+    using level_type                             = LevelType;
+    using counter_type                           = CounterType;
+    static constexpr bool use_graphs             = UseGraphs;
 };
 
 template<class Params>
@@ -347,7 +375,8 @@ typedef ::testing::Types<
     params2<test_utils::half, 3, 10000, 1000, 1000, test_utils::half, unsigned int>,
     params2<test_utils::bfloat16, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
     params2<float, 456, -100, 1, 123>,
-    params2<double, 3, 10000, 1000, 1000, double, unsigned int>>
+    params2<double, 3, 10000, 1000, 1000, double, unsigned int>,
+    params2<int, 10, 0, 1, 10, int, int, true>>
     Params2;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramRange, Params2);
@@ -368,7 +397,12 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
     using native_sample_type = test_utils::convert_to_fundamental_t<sample_type>;
     using native_level_type  = test_utils::convert_to_fundamental_t<level_type>;
 
-    hipStream_t stream = 0;
+    hipStream_t stream = 0; // default
+    if(TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -487,6 +521,12 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             if(rows == 1)
             {
                 HIP_CHECK(hipcub::DeviceHistogram::HistogramRange(d_temporary_storage,
@@ -512,6 +552,12 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
                                                                   stream));
             }
 
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+            }
+
             std::vector<counter_type> histogram(bins);
             HIP_CHECK(
                 hipMemcpy(
@@ -530,30 +576,39 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
             {
                 ASSERT_EQ(histogram[i], histogram_expected[i]);
             }
+
+            if(TestFixture::params::use_graphs)
+            {
+                test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
+    }
+    if(TestFixture::params::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
-template<
-    class SampleType,
-    unsigned int Channels,
-    unsigned int ActiveChannels,
-    unsigned int Bins,
-    int LowerLevel,
-    int UpperLevel,
-    class LevelType = SampleType,
-    class CounterType = int
->
+template<class SampleType,
+         unsigned int Channels,
+         unsigned int ActiveChannels,
+         unsigned int Bins,
+         int          LowerLevel,
+         int          UpperLevel,
+         class LevelType   = SampleType,
+         class CounterType = int,
+         bool UseGraphs    = false>
 struct params3
 {
-    using sample_type = SampleType;
-    static constexpr unsigned int channels = Channels;
+    using sample_type                             = SampleType;
+    static constexpr unsigned int channels        = Channels;
     static constexpr unsigned int active_channels = ActiveChannels;
-    static constexpr unsigned int bins = Bins;
-    static constexpr int lower_level = LowerLevel;
-    static constexpr int upper_level = UpperLevel;
-    using level_type = LevelType;
-    using counter_type = CounterType;
+    static constexpr unsigned int bins            = Bins;
+    static constexpr int          lower_level     = LowerLevel;
+    static constexpr int          upper_level     = UpperLevel;
+    using level_type                              = LevelType;
+    using counter_type                            = CounterType;
+    static constexpr bool use_graphs              = UseGraphs;
 };
 
 template<class Params>
@@ -573,7 +628,8 @@ typedef ::testing::Types<params3<int, 4, 3, 2000, 0, 2000>,
                          params3<test_utils::bfloat16, 4, 3, 55, -123, +123, test_utils::bfloat16>,
                          params3<double, 4, 2, 10, 0, 1000, double, int>,
                          params3<int, 3, 2, 123, 100, 5635, int>,
-                         params3<double, 4, 3, 55, -123, +123, double>>
+                         params3<double, 4, 3, 55, -123, +123, double>,
+                         params3<int, 4, 3, 2000, 0, 2000, int, int, true>>
     Params3;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramMultiEven, Params3);
@@ -621,7 +677,12 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
         upper_level[channel] = test_utils::convert_to_device<level_type>(n_upper_level[channel]);
     }
 
-    hipStream_t stream = 0;
+    hipStream_t stream = 0; // default
+    if(TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     for(auto dim : get_dims())
     {
@@ -769,6 +830,12 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             if(rows == 1)
             {
                 HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramEven<channels, active_channels>(
@@ -798,6 +865,12 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
                     stream)));
             }
 
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+            }
+
             std::vector<counter_type> histogram[active_channels];
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
@@ -824,32 +897,42 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
                     ASSERT_EQ(histogram[channel][i], histogram_expected[channel][i]);
                 }
             }
+
+            if(TestFixture::params::use_graphs)
+            {
+                test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
+    }
+
+    if(TestFixture::params::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
-template<
-    class SampleType,
-    unsigned int Channels,
-    unsigned int ActiveChannels,
-    unsigned int Bins,
-    int StartLevel = 0,
-    unsigned int MinBinWidth = 1,
-    unsigned int MaxBinWidth = 10,
-    class LevelType = SampleType,
-    class CounterType = int
->
+template<class SampleType,
+         unsigned int Channels,
+         unsigned int ActiveChannels,
+         unsigned int Bins,
+         int          StartLevel  = 0,
+         unsigned int MinBinWidth = 1,
+         unsigned int MaxBinWidth = 10,
+         class LevelType          = SampleType,
+         class CounterType        = int,
+         bool UseGraphs           = false>
 struct params4
 {
-    using sample_type = SampleType;
-    static constexpr unsigned int channels = Channels;
+    using sample_type                             = SampleType;
+    static constexpr unsigned int channels        = Channels;
     static constexpr unsigned int active_channels = ActiveChannels;
-    static constexpr unsigned int bins = Bins;
-    static constexpr int start_level = StartLevel;
-    static constexpr unsigned int min_bin_length = MinBinWidth;
-    static constexpr unsigned int max_bin_length = MaxBinWidth;
-    using level_type = LevelType;
-    using counter_type = CounterType;
+    static constexpr unsigned int bins            = Bins;
+    static constexpr int          start_level     = StartLevel;
+    static constexpr unsigned int min_bin_length  = MinBinWidth;
+    static constexpr unsigned int max_bin_length  = MaxBinWidth;
+    using level_type                              = LevelType;
+    using counter_type                            = CounterType;
+    static constexpr bool use_graphs              = UseGraphs;
 };
 
 template<class Params>
@@ -867,7 +950,8 @@ typedef ::testing::Types<
     params4<test_utils::half, 3, 1, 3, 10000, 1000, 1000, test_utils::half, unsigned int>,
     params4<test_utils::bfloat16, 3, 1, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
     params4<float, 4, 2, 456, -100, 1, 123>,
-    params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>>
+    params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>,
+    params4<int, 4, 3, 10, 0, 1, 10, int, int, true>>
     Params4;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramMultiRange, Params4);
@@ -890,8 +974,6 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
     constexpr unsigned int channels = TestFixture::params::channels;
     constexpr unsigned int active_channels = TestFixture::params::active_channels;
 
-    hipStream_t stream = 0;
-
     std::random_device rd;
     std::default_random_engine gen(rd());
 
@@ -907,6 +989,13 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
             TestFixture::params::min_bin_length,
             TestFixture::params::max_bin_length
         );
+    }
+
+    hipStream_t stream = 0; // default
+    if(TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
     for(auto dim : get_dims())
@@ -1081,6 +1170,12 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
+            hipGraph_t graph;
+            if(TestFixture::params::use_graphs)
+            {
+                graph = test_utils::createGraphHelper(stream);
+            }
+
             if(rows == 1)
             {
                 HIP_CHECK((hipcub::DeviceHistogram::MultiHistogramRange<channels, active_channels>(
@@ -1106,6 +1201,12 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
                     int(rows),
                     row_stride_bytes,
                     stream)));
+            }
+
+            hipGraphExec_t graph_instance;
+            if(TestFixture::params::use_graphs)
+            {
+                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
             }
 
             std::vector<counter_type> histogram[active_channels];
@@ -1135,6 +1236,16 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
                     ASSERT_EQ(histogram[channel][i], histogram_expected[channel][i]);
                 }
             }
+
+            if(TestFixture::params::use_graphs)
+            {
+                test_utils::cleanupGraphHelper(graph, graph_instance);
+            }
         }
+    }
+
+    if(TestFixture::params::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }

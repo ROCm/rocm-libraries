@@ -58,6 +58,8 @@ BraceWrapping:
     AfterStruct: true
     AfterUnion: true
     AfterExternBlock: false
+    BeforeCatch: true
+    BeforeElse: true
     BeforeLambdaBody: true
     BeforeWhile: true
     IndentBraces: false

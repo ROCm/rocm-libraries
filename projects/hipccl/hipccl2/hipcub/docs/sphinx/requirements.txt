@@ -36,6 +36,8 @@ docutils==0.21.2
     #   myst-parser
     #   pydata-sphinx-theme
     #   sphinx
+doxysphinx==3.3.8
+    # via rocm-docs-core
 fastjsonschema==2.19.1
     # via rocm-docs-core
 gitdb==4.0.11

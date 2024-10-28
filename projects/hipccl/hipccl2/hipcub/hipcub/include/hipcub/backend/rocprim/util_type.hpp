@@ -36,8 +36,9 @@
 #include <rocprim/thread/radix_key_codec.hpp>
 #include <rocprim/types/future_value.hpp>
 
-#include <hip/hip_fp16.h>
 #include <hip/hip_bfloat16.h>
+#include <hip/hip_fp16.h>
+#include <hip/hip_vector_types.h>
 
 #include <limits>
 #include <type_traits>
@@ -362,11 +363,98 @@ template <typename T> struct UnitWord<volatile T> : UnitWord<T> {};
 template <typename T> struct UnitWord<const T> : UnitWord<T> {};
 template <typename T> struct UnitWord<const volatile T> : UnitWord<T> {};
 
-
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
+/******************************************************************************
+ * Vector type inference utilities.
+ ******************************************************************************/
 
+template<typename T, int vec_elements>
+struct GenericCubVector
+{
+    static_assert(!sizeof(T), "CubVector can only have 1-4 elements");
+};
 
+enum
+{
+    /// The maximum number of elements in HIP vector types
+    MAX_VEC_ELEMENTS = 4,
+};
+
+template<typename T>
+struct GenericCubVector<T, 1>
+{
+    T x;
+
+    using BaseType = T;
+    using Type     = GenericCubVector<T, 1>;
+};
+
+template<typename T>
+struct GenericCubVector<T, 2>
+{
+    T x;
+    T y;
+
+    using BaseType = T;
+    using Type     = GenericCubVector<T, 2>;
+};
+
+template<typename T>
+struct GenericCubVector<T, 3>
+{
+    T x;
+    T y;
+    T z;
+
+    using BaseType = T;
+    using Type     = GenericCubVector<T, 3>;
+};
+
+template<typename T>
+struct GenericCubVector<T, 4>
+{
+    T x;
+    T y;
+    T z;
+    T w;
+
+    using BaseType = T;
+    using Type     = GenericCubVector<T, 4>;
+};
+
+template<typename T, int vec_elements>
+struct CubVectorType
+{
+    // Fallback on GenericCubVector
+    using Type = GenericCubVector<T, vec_elements>;
+};
+
+template<typename T, int vec_elements>
+using CubVector = typename CubVectorType<T, vec_elements>::Type;
+
+#define HIPCUB_DEFINE_VECTOR_TYPE(base_type, vec_type)        \
+    template<int vec_elements>                                \
+    struct CubVectorType<base_type, vec_elements>             \
+    {                                                         \
+        using Type = HIP_vector_type<vec_type, vec_elements>; \
+    };
+
+HIPCUB_DEFINE_VECTOR_TYPE(char, char)
+HIPCUB_DEFINE_VECTOR_TYPE(unsigned char, unsigned char)
+HIPCUB_DEFINE_VECTOR_TYPE(short, short)
+HIPCUB_DEFINE_VECTOR_TYPE(ushort, ushort)
+HIPCUB_DEFINE_VECTOR_TYPE(int, int)
+HIPCUB_DEFINE_VECTOR_TYPE(uint, uint)
+HIPCUB_DEFINE_VECTOR_TYPE(long, long)
+HIPCUB_DEFINE_VECTOR_TYPE(unsigned long, unsigned long)
+HIPCUB_DEFINE_VECTOR_TYPE(long long, long long)
+HIPCUB_DEFINE_VECTOR_TYPE(unsigned long long, unsigned long long)
+HIPCUB_DEFINE_VECTOR_TYPE(float, float)
+HIPCUB_DEFINE_VECTOR_TYPE(double, double)
+HIPCUB_DEFINE_VECTOR_TYPE(bool, unsigned char)
+
+#undef HIPCUB_DEFINE_VECTOR_TYPE
 
 /******************************************************************************
  * Wrapper types
@@ -407,7 +495,7 @@ struct Uninitialized
  *
  ******************************************************************************/
 
- #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 /**
  * \brief Basic type traits categories

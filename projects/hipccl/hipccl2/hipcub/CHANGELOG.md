@@ -3,6 +3,12 @@
 Documentation for hipCUB is available at
 [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## (Unreleased) hipCUB-x.x.x for ROCm 6.4.0
+
+### Added
+* Added `ForEach`, `ForEachN`, `ForEachCopy`, `ForEachCopyN` and `Bulk` functions to have parity with CUB.
+* Added the `hipcub::CubVector` type for CUB parity.
+
 ## (Unreleased) hipCUB-3.3.0 for ROCm 6.3.0
 
 ### Fixed
@@ -12,8 +18,14 @@ Documentation for hipCUB is available at
 ### Added
 * Add support for large indices in `hipcub::DeviceSegmentedReduce::*`. rocPRIM's backend provides support for all reduce variants, but CUB's does not have support yet for `DeviceSegmentedReduce::Arg*`, so large indices support has been excluded for these as well in hipCUB.
 * Add -t smoke option in rtest.py. It will run a subset of tests such that the total test time is in 5 minutes. Use python3 ./rtest.py --test smoke or python3 ./rtest.py -t smoke to execute smoke test.
+* Add inplace overloads of `DeviceScan` functions.
+* Add inplace overloads of `DeviceSelect::Flagged` and `DeviceSelect::If`.
+* Add `DeviceReduce::TransformReduce`.
+* Add `DeviceSelect::UniqueByKey` overload with `equality_op`.
+* Add support for large indices in `DeviceSelect::UniqueByKey`.
+
 ### Changed
-* The NVIDIA backend now requires CUB, Thrust and libcu++ 2.3.2. If it is not found it will be downloaded from the NVIDIA CCCL repository.
+* The NVIDIA backend now requires CUB, Thrust and libcu++ 2.4.0. If it is not found it will be downloaded from the NVIDIA CCCL repository.
 
 ## (Unreleased) hipCUB-3.2.0 for ROCm 6.2.0
 

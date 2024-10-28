@@ -46,6 +46,7 @@
 
 #if   HIPCUB_TEST_SLICE == 0
     TEST(SUITE, SortKeysOver4G) { sort_keys_over_4g(); }
+    TEST(SUITE, SortKeysLargeSizes) { sort_keys_large_sizes(); }
 #endif
 
 #if   HIPCUB_TEST_TYPE_SLICE == 0
@@ -64,7 +65,9 @@
     INSTANTIATE(params<test_utils::half,      int,          true                      >) 
     INSTANTIATE(params<test_utils::bfloat16,  int                                     >) 
     INSTANTIATE(params<test_utils::bfloat16,  int,          true                      >) 
-    INSTANTIATE(params<int,                   test_utils::custom_test_type<float>     >) 
+    INSTANTIATE(params<int,                   test_utils::custom_test_type<float>     >)
+    // With graphs
+    INSTANTIATE(params<int,                   short,        false, 0, 32, false, true >)
 #elif HIPCUB_TEST_TYPE_SLICE == 1
     // start_bit and end_bit
 

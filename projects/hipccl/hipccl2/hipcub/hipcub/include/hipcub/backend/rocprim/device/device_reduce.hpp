@@ -38,6 +38,7 @@
 
 #include <rocprim/device/device_reduce.hpp>
 #include <rocprim/device/device_reduce_by_key.hpp>
+#include <rocprim/iterator/transform_iterator.hpp>
 
 #include <hip/hip_bfloat16.h> // hip_bfloat16
 #include <hip/hip_fp16.h> // __half
@@ -417,6 +418,39 @@ public:
                       num_items,
                       stream,
                       debug_synchronous);
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename ReductionOpT,
+             typename TransformOpT,
+             typename T,
+             typename NumItemsT>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t TransformReduce(void*           d_temp_storage,
+                                      size_t&         temp_storage_bytes,
+                                      InputIteratorT  d_in,
+                                      OutputIteratorT d_out,
+                                      NumItemsT       num_items,
+                                      ReductionOpT    reduction_op,
+                                      TransformOpT    transform_op,
+                                      T               init,
+                                      hipStream_t     stream = 0)
+    {
+        using TransformInputIteratorT = ::rocprim::transform_iterator<InputIteratorT, TransformOpT>;
+
+        return ::rocprim::reduce(
+            d_temp_storage,
+            temp_storage_bytes,
+            TransformInputIteratorT(d_in, transform_op),
+            d_out,
+            init,
+            num_items,
+            ::hipcub::detail::convert_binary_result_type<T,
+                                                         TransformInputIteratorT,
+                                                         OutputIteratorT>(reduction_op),
+            stream,
+            HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
     }
 
     template<typename KeysInputIteratorT,
