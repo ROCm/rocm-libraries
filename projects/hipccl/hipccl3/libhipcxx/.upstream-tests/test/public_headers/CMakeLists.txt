@@ -76,6 +76,9 @@ function(libcudacxx_add_public_header_test header)
                          PRIVATE
                          ${headertest_warning_levels_device}
                          -DLIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE)
+  if (CCCL_SUPPRESS_ICC_DEPRECATION_WARNING)
+    target_compile_definitions(headertest_${header_name} PRIVATE CCCL_SUPPRESS_ICC_DEPRECATION_WARNING)
+  endif()
   target_compile_definitions(headertest_${header_name} PRIVATE CCCL_ENABLE_ASSERTIONS)
   target_link_libraries(headertest_${header_name} hip::device)
 
