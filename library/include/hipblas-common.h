@@ -79,7 +79,7 @@ typedef enum
     HIPBLAS_COMPUTE_32F_FAST_16F  = 4, /**< 32-bit input can use 16-bit compute */
     HIPBLAS_COMPUTE_32F_FAST_16BF = 5, /**< 32-bit input can is bf16 compute */
     HIPBLAS_COMPUTE_32F_FAST_TF32
-    = 6, /**< 32-bit input can use tensor cores w/ TF32 compute. Only supported with cuBLAS backend currently */
+    = 6, /**< 32-bit input can use tensor cores w/ TF32 compute. Only supported with cuBLAS and hipBLASLT backend currently */
     HIPBLAS_COMPUTE_64F          = 7, /**< compute will be at least 64-bit precision */
     HIPBLAS_COMPUTE_64F_PEDANTIC = 8, /**< compute will be exactly 64-bit precision */
     HIPBLAS_COMPUTE_32I          = 9, /**< compute will be at least 32-bit integer precision */
