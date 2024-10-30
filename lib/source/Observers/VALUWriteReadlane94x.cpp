@@ -20,8 +20,14 @@ namespace rocRoller
             if(inst.getOpCode().rfind("v_readlane", 0) == 0)
             {
                 AssertFatal(inst.getSrcs().size() > 0, "Bad readlane sources");
+                return checkRegister(inst.getSrcs()[0]).value_or(0) - 1;
+            }
+
+            if(GPUInstructionInfo::isVPermlane(inst.getOpCode()))
+            {
                 return checkRegister(inst.getSrcs()[0]).value_or(0);
             }
+
             return 0;
         }
     }
