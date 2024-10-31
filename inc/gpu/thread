@@ -298,7 +298,7 @@ namespace this_thread {
 __device__ gpu::thread::id get_id() noexcept;
 __device__ void pseudo_yield();
 __device__ unsigned int get_width() noexcept;
-__device__ unsigned int get_lane_id() noexcept;
+__device__ unsigned int get_fiber_id() noexcept;
 
 } // namespace this_thread
 
