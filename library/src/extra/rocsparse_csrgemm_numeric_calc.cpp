@@ -1448,7 +1448,6 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 #undef CSRGEMM_DIM
     }
 
-#ifndef rocsparse_ILP64
     // Group 6: 2049 - 4096 non-zeros per row
     if(h_group_size[6] > 0 && !exceeding_smem)
     {
@@ -1481,7 +1480,6 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                                                                       info_C->csrgemm_info->mul,
                                                                       info_C->csrgemm_info->add));
     }
-#endif
 
     // Group 7: more than 4096 non-zeros per row
     if(h_group_size[7] > 0)

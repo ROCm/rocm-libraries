@@ -196,7 +196,7 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t GROUPS, bool CPLX, typename I, typename J>
+    template <uint32_t BLOCKSIZE, uint32_t GROUPS, bool EXCEEDS_SMEM, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_group_reduce_part2(J m,
                                     const I* __restrict__ csr_row_ptr,
@@ -228,9 +228,7 @@ namespace rocsparse
         else if(nnz <=   512) { ++sdata[hipThreadIdx_x * GROUPS + 3]; workspace[row] = 3; }
         else if(nnz <=  1024) { ++sdata[hipThreadIdx_x * GROUPS + 4]; workspace[row] = 4; }
         else if(nnz <=  2048) { ++sdata[hipThreadIdx_x * GROUPS + 5]; workspace[row] = 5; }
-#ifndef rocsparse_ILP64
-        else if(nnz <=  4096 && !CPLX) { ++sdata[hipThreadIdx_x * GROUPS + 6]; workspace[row] = 6; }
-#endif
+        else if(nnz <=  4096 && !EXCEEDS_SMEM) { ++sdata[hipThreadIdx_x * GROUPS + 6]; workspace[row] = 6; }
         else                  { ++sdata[hipThreadIdx_x * GROUPS + 7]; workspace[row] = 7; }
             // clang-format on
         }

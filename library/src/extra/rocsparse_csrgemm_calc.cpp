@@ -801,7 +801,6 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
 #undef CSRGEMM_DIM
     }
 
-#ifndef rocsparse_ILP64
     // Group 6: 2049 - 4096 non-zeros per row
     if(h_group_size[6] > 0 && !exceeding_smem)
     {
@@ -833,7 +832,6 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                               info_C->csrgemm_info->mul,
                                                               info_C->csrgemm_info->add));
     }
-#endif
 
     // Group 7: more than 4096 non-zeros per row
     if(h_group_size[7] > 0)
@@ -846,9 +844,6 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             return rocsparse_status_requires_sorted_storage;
         }
 
-#define CSRGEMM_DIM 512
-#define CSRGEMM_SUB 16
-#define CSRGEMM_CHUNKSIZE 2048
         I* workspace_B = nullptr;
 
         if(info_C->csrgemm_info->mul == true)
@@ -858,6 +853,9 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                 rocsparse_hipMallocAsync((void**)&workspace_B, sizeof(I) * nnz_A, handle->stream));
         }
 
+#define CSRGEMM_DIM 512
+#define CSRGEMM_SUB 16
+#define CSRGEMM_CHUNKSIZE 2048
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::
                  csrgemm_fill_block_per_row_multipass<CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_CHUNKSIZE>),
@@ -889,14 +887,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             base_D,
             info_C->csrgemm_info->mul,
             info_C->csrgemm_info->add);
+#undef CSRGEMM_CHUNKSIZE
+#undef CSRGEMM_SUB
+#undef CSRGEMM_DIM
 
         if(info_C->csrgemm_info->mul == true)
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace_B, handle->stream));
         }
-#undef CSRGEMM_CHUNKSIZE
-#undef CSRGEMM_SUB
-#undef CSRGEMM_DIM
     }
 
     return rocsparse_status_success;

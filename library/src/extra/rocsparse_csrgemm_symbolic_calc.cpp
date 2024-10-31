@@ -398,7 +398,7 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t GROUPS, bool CPLX, typename I, typename J>
+    template <uint32_t BLOCKSIZE, uint32_t GROUPS, bool EXCEEDS_SMEM, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_symbolic_group_reduce_part2(J m,
                                              const I* __restrict__ csr_row_ptr,
@@ -430,9 +430,7 @@ namespace rocsparse
         else if(nnz <=   512) { ++sdata[hipThreadIdx_x * GROUPS + 3]; workspace[row] = 3; }
         else if(nnz <=  1024) { ++sdata[hipThreadIdx_x * GROUPS + 4]; workspace[row] = 4; }
         else if(nnz <=  2048) { ++sdata[hipThreadIdx_x * GROUPS + 5]; workspace[row] = 5; }
-#ifndef rocsparse_ILP64
-        else if(nnz <=  4096 && !CPLX) { ++sdata[hipThreadIdx_x * GROUPS + 6]; workspace[row] = 6; }
-#endif
+        else if(nnz <=  4096 && !EXCEEDS_SMEM) { ++sdata[hipThreadIdx_x * GROUPS + 6]; workspace[row] = 6; }
         else                  { ++sdata[hipThreadIdx_x * GROUPS + 7]; workspace[row] = 7; }
             // clang-format on
         }
@@ -1081,7 +1079,8 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
     hipStream_t stream = handle->stream;
 
     // Flag for exceeding shared memory
-    constexpr bool exceeding_smem = false;
+    constexpr bool exceeding_smem
+        = (std::is_same<I, int64_t>::value && std::is_same<J, int64_t>::value);
 
     // Temporary buffer
     char* buffer = reinterpret_cast<char*>(temp_buffer);
@@ -1279,7 +1278,8 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
         = info_C->csrgemm_info->add ? descr_D->base : rocsparse_index_base_zero;
 
     // Flag for exceeding shared memory
-    constexpr bool exceeding_smem = false;
+    constexpr bool exceeding_smem
+        = (std::is_same<I, int64_t>::value && std::is_same<J, int64_t>::value);
 
     // Group 0: 0 - 16 non-zeros per row
     if(h_group_size[0] > 0)
@@ -1507,7 +1507,6 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
 #undef CSRGEMM_DIM
     }
 
-#ifndef rocsparse_ILP64
     // Group 6: 2049 - 4096 non-zeros per row
     if(h_group_size[6] > 0 && !exceeding_smem)
     {
@@ -1533,7 +1532,6 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
                                                               info_C->csrgemm_info->mul,
                                                               info_C->csrgemm_info->add));
     }
-#endif
 
     // Group 7: more than 4096 non-zeros per row
     if(h_group_size[7] > 0)
