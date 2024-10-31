@@ -45,4 +45,4 @@ set(TEST_MATRICES
     IPSO/OPF_10000
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

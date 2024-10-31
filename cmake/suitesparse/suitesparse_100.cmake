@@ -45,4 +45,4 @@ set(TEST_MATRICES
     GHS_indef/ncvxbqp1
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

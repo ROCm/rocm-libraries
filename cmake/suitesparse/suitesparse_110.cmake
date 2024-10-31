@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Botonakis/thermomech_TK
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

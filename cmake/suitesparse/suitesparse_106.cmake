@@ -45,4 +45,4 @@ set(TEST_MATRICES
     SNAP/soc-sign-Slashdot090216
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

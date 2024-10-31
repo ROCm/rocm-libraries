@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Averous/epb3
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

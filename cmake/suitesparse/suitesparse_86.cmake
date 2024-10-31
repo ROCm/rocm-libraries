@@ -45,4 +45,4 @@ set(TEST_MATRICES
     JGD_BIBD/bibd_15_7
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

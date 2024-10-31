@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Wang/wang4
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

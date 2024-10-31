@@ -45,4 +45,4 @@ set(TEST_MATRICES
     SNAP/com-DBLP
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

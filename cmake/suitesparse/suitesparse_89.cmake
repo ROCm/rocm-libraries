@@ -45,4 +45,4 @@ set(TEST_MATRICES
     VDOL/lowThrust_4
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

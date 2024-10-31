@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Oberwolfach/windscreen
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

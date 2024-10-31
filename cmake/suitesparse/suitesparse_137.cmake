@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Schenk_AFE/af_shell1
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

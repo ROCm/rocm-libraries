@@ -45,4 +45,4 @@ set(TEST_MATRICES
     LAW/ljournal-2008
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

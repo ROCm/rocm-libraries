@@ -45,4 +45,4 @@ set(TEST_MATRICES
     DIMACS10/delaunay_n20
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

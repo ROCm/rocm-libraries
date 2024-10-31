@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Oberwolfach/inlet
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

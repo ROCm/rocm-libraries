@@ -45,4 +45,4 @@ set(TEST_MATRICES
     POLYFLOW/mixtank_new
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

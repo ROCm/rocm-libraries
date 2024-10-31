@@ -44,4 +44,4 @@ set(TEST_MATRICES
     SNAP/web-Stanford
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

@@ -45,4 +45,4 @@ set(TEST_MATRICES
     LPnetlib/lp_osa_14
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

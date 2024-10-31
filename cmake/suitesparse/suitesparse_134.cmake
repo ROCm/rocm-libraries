@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Andrianov/pattern1
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

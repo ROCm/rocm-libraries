@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Williams/cop20k_A
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

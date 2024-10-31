@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Okunbor/aft01
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

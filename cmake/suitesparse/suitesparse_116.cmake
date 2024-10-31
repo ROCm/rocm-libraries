@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Buss/connectus
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

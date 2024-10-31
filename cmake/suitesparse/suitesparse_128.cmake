@@ -45,4 +45,4 @@ set(TEST_MATRICES
     JGD_Homology/ch8-8-b5
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

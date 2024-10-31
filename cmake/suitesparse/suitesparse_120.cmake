@@ -45,4 +45,4 @@ set(TEST_MATRICES
     JGD_Forest/TF18
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

@@ -45,4 +45,4 @@ set(TEST_MATRICES
     DIMACS10/wing
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

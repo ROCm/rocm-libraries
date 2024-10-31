@@ -45,4 +45,4 @@ set(TEST_MATRICES
     DIMACS10/vsp_vibrobox_scagr7-2c_rlfddd
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

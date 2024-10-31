@@ -45,4 +45,4 @@ set(TEST_MATRICES
     SNAP/soc-Epinions1
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

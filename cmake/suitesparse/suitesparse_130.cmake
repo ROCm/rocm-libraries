@@ -45,4 +45,4 @@ set(TEST_MATRICES
     GHS_psdef/s3dkq4m2
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

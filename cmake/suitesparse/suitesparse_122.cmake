@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Simon/appu
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

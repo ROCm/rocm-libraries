@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Simon/venkat01
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

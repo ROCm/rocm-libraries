@@ -45,4 +45,4 @@ set(TEST_MATRICES
     DNVS/ship_001
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

@@ -45,4 +45,4 @@ set(TEST_MATRICES
     JGD_Homology/shar_te2-b2
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

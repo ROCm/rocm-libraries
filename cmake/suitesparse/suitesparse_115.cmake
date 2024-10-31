@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Goodwin/rim
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

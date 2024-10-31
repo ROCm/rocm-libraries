@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Hollinger/jan99jac120sc
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

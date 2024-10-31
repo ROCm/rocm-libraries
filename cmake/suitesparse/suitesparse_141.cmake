@@ -45,4 +45,4 @@ set(TEST_MATRICES
     DIMACS10/hugetrace-00020
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

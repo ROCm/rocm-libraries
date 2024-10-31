@@ -45,4 +45,4 @@ set(TEST_MATRICES
     Guettel/TEM181302
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

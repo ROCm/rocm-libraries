@@ -45,4 +45,4 @@ set(TEST_MATRICES
     IBM_EDA/trans4
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

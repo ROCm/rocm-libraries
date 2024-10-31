@@ -45,4 +45,4 @@ set(TEST_MATRICES
     GenBank/kmer_U1a
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

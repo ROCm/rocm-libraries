@@ -45,4 +45,4 @@ set(TEST_MATRICES
     vanHeukelum/cage14
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)

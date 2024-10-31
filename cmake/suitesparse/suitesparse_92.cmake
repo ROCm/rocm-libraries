@@ -45,4 +45,4 @@ set(TEST_MATRICES
     GHS_psdef/mario001
 )
 
-include(MatrixDownloadAndConverttrices.cmake)
+include(MatrixDownloadAndConvert.cmake)
