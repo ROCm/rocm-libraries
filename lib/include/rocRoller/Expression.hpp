@@ -81,6 +81,13 @@ namespace rocRoller
         {
             ExpressionPtr lhs, rhs;
             std::string   comment = "";
+
+            template <typename T>
+            requires std::derived_from<T, Binary>
+            inline T& copyParams(const T& other)
+            {
+                return static_cast<T&>(*this);
+            }
         };
 
         template <typename T>
@@ -278,6 +285,13 @@ namespace rocRoller
         {
             ExpressionPtr lhs, r1hs, r2hs;
             std::string   comment = "";
+
+            template <typename T>
+            requires std::derived_from<T, Ternary>
+            inline T& copyParams(const T& other)
+            {
+                return static_cast<T&>(*this);
+            }
         };
 
         struct TernaryMixed : Ternary
@@ -377,6 +391,13 @@ namespace rocRoller
         {
             ExpressionPtr arg;
             std::string   comment = "";
+
+            template <typename T>
+            requires std::derived_from<T, Unary>
+            inline T& copyParams(const T& other)
+            {
+                return static_cast<T&>(*this);
+            }
         };
 
         template <typename T>
@@ -461,6 +482,26 @@ namespace rocRoller
             constexpr static inline int  Complexity = 1;
         };
 
+        struct BitFieldExtract : Unary
+        {
+            inline BitFieldExtract& copyParams(const BitFieldExtract& other)
+            {
+                outputDataType = other.outputDataType;
+                offset         = other.offset;
+                width          = other.offset;
+
+                return *this;
+            }
+
+            constexpr static inline auto            Type = Category::Arithmetic;
+            constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate};
+            constexpr static inline int             Complexity = 1;
+
+            DataType outputDataType = DataType::None;
+            int      offset         = 0;
+            int      width          = 0;
+        };
+
         /**
          * @brief Register value from the coordinate graph.
          *
@@ -514,6 +555,9 @@ namespace rocRoller
 
         template <DataType DATATYPE>
         ExpressionPtr convert(ExpressionPtr a);
+
+        ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width);
+        ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width);
 
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value);

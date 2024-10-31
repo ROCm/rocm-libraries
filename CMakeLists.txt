@@ -346,6 +346,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/AddShiftL.cpp
  lib/source/CodeGen/Arithmetic/ArithmeticGenerator.cpp
  lib/source/CodeGen/Arithmetic/ArithmeticShiftR.cpp
+ lib/source/CodeGen/Arithmetic/BitFieldExtract.cpp
  lib/source/CodeGen/Arithmetic/BitwiseNegate.cpp
  lib/source/CodeGen/Arithmetic/BitwiseAnd.cpp
  lib/source/CodeGen/Arithmetic/BitwiseOr.cpp

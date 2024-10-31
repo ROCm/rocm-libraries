@@ -236,6 +236,13 @@ namespace ArithmeticTest
                 co_yield generateOp<Expression::Conditional>(c, boolean, a, b);
                 co_yield store(20);
 
+                co_yield generateOp<Expression::BitFieldExtract>(
+                    c,
+                    a,
+                    Expression::BitFieldExtract{
+                        .outputDataType = dataType, .offset = 8, .width = 8});
+                co_yield store(21);
+
                 //
                 // Logical / boolean
                 //
@@ -307,7 +314,7 @@ namespace ArithmeticTest
                 commandKernel.setContext(m_context);
                 commandKernel.generateKernel();
 
-                size_t const resultSize           = 21;
+                size_t const resultSize           = 22;
                 size_t const comparisonResultSize = 10;
 
                 auto d_result = make_shared_device<T>(resultSize);
@@ -395,6 +402,10 @@ namespace ArithmeticTest
                             }
                             EXPECT_EQ(result[19], ~a);
                             EXPECT_EQ(result[20], (a >= b) ? a : b);
+                            EXPECT_EQ(result[21],
+                                      std::bit_cast<T>((std::bit_cast<similar_integral_type<T>>(a)
+                                                        << (sizeof(T) * 8 - 16))
+                                                       >> (sizeof(T) * 8 - 8)));
 
                             int wm = regType == Register::Type::Vector ? numBoolRegs : 1;
 
@@ -533,6 +544,9 @@ namespace ArithmeticTest
             auto v_r = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Float, 1);
 
+            auto v_tmp = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::UInt8, 1);
+
             auto s_r = Register::Value::Placeholder(m_context,
                                                     Register::Type::Scalar,
                                                     {DataType::Float, PointerType::PointerGlobal},
@@ -578,6 +592,15 @@ namespace ArithmeticTest
             co_yield generateOp<Expression::Conditional>(v_r, vcc, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(20), 4);
+
+            co_yield generateOp<Expression::BitFieldExtract>(
+                v_tmp,
+                v_a,
+                Expression::BitFieldExtract{
+                    .outputDataType = DataType::UInt8, .offset = 23, .width = 8});
+            co_yield_(Instruction("v_cvt_f32_ubyte0", {v_r}, {v_tmp}, {}, ""));
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(24), 4);
 
             co_yield generateOp<Expression::GreaterThan>(s_r, v_a, v_b);
             co_yield m_context->copier()->copy(
@@ -626,7 +649,7 @@ namespace ArithmeticTest
             commandKernel.setContext(m_context);
             commandKernel.generateKernel();
 
-            auto d_result      = make_shared_device<float>(6);
+            auto d_result      = make_shared_device<float>(7);
             auto d_cond_result = make_shared_device<int>(6);
 
             for(float a : TestValues::floatValues)
@@ -647,7 +670,7 @@ namespace ArithmeticTest
 
                         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
-                        std::vector<float> result(6);
+                        std::vector<float> result(7);
                         ASSERT_THAT(hipMemcpy(result.data(),
                                               d_result.get(),
                                               result.size() * sizeof(float),
@@ -674,6 +697,7 @@ namespace ArithmeticTest
                         }
                         EXPECT_EQ(result[5], c >= a ? a : b)
                             << "a: " << a << ", b: " << b << ", c: " << c;
+                        EXPECT_EQ(result[6], a == 0 ? 0 : std::ilogb(a) + 127);
                         ;
                         EXPECT_EQ(cond_result[0], (a > b ? 1 : 0));
                         EXPECT_EQ(cond_result[1], (a >= b ? 1 : 0));
@@ -1079,6 +1103,9 @@ namespace ArithmeticTest
             auto v_c = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Double, 1);
 
+            auto v_tmp = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::UInt16, 1);
+
             auto s_c = Register::Value::Placeholder(m_context,
                                                     Register::Type::Scalar,
                                                     {DataType::Double, PointerType::PointerGlobal},
@@ -1118,6 +1145,15 @@ namespace ArithmeticTest
             co_yield generateOp<Expression::Conditional>(v_c, vcc, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(32), 8);
+
+            co_yield generateOp<Expression::BitFieldExtract>(
+                v_tmp,
+                v_a,
+                Expression::BitFieldExtract{
+                    .outputDataType = DataType::UInt16, .offset = 52, .width = 11});
+            co_yield_(Instruction("v_cvt_f64_u32", {v_c}, {v_tmp->subset({0})}, {}, ""));
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(40), 8);
 
             co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
@@ -1186,7 +1222,7 @@ namespace ArithmeticTest
             commandKernel.setContext(m_context);
             commandKernel.generateKernel();
 
-            auto d_result      = make_shared_device<double>(5);
+            auto d_result      = make_shared_device<double>(6);
             auto d_cond_result = make_shared_device<int>(6);
 
             for(double a : TestValues::doubleValues)
@@ -1203,7 +1239,7 @@ namespace ArithmeticTest
 
                     commandKernel.launchKernel(commandArgs.runtimeArguments());
 
-                    std::vector<double> result(5);
+                    std::vector<double> result(6);
                     ASSERT_THAT(hipMemcpy(result.data(),
                                           d_result.get(),
                                           result.size() * sizeof(double),
@@ -1222,6 +1258,7 @@ namespace ArithmeticTest
                     EXPECT_EQ(result[2], a * b);
                     EXPECT_EQ(result[3], -a);
                     EXPECT_EQ(result[4], a >= b ? a : b);
+                    EXPECT_EQ(result[5], a == 0 ? 0 : std::ilogb(a) + 1023);
                     EXPECT_EQ(cond_result[0], (a > b ? 1 : 0));
                     EXPECT_EQ(cond_result[1], (a >= b ? 1 : 0));
                     EXPECT_EQ(cond_result[2], (a < b ? 1 : 0));

@@ -3,6 +3,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 
 namespace rocRoller
@@ -101,42 +102,28 @@ namespace rocRoller
 
         if(m_packedWorkitemIndex)
         {
-            auto tenBits = Register::Value::Literal(0x3FF);
-            auto ten     = Register::Value::Literal(10);
-            auto twenty  = Register::Value::Literal(20);
-
-            co_yield_(Instruction("v_and_b32",
-                                  {m_workitemIndex[0]},
-                                  {tenBits, m_packedWorkitemIndex},
-                                  {},
-                                  "Mask off 10 bit X coordinate"));
+            co_yield generateOp(
+                m_workitemIndex[0],
+                m_packedWorkitemIndex,
+                Expression::BitFieldExtract{
+                    {nullptr, "Extract 10 bit X coordinate"}, DataType::UInt32, 0, 10});
 
             if(m_kernelDimensions > 1)
             {
-                co_yield_(Instruction("v_lshrrev_b32",
-                                      {m_workitemIndex[1]},
-                                      {ten, m_packedWorkitemIndex},
-                                      {},
-                                      "Shift 10 bit Y Coordinate"));
-                co_yield_(Instruction("v_and_b32",
-                                      {m_workitemIndex[1]},
-                                      {tenBits, m_workitemIndex[1]},
-                                      {},
-                                      "Mask off 10 bit Y coordinate"));
+                co_yield generateOp(
+                    m_workitemIndex[1],
+                    m_packedWorkitemIndex,
+                    Expression::BitFieldExtract{
+                        {nullptr, "Extract 10 bit Y coordinate"}, DataType::UInt32, 10, 10});
             }
 
             if(m_kernelDimensions > 2)
             {
-                co_yield_(Instruction("v_lshrrev_b32",
-                                      {m_workitemIndex[2]},
-                                      {twenty, m_packedWorkitemIndex},
-                                      {},
-                                      "Shift 10 bit Z Coordinate"));
-                co_yield_(Instruction("v_and_b32",
-                                      {m_workitemIndex[2]},
-                                      {tenBits, m_workitemIndex[2]},
-                                      {},
-                                      "Mask off 10 bit Z coordinate"));
+                co_yield generateOp(
+                    m_workitemIndex[2],
+                    m_packedWorkitemIndex,
+                    Expression::BitFieldExtract{
+                        {nullptr, "Extract 10 bit Z coordinate"}, DataType::UInt32, 20, 10});
             }
 
             // No more need for packed value.

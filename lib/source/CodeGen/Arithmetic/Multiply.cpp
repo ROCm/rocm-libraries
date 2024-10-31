@@ -17,7 +17,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::Multiply>>
         GetGenerator<Expression::Multiply>(Register::ValuePtr dst,
                                            Register::ValuePtr lhs,
-                                           Register::ValuePtr rhs)
+                                           Register::ValuePtr rhs,
+                                           Expression::Multiply const&)
     {
         // Choose the proper generator, based on the context, register type
         // and datatype.
@@ -29,7 +30,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Scalar, DataType::Int32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -39,7 +43,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Int32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -49,7 +56,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Scalar, DataType::Int64>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&)
     {
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
 
@@ -165,7 +175,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Int64>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&)
     {
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
 
@@ -318,7 +331,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Halfx2>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -328,7 +344,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Float>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -338,7 +357,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Double>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

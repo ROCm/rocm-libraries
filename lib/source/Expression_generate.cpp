@@ -627,7 +627,7 @@ namespace rocRoller
                                       ? rhs
                                       : rhs->element({k});
                     co_yield generateOp<Conditional>(
-                        dest->element({k}), cond->element({k}), lhsVal, rhsVal);
+                        dest->element({k}), cond->element({k}), lhsVal, rhsVal, expr);
                 }
             }
 
@@ -680,7 +680,7 @@ namespace rocRoller
 
                 if(dest->valueCount() == 1 && results[0]->valueCount() == 1)
                 {
-                    co_yield generateOp<Operation>(dest, results[0]);
+                    co_yield generateOp<Operation>(dest, results[0], expr);
                 }
                 else
                 {
@@ -698,7 +698,7 @@ namespace rocRoller
                                 Throw<FatalError>("Packing ratio not supported yet.");
 
                             Register::ValuePtr arg = results[0]->element({i});
-                            co_yield generateOp<Operation>(destRegs, arg);
+                            co_yield generateOp<Operation>(destRegs, arg, expr);
                         }
                     }
                     else
@@ -724,7 +724,7 @@ namespace rocRoller
                                 arg = results[0]->element({i});
                             }
 
-                            co_yield generateOp<Operation>(dest->element({i}), arg);
+                            co_yield generateOp<Operation>(dest->element({i}), arg, expr);
                         }
                     }
                 }

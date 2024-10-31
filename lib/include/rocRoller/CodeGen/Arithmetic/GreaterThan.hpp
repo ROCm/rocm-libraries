@@ -9,7 +9,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::GreaterThan>>
         GetGenerator<Expression::GreaterThan>(Register::ValuePtr dst,
                                               Register::ValuePtr lhs,
-                                              Register::ValuePtr rhs);
+                                              Register::ValuePtr rhs,
+                                              Expression::GreaterThan const&);
 
     // Templated Generator class based on the register type and datatype.
     template <Register::Type REGISTER_TYPE, DataType DATATYPE>
@@ -45,8 +46,10 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction>
-            generate(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Generator<Instruction> generate(Register::ValuePtr dst,
+                                        Register::ValuePtr lhs,
+                                        Register::ValuePtr rhs,
+                                        Expression::GreaterThan const&);
 
         static const std::string Name;
     };
@@ -54,32 +57,62 @@ namespace rocRoller
     // Specializations for supported Register Type / DataType combinations
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Scalar, DataType::Int32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&);
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Scalar, DataType::UInt32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&);
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::Int32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&);
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::UInt32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&);
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Scalar, DataType::Int64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&);
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Scalar, DataType::UInt64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&);
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::Int64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&);
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::UInt64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&);
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::Float>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&);
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::Double>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&);
 }

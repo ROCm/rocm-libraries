@@ -13,8 +13,11 @@ namespace rocRoller
     RegisterComponentTemplateSpec(DivideGenerator, Register::Type::Vector, DataType::Int64);
 
     template <>
-    std::shared_ptr<BinaryArithmeticGenerator<Expression::Divide>> GetGenerator<Expression::Divide>(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::Divide>>
+        GetGenerator<Expression::Divide>(Register::ValuePtr dst,
+                                         Register::ValuePtr lhs,
+                                         Register::ValuePtr rhs,
+                                         Expression::Divide const&)
     {
         // Choose the proper generator, based on the context, register type
         // and datatype.
@@ -26,7 +29,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Scalar, DataType::Int32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Divide const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -95,7 +101,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Vector, DataType::Int32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Divide const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -170,7 +179,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Scalar, DataType::Int64>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Divide const&)
     {
 
         auto const& architecture = m_context->targetArchitecture();
@@ -553,7 +565,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Vector, DataType::Int64>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Divide const&)
     {
         auto const& architecture = m_context->targetArchitecture();
 

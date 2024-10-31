@@ -16,8 +16,11 @@ namespace rocRoller
     RegisterComponentTemplateSpec(EqualGenerator, Register::Type::Vector, DataType::Double);
 
     template <>
-    std::shared_ptr<BinaryArithmeticGenerator<Expression::Equal>> GetGenerator<Expression::Equal>(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::Equal>>
+        GetGenerator<Expression::Equal>(Register::ValuePtr dst,
+                                        Register::ValuePtr lhs,
+                                        Register::ValuePtr rhs,
+                                        Expression::Equal const&)
     {
         // Choose the proper generator, based on the context, register type
         // and datatype.
@@ -28,8 +31,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> EqualGenerator<Register::Type::Scalar, DataType::Int32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        EqualGenerator<Register::Type::Scalar, DataType::Int32>::generate(Register::ValuePtr dst,
+                                                                          Register::ValuePtr lhs,
+                                                                          Register::ValuePtr rhs,
+                                                                          Expression::Equal const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -52,8 +58,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> EqualGenerator<Register::Type::Vector, DataType::Int32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        EqualGenerator<Register::Type::Vector, DataType::Int32>::generate(Register::ValuePtr dst,
+                                                                          Register::ValuePtr lhs,
+                                                                          Register::ValuePtr rhs,
+                                                                          Expression::Equal const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -62,8 +71,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> EqualGenerator<Register::Type::Scalar, DataType::Int64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        EqualGenerator<Register::Type::Scalar, DataType::Int64>::generate(Register::ValuePtr dst,
+                                                                          Register::ValuePtr lhs,
+                                                                          Register::ValuePtr rhs,
+                                                                          Expression::Equal const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -84,8 +96,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> EqualGenerator<Register::Type::Vector, DataType::Int64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        EqualGenerator<Register::Type::Vector, DataType::Int64>::generate(Register::ValuePtr dst,
+                                                                          Register::ValuePtr lhs,
+                                                                          Register::ValuePtr rhs,
+                                                                          Expression::Equal const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -94,8 +109,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> EqualGenerator<Register::Type::Vector, DataType::Float>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        EqualGenerator<Register::Type::Vector, DataType::Float>::generate(Register::ValuePtr dst,
+                                                                          Register::ValuePtr lhs,
+                                                                          Register::ValuePtr rhs,
+                                                                          Expression::Equal const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -104,8 +122,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> EqualGenerator<Register::Type::Vector, DataType::Double>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        EqualGenerator<Register::Type::Vector, DataType::Double>::generate(Register::ValuePtr dst,
+                                                                           Register::ValuePtr lhs,
+                                                                           Register::ValuePtr rhs,
+                                                                           Expression::Equal const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

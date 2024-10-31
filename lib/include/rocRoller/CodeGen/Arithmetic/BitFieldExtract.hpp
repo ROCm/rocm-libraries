@@ -4,19 +4,18 @@
 
 namespace rocRoller
 {
+
     // GetGenerator function will return the Generator to use based on the provided arguments.
     template <>
-    std::shared_ptr<UnaryArithmeticGenerator<Expression::RandomNumber>>
-        GetGenerator<Expression::RandomNumber>(Register::ValuePtr dst,
-                                               Register::ValuePtr arg,
-                                               Expression::RandomNumber const&);
+    std::shared_ptr<UnaryArithmeticGenerator<Expression::BitFieldExtract>> GetGenerator(
+        Register::ValuePtr dst, Register::ValuePtr arg, Expression::BitFieldExtract const& expr);
 
-    // Templated Generator class based on the register type and datatype.
-    class RandomNumberGenerator : public UnaryArithmeticGenerator<Expression::RandomNumber>
+    template <DataType DATATYPE>
+    class BitFieldExtractGenerator : public UnaryArithmeticGenerator<Expression::BitFieldExtract>
     {
     public:
-        RandomNumberGenerator(ContextPtr c)
-            : UnaryArithmeticGenerator<Expression::RandomNumber>(c)
+        BitFieldExtractGenerator(ContextPtr c)
+            : UnaryArithmeticGenerator<Expression::BitFieldExtract>(c)
         {
         }
 
@@ -29,7 +28,8 @@ namespace rocRoller
             DataType       dataType;
 
             std::tie(ctx, registerType, dataType) = arg;
-            return true;
+
+            return dataType == DATATYPE;
         }
 
         // Build function required by Component system to return the generator.
@@ -38,13 +38,13 @@ namespace rocRoller
             if(!Match(arg))
                 return nullptr;
 
-            return std::make_shared<RandomNumberGenerator>(std::get<0>(arg));
+            return std::make_shared<BitFieldExtractGenerator>(std::get<0>(arg));
         }
 
         // Method to generate instructions
-        Generator<Instruction> generate(Register::ValuePtr dst,
-                                        Register::ValuePtr arg,
-                                        Expression::RandomNumber const&);
+        Generator<Instruction> generate(Register::ValuePtr                 dst,
+                                        Register::ValuePtr                 arg,
+                                        Expression::BitFieldExtract const& expr);
 
         static const std::string Name;
     };

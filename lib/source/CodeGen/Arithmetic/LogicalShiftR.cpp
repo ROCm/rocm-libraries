@@ -10,7 +10,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::LogicalShiftR>>
         GetGenerator<Expression::LogicalShiftR>(Register::ValuePtr dst,
                                                 Register::ValuePtr lhs,
-                                                Register::ValuePtr rhs)
+                                                Register::ValuePtr rhs,
+                                                Expression::LogicalShiftR const&)
     {
         return Component::Get<BinaryArithmeticGenerator<Expression::LogicalShiftR>>(
             getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);
@@ -18,7 +19,8 @@ namespace rocRoller
 
     Generator<Instruction> LogicalShiftRGenerator::generate(Register::ValuePtr dest,
                                                             Register::ValuePtr value,
-                                                            Register::ValuePtr shiftAmount)
+                                                            Register::ValuePtr shiftAmount,
+                                                            Expression::LogicalShiftR const&)
     {
         AssertFatal(value != nullptr);
         AssertFatal(shiftAmount != nullptr);

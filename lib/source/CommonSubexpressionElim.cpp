@@ -234,7 +234,8 @@ namespace rocRoller
                     std::make_shared<Expression>(Expr{
                         canUseAsReg(tree.back()) ? tree.back().reg->expression() : tree.back().expr,
                         getComment(expr),
-                    }),
+                    }
+                                                     .copyParams(expr)),
                     deps,
                     tree.back().consolidationCount,
                 });
@@ -280,7 +281,8 @@ namespace rocRoller
                         canUseAsReg(tree.at(rhsLoc)) ? tree.at(rhsLoc).reg->expression()
                                                      : tree.at(rhsLoc).expr,
                         getComment(expr),
-                    }),
+                    }
+                                                     .copyParams(expr)),
                     deps,
                     consolidationCount,
                 });
@@ -339,7 +341,8 @@ namespace rocRoller
                                                       : tree.at(r1hsLoc).expr,
                         canUseAsReg(tree.at(r2hsLoc)) ? tree.at(r2hsLoc).reg->expression()
                                                       : tree.at(r2hsLoc).expr,
-                    }),
+                    }
+                                                     .copyParams(expr)),
                     deps,
                     consolidationCount,
                 });

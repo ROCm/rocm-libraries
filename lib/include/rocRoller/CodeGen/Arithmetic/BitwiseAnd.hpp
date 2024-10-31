@@ -10,7 +10,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::BitwiseAnd>>
         GetGenerator<Expression::BitwiseAnd>(Register::ValuePtr dst,
                                              Register::ValuePtr lhs,
-                                             Register::ValuePtr rhs);
+                                             Register::ValuePtr rhs,
+                                             Expression::BitwiseAnd const&);
 
     // Generator for all register types and datatypes.
     class BitwiseAndGenerator : public BinaryArithmeticGenerator<Expression::BitwiseAnd>
@@ -44,8 +45,10 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction>
-            generate(Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Generator<Instruction> generate(Register::ValuePtr dest,
+                                        Register::ValuePtr lhs,
+                                        Register::ValuePtr rhs,
+                                        Expression::BitwiseAnd const&);
 
         static const std::string Name;
     };

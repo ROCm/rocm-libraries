@@ -10,7 +10,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::BitwiseXor>>
         GetGenerator<Expression::BitwiseXor>(Register::ValuePtr dst,
                                              Register::ValuePtr lhs,
-                                             Register::ValuePtr rhs)
+                                             Register::ValuePtr rhs,
+                                             Expression::BitwiseXor const&)
     {
         return Component::Get<BinaryArithmeticGenerator<Expression::BitwiseXor>>(
             getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);
@@ -18,7 +19,8 @@ namespace rocRoller
 
     Generator<Instruction> BitwiseXorGenerator::generate(Register::ValuePtr dest,
                                                          Register::ValuePtr lhs,
-                                                         Register::ValuePtr rhs)
+                                                         Register::ValuePtr rhs,
+                                                         Expression::BitwiseXor const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

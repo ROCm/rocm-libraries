@@ -993,12 +993,15 @@ namespace rocRoller
     DeclareEnumTypeInfo(BF8, BF8);
     DeclareEnumTypeInfo(BF8x4, BF8x4);
     DeclareEnumTypeInfo(Int8x4, Int8x4);
+    DeclareEnumTypeInfo(Int8, int8_t);
+    DeclareEnumTypeInfo(Int16, int16_t);
     DeclareEnumTypeInfo(Int32, int32_t);
     DeclareEnumTypeInfo(Int64, int64_t);
     DeclareEnumTypeInfo(BFloat16, BFloat16);
     DeclareEnumTypeInfo(BFloat16x2, BFloat16x2);
-    DeclareEnumTypeInfo(Int8, int8_t);
     DeclareEnumTypeInfo(Raw32, Raw32);
+    DeclareEnumTypeInfo(UInt8, uint8_t);
+    DeclareEnumTypeInfo(UInt16, uint16_t);
     DeclareEnumTypeInfo(UInt32, uint32_t);
     DeclareEnumTypeInfo(UInt64, uint64_t);
     DeclareEnumTypeInfo(Bool, bool);
@@ -1025,6 +1028,10 @@ namespace rocRoller
             TypeInfo<T>::Name()
             } -> std::convertible_to<std::string>;
     };
+
+    template <CArithmeticType T>
+    using similar_integral_type = typename EnumTypeInfo<getIntegerType(
+        std::is_signed_v<T>&& std::is_integral_v<T>, sizeof(T))>::Type;
 
     /**
      * @}

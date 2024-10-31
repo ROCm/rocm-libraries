@@ -7,8 +7,8 @@ namespace rocRoller
 
     // GetGenerator function will return the Generator to use based on the provided arguments.
     template <>
-    std::shared_ptr<UnaryArithmeticGenerator<Expression::Negate>>
-        GetGenerator<Expression::Negate>(Register::ValuePtr dst, Register::ValuePtr arg);
+    std::shared_ptr<UnaryArithmeticGenerator<Expression::Negate>> GetGenerator<Expression::Negate>(
+        Register::ValuePtr dst, Register::ValuePtr arg, Expression::Negate const&);
 
     // Templated Generator class based on the return type.
     class NegateGenerator : public UnaryArithmeticGenerator<Expression::Negate>
@@ -44,7 +44,8 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg);
+        Generator<Instruction>
+            generate(Register::ValuePtr dst, Register::ValuePtr arg, Expression::Negate const&);
 
         static const std::string Name;
     };

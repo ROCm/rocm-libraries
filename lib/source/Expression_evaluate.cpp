@@ -743,6 +743,11 @@ namespace rocRoller
                 return evaluator.call(arg);
             }
 
+            CommandArgumentValue operator()(BitFieldExtract const& expr)
+            {
+                throw std::runtime_error("BitFieldExtract present in runtime expression.");
+            }
+
             CommandArgumentValue operator()(MatrixMultiply const& expr)
             {
                 throw std::runtime_error("Matrix multiply present in runtime expression.");

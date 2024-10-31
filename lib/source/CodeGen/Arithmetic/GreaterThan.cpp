@@ -21,7 +21,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::GreaterThan>>
         GetGenerator<Expression::GreaterThan>(Register::ValuePtr dst,
                                               Register::ValuePtr lhs,
-                                              Register::ValuePtr rhs)
+                                              Register::ValuePtr rhs,
+                                              Expression::GreaterThan const&)
     {
         // Choose the proper generator, based on the context, register type
         // and datatype.
@@ -33,7 +34,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Scalar, DataType::Int32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -55,7 +59,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Scalar, DataType::UInt32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -77,7 +84,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::Int32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -87,7 +97,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::UInt32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -97,7 +110,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Scalar, DataType::Int64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -107,7 +123,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Scalar, DataType::UInt64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -117,7 +136,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::Int64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -127,7 +149,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::UInt64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -137,7 +162,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::Float>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -147,7 +175,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> GreaterThanGenerator<Register::Type::Vector, DataType::Double>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::GreaterThan const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

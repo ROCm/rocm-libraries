@@ -53,6 +53,8 @@ namespace rocRoller
 
         struct RandomNumber;
 
+        struct BitFieldExtract;
+
         struct AddShiftL;
         struct ShiftLAdd;
         struct Conditional;
@@ -99,6 +101,7 @@ namespace rocRoller
             Exponential2,
             Exponential,
             RandomNumber,
+            BitFieldExtract,
 
             // --- Ternary Operations ---
             AddShiftL,

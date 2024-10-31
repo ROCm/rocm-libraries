@@ -11,7 +11,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::MultiplyHigh>>
         GetGenerator<Expression::MultiplyHigh>(Register::ValuePtr dst,
                                                Register::ValuePtr lhs,
-                                               Register::ValuePtr rhs)
+                                               Register::ValuePtr rhs,
+                                               Expression::MultiplyHigh const&)
     {
         return Component::Get<BinaryArithmeticGenerator<Expression::MultiplyHigh>>(
             getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);
@@ -19,7 +20,8 @@ namespace rocRoller
 
     Generator<Instruction> MultiplyHighGenerator::generate(Register::ValuePtr dest,
                                                            Register::ValuePtr lhs,
-                                                           Register::ValuePtr rhs)
+                                                           Register::ValuePtr rhs,
+                                                           Expression::MultiplyHigh const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

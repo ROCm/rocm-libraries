@@ -78,6 +78,7 @@ namespace rocRoller
             {
                 return concatenate(ExpressionInfo<Expr>::name(), "(", call(expr.arg), ")");
             }
+
             std::string operator()(Register::ValuePtr const& expr) const
             {
                 // This allows an unallocated register value to be rendered into a string which
@@ -229,6 +230,12 @@ namespace rocRoller
                 static_assert(DATATYPE == DataType::FP8 || DATATYPE == DataType::BF8);
                 auto argVal = call(expr.lhs);
                 return {argVal.regType, DATATYPE};
+            }
+
+            ResultType operator()(BitFieldExtract const& expr)
+            {
+                auto argVal = call(expr.arg);
+                return {argVal.regType, expr.outputDataType};
             }
 
             template <typename T>

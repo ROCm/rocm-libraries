@@ -8,14 +8,17 @@ namespace rocRoller
 
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::BitwiseNegate>>
-        GetGenerator<Expression::BitwiseNegate>(Register::ValuePtr dst, Register::ValuePtr arg)
+        GetGenerator<Expression::BitwiseNegate>(Register::ValuePtr dst,
+                                                Register::ValuePtr arg,
+                                                Expression::BitwiseNegate const&)
     {
         return Component::Get<UnaryArithmeticGenerator<Expression::BitwiseNegate>>(
             getContextFromValues(dst, arg), dst->regType(), dst->variableType().dataType);
     }
 
     Generator<Instruction> BitwiseNegateGenerator::generate(Register::ValuePtr dest,
-                                                            Register::ValuePtr arg)
+                                                            Register::ValuePtr arg,
+                                                            Expression::BitwiseNegate const&)
     {
         AssertFatal(arg != nullptr);
         AssertFatal(dest != nullptr);
