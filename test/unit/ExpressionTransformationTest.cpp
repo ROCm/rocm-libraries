@@ -258,7 +258,7 @@ TEST_F(ExpressionTransformationTest, RandomNumberTransformation)
     auto seedExpr = seed->expression();
 
     auto expr = std::make_shared<Expression::Expression>(Expression::RandomNumber{seedExpr});
-    EXPECT_EQ(Expression::toString(lowerPRNG(expr)),
+    EXPECT_EQ(Expression::toString(lowerPRNG(expr, m_context)),
               "Conditional(Equal(BitwiseAnd(LogicalShiftR(v0:I, 31j), 1j), 1j), BitwiseXor(197j, "
               "ShiftL(v0:I, 1j)), ShiftL(v0:I, 1j))");
 }

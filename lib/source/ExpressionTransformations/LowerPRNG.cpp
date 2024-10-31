@@ -122,8 +122,11 @@ namespace rocRoller
         /**
          *  Replace RandomNumber expression with equivalent expressions
          */
-        ExpressionPtr lowerPRNG(ExpressionPtr expr)
+        ExpressionPtr lowerPRNG(ExpressionPtr expr, ContextPtr cxt)
         {
+            if(cxt->targetArchitecture().HasCapability(GPUCapability::HasPRNG))
+                return expr;
+
             auto visitor = LowerPRNGExpressionVisitor();
             return visitor.call(expr);
         }

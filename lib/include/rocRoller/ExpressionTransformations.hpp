@@ -116,8 +116,9 @@ namespace rocRoller
          *        implement the PRNG algorithm when PRNG instruction is unavailable.
          *
          * @param expr Input expression
+     * @param context
          * @return ExpressionPtr Transformed expression
          */
-        ExpressionPtr lowerPRNG(ExpressionPtr exp);
+        ExpressionPtr lowerPRNG(ExpressionPtr exp, ContextPtr context);
     }
 }

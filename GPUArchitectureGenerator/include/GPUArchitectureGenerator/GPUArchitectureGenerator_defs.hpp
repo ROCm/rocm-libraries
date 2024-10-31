@@ -170,6 +170,14 @@ namespace GPUArchitectureGenerator
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942,
                                                  {.sramecc = true}},
             }},
+           {rocRoller::GPUCapability::HasPRNG,
+            {
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.xnack = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950,
+                                                 {.sramecc = true}},
+            }},
            {rocRoller::GPUCapability::HasWave64,
             std::vector<rocRoller::GPUArchitectureTarget>(
                 rocRoller::SupportedArchitectures.begin(),
@@ -1085,6 +1093,7 @@ namespace GPUArchitectureGenerator
                                                {rocRoller::GPUWaitQueueType::LGKMDSQueue},
                                                8,
                                                (1 << 16) - 1),
+                 rocRoller::GPUInstructionInfo("v_prng_b32", 0, {}, 1),
              }},
             {gfx9ISAs(),
              {

@@ -101,6 +101,8 @@ namespace rocRoller
             HasDSReadTransposeB6,
             HasDSReadTransposeB4,
 
+            HasPRNG,
+
             Count,
         };
 
