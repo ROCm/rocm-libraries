@@ -337,7 +337,7 @@ __device__ unsigned int get_width() noexcept {
         unlockActiveWorkNode(current);
     return width;
 }
-__device__ unsigned int get_lane_id() noexcept {
+__device__ unsigned int get_fiber_id() noexcept {
     using namespace internal;
     return threadIdx.x;
 }
