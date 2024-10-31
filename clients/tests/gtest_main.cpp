@@ -23,6 +23,7 @@
 ///
 
 #include <chrono>
+#include <fcntl.h>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -162,23 +163,72 @@ system_memory get_system_memory()
 
 system_memory start_memory = get_system_memory();
 
+void init_gtest_flags()
+{
+    // HACK: gtest maintains a "should run" flag on each test case,
+    // but only sets it during RUN_ALL_TESTS.  Precompiling should
+    // ideally only happen for the test cases that would actually
+    // run.
+    //
+    // So call RUN_ALL_TESTS once with the "list tests" temporarily set
+    // to true, to initialize all of that.
+    //
+    // gtest will then print all of the test cases to stdout.
+    // Temporarily redirect stdout to /dev/null as well.
+    bool temp_list_tests = true;
+
+    std::swap(temp_list_tests, testing::GTEST_FLAG(list_tests));
+
+    // move stdout to devnull
+#ifdef WIN32
+    int stdout_fd   = _fileno(stdout);
+    int devnull     = _open("NUL", _O_WRONLY);
+    int stdout_copy = _dup(stdout_fd);
+    _dup2(devnull, stdout_fd);
+#else
+    int stdout_fd   = STDOUT_FILENO;
+    int devnull     = open("/dev/null", O_WRONLY);
+    int stdout_copy = dup(stdout_fd);
+    dup2(devnull, stdout_fd);
+#endif
+
+    (void)RUN_ALL_TESTS();
+
+    // put stdout back
+#ifdef WIN32
+    _dup2(stdout_copy, stdout_fd);
+    _close(stdout_copy);
+    _close(devnull);
+#else
+    dup2(stdout_copy, stdout_fd);
+    close(stdout_copy);
+    close(devnull);
+#endif
+
+    std::swap(temp_list_tests, testing::GTEST_FLAG(list_tests));
+}
+
 void precompile_test_kernels(const std::string& precompile_file)
 {
     std::cout << "precompiling test kernels...\n";
     WorkQueue<std::string> tokenQueue;
+
+    init_gtest_flags();
 
     std::vector<std::string> tokens;
     auto                     ut = testing::UnitTest::GetInstance();
     for(int ts_index = 0; ts_index < ut->total_test_suite_count(); ++ts_index)
     {
         const auto ts = ut->GetTestSuite(ts_index);
-        // skip disabled suites
-        if(strncmp(ts->name(), "DISABLED", 8) == 0)
-            continue;
         for(int ti_index = 0; ti_index < ts->total_test_count(); ++ti_index)
         {
             const auto  ti   = ts->GetTestInfo(ti_index);
             std::string name = ti->name();
+
+            // only precompile test cases that will run
+            if(!ti->should_run())
+                continue;
+
             // only care about accuracy tests
             if(name.find("vs_fftw/") != std::string::npos)
             {
