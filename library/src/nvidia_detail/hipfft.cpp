@@ -231,27 +231,45 @@ static cufftXtCopyType hipfftXtCopyTypeTocufftXtCopyType(hipfftXtCopyType t)
 }
 
 hipfftResult hipfftPlan1d(hipfftHandle* plan, int nx, hipfftType type, int batch)
+try
 {
     return cufftResultToHipResult(cufftPlan1d(plan, nx, hipfftTypeToCufftType(type), batch));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftPlan2d(hipfftHandle* plan, int nx, int ny, hipfftType type)
+try
 {
     return cufftResultToHipResult(cufftPlan2d(plan, nx, ny, hipfftTypeToCufftType(type)));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftPlan3d(hipfftHandle* plan, int nx, int ny, int nz, hipfftType type)
+try
 {
-    auto cufftret = CUFFT_SUCCESS;
-    try
-    {
-        cufftret = cufftPlan3d(plan, nx, ny, nz, hipfftTypeToCufftType(type));
-    }
-    catch(hipfftResult e)
-    {
-        return e;
-    }
-    return cufftResultToHipResult(cufftret);
+    return cufftResultToHipResult(cufftPlan3d(plan, nx, ny, nz, hipfftTypeToCufftType(type)));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftPlanMany(hipfftHandle* plan,
@@ -265,6 +283,7 @@ hipfftResult hipfftPlanMany(hipfftHandle* plan,
                             int           odist,
                             hipfftType    type,
                             int           batch)
+try
 {
     if((inembed == nullptr) != (onembed == nullptr))
     {
@@ -273,33 +292,43 @@ hipfftResult hipfftPlanMany(hipfftHandle* plan,
     else
     {
         auto cufftret = CUFFT_SUCCESS;
-        try
-        {
-            cufftret = cufftPlanMany(plan,
-                                     rank,
-                                     n,
-                                     inembed,
-                                     istride,
-                                     idist,
-                                     onembed,
-                                     ostride,
-                                     odist,
-                                     hipfftTypeToCufftType(type),
-                                     batch);
-        }
-        catch(hipfftResult e)
-        {
-            return e;
-        }
+        cufftret      = cufftPlanMany(plan,
+                                 rank,
+                                 n,
+                                 inembed,
+                                 istride,
+                                 idist,
+                                 onembed,
+                                 ostride,
+                                 odist,
+                                 hipfftTypeToCufftType(type),
+                                 batch);
         return cufftResultToHipResult(cufftret);
     }
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 /*===========================================================================*/
 
 hipfftResult hipfftCreate(hipfftHandle* plan)
+try
 {
     return cufftResultToHipResult(cufftCreate(plan));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftExtPlanScaleFactor(hipfftHandle plan, double scalefactor)
@@ -309,22 +338,49 @@ hipfftResult hipfftExtPlanScaleFactor(hipfftHandle plan, double scalefactor)
 
 hipfftResult
     hipfftMakePlan1d(hipfftHandle plan, int nx, hipfftType type, int batch, size_t* workSize)
+try
 {
     return cufftResultToHipResult(
         cufftMakePlan1d(plan, nx, hipfftTypeToCufftType(type), batch, workSize));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftMakePlan2d(hipfftHandle plan, int nx, int ny, hipfftType type, size_t* workSize)
+try
 {
     return cufftResultToHipResult(
         cufftMakePlan2d(plan, nx, ny, hipfftTypeToCufftType(type), workSize));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult
     hipfftMakePlan3d(hipfftHandle plan, int nx, int ny, int nz, hipfftType type, size_t* workSize)
+try
 {
     return cufftResultToHipResult(
         cufftMakePlan3d(plan, nx, ny, nz, hipfftTypeToCufftType(type), workSize));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftMakePlanMany(hipfftHandle plan,
@@ -339,31 +395,33 @@ hipfftResult hipfftMakePlanMany(hipfftHandle plan,
                                 hipfftType   type,
                                 int          batch,
                                 size_t*      workSize)
+try
 {
     if((inembed == nullptr) != (onembed == nullptr))
         return HIPFFT_INVALID_VALUE;
 
     auto cufftret = CUFFT_SUCCESS;
-    try
-    {
-        cufftret = cufftMakePlanMany(plan,
-                                     rank,
-                                     n,
-                                     inembed,
-                                     istride,
-                                     idist,
-                                     onembed,
-                                     ostride,
-                                     odist,
-                                     hipfftTypeToCufftType(type),
-                                     batch,
-                                     workSize);
-    }
-    catch(hipfftResult e)
-    {
-        return e;
-    }
+    cufftret      = cufftMakePlanMany(plan,
+                                 rank,
+                                 n,
+                                 inembed,
+                                 istride,
+                                 idist,
+                                 onembed,
+                                 ostride,
+                                 odist,
+                                 hipfftTypeToCufftType(type),
+                                 batch,
+                                 workSize);
     return cufftResultToHipResult(cufftret);
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftMakePlanMany64(hipfftHandle   plan,
@@ -378,6 +436,7 @@ hipfftResult hipfftMakePlanMany64(hipfftHandle   plan,
                                   hipfftType     type,
                                   long long int  batch,
                                   size_t*        workSize)
+try
 {
     return cufftResultToHipResult(cufftMakePlanMany64(plan,
                                                       rank,
@@ -392,24 +451,59 @@ hipfftResult hipfftMakePlanMany64(hipfftHandle   plan,
                                                       batch,
                                                       workSize));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 /*===========================================================================*/
 
 hipfftResult hipfftEstimate1d(int nx, hipfftType type, int batch, size_t* workSize)
+try
 {
     return cufftResultToHipResult(
         cufftEstimate1d(nx, hipfftTypeToCufftType(type), batch, workSize));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftEstimate2d(int nx, int ny, hipfftType type, size_t* workSize)
+try
 {
     return cufftResultToHipResult(cufftEstimate2d(nx, ny, hipfftTypeToCufftType(type), workSize));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftEstimate3d(int nx, int ny, int nz, hipfftType type, size_t* workSize)
+try
 {
     return cufftResultToHipResult(
         cufftEstimate3d(nx, ny, nz, hipfftTypeToCufftType(type), workSize));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftEstimateMany(int        rank,
@@ -423,6 +517,7 @@ hipfftResult hipfftEstimateMany(int        rank,
                                 hipfftType type,
                                 int        batch,
                                 size_t*    workSize)
+try
 {
     return cufftResultToHipResult(cufftEstimateMany(rank,
                                                     n,
@@ -436,27 +531,62 @@ hipfftResult hipfftEstimateMany(int        rank,
                                                     batch,
                                                     workSize));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 /*===========================================================================*/
 
 hipfftResult
     hipfftGetSize1d(hipfftHandle plan, int nx, hipfftType type, int batch, size_t* workSize)
+try
 {
     return cufftResultToHipResult(
         cufftGetSize1d(plan, nx, hipfftTypeToCufftType(type), batch, workSize));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftGetSize2d(hipfftHandle plan, int nx, int ny, hipfftType type, size_t* workSize)
+try
 {
     return cufftResultToHipResult(
         cufftGetSize2d(plan, nx, ny, hipfftTypeToCufftType(type), workSize));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult
     hipfftGetSize3d(hipfftHandle plan, int nx, int ny, int nz, hipfftType type, size_t* workSize)
+try
 {
     return cufftResultToHipResult(
         cufftGetSize3d(plan, nx, ny, nz, hipfftTypeToCufftType(type), workSize));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftGetSizeMany(hipfftHandle plan,
@@ -471,6 +601,7 @@ hipfftResult hipfftGetSizeMany(hipfftHandle plan,
                                hipfftType   type,
                                int          batch,
                                size_t*      workSize)
+try
 {
     return cufftResultToHipResult(cufftGetSizeMany(plan,
                                                    rank,
@@ -485,6 +616,14 @@ hipfftResult hipfftGetSizeMany(hipfftHandle plan,
                                                    batch,
                                                    workSize));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftGetSizeMany64(hipfftHandle   plan,
                                  int            rank,
@@ -498,6 +637,7 @@ hipfftResult hipfftGetSizeMany64(hipfftHandle   plan,
                                  hipfftType     type,
                                  long long int  batch,
                                  size_t*        workSize)
+try
 {
     return cufftResultToHipResult(cufftGetSizeMany64(plan,
                                                      rank,
@@ -512,103 +652,255 @@ hipfftResult hipfftGetSizeMany64(hipfftHandle   plan,
                                                      batch,
                                                      workSize));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftGetSize(hipfftHandle plan, size_t* workSize)
+try
 {
     return cufftResultToHipResult(cufftGetSize(plan, workSize));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 /*===========================================================================*/
 
 hipfftResult hipfftSetAutoAllocation(hipfftHandle plan, int autoAllocate)
+try
 {
     return cufftResultToHipResult(cufftSetAutoAllocation(plan, autoAllocate));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftSetWorkArea(hipfftHandle plan, void* workArea)
+try
 {
     return cufftResultToHipResult(cufftSetWorkArea(plan, workArea));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 /*===========================================================================*/
 
 hipfftResult
     hipfftExecC2C(hipfftHandle plan, hipfftComplex* idata, hipfftComplex* odata, int direction)
+try
 {
     return cufftResultToHipResult(cufftExecC2C(plan, idata, odata, direction));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftExecR2C(hipfftHandle plan, hipfftReal* idata, hipfftComplex* odata)
+try
 {
     return cufftResultToHipResult(cufftExecR2C(plan, idata, odata));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftExecC2R(hipfftHandle plan, hipfftComplex* idata, hipfftReal* odata)
+try
 {
     return cufftResultToHipResult(cufftExecC2R(plan, idata, odata));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftExecZ2Z(hipfftHandle         plan,
                            hipfftDoubleComplex* idata,
                            hipfftDoubleComplex* odata,
                            int                  direction)
+try
 {
     return cufftResultToHipResult(cufftExecZ2Z(plan, idata, odata, direction));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftExecD2Z(hipfftHandle plan, hipfftDoubleReal* idata, hipfftDoubleComplex* odata)
+try
 {
     return cufftResultToHipResult(cufftExecD2Z(plan, idata, odata));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftExecZ2D(hipfftHandle plan, hipfftDoubleComplex* idata, hipfftDoubleReal* odata)
+try
 {
     return cufftResultToHipResult(cufftExecZ2D(plan, idata, odata));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 /*===========================================================================*/
 
 hipfftResult hipfftSetStream(hipfftHandle plan, hipStream_t stream)
+try
 {
     return cufftResultToHipResult(cufftSetStream(plan, stream));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftDestroy(hipfftHandle plan)
+try
 {
     return cufftResultToHipResult(cufftDestroy(plan));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftGetVersion(int* version)
+try
 {
     return cufftResultToHipResult(cufftGetVersion(version));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftGetProperty(hipfftLibraryPropertyType type, int* value)
+try
 {
     return cufftResultToHipResult(
         cufftGetProperty(hipfftLibraryPropertyTypeToCufftLibraryPropertyType(type), value));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftXtSetCallback(hipfftHandle         plan,
                                  void**               callbacks,
                                  hipfftXtCallbackType cbtype,
                                  void**               callbackData)
+try
 {
     return cufftResultToHipResult(cufftXtSetCallback(
         plan, callbacks, hipfftCallbackTypeToCufftCallbackType(cbtype), callbackData));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftXtClearCallback(hipfftHandle plan, hipfftXtCallbackType cbtype)
+try
 {
     return cufftResultToHipResult(
         cufftXtClearCallback(plan, hipfftCallbackTypeToCufftCallbackType(cbtype)));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult
     hipfftXtSetCallbackSharedSize(hipfftHandle plan, hipfftXtCallbackType cbtype, size_t sharedSize)
+try
 {
     return cufftResultToHipResult(cufftXtSetCallbackSharedSize(
         plan, hipfftCallbackTypeToCufftCallbackType(cbtype), sharedSize));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftXtMakePlanMany(hipfftHandle   plan,
@@ -625,6 +917,7 @@ hipfftResult hipfftXtMakePlanMany(hipfftHandle   plan,
                                   long long int  batch,
                                   size_t*        workSize,
                                   hipDataType    executiontype)
+try
 {
     return cufftResultToHipResult(cufftXtMakePlanMany(plan,
                                                       rank,
@@ -641,6 +934,14 @@ hipfftResult hipfftXtMakePlanMany(hipfftHandle   plan,
                                                       workSize,
                                                       executiontype));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftXtGetSizeMany(hipfftHandle   plan,
                                  int            rank,
@@ -656,6 +957,7 @@ hipfftResult hipfftXtGetSizeMany(hipfftHandle   plan,
                                  long long int  batch,
                                  size_t*        workSize,
                                  hipDataType    executiontype)
+try
 {
     return cufftResultToHipResult(cufftXtGetSizeMany(plan,
                                                      rank,
@@ -672,55 +974,94 @@ hipfftResult hipfftXtGetSizeMany(hipfftHandle   plan,
                                                      workSize,
                                                      executiontype));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftXtExec(hipfftHandle plan, void* input, void* output, int direction)
+try
 {
     return cufftResultToHipResult(cufftXtExec(plan, input, output, direction));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftXtSetGPUs(hipfftHandle plan, int count, int* gpus)
+try
 {
     return cufftResultToHipResult(cufftXtSetGPUs(plan, count, gpus));
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftXtMalloc(hipfftHandle plan, hipLibXtDesc** desc, hipfftXtSubFormat format)
+try
 {
-    try
-    {
-        auto cufftret = cufftXtMalloc(plan,
-                                      reinterpret_cast<cudaLibXtDesc**>(desc),
-                                      hipfftXtSubFormatTocufftXtSubFormat(format));
-        return cufftResultToHipResult(cufftret);
-    }
-    catch(hipfftResult e)
-    {
-        return e;
-    }
+    auto cufftret = cufftXtMalloc(
+        plan, reinterpret_cast<cudaLibXtDesc**>(desc), hipfftXtSubFormatTocufftXtSubFormat(format));
+    return cufftResultToHipResult(cufftret);
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src, hipfftXtCopyType type)
+try
 {
-    try
-    {
-        auto cufftret = cufftXtMemcpy(plan, dest, src, hipfftXtCopyTypeTocufftXtCopyType(type));
-        return cufftResultToHipResult(cufftret);
-    }
-    catch(hipfftResult e)
-    {
-        return e;
-    }
+    auto cufftret = cufftXtMemcpy(plan, dest, src, hipfftXtCopyTypeTocufftXtCopyType(type));
+    return cufftResultToHipResult(cufftret);
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftXtFree(hipLibXtDesc* desc)
+try
 {
     auto cufftret = cufftXtFree(reinterpret_cast<cudaLibXtDesc*>(desc));
     return cufftResultToHipResult(cufftret);
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
                                        hipLibXtDesc* input,
                                        hipLibXtDesc* output,
                                        int           direction)
+try
 {
     auto cufftret = cufftXtExecDescriptorC2C(plan,
                                              reinterpret_cast<cudaLibXtDesc*>(input),
@@ -728,25 +1069,52 @@ hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
                                              direction);
     return cufftResultToHipResult(cufftret);
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
+try
 {
     auto cufftret = cufftXtExecDescriptorR2C(
         plan, reinterpret_cast<cudaLibXtDesc*>(input), reinterpret_cast<cudaLibXtDesc*>(output));
     return cufftResultToHipResult(cufftret);
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
+try
 {
     auto cufftret = cufftXtExecDescriptorC2R(
         plan, reinterpret_cast<cudaLibXtDesc*>(input), reinterpret_cast<cudaLibXtDesc*>(output));
     return cufftResultToHipResult(cufftret);
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
                                        hipLibXtDesc* input,
                                        hipLibXtDesc* output,
                                        int           direction)
+try
 {
     auto cufftret = cufftXtExecDescriptorZ2Z(plan,
                                              reinterpret_cast<cudaLibXtDesc*>(input),
@@ -754,29 +1122,64 @@ hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
                                              direction);
     return cufftResultToHipResult(cufftret);
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
+try
 {
     auto cufftret = cufftXtExecDescriptorD2Z(
         plan, reinterpret_cast<cudaLibXtDesc*>(input), reinterpret_cast<cudaLibXtDesc*>(output));
     return cufftResultToHipResult(cufftret);
 }
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
 
 hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
+try
 {
     auto cufftret = cufftXtExecDescriptorZ2D(
         plan, reinterpret_cast<cudaLibXtDesc*>(input), reinterpret_cast<cudaLibXtDesc*>(output));
     return cufftResultToHipResult(cufftret);
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
 
 hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,
                                     hipLibXtDesc* input,
                                     hipLibXtDesc* output,
                                     int           direction)
+try
 {
     auto cufftret = cufftXtExecDescriptor(plan,
                                           reinterpret_cast<cudaLibXtDesc*>(input),
                                           reinterpret_cast<cudaLibXtDesc*>(output),
                                           direction);
     return cufftResultToHipResult(cufftret);
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
 }
