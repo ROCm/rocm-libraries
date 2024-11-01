@@ -180,4 +180,5 @@ TEST(RocprimDiscardIteratorTests, ReduceByKey)
     HIP_CHECK(hipFree(d_keys_input));
     HIP_CHECK(hipFree(d_values_input));
     HIP_CHECK(hipFree(d_aggregates_output));
+    HIP_CHECK(hipFree(d_temporary_storage));
 }

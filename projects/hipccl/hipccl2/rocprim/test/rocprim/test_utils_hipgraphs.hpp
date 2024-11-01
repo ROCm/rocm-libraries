@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+
 #ifndef ROCPRIM_TEST_UTILS_HIPGRAPHS_HPP
 #define ROCPRIM_TEST_UTILS_HIPGRAPHS_HPP
 
@@ -27,65 +28,65 @@
 
 // Helper functions for testing with hipGraph stream capture.
 // Note: graphs will not work on the default stream.
+    
 namespace test_utils
 {
-    
-inline hipGraph_t createGraphHelper(hipStream_t& stream, const bool beginCapture=true)
-{
-    // Create a new graph
-    hipGraph_t graph;
-    HIP_CHECK(hipGraphCreate(&graph, 0));
+    class GraphHelper{
+        private:
+            hipGraph_t graph;
+            hipGraphExec_t graph_instance;
+        public:
 
-    // Optionally begin stream capture
-    if (beginCapture)
-        HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+            inline void startStreamCapture(hipStream_t & stream){
+                HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+            }
 
-    return graph;
-}
+            inline void endStreamCapture(hipStream_t & stream){
+                HIP_CHECK(hipStreamEndCapture(stream, &graph));
+            }
+            
+            inline void createGraph(){
+                HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
+            }
 
-inline void cleanupGraphHelper(hipGraph_t& graph, hipGraphExec_t& instance)
-{
-    HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK(hipGraphExecDestroy(instance));
-}
+            inline void launchGraph(hipStream_t & stream, const bool sync=false){
+                HIP_CHECK(hipGraphLaunch(graph_instance, stream));
 
-inline void resetGraphHelper(hipGraph_t& graph, hipGraphExec_t& instance, hipStream_t& stream, const bool beginCapture=true)
-{
-    // Destroy the old graph and instance
-    cleanupGraphHelper(graph, instance);
+                if (sync)
+                    HIP_CHECK(hipStreamSynchronize(stream));
+            }
 
-    // Create a new graph and optionally begin capture
-    graph = createGraphHelper(stream, beginCapture);
-}
+            inline void createAndLaunchGraph(hipStream_t & stream, const bool launchGraph=true, const bool sync=true){
+                
+                endStreamCapture(stream);
+                
+                HIP_CHECK(hipGraphInstantiate(&graph_instance, graph, nullptr, nullptr, 0));
 
-inline hipGraphExec_t endCaptureGraphHelper(hipGraph_t& graph, hipStream_t& stream, const bool launchGraph=false, const bool sync=false)
-{
-    // End the capture
-    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+                // Optionally launch the graph
+                if (launchGraph)
+                    HIP_CHECK(hipGraphLaunch(graph_instance, stream));
 
-    // Instantiate the graph
-    hipGraphExec_t instance;
-    HIP_CHECK(hipGraphInstantiate(&instance, graph, nullptr, nullptr, 0));
+                // Optionally synchronize the stream when we're done
+                if (sync)
+                    HIP_CHECK(hipStreamSynchronize(stream));
+            }
 
-    // Optionally launch the graph
-    if (launchGraph)
-        HIP_CHECK(hipGraphLaunch(instance, stream));
+            inline void cleanupGraphHelper()
+            {
+                HIP_CHECK(hipGraphDestroy(this->graph));
+                HIP_CHECK(hipGraphExecDestroy(this->graph_instance));
+            }
 
-    // Optionally synchronize the stream when we're done
-    if (sync)
-        HIP_CHECK(hipStreamSynchronize(stream));
+            inline void resetGraphHelper(hipStream_t& stream, const bool beginCapture=true)
+            {
+                // Destroy the old graph and instance
+                cleanupGraphHelper();
 
-    return instance;
-}
+                if(beginCapture)
+                    startStreamCapture(stream);
 
-inline void launchGraphHelper(hipGraphExec_t& instance, hipStream_t& stream, const bool sync=false)
-{
-    HIP_CHECK(hipGraphLaunch(instance, stream));
-
-    // Optionally sync after the launch
-    if (sync)
-        HIP_CHECK(hipStreamSynchronize(stream));
-}
+            }
+    };
 
 } // end namespace test_utils
 

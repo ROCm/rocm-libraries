@@ -296,10 +296,10 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             void * d_temporary_storage;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            hipGraph_t graph;
+            test_utils::GraphHelper gHelper;
             if(TestFixture::params::use_graphs)
             {
-                graph = test_utils::createGraphHelper(stream);
+               gHelper.startStreamCapture(stream);
             }
 
             HIP_CHECK((invoke_reduce_by_key<deterministic, config>(d_temporary_storage,
@@ -315,10 +315,10 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
                                                                    stream,
                                                                    debug_synchronous)));
 
-            hipGraphExec_t graph_instance;
+            
             if(TestFixture::params::use_graphs)
             {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+                gHelper.createAndLaunchGraph(stream);
             }
 
             HIP_CHECK(hipFree(d_temporary_storage));
@@ -356,7 +356,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
             if (TestFixture::params::use_graphs)
             {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
+                gHelper.cleanupGraphHelper();
                 HIP_CHECK(hipStreamDestroy(stream));
             }
 
@@ -443,10 +443,10 @@ void large_indices_reduce_by_key()
         HIP_CHECK(
             test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-        hipGraph_t graph;
+        test_utils::GraphHelper gHelper;
         if(use_graphs)
         {
-            graph = test_utils::createGraphHelper(stream);
+           gHelper.startStreamCapture(stream);
         }
 
         HIP_CHECK(invoke_reduce_by_key<Deterministic>(d_temporary_storage,
@@ -462,10 +462,10 @@ void large_indices_reduce_by_key()
                                                       stream,
                                                       debug_synchronous));
 
-        hipGraphExec_t graph_instance;
+        
         if(use_graphs)
         {
-            graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+            gHelper.createAndLaunchGraph(stream);
         }
 
         HIP_CHECK(hipFree(d_temporary_storage));
@@ -492,7 +492,7 @@ void large_indices_reduce_by_key()
 
         if(use_graphs)
         {
-            test_utils::cleanupGraphHelper(graph, graph_instance);
+            gHelper.cleanupGraphHelper();
         }
 
         ASSERT_EQ(unique_count_output[0], unique_count_expected);
@@ -598,10 +598,10 @@ void large_segment_count_reduce_by_key()
         HIP_CHECK(
             test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-        hipGraph_t graph;
+        test_utils::GraphHelper gHelper;
         if(use_graphs)
         {
-            graph = test_utils::createGraphHelper(stream);
+           gHelper.startStreamCapture(stream);
         }
 
         HIP_CHECK(invoke_reduce_by_key<Deterministic>(d_temporary_storage,
@@ -617,10 +617,10 @@ void large_segment_count_reduce_by_key()
                                                       stream,
                                                       debug_synchronous));
 
-        hipGraphExec_t graph_instance;
+        
         if(use_graphs)
         {
-            graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+            gHelper.createAndLaunchGraph(stream);
         }
 
         HIP_CHECK(hipFree(d_temporary_storage));
@@ -636,7 +636,7 @@ void large_segment_count_reduce_by_key()
         ASSERT_EQ(unique_count_output, unique_count_expected);
 
         if (use_graphs)
-            test_utils::cleanupGraphHelper(graph, graph_instance);
+            gHelper.cleanupGraphHelper();
     }
 
     if (use_graphs)

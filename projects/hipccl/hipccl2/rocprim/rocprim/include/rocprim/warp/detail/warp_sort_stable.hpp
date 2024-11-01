@@ -24,6 +24,7 @@
 #include <type_traits>
 
 #include "../../config.hpp"
+#include "../../detail/merge_path.hpp"
 #include "../../detail/various.hpp"
 
 #include "../../functional.hpp"
@@ -154,14 +155,14 @@ private:
             const auto keys1_merge_begin = keys1_begin + partition;
             const auto keys2_merge_begin = keys2_begin + diag - partition;
 
-            const range_t range = {
+            const range_t<> range{
                 keys1_merge_begin,
                 keys1_end,
                 keys2_merge_begin,
                 keys2_end,
             };
 
-            serial_merge(shared_keys, thread_keys, range, compare_function);
+            serial_merge<false>(shared_keys, thread_keys, range, compare_function);
 
             wave_barrier();
         }
@@ -215,19 +216,19 @@ private:
             const auto keys1_merge_begin = keys1_begin + partition;
             const auto keys2_merge_begin = keys2_begin + diag - partition;
 
-            const range_t range = {
+            const range_t<> range{
                 keys1_merge_begin,
                 keys1_end,
                 keys2_merge_begin,
                 keys2_end,
             };
 
-            serial_merge(shared_keys,
-                         thread_keys,
-                         shared_values,
-                         thread_values,
-                         range,
-                         compare_function);
+            serial_merge<false>(shared_keys,
+                                thread_keys,
+                                shared_values,
+                                thread_values,
+                                range,
+                                compare_function);
 
             wave_barrier();
         }

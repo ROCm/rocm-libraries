@@ -1212,6 +1212,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_inclusive_output));
         HIP_CHECK(hipFree(device_exclusive_output));
+        HIP_CHECK(hipFree(device_output_reductions));
     }
 
 }
