@@ -1,7 +1,6 @@
-==============================================================================
 hipfort: FORTRAN Interfaces for GPU kernels
-==============================================================================
-Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+ 
+Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 [MITx11 License]
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
