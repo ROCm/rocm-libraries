@@ -1,7 +1,6 @@
 # Changelog for hipCUB
 
-Documentation for hipCUB is available at
-[https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
+Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
 ## (Unreleased) hipCUB-x.x.x for ROCm 6.4.0
 
@@ -9,14 +8,14 @@ Documentation for hipCUB is available at
 * Added `ForEach`, `ForEachN`, `ForEachCopy`, `ForEachCopyN` and `Bulk` functions to have parity with CUB.
 * Added the `hipcub::CubVector` type for CUB parity.
 
-## (Unreleased) hipCUB-3.3.0 for ROCm 6.3.0
+## hipCUB-3.3.0 for ROCm 6.3.0
 
 ### Fixed
 
 * Not all headers in hipCUB included `config.hpp` which could have resulted in build errors.
 
 ### Added
-* Add support for large indices in `hipcub::DeviceSegmentedReduce::*`. rocPRIM's backend provides support for all reduce variants, but CUB's does not have support yet for `DeviceSegmentedReduce::Arg*`, so large indices support has been excluded for these as well in hipCUB.
+* Support for large indices in `hipcub::DeviceSegmentedReduce::*` has been added, with the exception of `DeviceSegmentedReduce::Arg*`. Although rocPRIM's backend provides support for all reduce variants, CUB does not support large indices in `DeviceSegmentedReduce::Arg*`. For this reason, large index support is not available for `hipcub::DeviceSegmentedReduce::Arg*`.
 * Add -t smoke option in rtest.py. It will run a subset of tests such that the total test time is in 5 minutes. Use python3 ./rtest.py --test smoke or python3 ./rtest.py -t smoke to execute smoke test.
 * Add inplace overloads of `DeviceScan` functions.
 * Add inplace overloads of `DeviceSelect::Flagged` and `DeviceSelect::If`.
@@ -27,7 +26,11 @@ Documentation for hipCUB is available at
 ### Changed
 * The NVIDIA backend now requires CUB, Thrust and libcu++ 2.4.0. If it is not found it will be downloaded from the NVIDIA CCCL repository.
 
-## (Unreleased) hipCUB-3.2.0 for ROCm 6.2.0
+### Resolved issues
+
+* Fixed an issue where `config.hpp` was not included in all hipCUB headers, resulting in build errors.
+
+## hipCUB-3.2.0 for ROCm 6.2.0
 
 ### Added
 * Add `DeviceCopy` function to have parity with CUB.
