@@ -60,6 +60,8 @@ TEST(RocprimConfigDispatchTests, HostMatchesDevice)
 
     ASSERT_NE(host_arch, target_arch::invalid);
     ASSERT_EQ(host_arch, device_arch);
+
+    HIP_CHECK(hipFree(device_arch_ptr))
 }
 
 TEST(RocprimConfigDispatchTests, ParseCommonArches)

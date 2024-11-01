@@ -268,10 +268,10 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            hipGraph_t graph;
+            test_utils::GraphHelper gHelper;
             if(TestFixture::params::use_graphs)
             {
-                graph = test_utils::createGraphHelper(stream);
+                gHelper.startStreamCapture(stream);
             }
 
             HIP_CHECK(rocprim::segmented_reduce<Config>(
@@ -287,10 +287,10 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
                 stream,
                 debug_synchronous));
 
-            hipGraphExec_t graph_instance;
+            
             if(TestFixture::params::use_graphs)
             {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+                gHelper.createAndLaunchGraph(stream);
             }
 
             HIP_CHECK(hipFree(d_temporary_storage));
@@ -307,7 +307,7 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
 
             if (TestFixture::params::use_graphs)
             {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
+                gHelper.cleanupGraphHelper();
                 HIP_CHECK(hipStreamDestroy(stream));
             }
             SCOPED_TRACE(testing::Message() << "with seed = " << seed);
@@ -413,10 +413,10 @@ void testLargeIndices()
         HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        hipGraph_t graph;
+        test_utils::GraphHelper gHelper;
         if(use_graphs)
         {
-            graph = test_utils::createGraphHelper(stream);
+            gHelper.startStreamCapture(stream);
         }
 
         // Run
@@ -432,10 +432,10 @@ void testLargeIndices()
                                             stream,
                                             debug_synchronous));
 
-        hipGraphExec_t graph_instance;
+        
         if(use_graphs)
         {
-            graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, false);
+            gHelper.createAndLaunchGraph(stream, true, false);
         }
 
         HIP_CHECK(hipGetLastError());
@@ -458,7 +458,7 @@ void testLargeIndices()
 
         if(use_graphs)
         {
-            test_utils::cleanupGraphHelper(graph, graph_instance);
+            gHelper.cleanupGraphHelper();
         }
     }
 

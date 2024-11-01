@@ -106,6 +106,8 @@ void test_reproducibility(S scan_op, F run_test)
     auto second = run_test(eepy_scan_op);
     // We want the result to be bitwise equal, even if the inputs/outputs are floats.
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(first, second));
+
+    HIP_CHECK(hipFree(d_enable_sleep));
 }
 
 template<typename T>
@@ -199,12 +201,12 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, Scan)
                                         d_output,
                                         output.size() * sizeof(T),
                                         hipMemcpyDeviceToHost));
-                    hipFree(d_temp_storage);
+                    HIP_CHECK(hipFree(d_temp_storage));
                     return output;
                 });
 
-            hipFree(d_input);
-            hipFree(d_output);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
         }
     }
 }
@@ -296,12 +298,12 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ScanByKey)
                                         d_output,
                                         output.size() * sizeof(V),
                                         hipMemcpyDeviceToHost));
-                    hipFree(d_temp_storage);
+                    HIP_CHECK(hipFree(d_temp_storage));
                     return output;
                 });
 
-            hipFree(d_input);
-            hipFree(d_output);
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_input));
         }
     }
 }
@@ -409,13 +411,14 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ReduceByKey)
                                         d_output,
                                         output.size() * sizeof(V),
                                         hipMemcpyDeviceToHost));
-                    hipFree(d_temp_storage);
+                    HIP_CHECK(hipFree(d_temp_storage));
                     return output;
                 });
 
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_unique_count_output);
+            HIP_CHECK(hipFree(d_keys));
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_unique_count_output));
         }
     }
 }

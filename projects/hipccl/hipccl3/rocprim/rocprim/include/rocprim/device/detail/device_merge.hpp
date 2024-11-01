@@ -40,17 +40,17 @@ namespace detail
 {
 
 ROCPRIM_DEVICE ROCPRIM_INLINE
-range_t compute_range(const unsigned int id,
-                      const unsigned int size1,
-                      const unsigned int size2,
-                      const unsigned int spacing,
-                      const unsigned int p1,
-                      const unsigned int p2)
+range_t<> compute_range(const unsigned int id,
+                        const unsigned int size1,
+                        const unsigned int size2,
+                        const unsigned int spacing,
+                        const unsigned int p1,
+                        const unsigned int p2)
 {
     unsigned int diag1 = id * spacing;
     unsigned int diag2 = min(size1 + size2, diag1 + spacing);
 
-    return range_t{p1, p2, diag1 - p1, diag2 - p2};
+    return range_t<>{p1, p2, diag1 - p1, diag2 - p2};
 }
 
 template<
@@ -121,22 +121,20 @@ void load(unsigned int flat_id,
     ::rocprim::syncthreads();
 }
 
-template<
-    unsigned int BlockSize,
-    class KeysInputIterator1,
-    class KeysInputIterator2,
-    class KeyType,
-    unsigned int ItemsPerThread,
-    class BinaryFunction
->
+template<unsigned int BlockSize,
+         class KeysInputIterator1,
+         class KeysInputIterator2,
+         class KeyType,
+         unsigned int ItemsPerThread,
+         class BinaryFunction>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-void merge_keys(unsigned int flat_id,
+void merge_keys(unsigned int       flat_id,
                 KeysInputIterator1 keys_input1,
                 KeysInputIterator2 keys_input2,
                 KeyType (&key_inputs)[ItemsPerThread],
                 unsigned int (&index)[ItemsPerThread],
-                KeyType * keys_shared,
-                range_t range,
+                KeyType*       keys_shared,
+                range_t<>      range,
                 BinaryFunction compare_function)
 {
     load<BlockSize, ItemsPerThread>(
@@ -144,11 +142,7 @@ void merge_keys(unsigned int flat_id,
         keys_shared, range.count1(), range.count2()
     );
 
-    range_t range_local =
-        range_t {
-            0, range.count1(), range.count1(),
-            (range.count1() + range.count2())
-        };
+    range_t<> range_local{0, range.count1(), range.count1(), (range.count1() + range.count2())};
 
     unsigned int diag = ItemsPerThread * flat_id;
     unsigned int partition =
@@ -161,18 +155,12 @@ void merge_keys(unsigned int flat_id,
             compare_function
         );
 
-    range_t range_partition =
-        range_t {
-            range_local.begin1 + partition,
-            range_local.end1,
-            range_local.begin2 + diag - partition,
-            range_local.end2
-        };
+    range_t<> range_partition{range_local.begin1 + partition,
+                              range_local.end1,
+                              range_local.begin2 + diag - partition,
+                              range_local.end2};
 
-    serial_merge(
-        keys_shared, key_inputs, index, range_partition,
-        compare_function
-    );
+    serial_merge<false>(keys_shared, key_inputs, index, range_partition, compare_function);
 }
 
 template<
@@ -316,11 +304,8 @@ void merge_kernel_impl(IndexIterator indices,
     const unsigned int p1 = indices[rocprim::min(flat_block_id, partitions)];
     const unsigned int p2 = indices[rocprim::min(flat_block_id + 1, partitions)];
 
-    range_t range =
-        compute_range(
-            flat_block_id, input1_size, input2_size, items_per_block,
-            p1, p2
-        );
+    range_t<> range
+        = compute_range(flat_block_id, input1_size, input2_size, items_per_block, p1, p2);
 
     merge_keys<BlockSize>(
         flat_id, keys_input1, keys_input2, input, index,
