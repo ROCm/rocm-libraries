@@ -41,3 +41,6 @@ build
 # matrices
 *.csr
 *.mtx
+
+# files
+rocsparse_mtx2csr

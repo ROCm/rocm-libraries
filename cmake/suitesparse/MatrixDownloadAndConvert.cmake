@@ -21,7 +21,7 @@
 #
 # ########################################################################
 
-find_program(ROCSPARSE_MTX2CSR rocsparse_mtx2csr PATHS /opt/rocm/bin ${ROCM_PATH}/bin)
+find_program(ROCSPARSE_MTX2CSR rocsparse_mtx2csr PATHS /opt/rocm/bin ${ROCM_PATH}/bin ./)
 
 if(NOT CMAKE_MATRICES_DIR)
   set(CMAKE_MATRICES_DIR "./")
