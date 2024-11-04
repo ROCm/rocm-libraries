@@ -45,8 +45,22 @@ endif()
   
 # Either rocfft or cufft is required
 if(NOT BUILD_WITH_LIB STREQUAL "CUDA")
+  if( HIPFFT_MPI_ENABLE )
+    find_package( MPI REQUIRED )
+  endif()
   find_package(rocfft REQUIRED)
 else()
+  # cufft may be in the HPC SDK or ordinary CUDA
+  if( HIPFFT_MPI_ENABLE )
+    if( NOT BUILD_SHARED_LIBS )
+      message( FATAL_ERROR "cufftMp is shared-only, static build is not possible" )
+    endif()
+    # MPI support is only in HPC SDK
+    find_package(NVHPC REQUIRED COMPONENTS CUDA MATH MPI)
+  else()
+    find_package(NVHPC QUIET COMPONENTS CUDA MATH)
+  endif()
+  set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
   find_package(CUDAToolkit REQUIRED)
 endif()
 

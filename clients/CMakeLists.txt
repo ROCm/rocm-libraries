@@ -60,9 +60,14 @@ list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
 include( build-options )
 
-if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
+if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR
+        CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+" OR
+	CMAKE_CXX_COMPILER MATCHES ".*nvcc" OR
+	CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+"
+  	)
+  )
   if(BUILD_CLIENTS)
-    message( FATAL_ERROR "Using BUILD_CLIENTS=ON requires hipcc or Clang++, as client programs require device code to be built." )
+    message( FATAL_ERROR "Using BUILD_CLIENTS=ON requires a compiler capable of building device code (hipcc, clang, nvcc, nvc++)." )
   endif()
 endif()
 
@@ -99,6 +104,7 @@ if( BUILD_CLIENTS_TESTS )
       URL_HASH SHA256=b4870bf121ff7795ba20d20bcdd8627b8e088f2d1dab299a031c1034eddc93d5
       PREFIX ${CMAKE_CURRENT_BINARY_DIR}
       CMAKE_ARGS -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER} -DBUILD_SHARED_LIBS=OFF
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
       INSTALL_COMMAND ""
       BUILD_BYPRODUCTS ${GTEST_LIBRARIES}
       )

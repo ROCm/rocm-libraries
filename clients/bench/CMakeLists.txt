@@ -57,7 +57,12 @@ if((NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$") OR CMAKE_CXX_COMPILER_ID STREQUA
 endif()
 
 if ( BUILD_WITH_LIB STREQUAL "CUDA" )
-  target_compile_options( hipfft-bench PRIVATE -arch sm_53 -gencode=arch=compute_53,code=sm_53 -Xptxas=-w)
+  if( CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+$" )
+    target_compile_options( hipfft-bench PRIVATE -cuda -Xptxas=-w)
+    target_link_options( hipfft-bench PRIVATE -cuda)
+  else()
+    target_compile_options( hipfft-bench PRIVATE -arch sm_53 -gencode=arch=compute_53,code=sm_53 -Xptxas=-w)
+  endif()
   target_link_libraries( hipfft-bench PRIVATE ${CUDA_LIBRARIES} )
 else()
   if( USE_HIPRAND AND NOT hiprand_FOUND )

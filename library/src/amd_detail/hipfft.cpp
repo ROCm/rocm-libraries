@@ -28,6 +28,10 @@
 #include <string>
 #include <vector>
 
+#ifdef HIPFFT_MPI_ENABLE
+#include "hipfft/hipfftMp.h"
+#endif
+
 #include "../../../shared/arithmetic.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/ptrdiff.h"
@@ -256,10 +260,19 @@ struct hipfftHandle_t
 
     // Due to hipExec** compatibility to cuFFT, we have to reserve all 4 types
     // rocfft handle separately here.
-    rocfft_plan           ip_forward          = nullptr;
-    rocfft_plan           op_forward          = nullptr;
-    rocfft_plan           ip_inverse          = nullptr;
-    rocfft_plan           op_inverse          = nullptr;
+    rocfft_plan ip_forward = nullptr;
+    rocfft_plan op_forward = nullptr;
+    rocfft_plan ip_inverse = nullptr;
+    rocfft_plan op_inverse = nullptr;
+
+    // return true if the plans have been initialized - hipfftCreate
+    // merely allocates a handle and a hipfftMakePlan* API initializes
+    // them.
+    bool initialized() const
+    {
+        return ip_forward || op_forward || ip_inverse || op_inverse;
+    }
+
     rocfft_execution_info info                = nullptr;
     void*                 workBuffer          = nullptr;
     size_t                workBufferSize      = 0;
@@ -287,6 +300,13 @@ struct hipfftHandle_t
     // brick decomposition for multi-device transforms
     std::vector<hipfft_brick> inBricks;
     std::vector<hipfft_brick> outBricks;
+    // hipFFT will decompose the problem across multiple devices in a
+    // single process (i.e. via hipfftXtSetGPUs)
+    bool singleProcMultiDevice = false;
+
+    // multi-processing communicator
+    rocfft_comm_type comm_type   = rocfft_comm_none;
+    void*            comm_handle = nullptr;
 };
 
 struct hipfft_plan_description_t
@@ -711,8 +731,11 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         plan->oDist = oDist;
     }
 
-    // problem dimensions and strides are known, set up the bricks for multi-GPU
-    set_io_bricks(plan->inLength, plan->outLength, plan->batch, plan->inBricks, plan->outBricks);
+    // problem dimensions and strides are known, set up the bricks
+    // for single-proc multi-GPU
+    if(plan->singleProcMultiDevice)
+        set_io_bricks(
+            plan->inLength, plan->outLength, plan->batch, plan->inBricks, plan->outBricks);
 
     // create fields for the bricks
     if(!plan->inBricks.empty())
@@ -786,11 +809,18 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 
     if(plan->scale_factor != 1.0)
     {
-        // scale factor requires a rocfft plan description, but
-        // rocfft plan descriptions might not have been created yet
         for(auto rocfft_desc : {ip_forward_desc, op_forward_desc, ip_inverse_desc, op_inverse_desc})
         {
             rocfft_plan_description_set_scale_factor(rocfft_desc, plan->scale_factor);
+        }
+    }
+
+    // set comm handle on the plans
+    if(plan->comm_type != rocfft_comm_none)
+    {
+        for(auto rocfft_desc : {ip_forward_desc, op_forward_desc, ip_inverse_desc, op_inverse_desc})
+        {
+            rocfft_plan_description_set_comm(rocfft_desc, plan->comm_type, plan->comm_handle);
         }
     }
 
@@ -2003,6 +2033,8 @@ try
         plan->outBricks[i].device = gpus[i];
     }
 
+    plan->singleProcMultiDevice = true;
+
     return HIPFFT_SUCCESS;
 }
 catch(hipfftResult e)
@@ -2489,3 +2521,118 @@ catch(...)
 {
     return HIPFFT_INTERNAL_ERROR;
 }
+
+#ifdef HIPFFT_MPI_ENABLE
+static rocfft_comm_type hipfftMpCommTypeToRocfftCommType(hipfftMpCommType_t hipfft_type)
+{
+    switch(hipfft_type)
+    {
+    case HIPFFT_COMM_MPI:
+        return rocfft_comm_mpi;
+    case HIPFFT_COMM_NONE:
+        return rocfft_comm_none;
+    }
+    throw HIPFFT_INVALID_VALUE;
+}
+
+hipfftResult hipfftMpAttachComm(hipfftHandle plan, hipfftMpCommType comm_type, void* comm_handle)
+try
+{
+    // comm must be known before plans are actually constructed
+    if(!plan || plan->initialized())
+        return HIPFFT_INVALID_PLAN;
+
+    plan->comm_type   = hipfftMpCommTypeToRocfftCommType(comm_type);
+    plan->comm_handle = comm_handle;
+    return HIPFFT_SUCCESS;
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
+
+hipfftResult hipfftXtSetDistribution(hipfftHandle         plan,
+                                     int                  rank,
+                                     const long long int* input_lower,
+                                     const long long int* input_upper,
+                                     const long long int* output_lower,
+                                     const long long int* output_upper,
+                                     const long long int* input_stride,
+                                     const long long int* output_stride)
+try
+{
+    // distribution must be set before plans are actually constructed
+    if(!plan || plan->initialized())
+        return HIPFFT_INVALID_PLAN;
+
+    // one brick on this rank for each of input and output
+    plan->inBricks.resize(1);
+    plan->outBricks.resize(1);
+
+    auto setBrick = [=](hipfft_brick&        b,
+                        const long long int* lower,
+                        const long long int* upper,
+                        const long long int* stride) {
+        // init brick for FFT dimensions + batch dimension
+        b.field_lower.resize(rank + 1);
+        b.field_upper.resize(rank + 1);
+        b.brick_stride.resize(rank + 1);
+
+        // copy row-major coordinates and strides to column-major brick info
+        std::reverse_iterator<const long long int*> lower_rbegin(lower + rank);
+        std::reverse_iterator<const long long int*> lower_rend(lower);
+        std::copy(lower_rbegin, lower_rend, b.field_lower.begin());
+        std::reverse_iterator<const long long int*> upper_rbegin(upper + rank);
+        std::reverse_iterator<const long long int*> upper_rend(upper);
+        std::copy(upper_rbegin, upper_rend, b.field_upper.begin());
+        std::reverse_iterator<const long long int*> stride_rbegin(stride + rank);
+        std::reverse_iterator<const long long int*> stride_rend(stride);
+        std::copy(stride_rbegin, stride_rend, b.brick_stride.begin());
+
+        // hipFFT only supports batch-1 distributed FFTs, so set lower
+        // + upper + stride for batch dimension
+        b.field_lower.back()  = 0;
+        b.field_upper.back()  = 1;
+        b.brick_stride.back() = 0;
+
+        (void)hipGetDevice(&b.device);
+    };
+
+    setBrick(plan->inBricks.front(), input_lower, input_upper, input_stride);
+    setBrick(plan->outBricks.front(), output_lower, output_upper, output_stride);
+    return HIPFFT_SUCCESS;
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
+
+hipfftResult hipfftXtSetSubformatDefault(hipfftHandle      plan,
+                                         hipfftXtSubFormat subformat_forward,
+                                         hipfftXtSubFormat subformat_inverse)
+try
+{
+    // formats must be set before plans are actually constructed
+    if(!plan || plan->initialized())
+        return HIPFFT_INVALID_PLAN;
+
+    return HIPFFT_NOT_IMPLEMENTED;
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
+
+#endif

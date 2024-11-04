@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include <boost/scope_exit.hpp>
+#include <boost/tokenizer.hpp>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <math.h>
@@ -35,6 +36,9 @@
 #include "../../shared/gpubuf.h"
 #include "../../shared/rocfft_against_fftw.h"
 #include "../../shared/rocfft_complex.h"
+#include "../../shared/subprocess.h"
+
+extern std::string mp_launch;
 
 void fft_vs_reference(hipfft_params& params, bool round_trip)
 {
@@ -68,23 +72,61 @@ TEST_P(accuracy_test, vs_fftw)
         GTEST_SKIP();
     }
 
-    // only do round trip for single-GPU FFTs
-    bool round_trip = params.multiGPU <= 1;
-
-    if(!params.run_callbacks)
+    switch(params.mp_lib)
     {
-        try
+    case fft_params::fft_mp_lib_none:
+    {
+        // only do round trip for single-GPU FFTs
+        bool round_trip = params.multiGPU <= 1;
+
+        if(!params.run_callbacks)
         {
-            fft_vs_reference(params, round_trip);
+            try
+            {
+                fft_vs_reference(params, round_trip);
+            }
+            catch(ROCFFT_GTEST_SKIP& e)
+            {
+                GTEST_SKIP() << e.msg.str();
+            }
+            catch(ROCFFT_GTEST_FAIL& e)
+            {
+                GTEST_FAIL() << e.msg.str();
+            }
         }
-        catch(ROCFFT_GTEST_SKIP& e)
+        break;
+    }
+    case fft_params::fft_mp_lib_mpi:
+    {
+        // split launcher into tokens since the first one is the exe
+        // and the remainder is the start of its argv
+        boost::escaped_list_separator<char>                   sep('\\', ' ', '\"');
+        boost::tokenizer<boost::escaped_list_separator<char>> tokenizer(mp_launch, sep);
+        std::string                                           exe;
+        std::vector<std::string>                              argv;
+        for(auto t : tokenizer)
         {
-            GTEST_SKIP() << e.msg.str();
+            if(t.empty())
+                continue;
+
+            if(exe.empty())
+                exe = t;
+            else
+                argv.push_back(t);
         }
-        catch(ROCFFT_GTEST_FAIL& e)
-        {
-            GTEST_FAIL() << e.msg.str();
-        }
+        // append test token and ask for accuracy test
+        argv.push_back("--token");
+        argv.push_back(params.token());
+        argv.push_back("--accuracy");
+
+        // throws an exception if launch fails or if subprocess
+        // returns nonzero exit code
+        execute_subprocess(exe, argv, {});
+        break;
+    }
+    default:
+        GTEST_FAIL() << "Invalid communicator choice!";
+        break;
     }
 
     SUCCEED();

@@ -5,6 +5,14 @@ Documentation for hipFFT is available at
 
 ## hipFFT 1.0.18 (unreleased)
 
+### Added
+
+* Implemented the `hipfftMpAttachComm`, `hipfftXtSetDistribution`, and `hipfftXtSetSubformatDefault` APIs to allow
+  computing FFTs that are distributed between multiple MPI (Message Passing Interface) processes.  These APIs can be enabled
+  with the `HIPFFT_MPI_ENABLE` CMake option, which defaults to `OFF`.
+
+  The backend FFT library called by hipFFT must support MPI for these APIs to work.
+
 ### Changed
 
 * Building with the address sanitizer option sets xnack+ for the relevant GPU

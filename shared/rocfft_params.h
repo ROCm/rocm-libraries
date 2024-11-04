@@ -163,9 +163,9 @@ inline rocfft_result_placement
 template <typename Funcs>
 class rocfft_params_base : public fft_params
 {
-public:
-    mutable Funcs rocfft;
+    Funcs rocfft;
 
+public:
     rocfft_plan             plan = nullptr;
     rocfft_execution_info   info = nullptr;
     rocfft_plan_description desc = nullptr;
@@ -199,6 +199,15 @@ public:
         free();
     };
 
+    void setup() override
+    {
+        rocfft.setup();
+    }
+    void cleanup() override
+    {
+        rocfft.cleanup();
+    }
+
     void free()
     {
         if(plan != nullptr)
@@ -226,44 +235,7 @@ public:
         if(multiGPU > 1)
             throw std::runtime_error("library-decomposed multi-GPU is unsupported");
 
-        // row-major lengths including batch (i.e. batch is at the front)
-        std::vector<size_t> length_with_batch{nbatch};
-        std::copy(length.begin(), length.end(), std::back_inserter(length_with_batch));
-
-        auto validate_field = [&](const fft_field& f) {
-            for(const auto& b : f.bricks)
-            {
-                // bricks must have same dim as FFT, including batch
-                if(b.lower.size() != length.size() + 1 || b.upper.size() != length.size() + 1
-                   || b.stride.size() != length.size() + 1)
-                    throw std::runtime_error(
-                        "brick dimension does not match FFT + batch dimension");
-
-                // ensure lower < upper, and that both fit in the FFT + batch dims
-                if(!std::lexicographical_compare(
-                       b.lower.begin(), b.lower.end(), b.upper.begin(), b.upper.end()))
-                    throw std::runtime_error("brick lower index is not less than upper index");
-
-                if(!std::lexicographical_compare(b.lower.begin(),
-                                                 b.lower.end(),
-                                                 length_with_batch.begin(),
-                                                 length_with_batch.end()))
-                    throw std::runtime_error(
-                        "brick lower index is not less than FFT + batch length");
-
-                if(!std::lexicographical_compare(b.upper.begin(),
-                                                 b.upper.end(),
-                                                 length_with_batch.begin(),
-                                                 length_with_batch.end())
-                   && b.upper != length_with_batch)
-                    throw std::runtime_error("brick upper index is not <= FFT + batch length");
-            }
-        };
-
-        for(const auto& ifield : ifields)
-            validate_field(ifield);
-        for(const auto& ofield : ofields)
-            validate_field(ofield);
+        validate_brick_volume();
     }
 
     rocfft_precision get_rocfft_precision()
@@ -706,7 +678,7 @@ private:
 
 #define ROCFFT_API_WRAP(func)                            \
     template <typename... Arg>                           \
-    rocfft_status func(Arg&&... arg)                     \
+    rocfft_status func(Arg&&... arg) const               \
     {                                                    \
         return rocfft_##func(std::forward<Arg>(arg)...); \
     }

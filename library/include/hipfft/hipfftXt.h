@@ -264,6 +264,8 @@ HIPFFT_EXPORT hipfftResult hipfftXtExec(hipfftHandle plan,
  */
 HIPFFT_EXPORT hipfftResult hipfftXtSetGPUs(hipfftHandle plan, int count, int* gpus);
 
+/*! @brief Layout details of a multi-device memory descriptor.
+ */
 typedef enum hipfftXtSubFormat_t
 {
     HIPFFT_XT_FORMAT_INPUT             = 0x00,

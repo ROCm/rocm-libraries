@@ -104,6 +104,13 @@ bool fftw_compare = true;
 // Cache the last cpu fft that was requested
 last_cpu_fft_cache last_cpu_fft_data;
 
+// Multi-process library to use
+fft_params::fft_mp_lib mp_lib = fft_params::fft_mp_lib_none;
+// Number of multi-process ranks to launch
+int mp_ranks = 1;
+// Multi-process launch command (e.g. mpirun --np 4 /path/to/rocfft_mpi_worker)
+std::string mp_launch;
+
 system_memory get_system_memory()
 {
     system_memory memory_data;
@@ -350,6 +357,24 @@ int main(int argc, char* argv[])
 
     app.add_option("--fftw_compare", fftw_compare, "Compare to FFTW in accuracy tests")
         ->default_val(true);
+    app.add_option("--mp_lib", mp_lib, "Multi-process library type: none (default), mpi")
+        ->default_val("none");
+    app.add_option("--mp_ranks", mp_ranks, "Number of multi-process ranks to launch")
+        ->default_val(1)
+        ->check(CLI::NonNegativeNumber);
+    app.add_option("--mp_launch",
+                   mp_launch,
+                   "Command line prefix to launch multi-process transforms, e.g. \"mpirun --np 4 "
+                   "/path/to/rocfft_mpi_worker\"")
+        ->default_val("")
+        ->each([&](const std::string&) {
+            if(mp_lib == fft_params::fft_mp_lib_none)
+            {
+                std::cout << "--mp_launch requires an mp library (see mp_lib in --help).\n";
+                std::exit(-1);
+            }
+        })
+        ->needs("--mp_lib");
     // FIXME: Seed has no use currently
     // CLI::Option* opt_seed =
     app.add_option("--seed", random_seed, "Random seed; if unset, use an actual random seed");

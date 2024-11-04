@@ -56,6 +56,7 @@ project( hipfft LANGUAGES CXX )
 # Build options
 option( BUILD_SHARED_LIBS "Build ${PROJECT_NAME} as a shared library" ON )
 option( BUILD_VERBOSE "Output additional build information" OFF )
+option( HIPFFT_MPI_ENABLE "Build with MPI support for distributed transforms" OFF )
 
 set( BUILD_WITH_COMPILER "HOST-default" CACHE INTERNAL
      "Build ${PROJECT_NAME} with compiler HIP-clang, HIP-nvcc, or just the host default compiler, eg g++")
@@ -124,9 +125,12 @@ endif()
 string( TOUPPER "${BUILD_WITH_COMPILER}" BUILD_WITH_COMPILER )
 string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
 
-set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wno-unknown-pragmas)
-if( WERROR )
-  set( WARNING_FLAGS ${WARNING_FLAGS} -Werror )
+# nvc++ doesn't understand warning flags
+if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
+  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wno-unknown-pragmas)
+  if( WERROR )
+    set( WARNING_FLAGS ${WARNING_FLAGS} -Werror )
+  endif()
 endif()
 
 if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
@@ -265,7 +269,12 @@ if( ROCM_FOUND )
   if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
     rocm_package_add_dependencies(DEPENDS "rocfft >= 1.0.21")
   else()
-    rocm_package_add_dependencies(DEPENDS "cufft >= 10.0.0")
+    if( NVHPC_FOUND )
+      string( REPLACE "." "-" NVHPC_PKG_VERSION ${NVHPC_VERSION} )
+      rocm_package_add_dependencies(DEPENDS "nvhpc-${NVHPC_PKG_VERSION}")
+    else()
+      rocm_package_add_dependencies(DEPENDS "cufft >= 10.0.0")
+    endif()
   endif()
 
   set( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md" )

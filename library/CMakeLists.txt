@@ -43,6 +43,7 @@ configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipfft/hipfft-version.h.in"
 set( hipfft_headers_public
   include/hipfft/hipfft.h
   include/hipfft/hipfftXt.h
+  include/hipfft/hipfftMp.h
   ${PROJECT_BINARY_DIR}/include/hipfft/hipfft-version.h
   )
 
@@ -54,14 +55,40 @@ include( src/CMakeLists.txt )
 # Create hipFFT library
 add_library( hipfft ${hipfft_source} ${hipfft_headers_public} )
 add_library( hip::hipfft ALIAS hipfft )
+if( BUILD_WITH_LIB STREQUAL "CUDA" )
+  # static hipfft build should link against static cufft
+  if( BUILD_SHARED_LIBS )
+    if( NVHPC_FOUND )
+      if( HIPFFT_MPI_ENABLE )
+        target_link_libraries( hipfft PRIVATE NVHPC::CUFFTMP )
+      else()
+        target_link_libraries( hipfft PRIVATE NVHPC::CUFFT )
+      endif()
+    else()
+      target_link_libraries( hipfft PRIVATE CUDA::cufft )
+    endif()
+  else()
+    if( NVHPC_FOUND )
+      target_link_libraries( hipfft PRIVATE NVHPC::CUFFT_static )
+    else()
+      target_link_libraries( hipfft PRIVATE CUDA::cufft_static )
+    endif()
+  endif()
+endif()
+
+set(static_depends)
 
 # Target compile definitions
 if( BUILD_WITH_COMPILER STREQUAL "HOST-DEFAULT" )
   if( BUILD_WITH_LIB STREQUAL "ROCM" )
     target_compile_definitions( hipfft PRIVATE __HIP_PLATFORM_AMD__ )
-  elseif( BUILD_WITH_LIB STREQUAL "CUDA" )
+  else()
     target_compile_definitions( hipfft PRIVATE __HIP_PLATFORM_NVIDIA__ )
   endif()
+endif()
+
+if( HIPFFT_MPI_ENABLE )
+  target_compile_definitions( hipfft PRIVATE HIPFFT_MPI_ENABLE )
 endif()
 
 # Target include directories
@@ -80,23 +107,16 @@ if( BUILD_WITH_LIB STREQUAL "CUDA" )
   target_include_directories( hipfft PUBLIC $<BUILD_INTERFACE:${CUDAToolkit_INCLUDE_DIRS}> )
 endif()
 
-set(static_depends)
-
-# Target link libraries
-if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
+# Target link libraries - on ROCm we just use rocFFT for
+# everything.  CUDA has to be handled separately for normal and
+# "Mp" libs
+if( BUILD_WITH_LIB STREQUAL "ROCM" )
   list(APPEND static_depends PACKAGE rocfft)
   target_link_libraries( hipfft PRIVATE roc::rocfft )
   if( WIN32 )
     target_link_libraries( hipfft PRIVATE hip::device )
   endif()
   target_link_libraries( hipfft PUBLIC hip::host )
-else()
-  # static hipfft build should link against static cufft
-  if( BUILD_SHARED_LIBS )
-    target_link_libraries( hipfft PRIVATE CUDA::cufft )
-  else()
-    target_link_libraries( hipfft PRIVATE -lcufft_static -lculibos )
-  endif()
 endif()
 
 target_compile_options( hipfft PRIVATE ${WARNING_FLAGS} )
@@ -118,7 +138,7 @@ if( NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
     PROPERTIES CXX_VISIBILITY_PRESET "hidden" VISIBILITY_INLINES_HIDDEN ON )
 endif()
 
-# nvcc can not recognize shared libraray file name with suffix other than *.so when linking.
+# nvcc can not recognize shared library file name with suffix other than *.so when linking.
 if (NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC")
   rocm_set_soversion(hipfft ${hipfft_SOVERSION})
 endif()

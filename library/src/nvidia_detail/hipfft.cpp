@@ -18,13 +18,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "hipfft/hipfft.h"
-#include "hipfft/hipfftXt.h"
-#include <cuda_runtime_api.h>
+#ifdef HIPFFT_MPI_ENABLE
+#include <cufftmp/cufft.h>
+
+#include <cufftmp/cudalibxt.h>
+#include <cufftmp/cufftMp.h>
+#include <cufftmp/cufftXt.h>
+#else
 #include <cudalibxt.h>
 #include <cufft.h>
 #include <cufftXt.h>
+#endif
+
+#include "hipfft/hipfft.h"
+#include "hipfft/hipfftXt.h"
+#include <cuda_runtime_api.h>
 #include <iostream>
+
+#ifdef HIPFFT_MPI_ENABLE
+#include "hipfft/hipfftMp.h"
+#endif
 
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
@@ -1183,3 +1196,80 @@ catch(...)
 {
     return HIPFFT_INTERNAL_ERROR;
 }
+
+#ifdef HIPFFT_MPI_ENABLE
+static cufftMpCommType_t hipfftMpCommTypeToCufftMpCommType(hipfftMpCommType_t hipfft_type)
+{
+    switch(hipfft_type)
+    {
+    case HIPFFT_COMM_MPI:
+        return CUFFT_COMM_MPI;
+    case HIPFFT_COMM_NONE:
+        return CUFFT_COMM_NONE;
+    }
+    throw HIPFFT_INVALID_VALUE;
+}
+
+hipfftResult hipfftMpAttachComm(hipfftHandle plan, hipfftMpCommType comm_type, void* comm_handle)
+try
+{
+    auto cuComm = hipfftMpCommTypeToCufftMpCommType(comm_type);
+    return cufftResultToHipResult(cufftMpAttachComm(plan, cuComm, comm_handle));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
+
+hipfftResult hipfftXtSetDistribution(hipfftHandle         plan,
+                                     int                  rank,
+                                     const long long int* input_lower,
+                                     const long long int* input_upper,
+                                     const long long int* output_lower,
+                                     const long long int* output_upper,
+                                     const long long int* stride_input,
+                                     const long long int* stride_output)
+try
+{
+    return cufftResultToHipResult(cufftXtSetDistribution(plan,
+                                                         rank,
+                                                         input_lower,
+                                                         input_upper,
+                                                         output_lower,
+                                                         output_upper,
+                                                         stride_input,
+                                                         stride_output));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
+
+hipfftResult hipfftXtSetSubformatDefault(hipfftHandle      plan,
+                                         hipfftXtSubFormat subformat_forward,
+                                         hipfftXtSubFormat subformat_inverse)
+try
+{
+    return cufftResultToHipResult(
+        cufftXtSetSubformatDefault(plan,
+                                   hipfftXtSubFormatTocufftXtSubFormat(subformat_forward),
+                                   hipfftXtSubFormatTocufftXtSubFormat(subformat_inverse)));
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
+
+#endif

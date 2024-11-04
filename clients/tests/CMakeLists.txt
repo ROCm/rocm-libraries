@@ -66,94 +66,27 @@ set( hipfft-test_source
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
 
-target_include_directories(
-  hipfft-test
-  PRIVATE
-  $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
-  $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
-  $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
+set( TEST_TARGETS hipfft-test )
+
+# MPI worker for MPI tests
+if( HIPFFT_MPI_ENABLE )
+  # build MPI worker to support the tests
+  add_executable( hipfft_mpi_worker hipfft_mpi_worker.cpp )
+  list( APPEND TEST_TARGETS hipfft_mpi_worker )
+  target_include_directories( hipfft_mpi_worker
+    PRIVATE
+    ${MPI_C_INCLUDE_PATH}
   )
-
-
-if( GTEST_FOUND )
-  target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
-  target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
-else()
-  add_dependencies( hipfft-test gtest )
-  target_include_directories( hipfft-test PRIVATE hipfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
-  target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
+  add_compile_definitions( HIPFFT_MPI_ENABLE )
 endif()
 
-target_compile_options( hipfft-test PRIVATE ${WARNING_FLAGS} )
-
-if((NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$") OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
-    if( WIN32 )
-      find_package( HIP CONFIG REQUIRED )
-    else()
-      find_package( HIP MODULE REQUIRED )
-    endif()
-    target_link_libraries( hipfft-test PRIVATE hip::host hip::device )
+if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
+  if( WIN32 )
+    find_package( HIP CONFIG REQUIRED )
   else()
-    target_compile_definitions( hipfft-test PRIVATE __HIP_PLATFORM_NVIDIA__)
-    target_include_directories( hipfft-test PRIVATE ${HIP_INCLUDE_DIRS})
-  endif()
-else()
-  foreach( target ${AMDGPU_TARGETS} )
-    target_compile_options( hipfft-test PRIVATE --offload-arch=${target} )
-  endforeach( )
-endif()
-
-if ( BUILD_WITH_LIB STREQUAL "CUDA" )
-  target_compile_options( hipfft-test PRIVATE -arch sm_53 -gencode=arch=compute_53,code=sm_53 -Xptxas=-w)
-  target_link_libraries( hipfft-test  PRIVATE ${CUDA_LIBRARIES} )
-  target_compile_definitions( hipfft-test PUBLIC _CUFFT_BACKEND )
-else()
-  if( USE_HIPRAND AND NOT hiprand_FOUND )
-    find_package( hiprand REQUIRED )
-  endif()
-  if( USE_HIPRAND )
-    target_link_libraries( hipfft-test PRIVATE hip::hiprand )
+    find_package( HIP MODULE REQUIRED )
   endif()
 endif()
-
-option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
-
-if( BUILD_CLIENTS_TESTS_OPENMP )
-  if( BUILD_WITH_LIB STREQUAL "CUDA" )
-    message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
-  else()
-    target_compile_options( hipfft-test PRIVATE -DBUILD_CLIENTS_TESTS_OPENMP )
-    if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
-      target_compile_options( hipfft-test PRIVATE -fopenmp )
-      target_link_libraries( hipfft-test PRIVATE -fopenmp -L${HIP_CLANG_ROOT}/lib -Wl,-rpath=${HIP_CLANG_ROOT}/lib )
-      target_include_directories( hipfft-test PRIVATE ${HIP_CLANG_ROOT}/include )
-    else()
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        target_compile_options( hipfft-test PRIVATE -fopenmp=libomp )
-        target_link_options( hipfft-test PRIVATE -fopenmp=libomp )
-      endif()
-    endif()
-  endif()
-endif()
-
-if(FFTW_MULTITHREAD)
-  target_compile_options( hipfft-test PRIVATE -DFFTW_MULTITHREAD )
-endif( )
-
-set_target_properties( hipfft-test PROPERTIES
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-  )
-
-target_link_libraries( hipfft-test
-  PRIVATE
-  ${FFTW_LIBRARIES}
-  Threads::Threads
-  )
-
-target_link_libraries( hipfft-test  PRIVATE hip::hipfft )
 
 if( HIPFFT_BUILD_SCOPE )
   set( TESTS_OUT_DIR "/../staging" )
@@ -164,13 +97,113 @@ else()
 endif()
 string( CONCAT TESTS_OUT_DIR "${PROJECT_BINARY_DIR}" ${TESTS_OUT_DIR} )
 
-set_target_properties(hipfft-test
-                      PROPERTIES 
-                      RUNTIME_OUTPUT_DIRECTORY 
-                      ${TESTS_OUT_DIR})
+option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
 
+foreach( target ${TEST_TARGETS} )
+  set_target_properties( ${target} PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    )
 
-rocm_install(TARGETS hipfft-test COMPONENT tests)
+  if( BUILD_WITH_LIB STREQUAL "ROCM" )
+    target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
+    target_link_libraries( ${target}
+      PRIVATE
+      hip::host
+      hip::device
+    )
+    foreach( gpu_target ${AMDGPU_TARGETS} )
+      target_compile_options( ${target} PRIVATE --offload-arch=${gpu_target} )
+    endforeach()
+
+    if( NOT hiprand_FOUND )
+      find_package( hiprand REQUIRED )
+    endif()
+    if( USE_HIPRAND )
+      target_link_libraries( ${target} PRIVATE hip::hiprand )
+    endif()
+  else()
+    target_compile_definitions( ${target} PRIVATE __HIP_PLATFORM_NVIDIA__)
+    target_include_directories( ${target} PRIVATE ${HIP_INCLUDE_DIRS})
+
+    if( CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+$" )
+      target_compile_options( ${target} PRIVATE -cuda -Xptxas=-w)
+      target_link_options( ${target} PRIVATE -cuda)
+    else()
+      target_compile_options( ${target} PRIVATE -arch sm_53 -gencode=arch=compute_53,code=sm_53 -Xptxas=-w)
+    endif()
+    if( NVHPC_FOUND )
+      target_link_libraries( ${target}  PRIVATE NVHPC::CUDART )
+    else()
+      target_link_libraries( ${target}  PRIVATE CUDA::cudart )
+    endif()
+    target_compile_definitions( ${target} PUBLIC _CUFFT_BACKEND )
+  endif()
+
+  if( BUILD_CLIENTS_TESTS_OPENMP )
+    if( BUILD_WITH_LIB STREQUAL "CUDA" )
+      message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
+    else()
+      target_compile_options( ${target} PRIVATE -DBUILD_CLIENTS_TESTS_OPENMP )
+      if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
+        target_compile_options( ${target} PRIVATE -fopenmp )
+        target_link_libraries( ${target} PRIVATE -fopenmp -L${HIP_CLANG_ROOT}/lib -Wl,-rpath=${HIP_CLANG_ROOT}/lib )
+        target_include_directories( ${target} PRIVATE ${HIP_CLANG_ROOT}/include )
+      else()
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+          target_compile_options( ${target} PRIVATE -fopenmp=libomp )
+          target_link_options( ${target} PRIVATE -fopenmp=libomp )
+        endif()
+      endif()
+    endif()
+  endif()
+
+  target_include_directories( ${target}
+    PRIVATE
+    $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
+  )
+
+  target_link_libraries( ${target}
+    PRIVATE
+    hip::hipfft
+    ${FFTW_LIBRARIES}
+  )
+
+  if( HIPFFT_MPI_ENABLE )
+    target_link_libraries( ${target}
+      PRIVATE
+      MPI::MPI_CXX
+    )
+  endif()
+
+  set_target_properties(${target}
+                        PROPERTIES 
+                        RUNTIME_OUTPUT_DIRECTORY 
+                        ${TESTS_OUT_DIR})
+
+  rocm_install(TARGETS ${target} COMPONENT tests)
+endforeach()
+
+if( GTEST_FOUND )
+  target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
+  target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
+else()
+  add_dependencies( hipfft-test gtest )
+  target_include_directories( hipfft-test PRIVATE hipfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
+  target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
+endif()
+
+if(FFTW_MULTITHREAD)
+  target_compile_options( hipfft-test PRIVATE -DFFTW_MULTITHREAD )
+endif( )
+
+target_link_libraries( hipfft-test
+  PRIVATE
+  Threads::Threads
+  )
 
 if (WIN32)
 

@@ -22,6 +22,7 @@
 #define HIPFFT_PARAMS_H
 
 #include <atomic>
+#include <map>
 #include <numeric>
 #include <optional>
 
@@ -30,6 +31,11 @@
 #include "../shared/hipfft_brick.h"
 #include "hipfft/hipfft.h"
 #include "hipfft/hipfftXt.h"
+
+#ifdef HIPFFT_MPI_ENABLE
+#include "hipfft/hipfftMp.h"
+#include <mpi.h>
+#endif
 
 inline fft_status fft_status_from_hipfftparams(const hipfftResult_t val)
 {
@@ -387,10 +393,41 @@ public:
 
     void validate_fields() const override
     {
-        // hipFFT has no explicit field/brick API, but
-        // library-decomposed multi-GPU is allowed
+        validate_brick_volume();
+
+        // multi-process only works with batch-1 FFTs, as hipFFT has
+        // no place in the API to communicate batch indexes for
+        // bricks
+        if(mp_lib != fft_mp_lib_none && nbatch > 1)
+            throw std::runtime_error("multi-process FFTs require batch-1");
+
+        // if user provided decomposition
         if(!ifields.empty() || !ofields.empty())
-            throw std::runtime_error("input/output fields are unsupported");
+        {
+            // then library-decomposed multi-GPU must not also be requested
+            if(multiGPU > 1)
+                throw std::runtime_error(
+                    "cannot request both library-decomposed GPU and user decomposition");
+
+            // count bricks per rank
+            std::map<int, size_t> rank_ibrick_count;
+            std::map<int, size_t> rank_obrick_count;
+            for(const auto& b : ifields.front().bricks)
+                rank_ibrick_count[b.rank]++;
+            for(const auto& b : ofields.front().bricks)
+                rank_obrick_count[b.rank]++;
+
+            // make sure there's only one input/output brick per rank
+            auto count_is_one
+                = [](const std::pair<int, size_t>& entry) { return entry.second == 1; };
+            if(!std::all_of(rank_ibrick_count.begin(), rank_ibrick_count.end(), count_is_one)
+               || !std::all_of(rank_obrick_count.begin(), rank_obrick_count.end(), count_is_one))
+                throw std::runtime_error("multiple bricks per rank are not supported");
+
+            // also ensure that each input brick maps to an output on same rank
+            if(rank_ibrick_count != rank_obrick_count)
+                throw std::runtime_error("input and output bricks do not match up");
+        }
     }
 
     fft_status set_callbacks(void* load_cb_host,
@@ -866,7 +903,7 @@ private:
     {
         // scale factor and multi-GPU need API calls between create +
         // init
-        if(scale_factor != 1.0 || multiGPU > 1)
+        if(scale_factor != 1.0 || multiGPU > 1 || mp_lib != fft_mp_lib_none)
             return true;
         return false;
     }
@@ -978,8 +1015,64 @@ private:
             xt_worksize.resize(GPUs.size());
             workbuffersize_ptr = xt_worksize.data();
         }
+        if(mp_lib == fft_mp_lib_mpi)
+        {
+#ifdef HIPFFT_MPI_ENABLE
+            ret = hipfftMpAttachComm(plan, HIPFFT_COMM_MPI, mp_comm);
+            if(ret != HIPFFT_SUCCESS)
+                return ret;
+
+            int mpi_rank = 0;
+            MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &mpi_rank);
+
+            const auto& in_bricks  = ifields.front().bricks;
+            const auto& out_bricks = ofields.front().bricks;
+
+            // find the input/output brick for this rank
+            auto curr_rank_brick = [mpi_rank](const fft_brick& b) { return b.rank == mpi_rank; };
+            auto in_brick  = std::find_if(in_bricks.begin(), in_bricks.end(), curr_rank_brick);
+            auto out_brick = std::find_if(out_bricks.begin(), out_bricks.end(), curr_rank_brick);
+
+            if(in_brick != in_bricks.end() && out_brick != out_bricks.end())
+            {
+                std::vector<long long int> input_lower;
+                std::vector<long long int> input_upper;
+                std::vector<long long int> output_lower;
+                std::vector<long long int> output_upper;
+                std::vector<long long int> input_stride;
+                std::vector<long long int> output_stride;
+
+                // convert brick info to long long int for hipFFT
+                auto convert_intvec
+                    = [](const std::vector<size_t>& in, std::vector<long long int>& out) {
+                          // start with index 1 because hipFFT only wants to be
+                          // told about FFT dimensions, not batch dimension
+                          for(size_t i = 1; i < in.size(); ++i)
+                              out.push_back(static_cast<long long int>(in[i]));
+                      };
+                convert_intvec(in_brick->lower, input_lower);
+                convert_intvec(in_brick->upper, input_upper);
+                convert_intvec(out_brick->lower, output_lower);
+                convert_intvec(out_brick->upper, output_upper);
+                convert_intvec(in_brick->stride, input_stride);
+                convert_intvec(out_brick->stride, output_stride);
+
+                ret = hipfftXtSetDistribution(plan,
+                                              static_cast<int>(dim()),
+                                              input_lower.data(),
+                                              input_upper.data(),
+                                              output_lower.data(),
+                                              output_upper.data(),
+                                              input_stride.data(),
+                                              output_stride.data());
+            }
+#else
+            throw std::runtime_error("MPI is not enabled");
+#endif
+        }
         return ret;
     }
+
     hipfftResult_t create_make_plan_Nd()
     {
         auto ret = create_with_pre_make();
@@ -1005,6 +1098,7 @@ private:
             throw std::runtime_error("invalid dim");
         }
     }
+
     hipfftResult_t create_make_plan_many()
     {
         auto ret = create_with_pre_make();
@@ -1023,6 +1117,7 @@ private:
                                   nbatch,
                                   workbuffersize_ptr);
     }
+
     hipfftResult_t create_make_plan_many64()
     {
         auto ret = create_with_pre_make();
