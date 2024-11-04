@@ -30,262 +30,6 @@ using namespace rocRoller;
 
 namespace ExpressionTest
 {
-    TEST_CASE("Create expressions and convert to string", "[expression][toString]")
-    {
-        SUPPORTED_ARCH_SECTION(arch)
-        {
-            auto context = TestContext::ForTarget(arch);
-
-            auto a = Expression::literal(1);
-            auto b = Expression::literal(2);
-
-            auto rc = std::make_shared<Register::Value>(
-                context.get(), Register::Type::Vector, DataType::Int32, 1);
-            rc->allocateNow();
-
-            auto expr1  = a + b;
-            auto expr2  = b * expr1;
-            auto expr3  = b * expr1 - rc->expression();
-            auto expr4  = expr1 > expr2;
-            auto expr5  = expr3 < expr4;
-            auto expr6  = expr4 >= expr5;
-            auto expr7  = expr5 <= expr6;
-            auto expr8  = expr6 == expr7;
-            auto expr9  = -expr2;
-            auto expr10 = Expression::fuseTernary(expr1 << b);
-            auto expr11 = Expression::fuseTernary((a << b) + b);
-            auto expr12 = expr6 != expr7;
-
-            SECTION("toString()")
-            {
-                auto sexpr1  = Expression::toString(expr1);
-                auto sexpr2  = Expression::toString(expr2);
-                auto sexpr3  = Expression::toString(expr3);
-                auto sexpr4  = Expression::toString(expr4);
-                auto sexpr5  = Expression::toString(expr5);
-                auto sexpr6  = Expression::toString(expr6);
-                auto sexpr7  = Expression::toString(expr7);
-                auto sexpr8  = Expression::toString(expr8);
-                auto sexpr9  = Expression::toString(expr9);
-                auto sexpr10 = Expression::toString(expr10);
-                auto sexpr11 = Expression::toString(expr11);
-                auto sexpr12 = Expression::toString(expr12);
-
-                CHECK(sexpr1 == "Add(1i, 2i)");
-                CHECK(sexpr2 == "Multiply(2i, Add(1i, 2i))");
-                CHECK(sexpr3 == "Subtract(Multiply(2i, Add(1i, 2i)), v0:I)");
-                CHECK(sexpr4 == "GreaterThan(Add(1i, 2i), Multiply(2i, Add(1i, 2i)))");
-                CHECK(sexpr5 == "LessThan(" + sexpr3 + ", " + sexpr4 + ")");
-                CHECK(sexpr6 == "GreaterThanEqual(" + sexpr4 + ", " + sexpr5 + ")");
-                CHECK(sexpr7 == "LessThanEqual(" + sexpr5 + ", " + sexpr6 + ")");
-                CHECK(sexpr8 == "Equal(" + sexpr6 + ", " + sexpr7 + ")");
-                CHECK(sexpr9 == "Negate(" + sexpr2 + ")");
-                CHECK(sexpr10 == "AddShiftL(1i, 2i, 2i)");
-                CHECK(sexpr11 == "ShiftLAdd(1i, 2i, 2i)");
-                CHECK(sexpr12 == "NotEqual(" + sexpr6 + ", " + sexpr7 + ")");
-            }
-
-            SECTION("evaluationTimes()")
-            {
-                Expression::EvaluationTimes expectedTimes{
-                    Expression::EvaluationTime::KernelExecute};
-                CHECK(expectedTimes == Expression::evaluationTimes(expr8));
-                CHECK(expectedTimes == Expression::evaluationTimes(expr10));
-            }
-        }
-    }
-
-    TEST_CASE("Expression serialization", "[expression][serialization]")
-    {
-        auto a = Expression::literal(1);
-        auto b = Expression::literal(2);
-        SECTION("Serializable expressions")
-        {
-
-            auto c = Register::Value::Literal(4.2f);
-            auto d = Register::Value::Literal(Half(4.2f));
-
-            Expression::DataFlowTag dataFlow;
-            dataFlow.tag              = 50;
-            dataFlow.regType          = Register::Type::Vector;
-            dataFlow.varType.dataType = DataType::Float;
-
-            auto expr1  = a + b;
-            auto expr2  = b * expr1;
-            auto expr3  = b * expr1 - c->expression();
-            auto expr4  = expr1 > (expr2 + d->expression());
-            auto expr5  = expr3 < expr4;
-            auto expr6  = expr4 >= expr5;
-            auto expr7  = expr5 <= expr6;
-            auto expr8  = expr6 == expr7;
-            auto expr9  = -expr2;
-            auto expr10 = Expression::fuseTernary(expr1 << b);
-            auto expr11 = Expression::fuseTernary((a << b) + b);
-            auto expr12 = std::make_shared<Expression::Expression>(dataFlow) / a;
-
-            auto expr = GENERATE_COPY(expr1,
-                                      expr2,
-                                      expr3,
-                                      expr4,
-                                      expr5,
-                                      expr6,
-                                      expr7,
-                                      expr8,
-                                      expr9,
-                                      expr10,
-                                      expr11,
-                                      expr12);
-
-            CAPTURE(expr);
-
-            auto yamlText = Expression::toYAML(expr);
-            INFO(yamlText);
-
-            CHECK(yamlText != "");
-
-            auto deserialized = Expression::fromYAML(yamlText);
-            REQUIRE(deserialized.get() != nullptr);
-
-            CHECK(Expression::toString(deserialized) == Expression::toString(expr));
-            CHECK(Expression::identical(deserialized, expr));
-        }
-
-        SECTION("Unserializable expressions")
-        {
-            SECTION("Kernel arg")
-            {
-                auto kernelArg                   = std::make_shared<AssemblyKernelArgument>();
-                kernelArg->name                  = "KernelArg1";
-                kernelArg->variableType.dataType = DataType::Int32;
-                kernelArg->expression            = Expression::literal(10);
-                kernelArg->offset                = 1;
-                kernelArg->size                  = 5;
-
-                auto expr = b >> std::make_shared<Expression::Expression>(kernelArg);
-                CHECK_THROWS(Expression::fromYAML(Expression::toYAML(expr)));
-            }
-
-            SECTION("WaveTile")
-            {
-                auto waveTile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
-                auto expr     = std::make_shared<Expression::Expression>(waveTile) + b;
-                CHECK_THROWS(Expression::fromYAML(Expression::toYAML(expr)));
-            }
-
-            SUPPORTED_ARCH_SECTION(arch)
-            {
-                auto context = TestContext::ForTarget(arch);
-
-                auto reg = std::make_shared<Register::Value>(
-                    context.get(), Register::Type::Vector, DataType::Int32, 1);
-                reg->allocateNow();
-
-                CHECK_THROWS(Expression::toYAML(reg->expression()));
-            }
-        }
-    }
-
-    TEST_CASE("Expression identical and equivalent", "[expression]")
-    {
-        auto context = TestContext::ForDefaultTarget();
-
-        auto a    = Expression::literal(1u);
-        auto ap   = Expression::literal(1);
-        auto b    = Expression::literal(2u);
-        auto zero = Expression::literal(0u);
-
-        auto rc = std::make_shared<Register::Value>(
-            context.get(), Register::Type::Vector, DataType::Int32, 1);
-        rc->allocateNow();
-
-        auto rd = std::make_shared<Register::Value>(
-            context.get(), Register::Type::Vector, DataType::Float, 1);
-        rd->allocateNow();
-
-        auto c = rc->expression();
-        auto d = rd->expression();
-
-        auto cve = std::make_shared<CommandArgument>(nullptr, DataType::Float, 0);
-        auto cvf = std::make_shared<CommandArgument>(nullptr, DataType::Float, 8);
-
-        auto e = std::make_shared<Expression::Expression>(cve);
-        auto f = std::make_shared<Expression::Expression>(cvf);
-
-        auto expr1 = a + b;
-        auto expr2 = a + b;
-
-        auto expr3 = a - b;
-
-        CHECK(identical(expr1, expr2));
-        CHECK_FALSE(identical(expr1, expr3));
-        CHECK_FALSE(identical(ap + b, expr3));
-
-        CHECK(equivalent(expr1, expr2));
-        CHECK_FALSE(equivalent(expr1, expr3));
-        CHECK_FALSE(equivalent(ap + b, expr3));
-
-        auto expr4 = c + d;
-        auto expr5 = c + d + zero;
-
-        CHECK_FALSE(identical(expr1, expr4));
-        CHECK_FALSE(identical(expr4, expr5));
-        CHECK(identical(expr4, simplify(expr5)));
-
-        CHECK_FALSE(equivalent(expr1, expr4));
-        CHECK_FALSE(equivalent(expr4, expr5));
-        CHECK(equivalent(expr4, simplify(expr5)));
-
-        auto expr6 = e / f % d;
-        auto expr7 = a + f;
-
-        CHECK_FALSE(identical(expr6, expr7));
-        CHECK_FALSE(identical(e, f));
-
-        CHECK(Expression::identical(nullptr, nullptr));
-        CHECK_FALSE(identical(nullptr, a));
-        CHECK_FALSE(identical(a, nullptr));
-
-        CHECK_FALSE(equivalent(expr6, expr7));
-        CHECK_FALSE(equivalent(e, f));
-
-        CHECK(Expression::equivalent(nullptr, nullptr));
-        CHECK_FALSE(equivalent(nullptr, a));
-        CHECK_FALSE(equivalent(a, nullptr));
-
-        // Commutative tests
-        CHECK_FALSE(identical(a + b, b + a));
-        CHECK_FALSE(identical(a - b, b - a));
-
-        CHECK(equivalent(a + b, b + a));
-        CHECK_FALSE(equivalent(a - b, b - a));
-        CHECK(equivalent(a * b, b * a));
-        CHECK_FALSE(equivalent(a / b, b / a));
-        CHECK_FALSE(equivalent(a % b, b % a));
-        CHECK_FALSE(equivalent(a << b, b << a));
-        CHECK_FALSE(equivalent(a >> b, b >> a));
-        CHECK(equivalent(a & b, b & a));
-        CHECK(equivalent(a | b, b | a));
-        CHECK(equivalent(a ^ b, b ^ a));
-
-        // Unallocated
-        auto rg = std::make_shared<Register::Value>(
-            context.get(), Register::Type::Vector, DataType::Int32, 1);
-
-        // Unallocated
-        auto rh = std::make_shared<Register::Value>(
-            context.get(), Register::Type::Vector, DataType::Int32, 1);
-
-        CHECK(Expression::identical(rg->expression(), rg->expression()));
-        CHECK_FALSE(Expression::identical(rg->expression(), rh->expression()));
-
-        CHECK(Expression::equivalent(rg->expression(), rg->expression()));
-        CHECK_FALSE(Expression::equivalent(rg->expression(), rh->expression()));
-
-        // Null
-        Expression::ExpressionPtr n = nullptr;
-        CHECK_FALSE(Expression::equivalent(n + n, a + n));
-        CHECK_FALSE(Expression::equivalent(n + n, n + a));
-    }
 
     TEST_CASE("Basic expression code generation", "[expression][codegen]")
     {
@@ -427,22 +171,31 @@ namespace ExpressionTest
         Register::ValuePtr dest;
         context.get()->schedule(Expression::generate(dest, expr2, context.get()));
 
-        std::string expected = R"(
-            // Generate {The Multiplication: Multiply(v1:I, {The Addition extra comment: Add(v0:I, v1:I)})} into nullptr
-            // BEGIN: The Addition extra comment
-            // {The Addition extra comment: Add(v0:I, v1:I)}
-            // Allocated : 1 VGPR (Value: Int32): v2
-            v_add_i32 v2, v0, v1
-            // END: The Addition extra comment
-            // BEGIN: The Multiplication
-            // {The Multiplication: Multiply(v1:I, {The Addition extra comment: v2:I})}
-            // Allocated : 1 VGPR (Value: Int32): v3
-            v_mul_lo_u32 v3, v1, v2
-            // END: The Multiplication
-            // Freeing The Addition extra comment: 1 VGPR (Value: Int32): v2
-        )";
+        auto normalized = NormalizedSource(context.output(), true);
 
-        CHECK(NormalizedSource(context.output(), true) == NormalizedSource(expected, true));
+        using namespace Catch::Matchers;
+
+        CHECK_THAT(normalized,
+                   ContainsSubstring("// Generate {The Multiplication: Multiply(v1:I, {The "
+                                     "Addition extra comment: Add(v0:I, v1:I)I})I} into nullptr"));
+
+        CHECK_THAT(normalized, ContainsSubstring("// BEGIN: The Addition extra comment"));
+        CHECK_THAT(normalized,
+                   ContainsSubstring("// {The Addition extra comment: Add(v0:I, v1:I)I}"));
+        CHECK_THAT(normalized, ContainsSubstring("// Allocated : 1 VGPR (Value: Int32): v2"));
+        CHECK_THAT(normalized, ContainsSubstring("v_add_i32 v2, v0, v1"));
+        CHECK_THAT(normalized, ContainsSubstring("// END: The Addition extra comment"));
+        CHECK_THAT(normalized, ContainsSubstring("// BEGIN: The Multiplication"));
+        CHECK_THAT(
+            normalized,
+            ContainsSubstring(
+                "// {The Multiplication: Multiply(v1:I, {The Addition extra comment: v2:I})I}"));
+        CHECK_THAT(normalized, ContainsSubstring("// Allocated : 1 VGPR (Value: Int32): v3"));
+        CHECK_THAT(normalized, ContainsSubstring("v_mul_lo_u32 v3, v1, v2"));
+        CHECK_THAT(normalized, ContainsSubstring("// END: The Multiplication"));
+        CHECK_THAT(
+            normalized,
+            ContainsSubstring("// Freeing The Addition extra comment: 1 VGPR (Value: Int32): v2"));
 
         BENCHMARK("Generate expression")
         {
@@ -1087,10 +840,16 @@ namespace ExpressionTest
             CHECK(rSgprInt64 == resultType(sgprInt64 + sgprInt32));
 
             CHECK(rSgprWavefrontSized == resultType(vgprFloat > vgprFloat));
+            CHECK_THROWS_AS(resultType((vgprFloat > vgprFloat) && vgprBool), FatalError);
             CHECK(rSgprWavefrontSized == resultType(sgprFloat < vgprFloat));
+            CHECK(rSgprWavefrontSized == resultType(sgprFloat < vgprFloat && sgprBool));
             CHECK(rSgprWavefrontSized == resultType(sgprDouble <= vgprDouble));
             CHECK(rSgprWavefrontSized == resultType(sgprInt32 <= vgprInt32));
+            CHECK(rSgprWavefrontSized == resultType(sgprInt32 <= vgprInt32 || sgprBool));
             CHECK(rSgprWavefrontSized == resultType(litInt32 > vgprInt64));
+            CHECK(rSgprWavefrontSized == resultType(litInt32 > vgprInt64 || sgprBool));
+            CHECK(rSgprWavefrontSized
+                  == resultType(litInt32 > vgprInt64 || Expression::literal(false)));
             CHECK(rSgprBool == resultType(litInt32 <= sgprInt64));
             CHECK(rSgprBool == resultType(sgprInt32 >= litInt32));
         }
@@ -1244,10 +1003,13 @@ namespace ExpressionTest
             CHECK_THROWS(resultType(op(sgprInt64, sgprInt64)));
             CHECK_THROWS(resultType(op(sgprUInt32, sgprUInt32)));
 
-            CHECK(rSgprBool == resultType(op(sgprBool64, sgprBool64)));
+            CHECK(rSgprBool64 == resultType(op(sgprBool64, sgprBool64)));
+            CHECK(rSgprBool64 == resultType(op(sgprBool64, sgprBool)));
             CHECK_THROWS(resultType(op(sgprHalf, sgprHalf)));
             CHECK_THROWS(resultType(op(sgprHalfx2, sgprHalfx2)));
-            CHECK(rSgprBool == resultType(op(sgprBool32, sgprBool32)));
+            CHECK(rSgprBool32 == resultType(op(sgprBool32, sgprBool32)));
+            CHECK(rSgprBool32 == resultType(op(sgprBool32, sgprBool)));
+            CHECK(rSgprBool32 == resultType(op(sgprBool, sgprBool32)));
             CHECK(rSgprBool == resultType(op(sgprBool, sgprBool)));
         }
 
@@ -1362,8 +1124,8 @@ namespace ExpressionTest
 
             CHECK(Expression::canEvaluateTo(3.0, expr1));
             CHECK(Expression::canEvaluateTo(6.0, expr2));
-            CHECK(3.0 == std::get<double>(Expression::evaluate(expr1)));
-            CHECK(6.0 == std::get<double>(Expression::evaluate(expr2)));
+            CHECK(3.0 == std::get<double>(evaluate(expr1)));
+            CHECK(6.0 == std::get<double>(evaluate(expr2)));
         }
 
         SECTION("Arguments")
@@ -1388,18 +1150,18 @@ namespace ExpressionTest
 
             Expression::ResultType expected{Register::Type::Literal, DataType::Double};
             CHECK(expected == resultType(expr2));
-            CHECK(6.0 == std::get<double>(Expression::evaluate(expr2, runtimeArgs)));
+            CHECK(6.0 == std::get<double>(evaluate(expr2, runtimeArgs)));
 
             args.a = 2.0;
-            CHECK(8.0 == std::get<double>(Expression::evaluate(expr2, runtimeArgs)));
-            CHECK(-8.0 == std::get<double>(Expression::evaluate(expr3, runtimeArgs)));
+            CHECK(8.0 == std::get<double>(evaluate(expr2, runtimeArgs)));
+            CHECK(-8.0 == std::get<double>(evaluate(expr3, runtimeArgs)));
 
             args.b = 1.5;
-            CHECK(5.25 == std::get<double>(Expression::evaluate(expr2, runtimeArgs)));
+            CHECK(5.25 == std::get<double>(evaluate(expr2, runtimeArgs)));
 
             CHECK_FALSE(Expression::canEvaluateTo(5.25, expr2));
             // Don't send in the runtimeArgs, can't evaluate the arguments.
-            CHECK_THROWS_AS(Expression::evaluate(expr2), std::runtime_error);
+            CHECK_THROWS_AS(evaluate(expr2), std::runtime_error);
 
             Expression::EvaluationTimes expectedTimes{Expression::EvaluationTime::KernelLaunch};
             CHECK(expectedTimes == Expression::evaluationTimes(expr2));
@@ -1408,12 +1170,13 @@ namespace ExpressionTest
 
     TEST_CASE("Expression test evaluate mixed types", "[expression]")
     {
-        auto one          = std::make_shared<Expression::Expression>(1.0);
-        auto two          = std::make_shared<Expression::Expression>(2.0f);
-        auto twoPoint5    = std::make_shared<Expression::Expression>(2.5f);
-        auto five         = std::make_shared<Expression::Expression>(5);
-        auto seven        = std::make_shared<Expression::Expression>(7.0);
-        auto eightPoint75 = std::make_shared<Expression::Expression>(8.75);
+        using Expression::literal;
+        auto one          = literal(1.0);
+        auto two          = literal(2.0f);
+        auto twoPoint5    = literal(2.5f);
+        auto five         = literal(5);
+        auto seven        = literal(7.0);
+        auto eightPoint75 = literal(8.75);
 
         auto ptrNull = std::make_shared<Expression::Expression>((float*)nullptr);
 
@@ -1429,29 +1192,33 @@ namespace ExpressionTest
         auto exprSix = two * expr1;
 
         // double - int -> double
-        auto exprOne = exprSix - five;
+        auto exprOneBad = exprSix - five;
+        auto exprOne    = exprSix - convert(DataType::Double, five);
 
         // float + int -> float
-        auto exprSeven = two + five;
+        auto exprSeven = two + convert(DataType::Float, five);
 
-        CHECK(6.0 == std::get<double>(Expression::evaluate(exprSix)));
-        CHECK(1.0 == std::get<double>(Expression::evaluate(exprOne)));
-        CHECK(7.0f == std::get<float>(Expression::evaluate(exprSeven)));
+        CHECK(6.0 == std::get<double>(evaluate(exprSix)));
+        CHECK_THROWS_AS(evaluate(exprOneBad), FatalError);
+        CHECK(1.0 == std::get<double>(evaluate(exprOne)));
+        CHECK(7.0f == std::get<float>(evaluate(exprSeven)));
 
         auto twoDouble = convert(DataType::Double, two);
-        CHECK(2.0 == std::get<double>(Expression::evaluate(twoDouble)));
+        CHECK(2.0 == std::get<double>(evaluate(twoDouble)));
 
         auto twoInt = convert(DataType::Int32, twoPoint5);
-        CHECK(2 == std::get<int>(Expression::evaluate(twoInt)));
+        CHECK(2 == std::get<int>(evaluate(twoInt)));
 
-        auto fiveDouble = seven - twoInt;
-        CHECK(5.0 == std::get<double>(Expression::evaluate(fiveDouble)));
+        auto fiveDoubleBad = seven - twoInt;
+        auto fiveDouble    = seven - convert(DataType::Double, twoInt);
+        CHECK_THROWS_AS(std::get<double>(evaluate(fiveDoubleBad)), FatalError);
+        CHECK(5.0 == std::get<double>(evaluate(fiveDouble)));
 
         auto minusThree64 = convert(DataType::Int64, twoInt - five);
-        CHECK(-3l == std::get<int64_t>(Expression::evaluate(minusThree64)));
+        CHECK(-3l == std::get<int64_t>(evaluate(minusThree64)));
 
         auto minusThreeU64 = convert(DataType::UInt64, twoInt - five);
-        CHECK(18446744073709551613ul == std::get<uint64_t>(Expression::evaluate(minusThreeU64)));
+        CHECK(18446744073709551613ul == std::get<uint64_t>(evaluate(minusThreeU64)));
 
         auto eight75Half = convert(DataType::Half, eightPoint75);
         CHECK(Half(8.75) == std::get<Half>(evaluate(eight75Half)));
@@ -1462,95 +1229,89 @@ namespace ExpressionTest
 
         CHECK(litDouble == resultType(exprSix));
         // Result type not (yet?) defined for mixed integral/floating point types.
-        CHECK_THROWS(resultType(exprOne));
-        CHECK_THROWS(resultType(exprSeven));
 
-        CHECK(true == std::get<bool>(Expression::evaluate(exprSix > exprOne)));
-        CHECK(true == std::get<bool>(Expression::evaluate(exprSix >= exprOne)));
-        CHECK(false == std::get<bool>(Expression::evaluate(exprSix < exprOne)));
-        CHECK(false == std::get<bool>(Expression::evaluate(exprSix <= exprOne)));
-        CHECK(true == std::get<bool>(Expression::evaluate(exprSix != exprOne)));
+        CHECK(true == std::get<bool>(evaluate(exprSix > exprOne)));
+        CHECK(true == std::get<bool>(evaluate(exprSix >= exprOne)));
+        CHECK(false == std::get<bool>(evaluate(exprSix < exprOne)));
+        CHECK(false == std::get<bool>(evaluate(exprSix <= exprOne)));
+        CHECK(true == std::get<bool>(evaluate(exprSix != exprOne)));
 
-        CHECK_THROWS(resultType(exprSix > exprOne));
-        CHECK_THROWS(resultType(exprSix >= exprOne));
-        CHECK_THROWS(resultType(exprSix < exprOne));
-        CHECK_THROWS(resultType(exprSix <= exprOne));
         CHECK(litBool == resultType(one > seven));
 
-        CHECK(true == std::get<bool>(Expression::evaluate(exprSix < exprSeven)));
-        CHECK(true == std::get<bool>(Expression::evaluate(exprSix <= exprSeven)));
-        CHECK(false == std::get<bool>(Expression::evaluate(exprSix > exprSeven)));
-        CHECK(false == std::get<bool>(Expression::evaluate(exprSix >= exprSeven)));
+        CHECK(true == std::get<bool>(evaluate(exprSix < exprSeven)));
+        CHECK(true == std::get<bool>(evaluate(exprSix <= exprSeven)));
+        CHECK(false == std::get<bool>(evaluate(exprSix > exprSeven)));
+        CHECK(false == std::get<bool>(evaluate(exprSix >= exprSeven)));
 
-        CHECK(true == std::get<bool>(Expression::evaluate(one <= exprOne)));
-        CHECK(true == std::get<bool>(Expression::evaluate(one == exprOne)));
-        CHECK(true == std::get<bool>(Expression::evaluate(one >= exprOne)));
-        CHECK(false == std::get<bool>(Expression::evaluate(one != exprOne)));
+        CHECK(true == std::get<bool>(evaluate(one <= exprOne)));
+        CHECK(true == std::get<bool>(evaluate(one == exprOne)));
+        CHECK(true == std::get<bool>(evaluate(one >= exprOne)));
+        CHECK(false == std::get<bool>(evaluate(one != exprOne)));
 
         auto trueExp = std::make_shared<Expression::Expression>(true);
-        CHECK(true == std::get<bool>(Expression::evaluate(trueExp == (one >= exprOne))));
-        CHECK(false == std::get<bool>(Expression::evaluate(trueExp == (one < exprOne))));
+        CHECK(true == std::get<bool>(evaluate(trueExp == (one >= exprOne))));
+        CHECK(false == std::get<bool>(evaluate(trueExp == (one < exprOne))));
 
         // Pointer + double -> error.
         {
             auto exprThrow = ptrValid + exprOne;
-            CHECK_THROWS_AS(Expression::evaluate(exprThrow), std::runtime_error);
+            CHECK_THROWS_AS(evaluate(exprThrow), std::runtime_error);
             CHECK_THROWS(resultType(exprThrow));
         }
 
         // Pointer * int -> error.
         {
             auto exprThrow = ptrValid * five;
-            CHECK_THROWS_AS(Expression::evaluate(exprThrow), std::runtime_error);
+            CHECK_THROWS_AS(evaluate(exprThrow), std::runtime_error);
         }
 
         // Pointer + pointer -> error
         {
             auto exprThrow = ptrValid + ptrDoubleValid;
-            CHECK_THROWS_AS(Expression::evaluate(exprThrow), std::runtime_error);
+            CHECK_THROWS_AS(evaluate(exprThrow), std::runtime_error);
             CHECK_THROWS(resultType(exprThrow));
         }
 
         // (float *) -  (double *) -> error
         {
             auto exprThrow = ptrValid - ptrDoubleValid;
-            CHECK_THROWS_AS(Expression::evaluate(exprThrow), std::runtime_error);
+            CHECK_THROWS_AS(evaluate(exprThrow), std::runtime_error);
             CHECK_THROWS(resultType(exprThrow));
         }
 
         {
             auto exprThrow = ptrNull + five;
             // nullptr + int -> error;
-            CHECK_THROWS_AS(Expression::evaluate(exprThrow), std::runtime_error);
+            CHECK_THROWS_AS(evaluate(exprThrow), std::runtime_error);
         }
 
         {
             auto exprThrow = -ptrNull;
             // -pointer -> error;
-            CHECK_THROWS_AS(Expression::evaluate(exprThrow), std::runtime_error);
+            CHECK_THROWS_AS(evaluate(exprThrow), std::runtime_error);
         }
 
         {
             auto exprThrow = five + ptrNull;
             // Nullptr + int -> error;
-            CHECK_THROWS_AS(Expression::evaluate(exprThrow), std::runtime_error);
+            CHECK_THROWS_AS(evaluate(exprThrow), std::runtime_error);
         }
 
         auto   exprXPlus5          = ptrValid + five;
-        float* dontDereferenceThis = std::get<float*>(Expression::evaluate(exprXPlus5));
+        float* dontDereferenceThis = std::get<float*>(evaluate(exprXPlus5));
         auto   ptrDifference       = dontDereferenceThis - (&x);
         CHECK(5 == ptrDifference);
 
         auto expr10PlusX    = five + exprXPlus5;
-        dontDereferenceThis = std::get<float*>(Expression::evaluate(expr10PlusX));
+        dontDereferenceThis = std::get<float*>(evaluate(expr10PlusX));
         ptrDifference       = dontDereferenceThis - (&x);
         CHECK(10 == ptrDifference);
 
         auto expr5PtrDiff = expr10PlusX - exprXPlus5;
-        CHECK(5 == std::get<int64_t>(Expression::evaluate(expr5PtrDiff)));
+        CHECK(5 == std::get<int64_t>(evaluate(expr5PtrDiff)));
 
-        CHECK(true == std::get<bool>(Expression::evaluate(expr10PlusX > ptrValid)));
-        CHECK(false == std::get<bool>(Expression::evaluate(expr10PlusX < ptrValid)));
+        CHECK(true == std::get<bool>(evaluate(expr10PlusX > ptrValid)));
+        CHECK(false == std::get<bool>(evaluate(expr10PlusX < ptrValid)));
     }
 
     TEST_CASE("Expression equality", "[expression][codegen]")
@@ -1621,21 +1382,22 @@ namespace ExpressionTest
         runtimeArgs.append("b", bVal);
         auto args = runtimeArgs.runtimeArguments();
 
-        CHECK(std::get<bool>(Expression::evaluate(vals_gt, args)) == (aVal > bVal));
-        CHECK(std::get<bool>(Expression::evaluate(vals_lt, args)) == (aVal < bVal));
-        CHECK(std::get<bool>(Expression::evaluate(vals_ge, args)) == (aVal >= bVal));
-        CHECK(std::get<bool>(Expression::evaluate(vals_le, args)) == (aVal <= bVal));
-        CHECK(std::get<bool>(Expression::evaluate(vals_eq, args)) == (aVal == bVal));
+        CHECK(std::get<bool>(evaluate(vals_gt, args)) == (aVal > bVal));
+        CHECK(std::get<bool>(evaluate(vals_lt, args)) == (aVal < bVal));
+        CHECK(std::get<bool>(evaluate(vals_ge, args)) == (aVal >= bVal));
+        CHECK(std::get<bool>(evaluate(vals_le, args)) == (aVal <= bVal));
+        CHECK(std::get<bool>(evaluate(vals_eq, args)) == (aVal == bVal));
 
-        CHECK(std::get<bool>(Expression::evaluate(expr_gt, args)) == (aVal > (aVal + bVal)));
-        CHECK(std::get<bool>(Expression::evaluate(expr_lt, args)) == (aVal < (aVal + bVal)));
-        CHECK(std::get<bool>(Expression::evaluate(expr_ge, args)) == (aVal >= (aVal + bVal)));
-        CHECK(std::get<bool>(Expression::evaluate(expr_le, args)) == (aVal <= (aVal + bVal)));
-        CHECK(std::get<bool>(Expression::evaluate(expr_eq, args)) == (aVal == (aVal + bVal)));
+        CHECK(std::get<bool>(evaluate(expr_gt, args)) == (aVal > (aVal + bVal)));
+        CHECK(std::get<bool>(evaluate(expr_lt, args)) == (aVal < (aVal + bVal)));
+        CHECK(std::get<bool>(evaluate(expr_ge, args)) == (aVal >= (aVal + bVal)));
+        CHECK(std::get<bool>(evaluate(expr_le, args)) == (aVal <= (aVal + bVal)));
+        CHECK(std::get<bool>(evaluate(expr_eq, args)) == (aVal == (aVal + bVal)));
     }
 
     TEST_CASE("Expression evaluate logical", "[expression]")
     {
+        using Expression::literal;
         auto command = std::make_shared<Command>();
         auto aTag    = command->allocateTag();
         auto ca      = command->allocateArgument(
@@ -1644,28 +1406,32 @@ namespace ExpressionTest
         auto cb   = command->allocateArgument(
             {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value);
 
-        auto a = std::make_shared<Expression::Expression>(ca);
-        auto b = std::make_shared<Expression::Expression>(cb);
+        auto a = ca->expression();
+        auto b = cb->expression();
 
-        auto vals_negate        = logicalNot(a);
-        auto vals_double_negate = logicalNot(logicalNot(a));
-        auto vals_and           = a && b;
-        auto vals_or            = a || b;
+        auto zero = literal(0);
+
+        auto vals_negate        = logicalNot(a != zero);
+        auto vals_double_negate = logicalNot(logicalNot(a != zero));
+        auto vals_and           = (a != zero) && (b != zero);
+        auto vals_or            = (a != zero) || (b != zero);
 
         auto aVal = GENERATE(from_range(TestValues::int32Values));
         auto bVal = GENERATE(from_range(TestValues::int32Values));
 
-        CAPTURE(aVal, bVal);
+        DYNAMIC_SECTION(concatenate(aVal, ", ", bVal))
+        {
+            CAPTURE(aVal, bVal);
+            KernelArguments runtimeArgs;
+            runtimeArgs.append("a", aVal);
+            runtimeArgs.append("b", bVal);
+            auto args = runtimeArgs.runtimeArguments();
 
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("a", aVal);
-        runtimeArgs.append("b", bVal);
-        auto args = runtimeArgs.runtimeArguments();
-
-        CHECK(std::get<bool>(Expression::evaluate(vals_negate, args)) == (!aVal));
-        CHECK(std::get<bool>(Expression::evaluate(vals_double_negate, args)) == (!!aVal));
-        CHECK(std::get<bool>(Expression::evaluate(vals_and, args)) == (aVal && bVal));
-        CHECK(std::get<bool>(Expression::evaluate(vals_or, args)) == (aVal || bVal));
+            CHECK(std::get<bool>(evaluate(vals_negate, args)) == (!aVal));
+            CHECK(std::get<bool>(evaluate(vals_double_negate, args)) == (!!aVal));
+            CHECK(std::get<bool>(evaluate(vals_and, args)) == (aVal && bVal));
+            CHECK(std::get<bool>(evaluate(vals_or, args)) == (aVal || bVal));
+        }
     }
 
     TEST_CASE("Expression evaluate shifts", "[expression]")
@@ -1699,17 +1465,16 @@ namespace ExpressionTest
         runtimeArgs.append("b", bVal);
         auto args = runtimeArgs.runtimeArguments();
 
-        CHECK(std::get<int>(Expression::evaluate(vals_shiftL, args)) == (aVal << bVal));
+        CHECK(std::get<int>(evaluate(vals_shiftL, args)) == (aVal << bVal));
 
-        CHECK(std::get<int>(Expression::evaluate(vals_shiftR, args))
+        CHECK(std::get<int>(evaluate(vals_shiftR, args))
               == (static_cast<unsigned int>(aVal) >> bVal));
-        CHECK(std::get<int>(Expression::evaluate(vals_signedShiftR, args)) == (aVal >> bVal));
+        CHECK(std::get<int>(evaluate(vals_signedShiftR, args)) == (aVal >> bVal));
 
-        CHECK(std::get<int>(Expression::evaluate(expr_shiftL, args)) == ((aVal + bVal) << bVal));
-        CHECK(std::get<int>(Expression::evaluate(expr_shiftR, args))
+        CHECK(std::get<int>(evaluate(expr_shiftL, args)) == ((aVal + bVal) << bVal));
+        CHECK(std::get<int>(evaluate(expr_shiftR, args))
               == (static_cast<unsigned int>(aVal + bVal) >> bVal));
-        CHECK(std::get<int>(Expression::evaluate(expr_signedShiftR, args))
-              == ((aVal + bVal) >> bVal));
+        CHECK(std::get<int>(evaluate(expr_signedShiftR, args)) == ((aVal + bVal) >> bVal));
     }
 
     TEST_CASE("Expression evaluate conditional operator", "[expression]")
@@ -1738,14 +1503,12 @@ namespace ExpressionTest
         auto args = runtimeArgs.runtimeArguments();
 
         // At kernel launch time
-        CHECK(std::get<int>(Expression::evaluate(vals_shiftL, args))
-              == (aVal >= bVal ? aVal : bVal));
+        CHECK(std::get<int>(evaluate(vals_shiftL, args)) == (aVal >= bVal ? aVal : bVal));
 
         // At translate time
         auto a_static = std::make_shared<Expression::Expression>(aVal);
         auto b_static = std::make_shared<Expression::Expression>(bVal);
-        CHECK(std::get<int>(
-                  Expression::evaluate(conditional(a_static >= b_static, a_static, b_static)))
+        CHECK(std::get<int>(evaluate(conditional(a_static >= b_static, a_static, b_static)))
               == (aVal >= bVal ? aVal : bVal));
     }
 
@@ -1779,12 +1542,12 @@ namespace ExpressionTest
         runtimeArgs.append("b", bVal);
         auto args = runtimeArgs.runtimeArguments();
 
-        CHECK(std::get<int>(Expression::evaluate(vals_and, args)) == (aVal & bVal));
-        CHECK(std::get<int>(Expression::evaluate(vals_or, args)) == (aVal | bVal));
-        CHECK(std::get<int>(Expression::evaluate(vals_negate, args)) == (~aVal));
+        CHECK(std::get<int>(evaluate(vals_and, args)) == (aVal & bVal));
+        CHECK(std::get<int>(evaluate(vals_or, args)) == (aVal | bVal));
+        CHECK(std::get<int>(evaluate(vals_negate, args)) == (~aVal));
 
-        CHECK(std::get<int>(Expression::evaluate(expr_and, args)) == ((aVal + bVal) & bVal));
-        CHECK(std::get<int>(Expression::evaluate(expr_or, args)) == ((aVal + bVal) | bVal));
+        CHECK(std::get<int>(evaluate(expr_and, args)) == ((aVal + bVal) & bVal));
+        CHECK(std::get<int>(evaluate(expr_or, args)) == ((aVal + bVal) | bVal));
     }
 
     TEST_CASE("Expression evaluate multiplyHigh signed", "[expression]")
@@ -1833,10 +1596,9 @@ namespace ExpressionTest
         runtimeArgs.append("b", bVal);
         auto args = runtimeArgs.runtimeArguments();
 
-        CHECK(std::get<int>(Expression::evaluate(expr1, args)) == ((aVal * (int64_t)bVal) >> 32));
+        CHECK(std::get<int>(evaluate(expr1, args)) == ((aVal * (int64_t)bVal) >> 32));
 
-        CHECK(std::get<int>(Expression::evaluate(expr2, args))
-              == (((aVal + bVal) * (int64_t)bVal) >> 32));
+        CHECK(std::get<int>(evaluate(expr2, args)) == (((aVal + bVal) * (int64_t)bVal) >> 32));
     }
 
     TEST_CASE("Expression evaluate multiplyHigh unsigned", "[expression]")
@@ -1870,10 +1632,9 @@ namespace ExpressionTest
         runtimeArgs.append("b", bVal);
         auto args = runtimeArgs.runtimeArguments();
 
-        CHECK(std::get<unsigned int>(Expression::evaluate(expr1, args))
-              == ((aVal * (uint64_t)bVal) >> 32));
+        CHECK(std::get<unsigned int>(evaluate(expr1, args)) == ((aVal * (uint64_t)bVal) >> 32));
 
-        CHECK(std::get<unsigned int>(Expression::evaluate(expr2, args))
+        CHECK(std::get<unsigned int>(evaluate(expr2, args))
               == (((aVal + (uint64_t)bVal) * (uint64_t)bVal) >> 32));
     }
 
@@ -1895,7 +1656,7 @@ namespace ExpressionTest
         runtimeArgs.append("a", aVal);
         auto args = runtimeArgs.runtimeArguments();
 
-        CHECK(std::exp2(aVal) == std::get<float>(Expression::evaluate(expr, args)));
+        CHECK(std::exp2(aVal) == std::get<float>(evaluate(expr, args)));
     }
 
     TEST_CASE("Expression evaluate convert expressions", "[expression]")
@@ -2039,6 +1800,8 @@ namespace ExpressionTest
 
     TEST_CASE("Expression variant test", "[expression]")
     {
+        using Expression::literal;
+
         auto context = TestContext::ForDefaultTarget();
 
         int32_t  x1          = 3;
@@ -2073,89 +1836,98 @@ namespace ExpressionTest
             = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();
         Expression::ExpressionPtr waveTilePtr = std::make_shared<Expression::Expression>(waveTile);
 
-        std::vector<Expression::ExpressionPtr> exprs = {
-            intExpr,
-            uintExpr,
-            floatExpr,
-            doubleExpr,
-            boolExpr,
-            intExpr + intExpr,
-            intExpr - intExpr,
-            intExpr * intExpr,
-            intExpr / intExpr,
-            intExpr % intExpr,
-            intExpr << intExpr,
-            intExpr >> intExpr,
-            logicalShiftR(intExpr, intExpr),
-            intExpr & intExpr,
-            intExpr ^ intExpr,
-            intExpr > intExpr,
-            intExpr < intExpr,
-            intExpr >= intExpr,
-            intExpr <= intExpr,
-            intExpr == intExpr,
-            -intExpr,
-            intPtr,
-            intLongPtr,
-            uintPtr,
-            uintLongPtr,
-            floatPtr,
-            doublePtr,
-            valuePtr,
-        };
-
-        auto testFunc = [](auto const& expr) {
-            CAPTURE(expr);
-            CHECK_NOTHROW(Expression::toString(expr));
-            CHECK_NOTHROW(Expression::evaluationTimes(expr));
-        };
-
-        for(auto const& expr : exprs)
+        SECTION("evaluate, fastDivision, toString, evaluationTimes throw")
         {
-            testFunc(expr);
-            CHECK_NOTHROW(Expression::evaluate(expr));
-            CHECK_NOTHROW(Expression::fastDivision(expr, context.get()));
+            std::vector<Expression::ExpressionPtr> exprs = {
+                intExpr,
+                uintExpr,
+                floatExpr,
+                doubleExpr,
+                boolExpr,
+                intExpr + intExpr,
+                intExpr - intExpr,
+                intExpr * intExpr,
+                intExpr / intExpr,
+                intExpr % intExpr,
+                intExpr << intExpr,
+                intExpr >> intExpr,
+                logicalShiftR(intExpr, intExpr),
+                intExpr & intExpr,
+                intExpr ^ intExpr,
+                intExpr > intExpr,
+                intExpr < intExpr,
+                intExpr >= intExpr,
+                intExpr <= intExpr,
+                intExpr == intExpr,
+                -intExpr,
+                intPtr,
+                intLongPtr,
+                uintPtr,
+                uintLongPtr,
+                floatPtr,
+                doublePtr,
+                valuePtr,
+            };
+
+            auto testFunc = [](auto const& expr) {
+                CAPTURE(expr);
+                CHECK_NOTHROW(Expression::toString(expr));
+                CHECK_NOTHROW(Expression::evaluationTimes(expr));
+            };
+
+            for(auto const& expr : exprs)
+            {
+                testFunc(expr);
+                CHECK_NOTHROW(evaluate(expr));
+                CHECK_NOTHROW(Expression::fastDivision(expr, context.get()));
+            }
+
+            testFunc(v_a);
+            CHECK_THROWS_AS(Expression::evaluate(v_a), FatalError);
+
+            testFunc(tag);
+            CHECK_THROWS_AS(evaluate(tag), FatalError);
+
+            testFunc(tagPtr);
+            CHECK_THROWS_AS(evaluate(tagPtr), FatalError);
+            CHECK_NOTHROW(Expression::fastDivision(tagPtr, context.get()));
+
+            testFunc(value);
+            CHECK_NOTHROW(evaluate(value));
+
+            testFunc(waveTile);
+            CHECK_THROWS_AS(evaluate(waveTile), FatalError);
+
+            testFunc(waveTilePtr);
+
+            CHECK_THROWS_AS(evaluate(waveTilePtr), FatalError);
+            CHECK_NOTHROW(Expression::fastDivision(waveTilePtr, context.get()));
         }
 
-        testFunc(v_a);
-        CHECK_THROWS_AS(Expression::evaluate(v_a), FatalError);
-
-        testFunc(tag);
-        CHECK_THROWS_AS(Expression::evaluate(tag), FatalError);
-
-        testFunc(tagPtr);
-        CHECK_THROWS_AS(Expression::evaluate(tagPtr), FatalError);
-        CHECK_NOTHROW(Expression::fastDivision(tagPtr, context.get()));
-
-        testFunc(value);
-        CHECK_NOTHROW(Expression::evaluate(value));
-
-        testFunc(waveTile);
-        CHECK_THROWS_AS(Expression::evaluate(waveTile), FatalError);
-
-        testFunc(waveTilePtr);
-        CHECK_THROWS_AS(Expression::evaluate(waveTilePtr), FatalError);
-        CHECK_NOTHROW(Expression::fastDivision(waveTilePtr, context.get()));
-
-        CHECK_NOTHROW(Expression::convert(DataType::Float, intExpr));
-        CHECK_NOTHROW(Expression::convert(DataType::Double, intExpr));
-        CHECK_THROWS_AS(Expression::convert(DataType::ComplexFloat, intExpr), FatalError);
-        CHECK_THROWS_AS(Expression::convert(DataType::ComplexDouble, intExpr), FatalError);
-        CHECK_NOTHROW(Expression::convert(DataType::Half, intExpr));
-        CHECK_NOTHROW(Expression::convert(DataType::Halfx2, intExpr));
-        CHECK_THROWS_AS(Expression::convert(DataType::Int8x4, intExpr), FatalError);
-        CHECK_NOTHROW(Expression::convert(DataType::Int32, intExpr));
-        CHECK_NOTHROW(Expression::convert(DataType::Int64, intExpr));
-        CHECK_NOTHROW(Expression::convert(DataType::BFloat16, intExpr));
-        CHECK_NOTHROW(Expression::convert(DataType::BFloat16x2, intExpr));
-        CHECK_THROWS_AS(Expression::convert(DataType::Int8, intExpr), FatalError);
-        CHECK_THROWS_AS(Expression::convert(DataType::Raw32, intExpr), FatalError);
-        CHECK_NOTHROW(Expression::convert(DataType::UInt32, intExpr));
-        CHECK_NOTHROW(Expression::convert(DataType::UInt64, intExpr));
-        CHECK_THROWS_AS(Expression::convert(DataType::Bool, intExpr), FatalError);
-        CHECK_THROWS_AS(Expression::convert(DataType::Bool32, intExpr), FatalError);
-        CHECK_THROWS_AS(Expression::convert(DataType::Count, intExpr), FatalError);
-        CHECK_THROWS_AS(Expression::convert(static_cast<DataType>(200), intExpr), FatalError);
+        SECTION("convert")
+        {
+            // This just checks that the runtime version of `convert()` will throw an exception
+            // for a conversion that doesn't exist instead of returning something incorrect.
+            CHECK_NOTHROW(convert(DataType::Float, intExpr));
+            CHECK_NOTHROW(convert(DataType::Double, intExpr));
+            CHECK_THROWS_AS(convert(DataType::ComplexFloat, intExpr), FatalError);
+            CHECK_THROWS_AS(convert(DataType::ComplexDouble, intExpr), FatalError);
+            CHECK_NOTHROW(convert(DataType::Half, intExpr));
+            CHECK_NOTHROW(convert(DataType::Halfx2, intExpr));
+            CHECK_THROWS_AS(convert(DataType::Int8x4, intExpr), FatalError);
+            CHECK_NOTHROW(convert(DataType::Int32, intExpr));
+            CHECK_NOTHROW(convert(DataType::Int64, intExpr));
+            CHECK_NOTHROW(convert(DataType::BFloat16, intExpr));
+            CHECK_NOTHROW(convert(DataType::BFloat16x2, intExpr));
+            CHECK_THROWS_AS(convert(DataType::Int8, intExpr), FatalError);
+            CHECK_THROWS_AS(convert(DataType::Raw32, intExpr), FatalError);
+            CHECK_NOTHROW(convert(DataType::UInt32, intExpr));
+            CHECK_NOTHROW(convert(DataType::UInt64, intExpr));
+            CHECK_NOTHROW(convert(DataType::Bool, intExpr));
+            CHECK_NOTHROW(convert(DataType::Bool32, intExpr));
+            CHECK_THROWS_AS(convert(DataType::Count, intExpr), FatalError);
+            CHECK_THROWS_AS(convert(static_cast<DataType>(200), intExpr), FatalError);
+        }
     }
 
     TEST_CASE("Expression complexity values", "[expression][optimization]")
@@ -2170,5 +1942,4 @@ namespace ExpressionTest
         CHECK(Expression::complexity(intExpr / intExpr)
               > Expression::complexity(intExpr + intExpr));
     }
-
 }

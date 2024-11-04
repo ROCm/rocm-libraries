@@ -15,23 +15,31 @@ namespace rocRoller
         /**
          * Fast Multiplication
          *
-         * Attempt to replace division operations found within an expression with faster
+         * Attempt to replace multiplication operations found within an expression with faster
          * operations.
          */
 
         struct MultiplicationByConstant
         {
+            DataType      resultType;
+            ExpressionPtr lhs = nullptr;
+
             // Fast Multiplication for when rhs is power of two
             template <typename T>
             requires(std::integral<T> && !std::same_as<bool, T>) ExpressionPtr operator()(T rhs)
             {
+                if(resultVariableType(lhs) != resultType)
+                {
+                    lhs = convert(resultType, lhs);
+                }
+
                 if(rhs == 0)
                 {
                     return literal(0);
                 }
                 else if(rhs == 1)
                 {
-                    return m_lhs;
+                    return lhs;
                 }
                 // Power of 2 Multiplication
                 else if(rhs > 0 && std::has_single_bit(cast_to_unsigned(rhs)))
@@ -39,7 +47,7 @@ namespace rocRoller
                     auto rhs_exp
                         = literal(cast_to_unsigned(std::countr_zero(cast_to_unsigned(rhs))));
 
-                    return m_lhs << rhs_exp;
+                    return lhs << rhs_exp;
                 }
 
                 return nullptr;
@@ -52,14 +60,11 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs_, CommandArgumentValue rhs)
             {
-                m_lhs = lhs;
+                lhs = lhs_;
                 return visit(*this, rhs);
             }
-
-        private:
-            ExpressionPtr m_lhs;
         };
 
         struct FastMultiplicationExpressionVisitor
@@ -111,17 +116,23 @@ namespace rocRoller
 
             ExpressionPtr operator()(Multiply const& expr) const
             {
+                auto origResultType = resultVariableType(expr);
+                AssertFatal(!origResultType.isPointer(), ShowValue(origResultType));
+
                 auto lhs = call(expr.lhs);
                 auto rhs = call(expr.rhs);
 
-                auto mulByConst = MultiplicationByConstant();
+                auto mulByConst = MultiplicationByConstant{origResultType.dataType};
 
                 if(evaluationTimes(rhs)[EvaluationTime::Translate])
                 {
                     auto rhs_val = evaluate(rhs);
                     auto rv      = mulByConst.call(lhs, rhs_val);
                     if(rv != nullptr)
+                    {
+                        copyComment(rv, expr);
                         return rv;
+                    }
                 }
 
                 if(evaluationTimes(lhs)[EvaluationTime::Translate])
@@ -130,7 +141,10 @@ namespace rocRoller
                     // lhs becomes rhs because visitor checks rhs for optimization
                     auto rv = mulByConst.call(rhs, lhs_val);
                     if(rv != nullptr)
+                    {
+                        copyComment(rv, expr);
                         return rv;
+                    }
                 }
 
                 return std::make_shared<Expression>(Multiply({lhs, rhs, expr.comment}));

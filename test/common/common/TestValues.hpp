@@ -7,6 +7,9 @@
 #include <cstdint>
 #include <vector>
 
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/Utilities/Error.hpp>
+
 namespace TestValues
 {
 
@@ -149,5 +152,38 @@ namespace TestValues
     {
         inline const static auto values = doubleValues;
     };
+
+    template <typename T>
+    concept CHasTestValues = requires()
+    {
+        {
+            ByType<T>::values
+            } -> std::convertible_to<std::vector<T>>;
+    };
+
+    inline std::vector<rocRoller::CommandArgumentValue> byType(rocRoller::DataType type)
+    {
+        auto exp = rocRoller::Expression::literal(0, type);
+
+        auto singleValue = std::get<rocRoller::CommandArgumentValue>(*exp);
+
+        auto visitor = [type](auto value) -> std::vector<rocRoller::CommandArgumentValue> {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr(CHasTestValues<T>)
+            {
+                std::vector<rocRoller::CommandArgumentValue> rv{ByType<T>::values.begin(),
+                                                                ByType<T>::values.end()};
+
+                // ByType<T>::values;
+                return rv;
+            }
+            else
+            {
+                rocRoller::Throw<rocRoller::FatalError>("No test values for ", ShowValue(type));
+            }
+        };
+
+        return std::visit(visitor, singleValue);
+    }
 
 }

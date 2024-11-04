@@ -678,6 +678,8 @@ namespace rocRoller
                     }
                 }
 
+                dest->setName(dest->name() + results[0]->name());
+
                 if(dest->valueCount() == 1 && results[0]->valueCount() == 1)
                 {
                     co_yield generateOp<Operation>(dest, results[0], expr);
@@ -815,7 +817,7 @@ namespace rocRoller
                 }
                 else
                 {
-                    co_yield m_context->copier()->copy(dest, expr);
+                    co_yield m_context->copier()->copy(dest, expr, "reg expression");
                 }
             }
 
@@ -850,7 +852,7 @@ namespace rocRoller
                     }
                     else
                     {
-                        co_yield m_context->copier()->copy(dest, result);
+                        co_yield m_context->copier()->copy(dest, result, "call()");
                     }
                 }
                 else

@@ -38,43 +38,44 @@ namespace FastDivisionTest
         auto expr      = a / Expression::literal(8u);
         auto expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "ArithmeticShiftR(CommandArgument(user_Int32_Value_0), 3j)");
+                  "ArithmeticShiftR(CommandArgument(user_Int32_Value_0)I, 3:U32)I");
 
         expr      = a / Expression::literal(8);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "ArithmeticShiftR(Add(CommandArgument(user_Int32_Value_0), "
-                  "LogicalShiftR(ArithmeticShiftR(CommandArgument(user_Int32_Value_0), 31j), "
-                  "29j)), 3i)");
+                  "ArithmeticShiftR(Add(CommandArgument(user_Int32_Value_0)I, "
+                  "LogicalShiftR(ArithmeticShiftR(CommandArgument(user_Int32_Value_0)I, 31:U32)I, "
+                  "29:U32)I)I, 3:I)I");
 
         expr      = a / Expression::literal(7u);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        EXPECT_EQ(Expression::toString(expr_fast),
-                  "LogicalShiftR(Add(LogicalShiftR(Subtract(CommandArgument(user_Int32_Value_0), "
-                  "MultiplyHigh(CommandArgument(user_Int32_Value_0), 613566757j)), 1j), "
-                  "MultiplyHigh(CommandArgument(user_Int32_Value_0), 613566757j)), 2j)");
+        EXPECT_EQ(
+            Expression::toString(expr_fast),
+            "LogicalShiftR(Add(LogicalShiftR(Subtract(CommandArgument(user_Int32_Value_0)I, "
+            "MultiplyHigh(CommandArgument(user_Int32_Value_0)I, 613566757:U32)U32)U32, 1:U32)U32, "
+            "MultiplyHigh(CommandArgument(user_Int32_Value_0)I, 613566757:U32)U32)U32, 2:U32)U32");
 
         expr      = a / Expression::literal(1);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        EXPECT_EQ(Expression::toString(expr_fast), "CommandArgument(user_Int32_Value_0)");
+        EXPECT_EQ(Expression::toString(expr_fast), "CommandArgument(user_Int32_Value_0)I");
 
         expr      = a / Expression::literal(-5);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        EXPECT_EQ(
-            Expression::toString(expr_fast),
-            "Add(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0), -1717986919i), "
-            "1j), LogicalShiftR(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0), "
-            "-1717986919i), 1j), 31j))");
+        EXPECT_EQ(Expression::toString(expr_fast),
+                  "Add(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0)I, "
+                  "-1717986919:I)I, 1:U32)I, "
+                  "LogicalShiftR(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0)"
+                  "I, -1717986919:I)I, 1:U32)I, 31:U32)I)I");
 
         expr      = a / std::make_shared<Expression::Expression>(8u);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "ArithmeticShiftR(CommandArgument(user_Int32_Value_0), 3j)");
+                  "ArithmeticShiftR(CommandArgument(user_Int32_Value_0)I, 3:U32)I");
 
         expr      = a / std::make_shared<Expression::Expression>(128u);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "ArithmeticShiftR(CommandArgument(user_Int32_Value_0), 7j)");
+                  "ArithmeticShiftR(CommandArgument(user_Int32_Value_0)I, 7:U32)I");
     }
 
     TEST_F(FastDivisionTest, DivisionByArgumentExpressions)
@@ -99,13 +100,12 @@ namespace FastDivisionTest
 
         auto expr      = a / b_signed;
         auto expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        auto expected  = "Subtract(BitwiseXor(ArithmeticShiftR(Add(Add(MultiplyHigh("
-                        "UNALLOCATED:I, MagicMultiple_0), "
-                        "UNALLOCATED:I), "
-                        "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(UNALLOCATED:I"
-                        ", MagicMultiple_0), UNALLOCATED:I), 31i), Add(ShiftL(1i, "
-                        "MagicShifts_1), Conditional(Equal(MagicMultiple_0, 0i), -1i, 0i)))), "
-                        "MagicShifts_1), MagicSign_2), MagicSign_2)";
+        auto expected  = "Subtract(BitwiseXor(ArithmeticShiftR(Add(Add(MultiplyHigh(UNALLOCATED:I, "
+                        "MagicMultiple_0:I)I, UNALLOCATED:I)I, "
+                        "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(UNALLOCATED:I, "
+                        "MagicMultiple_0:I)I, UNALLOCATED:I)I, 31:I)I, Add(ShiftL(1:I, "
+                        "MagicShifts_1:I)I, Conditional(Equal(MagicMultiple_0:I, 0:I)BL, -1:I, "
+                        "0:I)I)I)I)I, MagicShifts_1:I)I, MagicSign_2:I)I, MagicSign_2:I)I";
         EXPECT_EQ(Expression::toString(expr_fast), expected);
 
         expr      = a_unsigned / b_unsigned;
@@ -113,13 +113,17 @@ namespace FastDivisionTest
         setComment(expr_fast, "");
         EXPECT_EQ(Expression::toString(expr_fast),
                   "ArithmeticShiftR(Add(ArithmeticShiftR(Subtract(UNALLOCATED:U32, "
-                  "MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3)), 1j), "
-                  "MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3)), MagicShifts_4)");
+                  "MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3:U32)U32)U32, 1:U32)U32, "
+                  "MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3:U32)U32)U32, MagicShifts_4:I)U32");
     }
 
     TEST_F(FastDivisionTest, ModuloByConstantExpressions)
     {
         auto command = std::make_shared<Command>();
+
+        auto regPtr
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::UInt32, 1);
+        auto reg = regPtr->expression();
 
         auto aTag = command->allocateTag();
         auto a    = std::make_shared<Expression::Expression>(command->allocateArgument(
@@ -128,47 +132,53 @@ namespace FastDivisionTest
         auto expr      = a % Expression::literal(8u);
         auto expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "BitwiseAnd(CommandArgument(user_Int32_Value_0), 7j)");
+                  "BitwiseAnd(CommandArgument(user_Int32_Value_0)I, 7:U32)U32");
 
         expr      = a % Expression::literal(8);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "Subtract(CommandArgument(user_Int32_Value_0), "
-                  "BitwiseAnd(Add(CommandArgument(user_Int32_Value_0), "
-                  "LogicalShiftR(ArithmeticShiftR(CommandArgument(user_Int32_Value_0), 31j), "
-                  "29j)), -8i))");
+                  "Subtract(CommandArgument(user_Int32_Value_0)I, "
+                  "BitwiseAnd(Add(CommandArgument(user_Int32_Value_0)I, "
+                  "LogicalShiftR(ArithmeticShiftR(CommandArgument(user_Int32_Value_0)I, 31:U32)I, "
+                  "29:U32)I)I, -8:I)I)I");
 
         expr      = a % Expression::literal(7u);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "Subtract(CommandArgument(user_Int32_Value_0), "
+                  "Subtract(CommandArgument(user_Int32_Value_0)I, "
                   "Multiply(LogicalShiftR(Add(LogicalShiftR(Subtract(CommandArgument(user_Int32_"
-                  "Value_0), MultiplyHigh(CommandArgument(user_Int32_Value_0), 613566757j)), 1j), "
-                  "MultiplyHigh(CommandArgument(user_Int32_Value_0), 613566757j)), 2j), 7j))");
+                  "Value_0)I, MultiplyHigh(CommandArgument(user_Int32_Value_0)I, "
+                  "613566757:U32)U32)U32, 1:U32)U32, "
+                  "MultiplyHigh(CommandArgument(user_Int32_Value_0)I, 613566757:U32)U32)U32, "
+                  "2:U32)U32, 7:U32)U32)U32");
 
         expr      = a % Expression::literal(1);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
-        EXPECT_EQ(Expression::toString(expr_fast), "0i");
+        EXPECT_EQ(Expression::toString(expr_fast), "0:I");
+
+        expr      = reg % Expression::literal(1u);
+        expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
+        EXPECT_EQ(Expression::toString(expr_fast), "0:U32");
 
         expr      = a % Expression::literal(-5);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(
             Expression::toString(expr_fast),
-            "Subtract(CommandArgument(user_Int32_Value_0), "
-            "Multiply(Add(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0), "
-            "-1717986919i), 1j), "
-            "LogicalShiftR(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0), "
-            "-1717986919i), 1j), 31j)), -5i))");
+            "Subtract(CommandArgument(user_Int32_Value_0)I, "
+            "Multiply(Add(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0)I, "
+            "-1717986919:I)I, 1:U32)I, "
+            "LogicalShiftR(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0)I, "
+            "-1717986919:I)I, 1:U32)I, 31:U32)I)I, -5:I)I)I");
 
         expr      = a % std::make_shared<Expression::Expression>(8u);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "BitwiseAnd(CommandArgument(user_Int32_Value_0), 7j)");
+                  "BitwiseAnd(CommandArgument(user_Int32_Value_0)I, 7:U32)U32");
 
         expr      = a % std::make_shared<Expression::Expression>(128u);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "BitwiseAnd(CommandArgument(user_Int32_Value_0), 127j)");
+                  "BitwiseAnd(CommandArgument(user_Int32_Value_0)I, 127:U32)U32");
     }
 
     TEST_F(FastDivisionTest, ModuloByArgumentExpressions)
@@ -196,12 +206,11 @@ namespace FastDivisionTest
         std::string expected
             = "Subtract(UNALLOCATED:I, "
               "Multiply(Subtract(BitwiseXor(ArithmeticShiftR(Add(Add(MultiplyHigh(UNALLOCATED:I, "
-              "MagicMultiple_0), UNALLOCATED:I), "
-              "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(UNALLOCATED:I, "
-              "MagicMultiple_0), UNALLOCATED:I), 31i), Add(ShiftL(1i, "
-              "MagicShifts_1), Conditional(Equal(MagicMultiple_0, 0i), -1i, 0i)))), "
-              "MagicShifts_1), MagicSign_2), MagicSign_2), "
-              "CommandArgument(user_Int32_Value_0)))";
+              "MagicMultiple_0:I)I, UNALLOCATED:I)I, "
+              "BitwiseAnd(ArithmeticShiftR(Add(MultiplyHigh(UNALLOCATED:I, MagicMultiple_0:I)I, "
+              "UNALLOCATED:I)I, 31:I)I, Add(ShiftL(1:I, MagicShifts_1:I)I, "
+              "Conditional(Equal(MagicMultiple_0:I, 0:I)BL, -1:I, 0:I)I)I)I)I, MagicShifts_1:I)I, "
+              "MagicSign_2:I)I, MagicSign_2:I)I, CommandArgument(user_Int32_Value_0)I)I)I";
         EXPECT_EQ(Expression::toString(expr_fast), expected);
 
         expr      = a_unsigned % b_unsigned;
@@ -209,11 +218,12 @@ namespace FastDivisionTest
 
         EXPECT_THAT(
             Expression::toString(expr_fast),
-            testing::HasSubstr("Subtract(UNALLOCATED:U32, "
-                               "Multiply(ArithmeticShiftR(Add(ArithmeticShiftR(Subtract("
-                               "UNALLOCATED:U32, MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3)), "
-                               "1j), MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3)), "
-                               "MagicShifts_4), CommandArgument(user_UInt32_Value_1)))"));
+            testing::HasSubstr(
+                "Subtract(UNALLOCATED:U32, "
+                "Multiply(ArithmeticShiftR(Add(ArithmeticShiftR(Subtract("
+                "UNALLOCATED:U32, MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3:U32)U32)U32, "
+                "1:U32)U32, MultiplyHigh(UNALLOCATED:U32, MagicMultiple_3:U32)U32)U32, "
+                "MagicShifts_4:I)U32, CommandArgument(user_UInt32_Value_1)U32)U32)U32"));
     }
 
     namespace GPUFastDivisionTest
@@ -316,6 +326,11 @@ namespace FastDivisionTest
             else
             {
                 expr = fastDivision(expr, this->m_context);
+                AssertFatal(!std::holds_alternative<Expression::Divide>(*expr), toString(expr));
+                AssertFatal(!std::holds_alternative<Expression::Modulo>(*expr), toString(expr));
+
+                AssertFatal(!contains<Expression::Divide>(expr), toString(expr));
+                AssertFatal(!contains<Expression::Modulo>(expr), toString(expr));
             }
 
             k->setWorkgroupSize({1, 1, 1});
@@ -353,6 +368,9 @@ namespace FastDivisionTest
 
                 AssertFatal(!std::holds_alternative<Expression::Divide>(*expr), toString(expr));
                 AssertFatal(!std::holds_alternative<Expression::Modulo>(*expr), toString(expr));
+
+                AssertFatal(!contains<Expression::Divide>(expr), toString(expr));
+                AssertFatal(!contains<Expression::Modulo>(expr), toString(expr));
 
                 Register::ValuePtr s_c;
                 co_yield Expression::generate(s_c, expr, this->m_context);
@@ -445,24 +463,7 @@ namespace FastDivisionTest
                 return;
             }
 
-            DataType dataTypeA;
-
-            if(typeid(A) == typeid(int32_t))
-            {
-                dataTypeA = DataType::Int32;
-            }
-            else if(typeid(A) == typeid(int64_t))
-            {
-                dataTypeA = DataType::Int64;
-            }
-            else if(typeid(A) == typeid(uint32_t))
-            {
-                dataTypeA = DataType::UInt32;
-            }
-            else
-            {
-                FAIL() << "Testing for unknown data type " << typeid(A).name();
-            }
+            DataType dataTypeA = rocRoller::TypeInfo<A>::Var.dataType;
 
             auto command = std::make_shared<Command>();
 
@@ -515,11 +516,9 @@ namespace FastDivisionTest
 
                 auto a = s_a->expression();
 
-                std::shared_ptr<Expression::Expression> expr;
-                if(isModulo)
-                    expr = fastDivision(a % Expression::literal(divisor), m_context);
-                else
-                    expr = fastDivision(a / Expression::literal(divisor), m_context);
+                auto denom = Expression::literal(divisor);
+
+                std::shared_ptr<Expression::Expression> expr = isModulo ? (a % denom) : (a / denom);
 
                 Register::ValuePtr s_c;
                 co_yield Expression::generate(s_c, expr, m_context);

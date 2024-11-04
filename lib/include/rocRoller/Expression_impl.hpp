@@ -231,6 +231,12 @@ namespace rocRoller
             return convertCase(dt, a);
         }
 
+        inline ExpressionPtr convert(VariableType vt, ExpressionPtr a)
+        {
+            AssertFatal(!vt.isPointer(), "Convert to pointer type not supported.", ShowValue(vt));
+            return convertCase(vt.dataType, a);
+        }
+
         template <DataType DATATYPE>
         inline ExpressionPtr convert(ExpressionPtr a)
         {
@@ -370,6 +376,9 @@ namespace rocRoller
         EXPRESSION_INFO(Convert<DataType::Int64>);
         EXPRESSION_INFO(Convert<DataType::UInt32>);
         EXPRESSION_INFO(Convert<DataType::UInt64>);
+        EXPRESSION_INFO(Convert<DataType::Bool>);
+        EXPRESSION_INFO(Convert<DataType::Bool32>);
+        EXPRESSION_INFO(Convert<DataType::Bool64>);
 
         EXPRESSION_INFO(SRConvert<DataType::FP8>);
         EXPRESSION_INFO(SRConvert<DataType::BF8>);
@@ -505,5 +514,28 @@ namespace rocRoller
         {
             return ExpressionEvaluationTimesVisitor().call(expr);
         }
+
+        template <typename Expr>
+        requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) auto split(ExpressionPtr expr)
+        {
+            AssertFatal(expr && std::holds_alternative<Expr>(*expr),
+                        "Expression does not hold the correct type");
+
+            auto exp = std::get<Expr>(*expr);
+
+            if constexpr(CUnary<Expr>)
+            {
+                return std::make_tuple(exp.arg);
+            }
+            else if constexpr(CBinary<Expr>)
+            {
+                return std::make_tuple(exp.lhs, exp.rhs);
+            }
+            else if constexpr(CTernary<Expr>)
+            {
+                return std::make_tuple(exp.lhs, exp.r1hs, exp.r2hs);
+            }
+        }
+
     }
 }

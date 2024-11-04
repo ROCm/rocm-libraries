@@ -391,15 +391,16 @@ namespace rocRoller
         {
         case DataType::Int32:
             co_yield signExtendDWord(dest->subset({1}), arg);
-            co_yield m_context->copier()->copy(dest->subset({0}), arg);
+            co_yield m_context->copier()->copy(dest->subset({0}), arg, "convert");
             break;
         case DataType::UInt32:
-            co_yield m_context->copier()->copy(dest->subset({1}), Register::Value::Literal(0));
-            co_yield m_context->copier()->copy(dest->subset({0}), arg);
+            co_yield m_context->copier()->copy(
+                dest->subset({1}), Register::Value::Literal(0), "convert");
+            co_yield m_context->copier()->copy(dest->subset({0}), arg, "convert");
             break;
 
         case DataType::UInt64:
-            co_yield m_context->copier()->copy(dest, arg);
+            co_yield m_context->copier()->copy(dest, arg, "convert");
             break;
 
         default:
@@ -420,12 +421,12 @@ namespace rocRoller
         switch(dataType)
         {
         case DataType::Int32:
-            co_yield m_context->copier()->copy(dest, arg);
+            co_yield m_context->copier()->copy(dest, arg, "convert");
             break;
 
         case DataType::UInt64:
         case DataType::Int64:
-            co_yield m_context->copier()->copy(dest, arg->subset({0}));
+            co_yield m_context->copier()->copy(dest, arg->subset({0}), "convert");
             break;
 
         default:
@@ -447,15 +448,16 @@ namespace rocRoller
         {
         case DataType::Int32:
             co_yield signExtendDWord(dest->subset({1}), arg);
-            co_yield m_context->copier()->copy(dest->subset({0}), arg);
+            co_yield m_context->copier()->copy(dest->subset({0}), arg, "convert");
             break;
         case DataType::UInt32:
-            co_yield m_context->copier()->copy(dest->subset({1}), Register::Value::Literal(0));
-            co_yield m_context->copier()->copy(dest->subset({0}), arg);
+            co_yield m_context->copier()->copy(
+                dest->subset({1}), Register::Value::Literal(0), "convert");
+            co_yield m_context->copier()->copy(dest->subset({0}), arg, "convert");
             break;
 
         case DataType::Int64:
-            co_yield m_context->copier()->copy(dest, arg);
+            co_yield m_context->copier()->copy(dest, arg, "convert");
             break;
 
         default:

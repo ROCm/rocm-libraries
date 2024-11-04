@@ -127,6 +127,9 @@ namespace rocRoller
             Convert<DataType::Int64>,
             Convert<DataType::UInt32>,
             Convert<DataType::UInt64>,
+            Convert<DataType::Bool>,
+            Convert<DataType::Bool32>,
+            Convert<DataType::Bool64>,
 
             // --- Stochastic Rounding Convert ---
             SRConvert<DataType::FP8>,

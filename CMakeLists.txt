@@ -1,5 +1,5 @@
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.16...3.19)
 
 project(rocRoller VERSION 1.0)
 
@@ -310,7 +310,9 @@ set(rocroller_src
  lib/source/Expression.cpp
  lib/source/Expression_evaluate.cpp
  lib/source/Expression_generate.cpp
+ lib/source/Expression_resultType.cpp
  lib/source/Expression_serialization.cpp
+ lib/source/Expression_toString.cpp
  lib/source/GPUArchitecture.cpp
  lib/source/GPUArchitectureLibrary.cpp
  lib/source/GPUInstructionInfo.cpp
@@ -329,6 +331,7 @@ set(rocroller_src
  lib/source/Assemblers/InProcessAssembler_assemble.cpp
  lib/source/Assemblers/SubprocessAssembler.cpp
 
+ lib/source/ExpressionTransformations/CombineShifts.cpp
  lib/source/ExpressionTransformations/DataFlowTagPropagation.cpp
  lib/source/ExpressionTransformations/FastArithmetic.cpp
  lib/source/ExpressionTransformations/LowerExponential.cpp
@@ -591,7 +594,6 @@ set(
   test/unit/DataTypesTest.cpp
   test/unit/DependencyTest.cpp
   test/unit/ErrorTest.cpp
-  test/unit/ExpressionTransformationTest.cpp
   test/unit/FastDivisionTest.cpp
   test/unit/LowerExponentialTest.cpp
   test/unit/FastMultiplicationTest.cpp
@@ -694,9 +696,15 @@ set(
   test/catch/TestKernels.cpp
 
   test/catch/BinaryExpressionTest.cpp
+  test/catch/CommandArgumentValueTest.cpp
   test/catch/CustomAssertionTest.cpp
   test/catch/CustomMatcherTest.cpp
+  test/catch/ExpressionIdenticalTest.cpp
+  test/catch/ExpressionSerializationTest.cpp
   test/catch/ExpressionTest.cpp
+  test/catch/ExpressionToStringTest.cpp
+  test/catch/ExpressionTransformationTest.cpp
+  test/catch/FastArithmeticTest.cpp
   test/catch/KernelArgumentsTest.cpp
   test/catch/KernelGraphConstraintsTest.cpp
   test/catch/ScalarExpressionTest.cpp

@@ -362,6 +362,9 @@ namespace rocRoller
         if(lhs.pointerType == PointerType::Value && rhs.pointerType != PointerType::Value)
             std::swap(lhs, rhs);
 
+        if(lhs == DataType::None || rhs == DataType::None)
+            return DataType::None;
+
         auto const& lhsInfo = DataTypeInfo::Get(lhs);
         auto const& rhsInfo = DataTypeInfo::Get(rhs);
 
@@ -379,6 +382,16 @@ namespace rocRoller
             return rhs;
         if(rhs.dataType == DataType::Raw32)
             return lhs;
+
+        if(lhs.dataType == DataType::Bool32 && rhs.dataType == DataType::Bool)
+            return lhs;
+        if(rhs.dataType == DataType::Bool32 && lhs.dataType == DataType::Bool)
+            return rhs;
+
+        if(lhs.dataType == DataType::Bool64 && rhs.dataType == DataType::Bool)
+            return lhs;
+        if(rhs.dataType == DataType::Bool64 && lhs.dataType == DataType::Bool)
+            return rhs;
 
         AssertFatal(lhsInfo.isIntegral == rhsInfo.isIntegral,
                     "No automatic promotion between integral and non-integral types",
@@ -412,7 +425,7 @@ namespace rocRoller
         if(lhsInfo.packing > rhsInfo.packing)
             return rhs;
 
-        if(rhsInfo.isSigned)
+        if(!rhsInfo.isSigned)
             return rhs;
 
         return lhs;
@@ -515,6 +528,13 @@ namespace rocRoller
     DataTypeInfo const& DataTypeInfo::Get(VariableType const& v)
     {
         registerAllTypeInfoOnce();
+
+        if(v.isPointer())
+        {
+            VariableType genericPointer(v.pointerType);
+            if(genericPointer != v)
+                return Get(genericPointer);
+        }
 
         auto iter = data.find(v);
         AssertFatal(iter != data.end(),

@@ -49,6 +49,12 @@ namespace rocRoller
         ExpressionPtr fastMultiplication(ExpressionPtr expr);
 
         /**
+         * Attempt to combine multiple shifts:
+         * - Opposite shifts by same amount: mask off bits that would be zeroed out.
+         */
+        ExpressionPtr combineShifts(ExpressionPtr expr);
+
+        /**
          * @brief Simplify expressions
          *
          * @param expr Input expression

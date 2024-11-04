@@ -83,4 +83,15 @@ namespace rocRoller
     static_assert(!CForwardRangeOf<std::set<std::string>, int>);
     static_assert(!CForwardRangeOf<int, int>);
 
+    template <typename T>
+    concept CPointer = requires()
+    {
+        requires std::is_pointer_v<T>;
+    };
+
+    static_assert(!CPointer<int>);
+    static_assert(CPointer<int*>);
+    static_assert(CPointer<int const*>);
+    static_assert(CPointer<char const*>);
+    static_assert(CPointer<char*>);
 }
