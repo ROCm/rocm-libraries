@@ -3,6 +3,31 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 3.4.0
+
+### Added
+
+* Added `rocsparse_[s|d|c|z]csritilu0_compute_ex` routines for iterative ILU
+* Added `rocsparse_[s|d|c|z]csritsvx_solve` routines for iterative triangular solve
+* Added BSR format to SpMM generic routine `rocsparse_spmm`
+* Added `GPU_TARGETS` to replace the now deprecated `AMDGPU_TARGETS` in cmake files
+
+### Changed
+
+* By default, build rocsparse shared library using `--offload-compress` compiler option which compresses the fat binary. This significantly reduces the shared library binary size.
+
+### Optimized
+
+* Improved adaptive CSR sparse matrix-vector multiplcation algorithm when the sparse matrix has many empty rows at the beginning or end of the matrix. This improves the routines `rocsparse_spmv` and `rocsparse_spmv_ex` when the adaptive algorithm `rocsparse_spmv_alg_csr_adaptive` is used.
+* Improved stream CSR sparse matrix-vector multiplication algorithm when the sparse matrix size (number of rows) decreases. This improves the routines `rocsparse_spmv` and `rocsparse_spmv_ex` when the stream algorithm `rocsparse_spmv_alg_csr_stream` is used.
+* Improved user documentation
+
+### Upcoming changes
+
+* Deprecated `rocsparse_[s|d|c|z]csritilu0_compute` routines. Users should use the newly added `rocsparse_[s|d|c|z]csritilu0_compute_ex` routines going forward.
+* Deprecated `rocsparse_[s|d|c|z]csritsvx_solve` routines. Users should use the newly added `rocsparse_[s|d|c|z]csritsvx_solve` routines going forward.
+* Deprecated `AMDGPU_TARGETS` using in cmake files. Users should use `GPU_TARGETS` going forward.
+
 ## rocSPARSE 3.3.0 for ROCm 6.3.0
 
 ### Added
