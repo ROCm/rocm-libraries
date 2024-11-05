@@ -182,19 +182,47 @@ Callbacks
 Single-process Multi-GPU Transforms
 ===================================
 
-hipFFT offers experimental single-process multi-GPU transforms.
-		     
-Multiple devices can be associated to a :cpp:type:`hipfftHandle` using
-:cpp:func:`hipfftXtSetGPUs`.  Once a plan is associated to multiple
-GPUs, :cpp:struct:`hipLibXtDesc` is used to pass multiple GPU buffers
-to the plan for execution.  These buffers are allocated via
-:cpp:func:`hipfftXtMalloc`, and free'd with :cpp:func:`hipfftXtFree`.
-The function :cpp:func:`hipfftXtMemcpy` allows one to move data to or
-from a :cpp:struct:`hipLibXtDesc` and a contiguous host buffer, or
-between two :cpp:struct:`hipLibXtDesc` s.
+hipFFT offers experimental support for distributing a transform
+across multiple GPUs in a single process.
 
-Execution is performed with the appropriate
-:cpp:func:`hipfftXtExecDescriptor`
+The API usage works as follows:
+
+1. Create a hipFFT plan handle with :cpp:func:`hipfftCreate`.
+
+2. Associate a set of GPU devices to the plan by calling :cpp:func:`hipfftXtSetGPUs`.
+
+3. Make the plan by calling one of:
+
+   * :cpp:func:`hipfftMakePlan1d`
+   * :cpp:func:`hipfftMakePlan2d`
+   * :cpp:func:`hipfftMakePlan3d`
+   * :cpp:func:`hipfftMakePlanMany`
+   * :cpp:func:`hipfftMakePlanMany64`
+   * :cpp:func:`hipfftXtMakePlanMany`
+
+4. Allocate memory for the data on the devices with
+   :cpp:func:`hipfftXtMalloc`, which returns the allocated memory as
+   a :cpp:struct:`hipLibXtDesc` descriptor.
+
+5. Copy data from the host to the descriptor with :cpp:func:`hipfftXtMemcpy`.
+
+6. Execute the plan by calling one of:
+
+   * :cpp:func:`hipfftXtExecDescriptor`
+   * :cpp:func:`hipfftXtExecDescriptorC2C`
+   * :cpp:func:`hipfftXtExecDescriptorR2C`
+   * :cpp:func:`hipfftXtExecDescriptorC2R`
+   * :cpp:func:`hipfftXtExecDescriptorZ2Z`
+   * :cpp:func:`hipfftXtExecDescriptorD2Z`
+   * :cpp:func:`hipfftXtExecDescriptorZ2D`
+
+   Pass the descriptor as input and output.
+
+7. Copy the output from the descriptor back to the host with :cpp:func:`hipfftXtMemcpy`.
+
+8. Free the descriptor with :cpp:func:`hipfftXtFree`.
+
+9. Clean up the plan by calling :cpp:func:`hipfftDestroy`.
 
 .. doxygenfunction:: hipfftXtSetGPUs
 
@@ -206,3 +234,159 @@ Execution is performed with the appropriate
 .. doxygenfunction:: hipfftXtMemcpy
 		     
 .. doxygengroup:: hipfftXtExecDescriptor
+
+Multi-process transforms
+========================
+
+hipFFT has experimental support for transforms distributed across MPI (Message 
+Passing Interface) processes.
+
+Support for MPI transforms was introduced in ROCm 6.4 with hipFFT 1.0.18.
+
+.. note::
+
+   hipFFT MPI support is only available when the library is built
+   with the `HIPFFT_MPI_ENABLE` CMake option enabled. By default, it
+   is off.
+
+   Additionally, hipFFT MPI support requires its backend FFT library
+   to also support MPI.  This means that either an MPI-enabled rocFFT
+   library or cuFFTMp must be used.
+
+   Finally, hipFFT API calls made on different ranks might return
+   different values.  Users must take care to ensure that all ranks
+   have successfully created their plans before attempting to execute
+   a distributed transform, and it is possible for one rank to fail
+   to create/execute a plan while the others succeed.
+
+MPI must be initialized before creating multi-process hipFFT plans.
+
+Built-in decomposition
+----------------------
+
+hipFFT can automatically decide the data decomposition for
+distributed transforms.  The API usage is similar to the
+single-process, multi-GPU case described above.
+
+1. On all ranks in the MPI communicator:
+
+   i. Create a hipFFT plan handle with :cpp:func:`hipfftCreate`.
+
+   ii. Attach the MPI communicator to the plan with :cpp:func:`hipfftMpAttachComm`.
+
+   iii. Make the plan by calling one of:
+
+      * :cpp:func:`hipfftMakePlan1d`
+      * :cpp:func:`hipfftMakePlan2d`
+      * :cpp:func:`hipfftMakePlan3d`
+      * :cpp:func:`hipfftMakePlanMany`
+      * :cpp:func:`hipfftMakePlanMany64`
+      * :cpp:func:`hipfftXtMakePlanMany`
+
+      .. note::
+
+         Not all backend FFT libraries support distributing all
+         transforms.  Check the documentation for the backend FFT library
+         for any restrictions on distributed transform types, placement,
+         sizes, or data layouts.
+
+2. Copy data from the host to the descriptor with :cpp:func:`hipfftXtMemcpy`.
+
+3. Execute the plan by calling one of:
+
+   * :cpp:func:`hipfftXtExec`
+   * :cpp:func:`hipfftXtExecDescriptorC2C`
+   * :cpp:func:`hipfftXtExecDescriptorR2C`
+   * :cpp:func:`hipfftXtExecDescriptorC2R`
+   * :cpp:func:`hipfftXtExecDescriptorZ2Z`
+   * :cpp:func:`hipfftXtExecDescriptorD2Z`
+   * :cpp:func:`hipfftXtExecDescriptorZ2D`
+
+4. Copy the output from the descriptor back to the host with :cpp:func:`hipfftXtMemcpy`.
+
+5. Free the descriptor with :cpp:func:`hipfftXtFree`.
+
+6. On all ranks in the MPI communicator:
+
+   i. Clean up the plan by calling :cpp:func:`hipfftDestroy`.
+
+Custom decomposition
+--------------------
+
+hipFFT also allows an arbitrary decomposition of the FFT into 1D, 2D, or
+3D bricks.  Each MPI rank calls :cpp:func:`hipfftXtSetDistribution`
+during plan creation to declare which input and output brick resides
+on that rank.
+
+The same API calls are made on each rank in the MPI communicator, as follows:
+
+1. Create a hipFFT plan handle with :cpp:func:`hipfftCreate`.
+
+2. Attach the MPI communicator to the plan with :cpp:func:`hipfftMpAttachComm`.
+
+3. Call :cpp:func:`hipfftXtSetDistribution` to specify the input and output brick for the current rank.
+
+   Bricks are specified by their lower and upper coordinates in
+   the input/output index space.  The lower coordinate is
+   inclusive (contained within the brick) and the upper
+   coordinate is exclusive (first index past the end of the
+   brick).
+
+   Strides for the input/output data are also provided, to
+   describe how the bricks are laid out in physical memory.
+
+   Each coordinate and stride contains the same number of elements as
+   the number of dimensions in the FFT.  Note that this also implies
+   that batched FFTs are not supported when using MPI, because the
+   coordinates and strides do not contain information about the batch
+   dimension.
+
+4. Make the plan by calling one of:
+
+   * :cpp:func:`hipfftMakePlan1d`
+   * :cpp:func:`hipfftMakePlan2d`
+   * :cpp:func:`hipfftMakePlan3d`
+
+   "PlanMany" APIs enable batched FFTs and are not usable with
+   MPI.
+
+   .. note::
+
+      Not all backend FFT libraries support distributing all
+      transforms.  Check the documentation for the backend FFT library
+      for any restrictions on distributed transform types, placement,
+      sizes, or data layouts.
+
+5. Call :cpp:func:`hipfftXtMalloc` with
+   :cpp:enum:`HIPFFT_XT_FORMAT_DISTRIBUTED_INPUT` to
+   allocate the input brick on the current rank.  The allocated
+   memory is returned as a :cpp:struct:`hipLibXtDesc` descriptor.
+
+6. Call :cpp:func:`hipfftXtMalloc` with
+   :cpp:enum:`HIPFFT_XT_FORMAT_DISTRIBUTED_OUTPUT` to
+   allocate the output brick on the current rank.  The allocated
+   memory is returned as a :cpp:struct:`hipLibXtDesc` descriptor.
+
+7. Initialize the memory pointed to by the descriptor.
+
+8. Execute the plan by calling one of:
+
+   * :cpp:func:`hipfftXtExecDescriptor`
+   * :cpp:func:`hipfftXtExecDescriptorC2C`
+   * :cpp:func:`hipfftXtExecDescriptorR2C`
+   * :cpp:func:`hipfftXtExecDescriptorC2R`
+   * :cpp:func:`hipfftXtExecDescriptorZ2Z`
+   * :cpp:func:`hipfftXtExecDescriptorD2Z`
+   * :cpp:func:`hipfftXtExecDescriptorZ2D`
+
+   Pass the input descriptor as input and the output descriptor as output.
+
+9. Use the transformed data pointed to by the output descriptor.
+
+10. Free the descriptors with :cpp:func:`hipfftXtFree`.
+
+11. Clean up the plan by calling :cpp:func:`hipfftDestroy`.
+
+.. doxygenfunction:: hipfftMpAttachComm
+.. doxygenfunction:: hipfftXtSetDistribution
+.. doxygenfunction:: hipfftXtSetSubformatDefault
