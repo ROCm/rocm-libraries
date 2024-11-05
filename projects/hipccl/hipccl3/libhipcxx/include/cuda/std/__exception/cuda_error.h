@@ -39,9 +39,9 @@
 #  pragma system_header
 #endif // no system header
 
-#if !defined(_CCCL_CUDA_COMPILER_NVCC) && !defined(_CCCL_CUDA_COMPILER_NVHPC) && !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC_RTC__)
+#if defined(_CCCL_CUDA_COMPILER_CLANG) && !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC_RTC__)
 #  include <cuda_runtime_api.h>
-#endif // !_CCCL_CUDA_COMPILER_NVCC && !_CCCL_CUDA_COMPILER_NVHPC
+#endif // _CCCL_CUDA_COMPILER_CLANG
 
 #include <cuda/std/__exception/terminate.h>
 
