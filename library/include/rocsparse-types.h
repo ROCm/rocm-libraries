@@ -42,7 +42,9 @@
 /// \endcond
 
 /*! \ingroup types_module
- *  \brief Specifies whether int32 or int64 is used.
+ *  \brief Specifies rocSPARSE integer type (defaults to int32_t).
+ *
+ *  \note When rocSPARSE is built with rocsparse_ILP64, \ref rocsparse_int is typedef to int64_t.
  */
 #if defined(rocsparse_ILP64)
 typedef int64_t rocsparse_int;

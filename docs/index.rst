@@ -34,6 +34,7 @@ The rocSPARSE documentation is structured as follows:
 
     * :ref:`api`
     * :ref:`rocsparse_types_`
+    * :ref:`rocsparse_enumerations_`
     * :ref:`rocsparse_auxiliary_functions_`
     * :ref:`rocsparse_level1_functions_`
     * :ref:`rocsparse_level2_functions_`

@@ -21,6 +21,7 @@ subtrees:
     - entries:
       - file: reference/api.rst
       - file: reference/types.rst
+      - file: reference/enumerations.rst
       - file: reference/auxiliary.rst
       - file: reference/level1.rst
       - file: reference/level2.rst
