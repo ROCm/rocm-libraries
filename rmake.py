@@ -203,7 +203,7 @@ def config_cmd():
             args.gpu_architecture = OS_info["GPU"]
         else:
             fatal("Could not detect GPU as requested. Not continuing.")
-    cmake_options.append(f'-DAMDGPU_TARGETS=\"{args.gpu_architecture}\"')
+    cmake_options.append(f'-DGPU_TARGETS=\"{args.gpu_architecture}\"')
 
  #   if args.clients_only:
  #       if args.library_dir_installed:
@@ -222,7 +222,7 @@ def config_cmd():
 #
 # Reject for now
 #
-#    cmake_options.append( f"-DAMDGPU_TARGETS={args.gpu_architecture}" )
+#    cmake_options.append( f"-DGPU_TARGETS={args.gpu_architecture}" )
 
     if args.cmake_dargs:
         for i in args.cmake_dargs:

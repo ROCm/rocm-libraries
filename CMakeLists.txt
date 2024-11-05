@@ -155,36 +155,48 @@ if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clan
     string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
 endif()
 
-#Set the AMDGPU_TARGETS with backward compatibility
+#Set the GPU_TARGETS with backward compatibility
 if(COMMAND rocm_check_target_ids)
     if(BUILD_ADDRESS_SANITIZER)
-      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+      rocm_check_target_ids(DEFAULT_GPU_TARGETS
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx940:xnack+;gfx941:xnack+;gfx942:xnack+")
     else()
-      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+      rocm_check_target_ids(DEFAULT_GPU_TARGETS
           TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx940;gfx941;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
     endif()
 else()
-    # Use target ID syntax if supported for AMDGPU_TARGETS
+    # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
-        set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
+        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
     else()
-        set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
+        set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
 endif()
 
-if (AMDGPU_TARGETS)
-  set(TMPAMDGPU_TARGETS "${AMDGPU_TARGETS}")
-  if(TMPAMDGPU_TARGETS STREQUAL "all" )
-    set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target" FORCE)
-  else()
-    set(AMDGPU_TARGETS "${TMPAMDGPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for" FORCE)
-  endif()
-else()
-  set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
+#Support AMDGPU_TARGETS as deprecated
+if( AMDGPU_TARGETS AND NOT GPU_TARGETS )
+  message( DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS." )
+  set( GFX_LIST ${AMDGPU_TARGETS} )
+elseif( GPU_TARGETS )
+  set( GFX_LIST ${GPU_TARGETS} )
+else ()
+  set( GFX_LIST ${DEFAULT_AMDGPU_TARGETS} ) # default if not set
 endif()
 
-message(STATUS "AMDGPU_TARGETS: ${AMDGPU_TARGETS}")
+set(GPU_TARGETS "${GFX_LIST}" CACHE STRING "GPU architectures to build for")
+
+if (GPU_TARGETS)
+  set(TMPGPU_TARGETS "${GPU_TARGETS}")
+  if(TMPGPU_TARGETS STREQUAL "all" )
+    set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target" FORCE)
+  else()
+    set(GPU_TARGETS "${TMPGPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for" FORCE)
+  endif()
+else()
+  set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
+endif()
+
+message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Find rocprim package
 find_package(rocprim REQUIRED)

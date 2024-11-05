@@ -524,7 +524,7 @@ pushd .
   # #################################################
   # configure & build
   # #################################################
-  cmake_common_options+=("--toolchain=toolchain-linux.cmake -DAMDGPU_TARGETS=${gpu_architecture}")
+  cmake_common_options+=("--toolchain=toolchain-linux.cmake -DGPU_TARGETS=${gpu_architecture}")
 
   # build type
   if [[ "${build_release}" == true ]]; then
