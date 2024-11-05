@@ -526,15 +526,15 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void sort_single(KeysInputIterator    keys_i
 
     ROCPRIM_SHARED_MEMORY typename sort_single_helper::storage_type storage;
 
-    sort_single_helper().template sort_single(keys_input,
-                                              keys_output,
-                                              values_input,
-                                              values_output,
-                                              size,
-                                              decomposer,
-                                              bit,
-                                              current_radix_bits,
-                                              storage);
+    sort_single_helper().template sort_single<>(keys_input,
+                                                keys_output,
+                                                values_input,
+                                                values_output,
+                                                size,
+                                                decomposer,
+                                                bit,
+                                                current_radix_bits,
+                                                storage);
 }
 
 template<class T>
