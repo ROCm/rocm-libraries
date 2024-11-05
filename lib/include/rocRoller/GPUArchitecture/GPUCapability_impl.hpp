@@ -55,6 +55,11 @@ namespace rocRoller
             {"HasMFMA_bf16_16x16x8", Value::HasMFMA_bf16_16x16x8},
             {"HasMFMA_bf16_16x16x16_1k", Value::HasMFMA_bf16_16x16x16_1k},
 
+            {"HasMFMA_16x16x32_f16", Value::HasMFMA_16x16x32_f16},
+            {"HasMFMA_32x32x16_f16", Value::HasMFMA_32x32x16_f16},
+            {"HasMFMA_16x16x32_bf16", Value::HasMFMA_16x16x32_bf16},
+            {"HasMFMA_32x32x16_bf16", Value::HasMFMA_32x32x16_bf16},
+
             {"HasAccumOffset", Value::HasAccumOffset},
             {"HasFlatOffset", Value::HasFlatOffset},
 

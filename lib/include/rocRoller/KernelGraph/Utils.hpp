@@ -220,6 +220,7 @@ namespace rocRoller
         void updateThreadTileForLongDwords(int& t_m,
                                            int& t_n,
                                            int  maxWidth,
+                                           uint macTileFastMovingDimSize,
                                            int  numDwordsPerElement);
 
         /**

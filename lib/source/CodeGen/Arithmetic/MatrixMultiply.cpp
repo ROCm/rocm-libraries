@@ -142,6 +142,18 @@ namespace rocRoller
                         inputType = "bf16_1k";
                     }
                 }
+                // For F16 types, result will be "f16" (or "bf16").
+                if((M == 16 && N == 16 && K == 32) || (M == 32 && N == 32 && K == 16))
+                {
+                    if(typeA == DataType::Halfx2)
+                    {
+                        inputType = "_f16";
+                    }
+                    if(typeA == DataType::BFloat16x2)
+                    {
+                        inputType = "_bf16";
+                    }
+                }
             }
             else
             {

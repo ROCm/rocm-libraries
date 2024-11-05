@@ -2,6 +2,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
+#include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
@@ -17,26 +18,6 @@ using namespace rocRoller;
 
 namespace TransposeLoadsTest
 {
-    template <uint elementBits>
-    std::string dsReadTRMnemonic()
-    {
-        if constexpr(elementBits == 16 || elementBits == 8 || elementBits == 4)
-            return "ds_read_b64_tr_b" + std::to_string(elementBits);
-
-        if constexpr(elementBits == 6)
-            return "ds_read_b96_tr_b6";
-    }
-
-    template <uint elementBits>
-    constexpr uint bitsPerTrLoad()
-    {
-        if constexpr(elementBits == 16 || elementBits == 8 || elementBits == 4)
-            return 64;
-
-        if constexpr(elementBits == 6)
-            return 96;
-    }
-
     template <typename ElementType, typename PackType, bool unalignedVGPRs>
     void generateTransposeLoad(rocRoller::ContextPtr m_context, const int MN, const int K)
     {
@@ -51,12 +32,11 @@ namespace TransposeLoadsTest
         const uint     numWorkitemsPerWave  = workitemCountX;
         const auto     packDataTypeInfo     = DataTypeInfo::Get(packDataType);
         const uint     packBytes            = packDataTypeInfo.elementBits / 8;
-        const uint     bytesPerTrLoad       = bitsPerTrLoad<elementBits>() / 8;
+        const uint     bytesPerTrLoad       = bitsPerTransposeLoad(elementBits) / 8;
         const uint     bytesPerWorkitem     = bytesPerTrLoad * /*numberOfLDSTrLoads*/ 2;
         const uint     bytesPerWord         = 4;
         const uint     registerCountPerLoad = bytesPerTrLoad / packBytes;
         const uint     threadTrLoadOffset   = MN * (bytesPerTrLoad + extraLdsBytes);
-        std::string    ds_tr_read_mnemonic  = dsReadTRMnemonic<elementBits>();
 
         auto k = m_context->kernel();
 
@@ -254,19 +234,13 @@ namespace TransposeLoadsTest
 
             co_yield generateOp<Expression::Add>(vLDSPtr, vLDSBasePtr, vTransposeOffset);
 
-            // TODO: use MemoryInstructions method when available
-            // co_yield m_context->mem()->loadLocalTranspose(vA0T, vLDSPtr, /*offset*/0, bytesPerTrLoad);
-            co_yield_(Instruction(ds_tr_read_mnemonic,
-                                  {vA0T},
-                                  {vLDSPtr},
-                                  {concatenate("offset:", 0)},
-                                  "transpose from lds"));
-            // co_yield m_context->mem()->loadLocalTranspose(vA1T, vLDSPtr, threadTrLoadOffset, bytesPerTrLoad);
-            co_yield_(Instruction(ds_tr_read_mnemonic,
-                                  {vA1T},
-                                  {vLDSPtr},
-                                  {concatenate("offset:", threadTrLoadOffset)},
-                                  "transpose from lds"));
+            co_yield m_context->mem()->transposeLoadLocal(
+                vA0T, vLDSPtr, /*offset*/ 0, bytesPerTrLoad + extraLdsBytes, elementBits);
+            co_yield m_context->mem()->transposeLoadLocal(vA1T,
+                                                          vLDSPtr,
+                                                          /*offset*/ threadTrLoadOffset,
+                                                          bytesPerTrLoad + extraLdsBytes,
+                                                          elementBits);
 
             co_yield m_context->mem()->barrier();
             if constexpr(elementBits == 6)
@@ -297,7 +271,7 @@ namespace TransposeLoadsTest
             {
                 co_yield generateOp<Expression::Add>(vResultPtr, vResultPtr, vLinearWordOffset);
 
-                const uint regCount = bitsPerTrLoad<elementBits>() / 32;
+                const uint regCount = bitsPerTransposeLoad(elementBits) / 32;
                 for(uint regIdx = 0; regIdx < regCount; regIdx++)
                 {
                     co_yield m_context->mem()->storeFlat(vResultPtr,
@@ -391,7 +365,7 @@ namespace TransposeLoadsTest
             const int NX1    = MN / 16;
             const int NX0    = 4 / NX1;
             // each thread points to 64b or 96b
-            const int NY0 = bitsPerTrLoad<elementBits>() / elementBits;
+            const int NY0 = bitsPerTransposeLoad(elementBits) / elementBits;
             const int NY1 = 16 / NY0;
             for(int x0 = 0; x0 < NX0; x0++)
                 for(int x1 = 0; x1 < NX1; x1++)
@@ -458,8 +432,8 @@ namespace TransposeLoadsTest
     void checkGeneratedCode(rocRoller::ContextPtr m_context)
     {
         constexpr uint elementBits     = TypeInfo<ElementType>::ElementBits;
-        constexpr uint dsReadWriteBits = bitsPerTrLoad<elementBits>();
-        std::string    mnemonic        = dsReadTRMnemonic<elementBits>();
+        const uint     dsReadWriteBits = bitsPerTransposeLoad(elementBits);
+        std::string    mnemonic        = transposeLoadMnemonic(elementBits);
 
         // FIXME: waiting for std::format :(
         std::string flatLoadDWordX{"flat_load_dwordx" + std::to_string(dwordX) + " "};

@@ -164,7 +164,6 @@ namespace rocRoller
 
     /**
      * @brief CPU reference solution for scaled matrix multiply
-     * input matrix A and B are not transposed
      *
      * @param D     output buffer
      * @param C     input buffer
@@ -192,10 +191,6 @@ namespace rocRoller
                      bool                        transA,
                      bool                        transB)
     {
-        AssertFatal(transA && !transB,
-                    "Only one transpose config supported for now.",
-                    ShowValue(transA),
-                    ShowValue(transB));
 
         AssertFatal(floatA.size() % AX.size() == 0 && floatA.size() / AX.size() == 32,
                     "Matrix A size must be 32 times of the scale vector size.",
@@ -206,6 +201,34 @@ namespace rocRoller
                     ShowValue(floatB.size()),
                     ShowValue(BX.size()));
 
+        auto idxA = [transA, M, K](auto i, auto j) {
+            if(transA)
+                return i * K + j;
+            else
+                return j * M + i;
+        };
+
+        auto idxB = [transB, N, K](auto i, auto j) {
+            if(!transB)
+                return i * K + j;
+            else
+                return j * N + i;
+        };
+
+        auto idxScaleA = [transA, M, K](auto i, auto j) {
+            if(transA)
+                return i * (K / 32) + (j / 32);
+            else
+                return (j / 32) * M + i;
+        };
+
+        auto idxScaleB = [transB, N, K](auto i, auto j) {
+            if(!transB)
+                return i * (K / 32) + (j / 32);
+            else
+                return (j / 32) * N + i;
+        };
+
         for(int m = 0; m < M; m++)
         {
             for(int n = 0; n < N; n++)
@@ -214,13 +237,11 @@ namespace rocRoller
 
                 for(int k = 0; k < K; k++)
                 {
-                    float aVal = floatA[m * K + k];
-                    float bVal = floatB[n * K + k];
+                    float aVal = floatA[idxA(m, k)];
+                    float bVal = floatB[idxB(n, k)];
 
-                    int scaledK = k / 32;
-
-                    float aScale = scaleToFloat(AX[m * (K / 32) + scaledK]);
-                    float bScale = scaleToFloat(BX[n * (K / 32) + scaledK]);
+                    float aScale = scaleToFloat(AX[idxScaleA(m, k)]);
+                    float bScale = scaleToFloat(BX[idxScaleB(n, k)]);
                     scaledAcc += aScale * aVal * bScale * bVal;
                 }
 

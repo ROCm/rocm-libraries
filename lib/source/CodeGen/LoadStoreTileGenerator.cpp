@@ -10,6 +10,7 @@
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
+#include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
@@ -349,13 +350,13 @@ namespace rocRoller
 
                 uint          elementBlockSize = 0;
                 ExpressionPtr elementBlockStride;
+                ExpressionPtr trLoadPairStride;
 
-                // For F8 data types and either 16x16x128 or 32x32x64
-                // MFMA instructions, each lane loads 32 matrix
-                // elements in blocks of 16 elements.  These two sets
-                // of 16 elements are not contiguous; and hence we
-                // need to break the loads into two, with a stride
-                // between them.
+                // For F16, F8, and F4 data types and either 16x16x(32|128) or
+                // 32x32x(16|64) MFMA instructions, each lane loads (MN * K)/64
+                // matrix elements via 2 VGPR blocks. These two sets of elements
+                // are not contiguous; and hence we need to break the loads into
+                // two, with a stride between them.
                 //
                 // Setting the elementBlockSize to 16 for other 8bit
                 // MFMA configurations is harmless; as the generated
@@ -363,26 +364,38 @@ namespace rocRoller
                 // loads are dwordx4, so the same code will be
                 // generated).
                 uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
-                if(numBits == 8)
+                if(numBits == 16 || numBits == 8 || numBits == 4)
                 {
-                    elementBlockSize = 16;
+                    // TODO: adjust bits per VGPR block for F6 case.
+                    elementBlockSize
+                        = /*number of loads*/ 2 * (/*bits per VGPR block*/ 64 / numBits);
 
                     elementBlockStride
                         = ci.forward
                               ? coords.forwardStride(increment, L(elementBlockSize), {target})[0]
                               : coords.reverseStride(increment, L(elementBlockSize), {target})[0];
+
+                    uint elementsPerTrLoad = bitsPerTransposeLoad(numBits) / numBits;
+                    trLoadPairStride
+                        = ci.forward
+                              ? coords.forwardStride(increment, L(elementsPerTrLoad), {target})[0]
+                              : coords.reverseStride(increment, L(elementsPerTrLoad), {target})[0];
                 }
 
                 Log::debug("  Stride({}): {}", stride, toString(indexExpr));
-                Log::debug("  Stride({}): unitStride: {} vgprBlockSize: {}",
+                Log::debug("  Stride({}): unitStride: {} vgprBlockSize: {}, trLoadPairStride: {}",
                            stride,
                            unitStride,
-                           elementBlockSize);
+                           elementBlockSize,
+                           toString(trLoadPairStride));
 
-                tagger->addExpression(
-                    stride,
-                    m_fastArith(toBytes(indexExpr)),
-                    {ci.strideType, unitStride, elementBlockSize, toBytes(elementBlockStride)});
+                tagger->addExpression(stride,
+                                      m_fastArith(toBytes(indexExpr)),
+                                      {ci.strideType,
+                                       unitStride,
+                                       elementBlockSize,
+                                       toBytes(elementBlockStride),
+                                       toBytes(trLoadPairStride)});
                 scope->addRegister(stride);
             }
 
@@ -452,7 +465,7 @@ namespace rocRoller
             auto rowStride   = getUnsignedInt(info.rowStrideReg->getLiteralValue());
             auto colStride   = getUnsignedInt(info.colStrideReg->getLiteralValue());
 
-            if(info.colStrideAttributes.unitStride)
+            if(!info.isTransposedTile && info.colStrideAttributes.unitStride)
             {
                 uint numVGPRBlocks = 1;
                 if(info.colStrideAttributes.elementBlockSize > 0
@@ -499,6 +512,52 @@ namespace rocRoller
                         if(numVGPRBlocks > 1)
                             offsetValue += getUnsignedInt(
                                 evaluate(info.colStrideAttributes.elementBlockStride));
+                    }
+                    offsetValue += rowStride;
+                }
+            }
+            else if(info.isTransposedTile)
+            {
+                const auto bitsPerTrLoad     = bitsPerTransposeLoad(info.elementBits);
+                const auto bytesPerTrLoad    = bitsPerTrLoad / 8;
+                const auto elementsPerTrLoad = bitsPerTrLoad / info.elementBits;
+                const auto numVGPRsPerLoad   = bitsPerTrLoad / Register::bitsPerRegister;
+                const auto numTrLoads        = info.n / elementsPerTrLoad;
+                const auto elementBlockStride
+                    = getUnsignedInt(evaluate(info.colStrideAttributes.elementBlockStride));
+                const auto trLoadPairStride
+                    = getUnsignedInt(evaluate(info.colStrideAttributes.trLoadPairStride));
+
+                AssertFatal(info.n % elementsPerTrLoad == 0,
+                            "WaveTileN must be multiple of the number of elements loaded by each "
+                            "transpose load!");
+                AssertFatal(numTrLoads % 2 == 0, "Transpose loads must be executed in pairs!");
+
+                Log::debug("  M {} N {} elementsPerTrLoad {} bytesPerTrLoad {} elementBits {} "
+                           "rowStride {} colStride {} vgprPerLoad {} numTrLoads {}",
+                           info.m,
+                           info.n,
+                           elementsPerTrLoad,
+                           bytesPerTrLoad,
+                           info.elementBits,
+                           rowStride,
+                           colStride,
+                           numVGPRsPerLoad,
+                           numTrLoads);
+
+                for(uint64_t i = 0; i < info.m; ++i)
+                {
+                    for(uint64_t j = 0; j < numTrLoads; ++j)
+                    {
+                        auto start = (i * numTrLoads + (j + 0)) * numVGPRsPerLoad;
+                        auto stop  = (i * numTrLoads + (j + 1)) * numVGPRsPerLoad;
+                        co_yield m_context->mem()->transposeLoadLocal(
+                            info.data->element(Generated(iota(start, stop))),
+                            info.rowOffsetReg,
+                            // TODO: account for extra lds when elementBits == 6
+                            offsetValue + (j % 2) * trLoadPairStride + (j / 2) * elementBlockStride,
+                            bytesPerTrLoad,
+                            info.elementBits);
                     }
                     offsetValue += rowStride;
                 }
@@ -621,6 +680,7 @@ namespace rocRoller
          * @param m Number of rows in the tile
          * @param n Number of columns in the tile
          * @param dataType The type of the data being loaded
+         * @param isTransposedTile if tile needs to be transposed
          * @param tag The tag of the control graph node generating the load or store
          * @param vgpr The registers to store the data in (null is loading)
          * @param offset Offset from the starting index
@@ -636,17 +696,19 @@ namespace rocRoller
                                                                 Register::ValuePtr       vgpr,
                                                                 Register::ValuePtr       offset,
                                                                 Transformer&             coords,
-                                                                BufferInstructionOptions bufOpts)
+                                                                BufferInstructionOptions bufOpts,
+                                                                bool isTransposedTile)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::LoadStoreTileGenerator::moveTile<{}>({})", toString(Dir), tag);
 
             LoadStoreTileInfo info;
-            info.kind    = kind;
-            info.m       = m;
-            info.n       = n;
-            info.offset  = offset;
-            info.bufOpts = bufOpts;
+            info.kind             = kind;
+            info.m                = m;
+            info.n                = n;
+            info.offset           = offset;
+            info.bufOpts          = bufOpts;
+            info.isTransposedTile = isTransposedTile;
 
             Register::ValuePtr finalVGPR;
 
@@ -692,7 +754,7 @@ namespace rocRoller
 
                 Register::ValuePtr tmpl;
                 if(unsegmentedVariableType && ((n * info.elementBits) % bitsPerRegister == 0)
-                   && colStrideIsOne)
+                   && (colStrideIsOne || (allStridesAreLiteral && info.isTransposedTile)))
                 {
                     tmpl = Register::Value::Placeholder(
                         m_context,
@@ -897,7 +959,9 @@ namespace rocRoller
                 tag,
                 nullptr,
                 ldsOffset,
-                coords);
+                coords,
+                {},
+                load.isTransposedTile);
         }
 
         Generator<Instruction> LoadStoreTileGenerator::loadMacroTileWAVE(int              tag,

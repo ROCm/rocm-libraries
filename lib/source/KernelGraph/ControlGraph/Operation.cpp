@@ -60,8 +60,9 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     LoadTiled::LoadTiled() = default;
-    LoadTiled::LoadTiled(rocRoller::VariableType const varType)
+    LoadTiled::LoadTiled(rocRoller::VariableType const varType, bool const isTransposedTile)
         : varType(varType)
+        , isTransposedTile(isTransposedTile)
     {
     }
 
@@ -81,8 +82,9 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     LoadLDSTile::LoadLDSTile() = default;
-    LoadLDSTile::LoadLDSTile(VariableType const varType)
+    LoadLDSTile::LoadLDSTile(VariableType const varType, bool const isTransposedTile)
         : varType(varType)
+        , isTransposedTile(isTransposedTile)
     {
     }
 
