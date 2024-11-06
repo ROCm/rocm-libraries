@@ -56,10 +56,11 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Fixed memory leaks in unit tests due to missing calls to `hipFree()` and the incorrect use of hipGraphs.
 * Fixed an issue where certain inputs to `block_sort_merge()`, `device_merge_sort_merge_path()`, `device_merge()`, and `warp_sort_stable()` caused an assertion error during the call to `serial_merge()`.
 
-## rocPRIM-3.2.1 for ROCm 6.2.1
+## rocPRIM 3.2.1 for ROCm 6.2.1
 
 ### Optimizations
-* Improved performance of block_reduce_warp_reduce when warp size == block size.
+
+* Improved performance of `block_reduce_warp_reduce` when warp size equals block size.
 
 ## rocPRIM-3.2.0 for ROCm 6.2.0
 
