@@ -40,6 +40,7 @@
 #include "DataTypes_Half.hpp"
 #include "DataTypes_Int8.hpp"
 #include "DataTypes_Int8x4.hpp"
+#include "DataTypes_UInt8x4.hpp"
 
 #include "../Utilities/Comparison.hpp"
 #include "../Utilities/Error.hpp"
@@ -96,6 +97,7 @@ namespace rocRoller
         Int32, //< 32bit signed integer
         Int64, //< 64bit signed integer
         Raw32, //< Thirty-two bits
+        UInt8x4, //< Four 8bit unsigned integers; packed into 32bits
         UInt8, //< 8bit unsigned integer
         UInt16, //< 16bit unsigned integer
         UInt32, //< 32bit unsigned integer
@@ -723,6 +725,20 @@ namespace rocRoller
     };
 
     template <>
+    struct TypeInfo<UInt8x4> : public BaseTypeInfo<UInt8x4,
+                                                   DataType::UInt8x4,
+                                                   DataType::UInt8,
+                                                   PointerType::Value,
+                                                   4,
+                                                   1,
+                                                   32,
+                                                   false,
+                                                   true,
+                                                   false>
+    {
+    };
+
+    template <>
     struct TypeInfo<Half> : public BaseTypeInfo<Half,
                                                 DataType::Half,
                                                 DataType::Half,
@@ -1005,6 +1021,7 @@ namespace rocRoller
     DeclareEnumTypeInfo(BFloat16, BFloat16);
     DeclareEnumTypeInfo(BFloat16x2, BFloat16x2);
     DeclareEnumTypeInfo(Raw32, Raw32);
+    DeclareEnumTypeInfo(UInt8x4, UInt8x4);
     DeclareEnumTypeInfo(UInt8, uint8_t);
     DeclareEnumTypeInfo(UInt16, uint16_t);
     DeclareEnumTypeInfo(UInt32, uint32_t);
