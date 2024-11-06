@@ -534,8 +534,8 @@ static void generate_random_interleaved_data(std::vector<hostbuf>& input,
                 auto write_idx = compute_index(index, whole_stride, i_base);
 
                 // generate number and ensure it is small enough to avoid overflow
-                const Tfloat               x      = gen() / gen.max();
-                const Tfloat               y      = gen() / gen.max();
+                const Tfloat               x      = (float)gen() / (float)gen.max();
+                const Tfloat               y      = (float)gen() / (float)gen.max();
                 const Tfloat               offset = 0.5;
                 const std::complex<Tfloat> val(x - offset, y - offset);
                 idata[write_idx] = val;
@@ -612,7 +612,8 @@ static void generate_random_planar_data(std::vector<hostbuf>& input,
                 // brick index to write to
                 auto write_idx = compute_index(index, whole_stride, i_base);
 
-                const std::complex<Tfloat> val(gen() / gen.max(), gen() / gen.max());
+                const std::complex<Tfloat> val((float)gen() / (float)gen.max(),
+                                               (float)gen() / (float)gen.max());
                 const Tfloat               offset = 0.5;
                 ireal[write_idx]                  = val.real() - offset;
                 iimag[write_idx]                  = val.imag() - offset;
@@ -690,7 +691,7 @@ static void generate_random_real_data(std::vector<hostbuf>& input,
                 // brick index to write to
                 auto write_idx = compute_index(index, whole_stride, i_base);
 
-                const Tfloat val = gen() / gen.max();
+                const Tfloat val = (float)gen() / (float)gen.max();
                 idata[write_idx] = val - static_cast<Tfloat>(0.5);
             } while(increment_rowmajor(index, length));
         }

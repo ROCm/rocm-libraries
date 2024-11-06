@@ -231,22 +231,23 @@ if( BUILD_CLIENTS_BENCH OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS )
   else()
     set(FFTW_RPM "fftw-libs")
   endif()
+  if( USE_HIPRAND )
+    set( HIPRAND_DEP hiprand )
+  endif()
   if(BUILD_CLIENTS_TESTS)
     rocm_package_setup_client_component(
       tests
-      if(USE_HIPRAND)
-        DEPENDS
-          DEB ${FFTW_DEB} hiprand
-          RPM ${FFTW_RPM} hiprand
+      DEPENDS
+        DEB ${FFTW_DEB} ${HIPRAND_DEP}
+        RPM ${FFTW_RPM} ${HIPRAND_DEP}
       )
   endif()
   if(BUILD_CLIENTS_BENCH)
     rocm_package_setup_client_component(
       benchmarks
-      if(USE_HIPRAND)
-        DEPENDS
-          DEB hiprand
-          RPM hiprand
+      DEPENDS
+        DEB ${HIPRAND_DEP}
+        RPM ${HIPRAND_DEP}
       )
   endif()
   add_subdirectory( clients )
