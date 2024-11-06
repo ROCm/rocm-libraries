@@ -56,6 +56,8 @@ ci: {
     def jobNameList = ["compute-rocm-dkms-no-npi-hipclang":([ubuntu18:['gfx900'],centos7:['gfx906'],centos8:['gfx906'],sles15sp1:['gfx908']])]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
+    auxiliary.registerDependencyBranchParameter(["rocPRIM"])
+    
     propertyList.each 
     {
         jobName, property->
