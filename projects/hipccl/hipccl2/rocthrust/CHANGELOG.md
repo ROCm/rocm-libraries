@@ -5,7 +5,7 @@ Documentation for rocThrust available at
 
 ## (Unreleased) rocThrust 3.2.0 for ROCm 6.3
 
-### Additions
+### Added
 
 * Merged changes from upstream CCCL/thrust 2.3.2
   * Only the NVIDIA backend uses `tuple` and `pair` types from libcu++, other backends continue to
@@ -13,11 +13,11 @@ Documentation for rocThrust available at
 * Added the `thrust::hip::par_det` execution policy to enable bitwise reproducibility on algorithms that are not bitwise reproducible by default.
 * Fix tests failing when compiling with `-D_GLIBCXX_ASSERTIONS=ON`.
 
-### Changes
+### Changed
 
 * Enabled the upstream (thrust) test suite for execution by default. It can still be disabled by CMake option `-DENABLE_UPSTREAM_TESTS=OFF`.
 
-### Fixes
+### Resolved issues
 
 * Fixed the HIP backend not passing `TestCopyIfNonTrivial` from the upstream (thrust) test suite.
 
