@@ -51,7 +51,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-c",
         "--cmakelist-path",
-        default="../CMakeLists.txt",
+        default="../test/CMakeLists.txt",
         help="Path to CMakeLists file",
     )
 

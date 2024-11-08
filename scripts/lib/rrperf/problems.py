@@ -197,7 +197,7 @@ class GEMMRun(GEMM):
             "numInner": "num_inner",
         }
 
-        command = "client/gemm"
+        command = "bin/client/gemm"
 
         def argName(key):
             if key in specialNames:
@@ -328,7 +328,7 @@ class CodeGenRun(CodeGen):
 
     def command(self) -> List[str]:
         retval = [
-            "client/codegen_stress",
+            "bin/client/codegen_stress",
             "--inst_count=" + str(self.instCount),
             "--instructions=" + str(self.instructions),
             "--yaml=" + str(self.output),
