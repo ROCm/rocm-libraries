@@ -196,7 +196,7 @@ if(HIP_PLATFORM STREQUAL "amd")
 
   find_package(hipsparse PATHS ${ROCM_PATH} /opt/rocm)
   if(hipsparse_FOUND)
-    hipfort_add_component(hipsparse hip::hipsparse)
+    hipfort_add_component(hipsparse roc::hipsparse)
   else()
     message(STATUS "Skipping hipfort::hipsparse target export")
   endif()
