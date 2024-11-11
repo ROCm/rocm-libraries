@@ -32,7 +32,7 @@ function display_help()
   echo "    [--matrices-dir] existing client matrices directory"
   echo "    [--matrices-dir-install] install client matrices directory"
   echo "    [--rm-legacy-include-dir] Remove legacy include dir Packaging added for file/folder reorg backward compatibility."
-  echo "    [--without-rocblas] Disable building rocSPARSE with rocBLAS."
+  echo "    [--no-rocblas] Disable building rocSPARSE with rocBLAS."
   echo "    [--cmake-arg] Forward the given argument to CMake when configuring the build."
 }
 
@@ -300,7 +300,7 @@ declare -a cmake_client_options
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
- GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,memstat,rocsparse_ILP64,rocprim-path:,rocblas-path:,no-offload-compress,offload-compress,without-rocblas,address-sanitizer,matrices-dir:,matrices-dir-install:,architecture:,rm-legacy-include-dir,cmake-arg: --options hicdgrska: -- "$@")
+ GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,memstat,rocsparse_ILP64,rocprim-path:,rocblas-path:,no-offload-compress,offload-compress,no-rocblas,address-sanitizer,matrices-dir:,matrices-dir-install:,architecture:,rm-legacy-include-dir,cmake-arg: --options hicdgrska: -- "$@")
 
 else
   echo "Need a new version of getopt"
@@ -362,7 +362,7 @@ while true; do
         --offload-compress)
             build_with_offload_compress=true
             shift ;;
-        --without-rocblas)
+        --no-rocblas)
             build_with_rocblas=false
             shift ;;
         -k|--relwithdebinfo)
@@ -561,7 +561,7 @@ pushd .
     cmake_common_options+=("-DBUILD_WITH_OFFLOAD_COMPRESS=OFF")
   fi
 
-  # without-rocblas
+  # no-rocblas
   if [[ "${build_with_rocblas}" == true ]]; then
     cmake_common_options+=("-DBUILD_WITH_ROCBLAS=ON")
   else
