@@ -169,6 +169,7 @@ enum class target_arch : unsigned int
     gfx906  = 906,
     gfx908  = 908,
     gfx90a  = 910,
+    gfx942  = 942,
     gfx1030 = 1030,
     gfx1100 = 1100,
     gfx1102 = 1102,
@@ -203,14 +204,22 @@ constexpr bool prefix_equals(const char* lhs, const char* rhs, std::size_t n)
 
 constexpr target_arch get_target_arch_from_name(const char* const arch_name, const std::size_t n)
 {
-    constexpr const char* target_names[]
-        = {"gfx803", "gfx900", "gfx906", "gfx908", "gfx90a", "gfx1030", "gfx1100", "gfx1102"};
+    constexpr const char* target_names[]         = {"gfx803",
+                                                    "gfx900",
+                                                    "gfx906",
+                                                    "gfx908",
+                                                    "gfx90a",
+                                                    "gfx942",
+                                                    "gfx1030",
+                                                    "gfx1100",
+                                                    "gfx1102"};
     constexpr target_arch target_architectures[] = {
         target_arch::gfx803,
         target_arch::gfx900,
         target_arch::gfx906,
         target_arch::gfx908,
         target_arch::gfx90a,
+        target_arch::gfx942,
         target_arch::gfx1030,
         target_arch::gfx1100,
         target_arch::gfx1102,
@@ -266,6 +275,8 @@ auto dispatch_target_arch(const target_arch target_arch)
             return Config::template architecture_config<target_arch::gfx908>::params;
         case target_arch::gfx90a:
             return Config::template architecture_config<target_arch::gfx90a>::params;
+        case target_arch::gfx942:
+            return Config::template architecture_config<target_arch::gfx942>::params;
         case target_arch::gfx1030:
             return Config::template architecture_config<target_arch::gfx1030>::params;
         case target_arch::gfx1100:
