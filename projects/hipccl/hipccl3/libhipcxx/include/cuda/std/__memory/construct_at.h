@@ -138,7 +138,7 @@ template <class _Tp,
           class... _Args,
           class = decltype(::new(_CUDA_VSTD::declval<void*>()) _Tp(_CUDA_VSTD::declval<_Args>()...))>
 _LIBCUDACXX_HIDE_FROM_ABI
-_CCCL_CONSTEXPR_CXX20 __enable_if_t<!__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
+_CCCL_CONSTEXPR_CXX20 enable_if_t<!__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
 construct_at(_Tp* __location, _Args&&... __args)
 {
   _CCCL_ASSERT(__location != nullptr, "null pointer given to construct_at");
@@ -155,7 +155,7 @@ template <class _Tp,
           class... _Args,
           class = decltype(::new(_CUDA_VSTD::declval<void*>()) _Tp(_CUDA_VSTD::declval<_Args>()...))>
 _LIBCUDACXX_HIDE_FROM_ABI
-_CCCL_CONSTEXPR_CXX20 __enable_if_t<__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
+_CCCL_CONSTEXPR_CXX20 enable_if_t<__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
 construct_at(_Tp* __location, _Args&&... __args)
 {
   _CCCL_ASSERT(__location != nullptr, "null pointer given to construct_at");
@@ -173,7 +173,7 @@ construct_at(_Tp* __location, _Args&&... __args)
 _CCCL_EXEC_CHECK_DISABLE
 template <class _Tp, class... _Args>
 _LIBCUDACXX_HIDE_FROM_ABI
-_CCCL_CONSTEXPR_CXX20 __enable_if_t<!__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
+_CCCL_CONSTEXPR_CXX20 enable_if_t<!__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
 __construct_at(_Tp* __location, _Args&&... __args)
 {
   _CCCL_ASSERT(__location != nullptr, "null pointer given to construct_at");
@@ -190,7 +190,7 @@ __construct_at(_Tp* __location, _Args&&... __args)
 _CCCL_EXEC_CHECK_DISABLE
 template <class _Tp, class... _Args>
 _LIBCUDACXX_HIDE_FROM_ABI
-_CCCL_CONSTEXPR_CXX20 __enable_if_t<__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
+_CCCL_CONSTEXPR_CXX20 enable_if_t<__detail::__can_optimize_construct_at<_Tp, _Args...>::value, _Tp*>
 __construct_at(_Tp* __location, _Args&&... __args)
 {
   _CCCL_ASSERT(__location != nullptr, "null pointer given to construct_at");
@@ -214,8 +214,8 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 _ForwardIterator __destroy(_Forw
 
 _CCCL_EXEC_CHECK_DISABLE
 template <class _Tp,
-          __enable_if_t<!_CCCL_TRAIT(is_array, _Tp), int>                  = 0,
-          __enable_if_t<!_CCCL_TRAIT(is_trivially_destructible, _Tp), int> = 0>
+          enable_if_t<!_CCCL_TRAIT(is_array, _Tp), int>                  = 0,
+          enable_if_t<!_CCCL_TRAIT(is_trivially_destructible, _Tp), int> = 0>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 void __destroy_at(_Tp* __loc)
 {
   _CCCL_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
@@ -224,15 +224,15 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 void __destroy_at(_Tp* __loc)
 
 _CCCL_EXEC_CHECK_DISABLE
 template <class _Tp,
-          __enable_if_t<!_CCCL_TRAIT(is_array, _Tp), int>                 = 0,
-          __enable_if_t<_CCCL_TRAIT(is_trivially_destructible, _Tp), int> = 0>
+          enable_if_t<!_CCCL_TRAIT(is_array, _Tp), int>                 = 0,
+          enable_if_t<_CCCL_TRAIT(is_trivially_destructible, _Tp), int> = 0>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 void __destroy_at(_Tp* __loc)
 {
   _CCCL_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
   (void) __loc;
 }
 
-template <class _Tp, __enable_if_t<_CCCL_TRAIT(is_array, _Tp), int> = 0>
+template <class _Tp, enable_if_t<_CCCL_TRAIT(is_array, _Tp), int> = 0>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 void __destroy_at(_Tp* __loc)
 {
   _CCCL_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
@@ -262,14 +262,14 @@ __reverse_destroy(_BidirectionalIterator __first, _BidirectionalIterator __last)
   return __last;
 }
 
-template <class _Tp, __enable_if_t<!_CCCL_TRAIT(is_array, _Tp), int> = 0>
+template <class _Tp, enable_if_t<!_CCCL_TRAIT(is_array, _Tp), int> = 0>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX20 void destroy_at(_Tp* __loc)
 {
   _CCCL_ASSERT(__loc != nullptr, "null pointer given to destroy_at");
   __loc->~_Tp();
 }
 
-template <class _Tp, __enable_if_t<_CCCL_TRAIT(is_array, _Tp), int> = 0>
+template <class _Tp, enable_if_t<_CCCL_TRAIT(is_array, _Tp), int> = 0>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX20 void destroy_at(_Tp* __loc)
 {
   _CUDA_VSTD::__destroy_at(__loc);
