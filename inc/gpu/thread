@@ -64,19 +64,20 @@ class thread {
     }
     __host__ __device__ thread &operator=(thread &&other) noexcept;
 
-    template <class Fn_t, class... Args_t,
-              std::enable_if_t<std::negation_v<std::is_arithmetic<std::remove_reference_t<Fn_t>>>, bool> = true>
+    template <class Fn_t, class... Args_t>
     explicit __device__ thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
-    template <class Fn_t, class... Args_t,
-              std::enable_if_t<std::negation_v<std::is_arithmetic<std::remove_reference_t<Fn_t>>>, bool> = true>
+    template <class Fn_t, class... Args_t>
     explicit __host__ thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
 
+    // TODO: replace the enable_if_t condition with one that checks if Fn_t is callable
     template <class Fn_t, class... Args_t,
-              std::enable_if_t<std::negation_v<std::is_arithmetic<std::remove_reference_t<Fn_t>>>, bool> = true>
+              std::enable_if_t<!std::is_arithmetic_v<std::remove_reference_t<Fn_t>>,
+                               bool> = true>
     explicit __device__ thread(Fn_t &&typed_fn, Args_t &&...args)
         : thread(1, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...) {}
     template <class Fn_t, class... Args_t,
-              std::enable_if_t<std::negation_v<std::is_arithmetic<std::remove_reference_t<Fn_t>>>, bool> = true>
+              std::enable_if_t<!std::is_arithmetic_v<std::remove_reference_t<Fn_t>>,
+                               bool> = true>
     explicit __host__ thread(Fn_t &&typed_fn, Args_t &&...args)
         : thread(1, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...) {}
 
@@ -559,8 +560,7 @@ __host__ __device__ inline thread &thread::operator=(thread &&other) noexcept {
     return *this;
 }
 
-template <class Fn_t, class... Args_t,
-          std::enable_if_t<std::negation_v<std::is_arithmetic<std::remove_reference_t<Fn_t>>>, bool>>
+template <class Fn_t, class... Args_t>
 inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     if (width > MAX_THREAD_WIDTH) {
         throw std::length_error("thread::thread: width must not exceed " + std::to_string(MAX_THREAD_WIDTH));
@@ -595,8 +595,7 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     __LIBGPU_HIP_CHECK__(hipEventDestroy(event));
 }
 
-template <class Fn_t, class... Args_t,
-          std::enable_if_t<std::negation_v<std::is_arithmetic<std::remove_reference_t<Fn_t>>>, bool>>
+template <class Fn_t, class... Args_t>
 inline __device__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     assert(width <= MAX_THREAD_WIDTH);
     assert(threadIdx.x == 0);
