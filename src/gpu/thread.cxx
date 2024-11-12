@@ -376,14 +376,15 @@ __host__ __device__ thread::id thread::get_id(uint32_t index) const {
     WorkNode_Header hdr;
     // Copy just the parts we need. Almost guaranteed to copy 2 uint32_ts of data starting at &(worknode_d->width).
     // TODO: Do we want to store a copy of the vthread_id in gpu::thread (and only fetch from worknode_d->vthread_id if the cached copy is invalid)?
-    if constexpr (offsetof(WorkNode_Header, width) < offsetof(WorkNode_Header, vthread_id)) {
-        constexpr size_t size = (offsetof(WorkNode_Header, vthread_id) - offsetof(WorkNode_Header, width)) + sizeof(worknode_d->vthread_id);
-        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&(hdr.width), &(worknode_d->width), size, hipMemcpyDeviceToHost, getEnqueingStream()));
-    } else {
-        constexpr size_t size = (offsetof(WorkNode_Header, width) - offsetof(WorkNode_Header, vthread_id)) + sizeof(worknode_d->width);
-        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&(hdr.vthread_id), &(worknode_d->vthread_id), size, hipMemcpyDeviceToHost, getEnqueingStream()));
-    }
-    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+    // TODO: fix this
+    // if constexpr (offsetof(WorkNode_Header, width) < offsetof(WorkNode_Header, vthread_id)) {
+    //     constexpr size_t size = (offsetof(WorkNode_Header, vthread_id) - offsetof(WorkNode_Header, width)) + sizeof(worknode_d->vthread_id);
+    //     __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&(hdr.width), &(worknode_d->width), size, hipMemcpyDeviceToHost, getEnqueingStream()));
+    // } else {
+    //     constexpr size_t size = (offsetof(WorkNode_Header, width) - offsetof(WorkNode_Header, vthread_id)) + sizeof(worknode_d->width);
+    //     __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&(hdr.vthread_id), &(worknode_d->vthread_id), size, hipMemcpyDeviceToHost, getEnqueingStream()));
+    // }
+    // __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
 
     if (index >= hdr.width) {
         throw std::out_of_range("thread::get_id: index is greater than thread width");
