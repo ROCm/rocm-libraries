@@ -197,7 +197,7 @@ template <class _Result, class _Fn, class... _Args>
 __device__ _LIBGPU_HIDE_FROM_ABI constexpr _Result
 invoke_r(_Fn&& __f, _Args&&... __args) noexcept(std::is_nothrow_invocable_r_v<_Result, _Fn, _Args...>) {
     if constexpr (std::is_void_v<_Result>) {
-        static_cast<void>(std::invoke(std::forward<_Fn>(__f), std::forward<_Args>(__args)...));
+        static_cast<void>(gpu::invoke(std::forward<_Fn>(__f), std::forward<_Args>(__args)...));
     } else {
         // TODO: Use std::reference_converts_from_temporary_v once implemented
         // using _ImplicitInvokeResult = std::invoke_result_t<_Fn, _Args...>;
@@ -205,7 +205,7 @@ invoke_r(_Fn&& __f, _Args&&... __args) noexcept(std::is_nothrow_invocable_r_v<_R
         static_assert(true,
             "Returning from invoke_r would bind a temporary object to the reference return type, "
             "which would result in a dangling reference.");
-        return std::invoke(std::forward<_Fn>(__f), std::forward<_Args>(__args)...);
+        return gpu::invoke(std::forward<_Fn>(__f), std::forward<_Args>(__args)...);
     }
 }
 #endif
