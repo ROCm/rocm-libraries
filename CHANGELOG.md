@@ -11,6 +11,7 @@ Documentation for rocSPARSE is available at
 * Added `rocsparse_[s|d|c|z]csritsvx_solve` routines for iterative triangular solve
 * Added BSR format to SpMM generic routine `rocsparse_spmm`
 * Added `GPU_TARGETS` to replace the now deprecated `AMDGPU_TARGETS` in cmake files
+* Added `azurelinux` OS name for correcting gfortran dependency
 
 ### Changed
 
