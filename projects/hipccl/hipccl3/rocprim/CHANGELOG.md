@@ -2,13 +2,20 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+
 ## (Unreleased) rocPRIM 3.4.0 for ROCm 6.4.0
 
 ### Added
 
 * Added the parallel `find_first_of` device function with autotuned configurations, this function is similar to `std::find_first_of`, it searches for the first occurrence of any of the provided elements.
+* Added `--emulation` option added for `rtest.py`
+* Unit tests can be ran with `[--emulation|-e|--test|-t]=<test_name>`
 
 ### Changed
+  * Modified smoke tests to complete in faster run-time and to never exceed 2GB of vram usage
+  * Old smoke tests can be ran with python3 rtest.py --test/-t smoke_old or python3 rtest.py --emulation/-e smoke_old instead
+  * `--test|-t` no longer a required flag for `rtest.py`, instead user can use either `--emulation|-e` or `--test|-t` but not both
+
 
 ### Resolved issues
 
