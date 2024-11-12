@@ -92,7 +92,7 @@ __device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *worknode) {
     // TODO: is it possible to allow multiple lanes to call insertWorkNode at once?
 
     const uint32_t myCount = atomicAdd(&mainWorkQueueIndex_push, 1);
-    const size_t myIndex = myCount % CPU_WORK_QUEUE_SIZE;
+    const size_t myIndex = myCount % MAIN_WORK_QUEUE_SIZE;
 
     if (myCount >= MAIN_WORK_QUEUE_SIZE) {
         for (uint32_t popIndex = atomicAdd(&mainWorkQueueIndex_pop, 0); myCount - popIndex >= MAIN_WORK_QUEUE_SIZE;
@@ -109,7 +109,7 @@ __device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *worknode) {
 // currently locked, or someone else got to it first, returns nullptr.
 [[nodiscard]] static inline __device__ WorkNode_Header *popWorkNodeFromMainQueue() {
     // Don't increment until we've successfully fetched a WorkNode.
-    uint32_t index = atomicAdd(&mainWorkQueueIndex_pop, 0) % CPU_WORK_QUEUE_SIZE;
+    uint32_t index = atomicAdd(&mainWorkQueueIndex_pop, 0) % MAIN_WORK_QUEUE_SIZE;
     // Note: I think access through this cast might be a strict aliasing violation, but it's kind of unavoidable.
     // atomicExch only accepts arithmetic types, so we have to cast mainWorkQueue[index] to an arithmetic type like uintptr_t,
     // resulting in a strict aliasing violation.
