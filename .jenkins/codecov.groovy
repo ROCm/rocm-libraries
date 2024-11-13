@@ -15,7 +15,7 @@ def runCI =
     def prj  = new rocProject('rocSPARSE', 'CodeCov')
 
     // customize for project
-    prj.paths.build_command = './install.sh --matrices-dir-install ${JENKINS_HOME_DIR}/rocsparse_matrices && ./install.sh -kc --without-rocblas --codecoverage --matrices-dir ${JENKINS_HOME_DIR}/rocsparse_matrices'
+    prj.paths.build_command = './install.sh --matrices-dir-install ${JENKINS_HOME_DIR}/rocsparse_matrices && ./install.sh -kc --no-rocblas --codecoverage --matrices-dir ${JENKINS_HOME_DIR}/rocsparse_matrices'
     prj.libraryDependencies = ['rocPRIM']
     prj.defaults.ccache = false
 
