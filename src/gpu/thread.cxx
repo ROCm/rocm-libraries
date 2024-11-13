@@ -7,15 +7,36 @@ namespace internal {
 
 __device__ uint32_t numVcores = NUM_VCORES;
 
+template <size_t queueSize>
+struct WorkQueue {
+    uint32_t popCount = 0;
+    uint32_t pushCount = 0;
+    WorkNode_Header *queue[queueSize] = {};
+
+    // Post-condition: worknode is likely unlocked and may get invalidated
+    __device__ void push(WorkNode_Header *worknode);
+    // Tries to fetch and simultaneously lock the next waiting worknode. If none exists, or it's currently locked, or
+    // someone else got to it first, returns nullptr.
+    [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount) {
+        return tryPop(shouldIncrementActiveCount, atomicAdd(&popCount, 0) % queueSize);
+    }
+    // Fetches and simultaneously lock the next waiting worknode. If the queue is empty, returns nullptr.
+    [[nodiscard]] __device__ WorkNode_Header *pop(bool shouldIncrementActiveCount);
+
+  private:
+    __device__ void waitForSpace(uint32_t myPushCount);
+    // Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or
+    // someone else got to it first, returns nullptr.
+    [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount, uint32_t index);
+};
+
 // TODO: should these be static members of WorkNode_Header?
 __device__ WorkNode_Header *cpuWorkQueue[CPU_WORK_QUEUE_SIZE] = {};
 std::atomic<uint32_t> cpuWorkQueueIndex_push = 0;
 __device__ uint32_t cpuWorkQueueIndex_pop = 0;
 __device__ volatile uint32_t cpuWorkQueueIndex_last = -1U; // If cpuWorkQueueIndex_last == cpuWorkQueueIndex_pop, then we're not going to receive any more work from the CPU
 
-__device__ WorkNode_Header *mainWorkQueue[MAIN_WORK_QUEUE_SIZE] = {};
-__device__ uint32_t mainWorkQueueIndex_pop = 0;
-__device__ uint32_t mainWorkQueueIndex_push = 0;
+__device__ WorkQueue<MAIN_WORK_QUEUE_SIZE> mainWorkQueue;
 
 __device__ uint32_t activeVcoreCount = 0;
 __device__ WorkNode_Header *currentWorkNode[NUM_VCORES] = {};
@@ -107,39 +128,46 @@ __device__ void setCurrentWorkNode(WorkNode_Header *node, bool yielding) {
 // a bunch of WorkNode_Header's member variables private
 
 // Post-condition: worknode is likely unlocked and may get invalidated
+template <size_t queueSize>
+__device__ void WorkQueue<queueSize>::push(WorkNode_Header *worknode) {
+    // TODO: is it possible to allow multiple lanes to call WorkQueue.push at once?
+
+    const uint32_t myPushCount = atomicAdd(&pushCount, 1);
+    waitForSpace(myPushCount);
+    moveAndUnlockWorkNode(worknode, &queue[myPushCount % queueSize]);
+}
 __device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *worknode) {
-    // TODO: is it possible to allow multiple lanes to call insertWorkNode at once?
-
-    const uint32_t myCount = atomicAdd(&mainWorkQueueIndex_push, 1);
-    const size_t myIndex = myCount % MAIN_WORK_QUEUE_SIZE;
-
-    if (myCount >= MAIN_WORK_QUEUE_SIZE) {
-        for (uint32_t popIndex = atomicAdd(&mainWorkQueueIndex_pop, 0); myCount - popIndex >= MAIN_WORK_QUEUE_SIZE;
-             popIndex = atomicAdd(&mainWorkQueueIndex_pop, 0)) {
-            assert(atomicAdd(&activeVcoreCount, 0) != 0 && "Probable deadlock: No space left in main work queue and no threads are currently being executed!");
-            __builtin_amdgcn_s_sleep(32);
-        }
-    }
-
-    moveAndUnlockWorkNode(worknode, &mainWorkQueue[myIndex]);
+    mainWorkQueue.push(worknode);
 }
 
-// Tries to fetch and simultaneously lock the next waiting worknode in mainWorkQueue. If none exists, or the next one is
-// currently locked, or someone else got to it first, returns nullptr.
-[[nodiscard]] static inline __device__ WorkNode_Header *popWorkNodeFromMainQueue(bool shouldIncrementActiveCount) {
-    // Don't increment until we've successfully fetched a WorkNode.
-    uint32_t index = atomicAdd(&mainWorkQueueIndex_pop, 0) % MAIN_WORK_QUEUE_SIZE;
-    // Note: I think access through this cast might be a strict aliasing violation, but it's kind of unavoidable.
-    // atomicExch only accepts arithmetic types, so we have to cast mainWorkQueue[index] to an arithmetic type like uintptr_t,
-    // resulting in a strict aliasing violation.
-    WorkNode_Header *work = reinterpret_cast<WorkNode_Header*>(atomicExch(reinterpret_cast<uintptr_t*>(&mainWorkQueue[index]), 0));
-    if (work != nullptr) {
-        if (shouldIncrementActiveCount) {
-            atomicAdd(&activeVcoreCount, 1);
-        }
-        __threadfence();
-        atomicAdd(&mainWorkQueueIndex_pop, 1);
+template <size_t queueSize>
+__device__ void WorkQueue<queueSize>::waitForSpace(uint32_t myPushCount) {
+    if (myPushCount < queueSize) {
+        return;
     }
+    for (uint32_t curPopCount = atomicAdd(&popCount, 0); myPushCount - curPopCount >= queueSize;
+                  curPopCount = atomicAdd(&popCount, 0)) {
+        assert(atomicAdd(&activeVcoreCount, 0) != 0 && "Probable deadlock: No space left in main work queue and no threads are currently being executed!");
+        __builtin_amdgcn_s_sleep(32);
+    }
+}
+
+// Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or someone
+// else got to it first, returns nullptr.
+template <size_t queueSize>
+[[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop(bool shouldIncrementActiveCount, uint32_t index) {
+    // Note: I think access through this cast might be a strict aliasing violation, but it's kind of unavoidable.
+    // atomicExch only accepts arithmetic types, so we have to cast queue[index] to an arithmetic type like uintptr_t,
+    // resulting in a strict aliasing violation.
+    WorkNode_Header *work = reinterpret_cast<WorkNode_Header*>(atomicExch(reinterpret_cast<uintptr_t*>(&queue[index]), 0));
+    if (work == nullptr) {
+        return nullptr;
+    }
+    if (shouldIncrementActiveCount) {
+        atomicAdd(&activeVcoreCount, 1);
+    }
+    __threadfence();
+    atomicAdd(&popCount, 1);
     return work;
 }
 
@@ -166,16 +194,29 @@ static inline __device__ WorkNode_Header *popWorkNodeFromCpuQueue(bool shouldInc
     return work;
 }
 
+// Fetches and simultaneously lock the next waiting worknode. If the queue is empty, returns nullptr.
+template <size_t queueSize>
+[[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::pop(bool shouldIncrementActiveCount) {
+    for (uint32_t curPopCount = atomicAdd(&popCount, 0); curPopCount < atomicAdd(&pushCount, 0);
+                  curPopCount = atomicAdd(&popCount, 0)) {
+        WorkNode_Header *work = tryPop(shouldIncrementActiveCount, curPopCount % queueSize);
+        if (work != nullptr) {
+            return work;
+        }
+    }
+    return nullptr;
+}
+
 // Returns true if there was work waiting
 static inline __device__ bool invokeNext(bool yielding = false) {
     __shared__ WorkNode_Header *worknode_s;
     if (threadIdx.x == 0) {
         WorkNode_Header *workFromCpu = popWorkNodeFromCpuQueue(!yielding);
-        WorkNode_Header *workFromMainQueue = popWorkNodeFromMainQueue(!yielding && workFromCpu == nullptr);
+        WorkNode_Header *workFromMainQueue = mainWorkQueue.tryPop(!yielding && workFromCpu == nullptr);
 
         if (workFromMainQueue != nullptr) {
             if (workFromCpu != nullptr) {
-                insertWorkNodeIntoMainQueue(workFromCpu);
+                mainWorkQueue.push(workFromCpu);
             }
             worknode_s = workFromMainQueue;
         }
@@ -306,14 +347,14 @@ static __device__ bool shouldKeepPollingForWork() {
     if (cpuWorkQueueIndex_last == -1U) {
         return true;
     }
-    // Pre-fetch the pop indices so that the load of activeVcoreCount happens after the load of the pop index, but
-    // before the load of the push index. This ensures that if popWorkNodeFromMainQueue and/or popWorkNodeFromCpuQueue
+    // Pre-fetch the pop counts so that the load of activeVcoreCount happens after the load of the pop count, but
+    // before the load of the push count. This ensures that if mainWorkQueue.tryPop and/or popWorkNodeFromCpuQueue
     // returned null only because someone beat us to the punch, we're guaranteed shouldKeepPollingForWork will return
     // true.
     uint32_t cached_cpuPopIndex = atomicAdd(&cpuWorkQueueIndex_pop, 0);
-    uint32_t cached_mainPopIndex = atomicAdd(&mainWorkQueueIndex_pop, 0);
+    uint32_t cached_mainPopCount = atomicAdd(&mainWorkQueue.popCount, 0);
     return atomicAdd(&activeVcoreCount, 0) != 0 ||
-            cached_mainPopIndex         < atomicAdd(&mainWorkQueueIndex_push, 0) ||
+            cached_mainPopCount         < atomicAdd(&mainWorkQueue.pushCount, 0) ||
             cached_cpuPopIndex          < cpuWorkQueueIndex_last;
 }
 
