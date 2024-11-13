@@ -6,12 +6,14 @@ Documentation for rocThrust available at
 ## (Unreleased) rocThrust 3.2.0 for ROCm 6.4
 
 ### Additions
-* Added smoke test options, which runs a subset of the unit tests and ensuring that less than 2gb of VRAM will be used
-  * Smoke tests can be ran with `[--emulation|-e|--test|-t]=smoke`
-* Added `--emulation` option added for `rtest.py`
+* Added regression tests to `rtest.py`. Regression tests are a subset of tests that caused hardware problems for past emulation environments.
+  * Can be run with `python rtest.py [--emulation|-e|--test|-t]=regression`
+* Added smoke test options, which runs a subset of the unit tests and ensures that less than 2gb of VRAM will be used
+  * Smoke tests can be run using `[--emulation|-e|--test|-t]=smoke`
+* Added `--emulation` option for `rtest.py`
 
 ### Changes
-* `--test|-t` no longer a required flag for `rtest.py`, instead user can use either `--emulation|-e` or `--test|-t` but not both
+* `--test|-t` is no longer a required flag for `rtest.py`. Instead, the user can use either `--emulation|-e` or `--test|-t`, but not both.
 
 ## (Unreleased) rocThrust 3.2.0 for ROCm 6.3
 
