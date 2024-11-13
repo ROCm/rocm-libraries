@@ -374,7 +374,7 @@ Tests:
   indextype: *i32_i64
   precision: *double_only_precisions
   M: 1
-  N: [48]
+  N: [56]
   K: 1
   batch_count_A: [2]
   batch_count_B: [2]
@@ -387,7 +387,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
-  filename: [shipsec1]
+  filename: [webbase-1M]
 
 - name: spmm_batched_csr_file
   category: nightly
@@ -395,7 +395,7 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [12]
+  N: [22]
   K: 1
   batch_count_A: [7]
   batch_count_B: [1]

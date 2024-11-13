@@ -515,7 +515,7 @@ Tests:
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
   filename: [sme3Dc,
-             bmwcra_1]
+             webbase-1M]
 
 - name: spmm_coo_file
   category: nightly

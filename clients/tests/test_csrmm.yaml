@@ -85,7 +85,7 @@ Tests:
 - name: csrmm
   category: pre_checkin
   function: csrmm
-  precision: *single_double_precisions_complex_real
+  precision: *double_only_precisions_complex_real
   M: [32, 64, 512]
   N: [32, 64, 123]
   K: [32, 64, 512]

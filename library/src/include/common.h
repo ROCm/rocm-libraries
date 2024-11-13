@@ -798,6 +798,396 @@ __device__ __forceinline__ double wfreduce_sum(double sum)
     sum = temp_sum.val;
     return sum;
 }
+
+// DPP-based double wavefront partial reduction
+template <uint32_t WFSIZE, uint32_t SUB_WFSIZE>
+__device__ __forceinline__ int32_t wfreduce_partial_sum(int32_t sum)
+{
+    if(SUB_WFSIZE == 1)
+    {
+        return wfreduce_sum<WFSIZE>(sum);
+    }
+    if(SUB_WFSIZE == 2)
+    {
+        if(WFSIZE >  2) sum += __hip_move_dpp(sum, 0x112, 0xf, 0xf, 0);
+        if(WFSIZE >  4) sum += __hip_move_dpp(sum, 0x114, 0xf, 0xe, 0);
+        if(WFSIZE >  8) sum += __hip_move_dpp(sum, 0x118, 0xf, 0xc, 0);
+        if(WFSIZE > 16) sum += __shfl_xor(sum, 16);
+        if(WFSIZE > 32) sum += __shfl_xor(sum, 32);
+        return sum;
+    }
+    if(SUB_WFSIZE == 4)
+    {
+        if(WFSIZE >  4) sum += __hip_move_dpp(sum, 0x114, 0xf, 0xe, 0);
+        if(WFSIZE >  8) sum += __hip_move_dpp(sum, 0x118, 0xf, 0xc, 0);
+        if(WFSIZE > 16) sum += __shfl_xor(sum, 16);
+        if(WFSIZE > 32) sum += __shfl_xor(sum, 32);
+        return sum;
+    }
+    if(SUB_WFSIZE == 8)
+    {
+        if(WFSIZE >  8) sum += __hip_move_dpp(sum, 0x118, 0xf, 0xc, 0);
+        if(WFSIZE > 16) sum += __shfl_xor(sum, 16);
+        if(WFSIZE > 32) sum += __shfl_xor(sum, 32);
+        return sum;
+    }
+    if(SUB_WFSIZE == 16)
+    {
+        if(WFSIZE > 16) sum += __shfl_xor(sum, 16);
+        if(WFSIZE > 32) sum += __shfl_xor(sum, 32);
+        return sum;
+    }
+    if(SUB_WFSIZE == 32)
+    {
+        if(WFSIZE > 32) sum += __shfl_xor(sum, 32);
+        return sum;
+    }
+    return sum;
+}
+
+// DPP-based double wavefront partial reduction
+template <uint32_t WFSIZE, uint32_t SUB_WFSIZE>
+__device__ __forceinline__ int64_t wfreduce_partial_sum(int64_t sum)
+{
+    typedef union i64_b32
+    {
+        int64_t i64;
+        uint32_t b32[2];
+    } i64_b32_t;
+    i64_b32_t upper_sum;
+    i64_b32_t temp_sum;
+    temp_sum.i64 = sum;
+    if(SUB_WFSIZE == 1)
+    {
+        return wfreduce_sum<WFSIZE>(sum);
+    }
+    if(SUB_WFSIZE == 2)
+    {
+        if(WFSIZE > 2)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x112, 0xf, 0xf, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x112, 0xf, 0xf, false);
+            temp_sum.i64 += upper_sum.i64;
+        }
+        if(WFSIZE > 4)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x114, 0xf, 0xe, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x114, 0xf, 0xe, false);
+            temp_sum.i64 += upper_sum.i64;
+        }
+        if(WFSIZE > 8)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x118, 0xf, 0xc, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x118, 0xf, 0xc, false);
+            temp_sum.i64 += upper_sum.i64;
+        }
+        if(WFSIZE > 16)
+        {
+            temp_sum.i64 += __shfl_xor(temp_sum.i64, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.i64 += __shfl_xor(temp_sum.i64, 32);
+        }
+        sum = temp_sum.i64;
+        return sum;   
+    }
+    if(SUB_WFSIZE == 4)
+    {
+        if(WFSIZE > 4)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x114, 0xf, 0xe, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x114, 0xf, 0xe, false);
+            temp_sum.i64 += upper_sum.i64;
+        }
+        if(WFSIZE > 8)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x118, 0xf, 0xc, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x118, 0xf, 0xc, false);
+            temp_sum.i64 += upper_sum.i64;
+        }
+        if(WFSIZE > 16)
+        {
+            temp_sum.i64 += __shfl_xor(temp_sum.i64, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.i64 += __shfl_xor(temp_sum.i64, 32);
+        }
+        sum = temp_sum.i64;
+        return sum;   
+    }
+    if(SUB_WFSIZE == 8)
+    {
+        if(WFSIZE > 8)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x118, 0xf, 0xc, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x118, 0xf, 0xc, false);
+            temp_sum.i64 += upper_sum.i64;
+        }
+        if(WFSIZE > 16)
+        {
+            temp_sum.i64 += __shfl_xor(temp_sum.i64, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.i64 += __shfl_xor(temp_sum.i64, 32);
+        }
+        sum = temp_sum.i64;
+        return sum;   
+    }
+    if(SUB_WFSIZE == 16)
+    {
+        if(WFSIZE > 16)
+        {
+            temp_sum.i64 += __shfl_xor(temp_sum.i64, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.i64 += __shfl_xor(temp_sum.i64, 32);
+        }
+        sum = temp_sum.i64;
+        return sum;   
+    }
+    if(SUB_WFSIZE == 32)
+    {
+        if(WFSIZE > 32)
+        {
+            temp_sum.i64 += __shfl_xor(temp_sum.i64, 32);
+        }
+        sum = temp_sum.i64;
+        return sum;   
+    }
+    sum = temp_sum.i64;
+    return sum;   
+}
+// DPP-based float wavefront partial reduction sum
+template <uint32_t WFSIZE, uint32_t SUB_WFSIZE>
+__device__ __forceinline__ float wfreduce_partial_sum(float sum)
+{
+    typedef union flt_b32
+    {
+        float val;
+        uint32_t b32;
+    } flt_b32_t;
+    flt_b32_t upper_sum;
+    flt_b32_t temp_sum;
+    temp_sum.val = sum;
+    if(SUB_WFSIZE == 1)
+    {
+        return wfreduce_sum<WFSIZE>(sum);
+    }
+    if(SUB_WFSIZE == 2)
+    {
+        if(WFSIZE > 2)
+        {
+            upper_sum.b32 = __hip_move_dpp(temp_sum.b32, 0x112, 0xf, 0xf, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 4)
+        {
+            upper_sum.b32 = __hip_move_dpp(temp_sum.b32, 0x114, 0xf, 0xe, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 8)
+        {
+            upper_sum.b32 = __hip_move_dpp(temp_sum.b32, 0x118, 0xf, 0xc, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 16)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 32);
+        }
+        sum = temp_sum.val;
+        return sum;
+    }
+    if(SUB_WFSIZE == 4)
+    {
+        if(WFSIZE > 4)
+        {
+            upper_sum.b32 = __hip_move_dpp(temp_sum.b32, 0x114, 0xf, 0xe, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 8)
+        {
+            upper_sum.b32 = __hip_move_dpp(temp_sum.b32, 0x118, 0xf, 0xc, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 16)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 32);
+        }
+        sum = temp_sum.val;
+        return sum;
+    }
+    if(SUB_WFSIZE == 8)
+    {
+        if(WFSIZE > 8)
+        {
+            upper_sum.b32 = __hip_move_dpp(temp_sum.b32, 0x118, 0xf, 0xc, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 16)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 32);
+        }
+        sum = temp_sum.val;
+        return sum;
+    }
+    if(SUB_WFSIZE == 16)
+    {
+        if(WFSIZE > 16)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 32);
+        }
+        sum = temp_sum.val;
+        return sum;
+    }
+    if(SUB_WFSIZE == 32)
+    {
+        if(WFSIZE > 32)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 32);
+        }
+        sum = temp_sum.val;
+        return sum;
+    }
+    sum = temp_sum.val;
+    return sum;
+}
+
+// DPP-based double wavefront partial reduction
+template <uint32_t WFSIZE, uint32_t SUB_WFSIZE>
+__device__ __forceinline__ double wfreduce_partial_sum(double sum)
+{
+    typedef union dbl_b32
+    {
+        double val;
+        uint32_t b32[2];
+    } dbl_b32_t;
+    dbl_b32_t upper_sum;
+    dbl_b32_t temp_sum;
+    temp_sum.val = sum;
+    if(SUB_WFSIZE == 1)
+    {
+        return wfreduce_sum<WFSIZE>(sum);
+    }
+    if(SUB_WFSIZE == 2)
+    {
+        if(WFSIZE > 2)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x112, 0xf, 0xf, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x112, 0xf, 0xf, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 4)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x114, 0xf, 0xe, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x114, 0xf, 0xe, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 8)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x118, 0xf, 0xc, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x118, 0xf, 0xc, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 16)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 32);
+        }
+        sum = temp_sum.val;
+        return sum;
+    }
+    if(SUB_WFSIZE == 4)
+    {
+        if(WFSIZE > 4)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x114, 0xf, 0xe, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x114, 0xf, 0xe, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 8)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x118, 0xf, 0xc, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x118, 0xf, 0xc, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 16)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 32);
+        }
+        sum = temp_sum.val;
+        return sum;
+    }
+    if(SUB_WFSIZE == 8)
+    {
+        if(WFSIZE > 8)
+        {
+            upper_sum.b32[0] = __hip_move_dpp(temp_sum.b32[0], 0x118, 0xf, 0xc, false);
+            upper_sum.b32[1] = __hip_move_dpp(temp_sum.b32[1], 0x118, 0xf, 0xc, false);
+            temp_sum.val += upper_sum.val;
+        }
+        if(WFSIZE > 16)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 32);
+        }
+        sum = temp_sum.val;
+        return sum;
+    }
+    if(SUB_WFSIZE == 16)
+    {
+        if(WFSIZE > 16)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 16);
+        }
+        if(WFSIZE > 32)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 32);
+        }
+        sum = temp_sum.val;
+        return sum;
+    }
+    if(SUB_WFSIZE == 32)
+    {
+        if(WFSIZE > 32)
+        {
+            temp_sum.val += __shfl_xor(temp_sum.val, 32);
+        }
+        sum = temp_sum.val;
+        return sum;
+    }
+    sum = temp_sum.val;
+    return sum;
+}
 #else /* ROCSPARSE_USE_MOVE_DPP */
 
 
@@ -895,6 +1285,48 @@ __device__ __forceinline__ double wfreduce_sum(double sum)
 
     return sum;
 }
+
+template <uint32_t WFSIZE, uint32_t SUB_WF_SIZE>
+__device__ __forceinline__ int32_t wfreduce_partial_sum(int32_t sum)
+{
+    for(int i = WFSIZE >> 1; i >= SUB_WF_SIZE; i >>= 1)
+    {
+        sum += __shfl_xor(sum, i);
+    }
+    return sum;
+}
+
+template <uint32_t WFSIZE, uint32_t SUB_WF_SIZE>
+__device__ __forceinline__ int64_t wfreduce_partial_sum(int64_t sum)
+{
+    for(int i = WFSIZE >> 1; i >= SUB_WF_SIZE; i >>= 1)
+    {
+        sum += __shfl_xor(sum, i);
+    }
+    return sum;
+}
+
+template <uint32_t WFSIZE, uint32_t SUB_WF_SIZE>
+__device__ __forceinline__ float wfreduce_partial_sum(float sum)
+{
+    for(int i = WFSIZE >> 1; i >= SUB_WF_SIZE; i >>= 1)
+    {
+        sum += __shfl_xor(sum, i);
+    }
+
+    return sum;
+}
+
+template <uint32_t WFSIZE, uint32_t SUB_WF_SIZE>
+__device__ __forceinline__ double wfreduce_partial_sum(double sum)
+{
+    for(int i = WFSIZE >> 1; i >= SUB_WF_SIZE; i >>= 1)
+    {
+        sum += __shfl_xor(sum, i);
+    }
+
+    return sum;
+}
 #endif /* ROCSPARSE_USE_MOVE_DPP */
 
 // DPP-based complex float wavefront reduction sum
@@ -911,6 +1343,22 @@ __device__ __forceinline__ rocsparse_double_complex wfreduce_sum(rocsparse_doubl
 {
     return rocsparse_double_complex(rocsparse::wfreduce_sum<WFSIZE>(std::real(sum)),
                                     rocsparse::wfreduce_sum<WFSIZE>(std::imag(sum)));
+}
+
+// DPP-based complex float wavefront reduction sum
+template <uint32_t WFSIZE, uint32_t SUB_WF_SIZE>
+__device__ __forceinline__ rocsparse_float_complex wfreduce_partial_sum(rocsparse_float_complex sum)
+{
+    return rocsparse_float_complex(rocsparse::wfreduce_partial_sum<WFSIZE, SUB_WF_SIZE>(std::real(sum)),
+                                   rocsparse::wfreduce_partial_sum<WFSIZE, SUB_WF_SIZE>(std::imag(sum)));
+}
+
+// DPP-based complex double wavefront reduction
+template <uint32_t WFSIZE, uint32_t SUB_WF_SIZE>
+__device__ __forceinline__ rocsparse_double_complex wfreduce_partial_sum(rocsparse_double_complex sum)
+{
+    return rocsparse_double_complex(rocsparse::wfreduce_partial_sum<WFSIZE, SUB_WF_SIZE>(std::real(sum)),
+                                    rocsparse::wfreduce_partial_sum<WFSIZE, SUB_WF_SIZE>(std::imag(sum)));
 }
     // clang-format on
 
