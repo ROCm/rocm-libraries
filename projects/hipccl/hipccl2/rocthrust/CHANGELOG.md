@@ -3,6 +3,16 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## (Unreleased) rocThrust 3.2.0 for ROCm 6.4
+
+### Additions
+* Added smoke test options, which runs a subset of the unit tests and ensuring that less than 2gb of VRAM will be used
+  * Smoke tests can be ran with `[--emulation|-e|--test|-t]=smoke`
+* Added `--emulation` option added for `rtest.py`
+
+### Changes
+* `--test|-t` no longer a required flag for `rtest.py`, instead user can use either `--emulation|-e` or `--test|-t` but not both
+
 ## (Unreleased) rocThrust 3.2.0 for ROCm 6.3
 
 ### Added
