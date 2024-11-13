@@ -47,8 +47,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description="""
     Checks build arguments
     """)
-    parser.add_argument('-t', '--test', required=True, type=str, action='append',
-                        help='Test set to run from rtest.xml (required, e.g. osdb)')
+    parser.add_argument('-e', '--emulation', required=False, default="",
+                        help='Test set to run from rtest.xml (optional, eg.smoke). At least one but not both of -e or -t must be set')
+    parser.add_argument('-t', '--test', required=False, default="", 
+                        help='Test set to run from rtest.xml (optional, e.g. osdb). At least one but not both of -e or -t must be set')
     parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                         help='Test Debug build (optional, default: false)')
     parser.add_argument('-o', '--output', type=str, required=False, default="xml", 
@@ -245,7 +247,11 @@ def batch(script, xml):
     global OS_info
     global args
     global fail_regex
-    # 
+
+    A, B = args.test != '', args.emulation != ''
+    if not (A ^ B):
+        raise ValueError('At least one but not both of -e/--emulation or -t/--test must be set')
+
     cwd = pathlib.os.curdir
     rtest_cwd_path = os.path.abspath( os.path.join( cwd, 'rtest.xml') )
     if os.path.isfile(rtest_cwd_path) and os.path.dirname(rtest_cwd_path).endswith( "staging" ):
@@ -310,7 +316,29 @@ def batch(script, xml):
             for test in xml.getElementsByTagName('test'):
                 sets = test.getAttribute('sets')
                 runset = sets.split(',')
-                if len([x for x in args.test if x in runset]):
+                if args.test in runset:
+                    for run in test.getElementsByTagName('run'):
+                        name = run.getAttribute('name')
+                        vram_limit = run.getAttribute('vram_min')
+                        if vram_limit:
+                            if OS_info["VRAM"] < float(vram_limit):
+                                print( f'***\n*** Skipped: {name} due to VRAM req.\n***')
+                                continue
+                        if name:
+                            print( f'***\n*** Running: {name}\n***')
+                        time_limit = run.getAttribute('time_max')
+                        if time_limit:
+                            timeout = float(time_limit)
+                        else:
+                            timeout = 0
+
+                        raw_cmd = run.firstChild.data
+                        var_cmd = raw_cmd.format_map(var_subs)
+                        error = run_cmd(var_cmd, True, timeout)
+                        if (error == 2):
+                            print( f'***\n*** Timed out when running: {name}\n***')
+                    continue
+                if args.emulation in runset:
                     for run in test.getElementsByTagName('run'):
                         name = run.getAttribute('name')
                         vram_limit = run.getAttribute('vram_min')
