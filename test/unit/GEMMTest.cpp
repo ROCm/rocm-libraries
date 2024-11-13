@@ -703,6 +703,29 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMLargerLDS)
+    {
+        GEMMProblem gemm;
+        gemm.macM             = 128;
+        gemm.macN             = 256;
+        gemm.loadLDSA         = true;
+        gemm.loadLDSB         = true;
+        gemm.prefetchInFlight = 1;
+        auto maxLDS = m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize);
+        auto ldsA   = gemm.loadLDSA ? (gemm.macM * gemm.macK * 4 * gemm.prefetchInFlight) : 0;
+        auto ldsB   = gemm.loadLDSB ? (gemm.macK * gemm.macN * 4 * gemm.prefetchInFlight) : 0;
+        auto ldsD   = gemm.storeLDSD ? (gemm.waveM * gemm.waveN * 4) : 0;
+
+        if(ldsA + ldsB + ldsD <= maxLDS)
+        {
+            basicGEMM<float>(gemm);
+        }
+        else
+        {
+            GTEST_SKIP() << "LDS usage exceeds maxLDS.";
+        }
+    }
+
     TEST_P(GEMMTestGPU, GPU_BasicGEMMBetaIsZero)
     {
         GEMMProblem gemm;
@@ -1726,6 +1749,21 @@ namespace GEMMDriverTest
                         numScaleBufferLoads,
                         numScaleDSWrites,
                         numScaleDSLoads);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_LargerLDSGEMMFP8_32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4(32, 32, 64);
+
+        gemm.macM             = 128;
+        gemm.macN             = 128;
+        gemm.macK             = 256;
+        gemm.loadLDSA         = true;
+        gemm.loadLDSB         = true;
+        gemm.prefetchInFlight = 2;
+
+        basicGEMM<FP8, FP8, float>(gemm);
     }
 
     TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2X2)

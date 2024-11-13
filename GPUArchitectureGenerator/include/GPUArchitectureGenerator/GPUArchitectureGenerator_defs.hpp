@@ -562,7 +562,7 @@ namespace GPUArchitectureGenerator
               },
               0,
               {rocRoller::GPUWaitQueueType::VMQueue, rocRoller::GPUWaitQueueType::LGKMDSQueue},
-              (1 << 13) - 1}},
+              (1 << 12) - 1}},
             // single-address LDS instructions
             {gfx9ISAs(),
              {{

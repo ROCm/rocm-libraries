@@ -328,6 +328,7 @@ namespace rocRoller
 
         int chooseWidth(int numWords, const std::vector<int>& potentialWidths, int maxWidth) const;
         std::string            genOffsetModifier(int) const;
+        Generator<Instruction> addLargerOffset2Addr(int&, Register::ValuePtr&, std::string);
         Generator<Instruction> genLocalAddr(Register::ValuePtr& addr) const;
         Generator<Instruction> packForStore(Register::ValuePtr& result,
                                             Register::ValuePtr  toPack) const;

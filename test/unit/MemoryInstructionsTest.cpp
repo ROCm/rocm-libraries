@@ -487,7 +487,7 @@ namespace MemoryInstructionsTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(MemoryInstructionsTests, MemoryInstructionsTest, supportedISATuples());
+    INSTANTIATE_TEST_SUITE_P(MemoryInstructionsTests, MemoryInstructionsTest, CDNAISATuples());
 
     struct BufferMemoryInstructionsTest : public GPUContextFixtureParam<int>
     {

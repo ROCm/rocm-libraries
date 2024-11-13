@@ -712,6 +712,8 @@ set(
   test/catch/ExpressionTest.cpp
   test/catch/KernelArgumentsTest.cpp
   test/catch/KernelGraphConstraintsTest.cpp
+  test/catch/LargerLDSTest.cpp
+  test/catch/MultipleLDSAllocationTest.cpp
   test/catch/ScalarExpressionTest.cpp
   test/catch/TernaryExpressionTest.cpp
   test/catch/TestContextTest.cpp
