@@ -29,19 +29,42 @@
 #include <rocprim/rocprim.hpp>
 
 template <typename K, typename V>
-rocsparse_status rocsparse::primitives::radix_sort_pairs_buffer_size(
-    rocsparse_handle handle, size_t length, uint32_t startbit, uint32_t endbit, size_t* buffer_size)
+rocsparse_status rocsparse::primitives::radix_sort_pairs_buffer_size(rocsparse_handle handle,
+                                                                     size_t           length,
+                                                                     uint32_t         startbit,
+                                                                     uint32_t         endbit,
+                                                                     size_t*          buffer_size,
+                                                                     bool using_double_buffers)
 {
-    rocprim::double_buffer<K> rocprim_keys(nullptr, nullptr);
-    rocprim::double_buffer<V> rocprim_values(nullptr, nullptr);
-    RETURN_IF_HIP_ERROR(rocprim::radix_sort_pairs(nullptr,
-                                                  *buffer_size,
-                                                  rocprim_keys,
-                                                  rocprim_values,
-                                                  length,
-                                                  startbit,
-                                                  endbit,
-                                                  handle->stream));
+    K* ptr1 = reinterpret_cast<K*>(0x4);
+    V* ptr2 = reinterpret_cast<V*>(0x4);
+
+    if(using_double_buffers)
+    {
+        rocprim::double_buffer<K> rocprim_keys(ptr1, ptr1);
+        rocprim::double_buffer<V> rocprim_values(ptr2, ptr2);
+        RETURN_IF_HIP_ERROR(rocprim::radix_sort_pairs(nullptr,
+                                                      *buffer_size,
+                                                      rocprim_keys,
+                                                      rocprim_values,
+                                                      length,
+                                                      startbit,
+                                                      endbit,
+                                                      handle->stream));
+    }
+    else
+    {
+        RETURN_IF_HIP_ERROR(rocprim::radix_sort_pairs(nullptr,
+                                                      *buffer_size,
+                                                      ptr1,
+                                                      ptr1,
+                                                      ptr2,
+                                                      ptr2,
+                                                      length,
+                                                      startbit,
+                                                      endbit,
+                                                      handle->stream));
+    }
 
     return rocsparse_status_success;
 }
@@ -548,7 +571,8 @@ rocsparse_status rocsparse::primitives::sort_csr_column_indices(rocsparse_handle
         size_t           length,                                                                 \
         uint32_t         startbit,                                                               \
         uint32_t         endbit,                                                                 \
-        size_t * buffer_size);                                                                   \
+        size_t * buffer_size,                                                                    \
+        bool using_double_buffers);                                                              \
     template rocsparse_status rocsparse::primitives::radix_sort_pairs(                           \
         rocsparse_handle      handle,                                                            \
         double_buffer<KTYPE>& keys,                                                              \

@@ -71,7 +71,8 @@ namespace rocsparse
                                                       size_t           length,
                                                       uint32_t         startbit,
                                                       uint32_t         endbit,
-                                                      size_t*          buffer_size);
+                                                      size_t*          buffer_size,
+                                                      bool             using_double_buffers = true);
 
         template <typename K, typename V>
         rocsparse_status radix_sort_pairs(rocsparse_handle  handle,

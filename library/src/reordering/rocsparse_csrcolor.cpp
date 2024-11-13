@@ -483,9 +483,15 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
             //
             // Get required size of the temporary storage
             //
+            static constexpr bool s_using_double_buffers = false;
             RETURN_IF_ROCSPARSE_ERROR(
                 (rocsparse::primitives::radix_sort_pairs_buffer_size<rocsparse_int, rocsparse_int>(
-                    handle, m, 0, sizeof(rocsparse_int) * 8, &temporary_storage_size_bytes)));
+                    handle,
+                    m,
+                    0,
+                    sizeof(rocsparse_int) * 8,
+                    &temporary_storage_size_bytes,
+                    s_using_double_buffers)));
 
             //
             // allocate temporary storage
