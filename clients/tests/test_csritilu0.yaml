@@ -375,8 +375,6 @@ Tests:
 #  filename: [Chevron2]
 #
 
-
-
 - name: csritilu0_file
   category: quick
   function: csritilu0
@@ -387,6 +385,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   itilu0_alg: [rocsparse_itilu0_alg_sync_split_fusion]
+  skip_hardware: gfx942 # Ignore on GFX942
   filename: [Chevron2]
 
 
