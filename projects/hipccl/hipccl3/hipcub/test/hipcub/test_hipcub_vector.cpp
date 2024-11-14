@@ -61,11 +61,22 @@ TYPED_TEST_SUITE(HipcubVector, Params);
 
 template<class T, unsigned int VecSize, unsigned int BlockSize>
 __global__
-void vector_double_kernel(T* device_input, T* device_output)
+void vector_test_kernel(T* device_input, T* device_output)
 {
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * BlockSize);
 
-    device_output[index] = device_input[index] + device_input[index];
+    // Note about why subtraction is used here:
+    // To maintain CUB compatibility, the CubVector type for bools uses
+    // unsigned char as the backing storage type.
+    // As a result, when device_input is a CubVector of bools, the math below really operates on unsigned char,
+    // and there is no cast back to bool on write-back to the device_output.
+
+    // The cast back to bool is only done later on the host, and must use a reinterpret_cast to a bool pointer,
+    // followed by a dereference. In this scenario, the compiler does not convert non-zero values to 1 (as it would
+    // with a static_cast to bool operating on a value).
+    // That means we can end up comparing two values that are both true but have different (non-zero) binary values.
+    // Using subtraction below results in zero, which will always cast to the same binary false value (0).
+    device_output[index] = device_input[index] - device_input[index];
 }
 
 template<class T, unsigned int vec_size>
@@ -82,7 +93,7 @@ void run_vector_test()
     Vector* device_input;
     HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, size * sizeof(Vector)));
 
-    T input_num = 10;
+    T input_num = static_cast<T>(10);
 
     Vector input_vec;
     for(unsigned int i = 0; i < vec_size; i++)
@@ -99,7 +110,7 @@ void run_vector_test()
     Vector* device_output;
     HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, size * sizeof(Vector)));
 
-    vector_double_kernel<Vector, vec_size, block_size>
+    vector_test_kernel<Vector, vec_size, block_size>
         <<<size / block_size, block_size>>>(device_input, device_output);
 
     std::vector<Vector> output(size);
@@ -108,7 +119,7 @@ void run_vector_test()
                         output.size() * sizeof(Vector),
                         hipMemcpyDeviceToHost));
 
-    const T expected_num = input_num + input_num;
+    const T expected_num = static_cast<T>(input_num - input_num);
 
     for(unsigned int i = 0; i < size; i++)
     {
