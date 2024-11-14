@@ -422,7 +422,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
       value<rocsparse_int>(&this->b_gtsv_interleaved_alg)->default_value(rocsparse_gtsv_interleaved_alg_default),
       "Indicates what algorithm to use when running rocsparse_gtsv_interleaved_batch. Possibly choices are thomas: 1, lu: 2, qr: 3 (default:3)")
 
-      ("sparsity_pattern_statistics",
+      ("sparsity-pattern-statistics",
        "enable sparsity pattern statistics: min,max and median of the number of non-zeros per row and per column of the sparsity pattern of the matrix A will be part of benchmarking results.");
 
 }
@@ -560,7 +560,7 @@ int rocsparse_arguments_config::parse(int&argc,char**&argv, options_description&
       return -1;
   }
 
-  if(vm.count("sparsity_pattern_statistics"))
+  if(vm.count("sparsity-pattern-statistics"))
   {
     this->sparsity_pattern_statistics = true;
   }
