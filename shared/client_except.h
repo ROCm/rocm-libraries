@@ -18,19 +18,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCFFT_GTEST_EXCEPT_H
-#define ROCFFT_GTEST_EXCEPT_H
+#ifndef ROCFFT_CLIENT_EXCEPT_H
+#define ROCFFT_CLIENT_EXCEPT_H
 
 #include <sstream>
 
-// exception type to throw when we want gtest to skip this test case
-struct ROCFFT_GTEST_SKIP
+// exception type to throw when we want to skip a problem
+struct ROCFFT_SKIP
 {
     std::stringstream msg;
 };
 
-// exception type to throw when we want gtest to fail this test case
-struct ROCFFT_GTEST_FAIL
+// exception type to throw when we want to consider a problem failed
+struct ROCFFT_FAIL
 {
     std::stringstream msg;
 };

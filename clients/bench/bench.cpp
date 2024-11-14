@@ -28,6 +28,7 @@
 #include "bench.h"
 
 #include "../../shared/CLI11.hpp"
+#include "../../shared/client_except.h"
 #include "../../shared/gpubuf.h"
 
 int main(int argc, char* argv[])
@@ -241,7 +242,17 @@ int main(int argc, char* argv[])
         return EXIT_SUCCESS;
     }
 
-    const auto vram_footprint = params.vram_footprint();
+    size_t vram_footprint = 0;
+
+    try
+    {
+        vram_footprint = params.vram_footprint();
+    }
+    catch(ROCFFT_SKIP& e)
+    {
+        std::cout << "SKIPPED: " << e.msg.str() << "\n";
+        return EXIT_SUCCESS;
+    }
     if(!vram_fits_problem(vram_footprint, free))
     {
         std::cout << "SKIPPED: Problem size (" << vram_footprint

@@ -31,11 +31,11 @@
 #include <string>
 #include <vector>
 
+#include "client_except.h"
 #include "enum_to_string.h"
 #include "fft_params.h"
 #include "fftw_transform.h"
 #include "gpubuf.h"
-#include "gtest_except.h"
 #include "rocfft_against_fftw.h"
 #include "test_params.h"
 
@@ -43,7 +43,7 @@ extern int    verbose;
 extern size_t ramgb;
 extern bool   fftw_compare;
 
-static const size_t ONE_GiB = 1 << 30;
+static constexpr size_t ONE_GiB = 1 << 30;
 
 inline size_t bytes_to_GiB(const size_t bytes)
 {
@@ -71,7 +71,7 @@ struct system_memory
 {
     size_t total_bytes = 0;
     size_t free_bytes  = 0;
-    // Limits the amount of memory used throught the tests.
+    // Limits the amount of memory used throughout the tests.
     // Test RAM limit is: total_bytes * percentage_usable_memory.
     // If the test system has little swap space (or there are many
     // other processes running concurrently) and we are too
@@ -136,7 +136,7 @@ inline void
     {
         std::stringstream msg;
         msg << "needed_ramgb: " << bytes_to_GiB(needed_ram) << ", ramgb limit: " << ramgb << ".\n";
-        throw ROCFFT_GTEST_SKIP{std::move(msg)};
+        throw ROCFFT_SKIP{std::move(msg)};
     }
 }
 
@@ -163,11 +163,11 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
                 ss << "hipMemGetInfo failure with error " << hip_status;
             if(skip_runtime_fails)
             {
-                throw ROCFFT_GTEST_SKIP{std::move(ss)};
+                throw ROCFFT_SKIP{std::move(ss)};
             }
             else
             {
-                throw ROCFFT_GTEST_FAIL{std::move(ss)};
+                throw ROCFFT_FAIL{std::move(ss)};
             }
         }
         vram_avail = total;
@@ -187,7 +187,7 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
         std::stringstream ss;
         ss << "Raw problem size (" << bytes_to_GiB(raw_vram_footprint)
            << " GiB) raw data too large for device";
-        throw ROCFFT_GTEST_SKIP{std::move(ss)};
+        throw ROCFFT_SKIP{std::move(ss)};
     }
 
     if(verbose > 2)
@@ -208,7 +208,7 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
         std::stringstream ss;
         ss << "Problem size (" << bytes_to_GiB(vram_footprint)
            << " GiB) raw data too large for device";
-        throw ROCFFT_GTEST_SKIP{std::move(ss)};
+        throw ROCFFT_SKIP{std::move(ss)};
     }
 }
 
@@ -409,11 +409,11 @@ inline void execute_gpu_fft(Tparams&              params,
             ++n_hip_failures;
             if(skip_runtime_fails)
             {
-                throw ROCFFT_GTEST_SKIP();
+                throw ROCFFT_SKIP();
             }
             else
             {
-                throw ROCFFT_GTEST_FAIL();
+                throw ROCFFT_FAIL();
             }
         }
         hip_status = hipMemcpy(load_cb_data_dev.data(),
@@ -425,11 +425,11 @@ inline void execute_gpu_fft(Tparams&              params,
             ++n_hip_failures;
             if(skip_runtime_fails)
             {
-                throw ROCFFT_GTEST_SKIP();
+                throw ROCFFT_SKIP();
             }
             else
             {
-                throw ROCFFT_GTEST_FAIL();
+                throw ROCFFT_FAIL();
             }
         }
 
@@ -455,11 +455,11 @@ inline void execute_gpu_fft(Tparams&              params,
             ++n_hip_failures;
             if(skip_runtime_fails)
             {
-                throw ROCFFT_GTEST_SKIP();
+                throw ROCFFT_SKIP();
             }
             else
             {
-                throw ROCFFT_GTEST_FAIL();
+                throw ROCFFT_FAIL();
             }
         }
 
@@ -472,11 +472,11 @@ inline void execute_gpu_fft(Tparams&              params,
             ++n_hip_failures;
             if(skip_runtime_fails)
             {
-                throw ROCFFT_GTEST_SKIP();
+                throw ROCFFT_SKIP();
             }
             else
             {
-                throw ROCFFT_GTEST_FAIL();
+                throw ROCFFT_FAIL();
             }
         }
 
@@ -519,11 +519,11 @@ inline void execute_gpu_fft(Tparams&              params,
             ss << "hipMemcpy failure";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_GTEST_SKIP{std::move(ss)};
+                throw ROCFFT_SKIP{std::move(ss)};
             }
             else
             {
-                throw ROCFFT_GTEST_FAIL{std::move(ss)};
+                throw ROCFFT_FAIL{std::move(ss)};
             }
         }
     }
@@ -708,11 +708,11 @@ inline void run_round_trip_inverse(Tparams&              params,
         ++n_hip_failures;
         if(skip_runtime_fails)
         {
-            throw ROCFFT_GTEST_SKIP{std::move(ss)};
+            throw ROCFFT_SKIP{std::move(ss)};
         }
         else
         {
-            throw ROCFFT_GTEST_FAIL{std::move(ss)};
+            throw ROCFFT_FAIL{std::move(ss)};
         }
     }
     ASSERT_EQ(plan_status, fft_status_success) << "round trip inverse plan creation failed";
@@ -738,11 +738,11 @@ inline void run_round_trip_inverse(Tparams&              params,
                     ss << "hipMemset failure";
                     if(skip_runtime_fails)
                     {
-                        throw ROCFFT_GTEST_SKIP{std::move(ss)};
+                        throw ROCFFT_SKIP{std::move(ss)};
                     }
                     else
                     {
-                        throw ROCFFT_GTEST_FAIL{std::move(ss)};
+                        throw ROCFFT_FAIL{std::move(ss)};
                     }
                 }
             }
@@ -910,11 +910,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         ss << "Work buffer allocation failed with size: " << params.workbuffersize;
         if(skip_runtime_fails)
         {
-            throw ROCFFT_GTEST_SKIP{std::move(ss)};
+            throw ROCFFT_SKIP{std::move(ss)};
         }
         else
         {
-            throw ROCFFT_GTEST_FAIL{std::move(ss)};
+            throw ROCFFT_FAIL{std::move(ss)};
         }
     }
     ASSERT_EQ(plan_status, fft_status_success) << "plan creation failed";
@@ -949,17 +949,25 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         if(hip_status != hipSuccess)
         {
             std::stringstream ss;
-            ss << "hipMalloc failure for input buffer " << i << " size " << ibuffer_sizes[i] << "("
-               << bytes_to_GiB(ibuffer_sizes[i]) << " GiB)"
-               << " with code " << hipError_to_string(hip_status);
-            ++n_hip_failures;
-            if(skip_runtime_fails)
+            if(hip_status == hipErrorOutOfMemory)
             {
-                throw ROCFFT_GTEST_SKIP{std::move(ss)};
+                ss << "Input buffer size (" << bytes_to_GiB(ibuffer_sizes[i])
+                   << " GiB) raw data too large for device";
             }
             else
             {
-                throw ROCFFT_GTEST_FAIL{std::move(ss)};
+                ss << "hipMalloc failure for input buffer " << i << " size " << ibuffer_sizes[i]
+                   << "(" << bytes_to_GiB(ibuffer_sizes[i]) << " GiB)"
+                   << " with code " << hipError_to_string(hip_status);
+            }
+            ++n_hip_failures;
+            if(skip_runtime_fails)
+            {
+                throw ROCFFT_SKIP{std::move(ss)};
+            }
+            else
+            {
+                throw ROCFFT_FAIL{std::move(ss)};
             }
         }
         pibuffer[i] = ibuffer[i].data();
@@ -1104,7 +1112,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                 std::cout << "Problem exceeds memory limit; skipped [rocfft_transform]."
                           << std::endl;
             }
-            throw ROCFFT_GTEST_SKIP();
+            throw ROCFFT_SKIP();
         }
     }
 
@@ -1146,11 +1154,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                         ss << "hipMemcpy failure with error " << hip_status;
                         if(skip_runtime_fails)
                         {
-                            throw ROCFFT_GTEST_SKIP{std::move(ss)};
+                            throw ROCFFT_SKIP{std::move(ss)};
                         }
                         else
                         {
-                            throw ROCFFT_GTEST_FAIL{std::move(ss)};
+                            throw ROCFFT_FAIL{std::move(ss)};
                         }
                     }
                 }
@@ -1185,11 +1193,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                         ss << "hipMemcpy failure with error " << hip_status;
                         if(skip_runtime_fails)
                         {
-                            throw ROCFFT_GTEST_SKIP{std::move(ss)};
+                            throw ROCFFT_SKIP{std::move(ss)};
                         }
                         else
                         {
-                            throw ROCFFT_GTEST_FAIL{std::move(ss)};
+                            throw ROCFFT_FAIL{std::move(ss)};
                         }
                     }
                 }
@@ -1237,11 +1245,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                         ss << "hipMemcpy failure with error " << hip_status;
                         if(skip_runtime_fails)
                         {
-                            throw ROCFFT_GTEST_SKIP{std::move(ss)};
+                            throw ROCFFT_SKIP{std::move(ss)};
                         }
                         else
                         {
-                            throw ROCFFT_GTEST_FAIL{std::move(ss)};
+                            throw ROCFFT_FAIL{std::move(ss)};
                         }
                     }
                 }
@@ -1301,11 +1309,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                 ss << "hipMemcpy failure with error " << hip_status;
                 if(skip_runtime_fails)
                 {
-                    throw ROCFFT_GTEST_SKIP{std::move(ss)};
+                    throw ROCFFT_SKIP{std::move(ss)};
                 }
                 else
                 {
-                    throw ROCFFT_GTEST_FAIL{std::move(ss)};
+                    throw ROCFFT_FAIL{std::move(ss)};
                 }
             }
         }
@@ -1367,11 +1375,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                    << " with code " << hipError_to_string(hip_status);
                 if(skip_runtime_fails)
                 {
-                    throw ROCFFT_GTEST_SKIP{std::move(ss)};
+                    throw ROCFFT_SKIP{std::move(ss)};
                 }
                 else
                 {
-                    throw ROCFFT_GTEST_FAIL{std::move(ss)};
+                    throw ROCFFT_FAIL{std::move(ss)};
                 }
             }
 
@@ -1390,11 +1398,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                     ss << "hipMemset failure with error " << hip_status;
                     if(skip_runtime_fails)
                     {
-                        throw ROCFFT_GTEST_SKIP{std::move(ss)};
+                        throw ROCFFT_SKIP{std::move(ss)};
                     }
                     else
                     {
-                        throw ROCFFT_GTEST_FAIL{std::move(ss)};
+                        throw ROCFFT_FAIL{std::move(ss)};
                     }
                 }
             }

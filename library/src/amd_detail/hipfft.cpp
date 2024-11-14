@@ -899,6 +899,11 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         }
     }
 
+    if(workSize != nullptr)
+        *workSize = workBufferSize;
+
+    plan->workBufferSize = workBufferSize;
+
     if(workBufferSize > 0)
     {
         if(plan->autoAllocate)
@@ -915,11 +920,6 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                 plan->info, plan->workBuffer, workBufferSize));
         }
     }
-
-    if(workSize != nullptr)
-        *workSize = workBufferSize;
-
-    plan->workBufferSize = workBufferSize;
 
     rocfft_plan_description_destroy(ip_forward_desc);
     rocfft_plan_description_destroy(op_forward_desc);

@@ -26,6 +26,7 @@
 #include <numeric>
 #include <optional>
 
+#include "../shared/client_except.h"
 #include "../shared/concurrency.h"
 #include "../shared/fft_params.h"
 #include "../shared/hipfft_brick.h"
@@ -119,6 +120,8 @@ public:
 #endif
 
     hipfftHandle plan = INVALID_PLAN_HANDLE;
+    // keep track of token to check when attempting to create new plan
+    std::string current_token;
 
     // hipFFT has two ways to specify transform type - the hipfftType
     // enum, and separate hipDataType enums for input/output.
@@ -193,16 +196,21 @@ public:
     size_t vram_footprint() override
     {
         size_t val = fft_params::vram_footprint();
-        if(setup_structs() != fft_status_success)
+        // auto-allocated plans fail here if not enough VRAM, skip these tests
+        try
         {
-            throw std::runtime_error("Struct setup failed");
+            if(create_plan() != fft_status_success)
+            {
+                throw std::runtime_error("Plan creation or struct setup failed");
+            }
         }
-
-        workbuffersize = 0;
-
-        // Hack for estimating buffer requirements.
-        workbuffersize = 3 * val;
-
+        catch(fft_params::work_buffer_alloc_failure& e)
+        {
+            val += workbuffersize;
+            std::stringstream msg;
+            msg << "Plan work buffer size (" << val << " bytes raw data) too large for device";
+            throw ROCFFT_SKIP{std::move(msg)};
+        }
         val += workbuffersize;
         return val;
     }
@@ -335,6 +343,20 @@ public:
 
     fft_status create_plan() override
     {
+        // check if we need to make a new plan
+        if(current_token == token())
+        {
+            return fft_status_success;
+        }
+        else
+        {
+            if(plan != INVALID_PLAN_HANDLE)
+            {
+                hipfftDestroy(plan);
+                plan = INVALID_PLAN_HANDLE;
+            }
+        }
+
         auto fft_ret = setup_structs();
         if(fft_ret != fft_status_success)
         {
@@ -388,6 +410,8 @@ public:
             throw fft_params::work_buffer_alloc_failure(
                 "plan create failed due to allocation failure");
 
+        // store token to check if plan was already made
+        current_token = token();
         return fft_status_from_hipfftparams(ret);
     }
 

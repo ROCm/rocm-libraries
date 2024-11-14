@@ -676,11 +676,11 @@ TEST(manual, vs_fftw)
     {
         fft_vs_reference(params, false);
     }
-    catch(ROCFFT_GTEST_SKIP& e)
+    catch(ROCFFT_SKIP& e)
     {
         GTEST_SKIP() << e.msg.str();
     }
-    catch(ROCFFT_GTEST_FAIL& e)
+    catch(ROCFFT_FAIL& e)
     {
         GTEST_FAIL() << e.msg.str();
     }
