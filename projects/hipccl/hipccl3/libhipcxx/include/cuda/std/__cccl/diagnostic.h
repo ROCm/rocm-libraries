@@ -69,7 +69,7 @@
 #  define _CCCL_DIAG_SUPPRESS_NVHPC(str)
 #  define _CCCL_DIAG_SUPPRESS_MSVC(str)
 #  define _CCCL_DIAG_SUPPRESS_ICC(str) _CCCL_PRAGMA(warning disable str)
-#elif defined(_CCCL_COMPILER_NVHPC)
+#elif _CCCL_COMPILER(NVHPC)
 #  define _CCCL_DIAG_PUSH _CCCL_PRAGMA(diagnostic push)
 #  define _CCCL_DIAG_POP  _CCCL_PRAGMA(diagnostic pop)
 #  define _CCCL_DIAG_SUPPRESS_CLANG(str)
@@ -113,7 +113,7 @@
     _CCCL_DIAG_SUPPRESS_GCC("-Wdeprecated") \
     _CCCL_DIAG_SUPPRESS_GCC("-Wdeprecated-declarations")
 #  define _CCCL_SUPPRESS_DEPRECATED_POP _CCCL_DIAG_POP
-#elif defined(_CCCL_COMPILER_NVHPC)
+#elif _CCCL_COMPILER(NVHPC)
 #  define _CCCL_SUPPRESS_DEPRECATED_PUSH \
     _CCCL_DIAG_PUSH                      \
     _CCCL_DIAG_SUPPRESS_NVHPC(deprecated_entity)
@@ -123,11 +123,11 @@
     _CCCL_DIAG_PUSH                      \
     _CCCL_DIAG_SUPPRESS_MSVC(4996)
 #  define _CCCL_SUPPRESS_DEPRECATED_POP _CCCL_DIAG_POP
-#else // !_CCCL_COMPILER_CLANG && !_CCCL_COMPILER_ICC && && !_CCCL_COMPILER_GCC && !_CCCL_COMPILER_NVHPC &&
+#else // !_CCCL_COMPILER_CLANG && !_CCCL_COMPILER_ICC && && !_CCCL_COMPILER_GCC && !_CCCL_COMPILER(NVHPC) &&
       // !_CCCL_COMPILER_MSVC
 #  define _CCCL_SUPPRESS_DEPRECATED_PUSH
 #  define _CCCL_SUPPRESS_DEPRECATED_POP
-#endif // !_CCCL_COMPILER_CLANG && !_CCCL_COMPILER_ICC && && !_CCCL_COMPILER_GCC && !_CCCL_COMPILER_NVHPC &&
+#endif // !_CCCL_COMPILER_CLANG && !_CCCL_COMPILER_ICC && && !_CCCL_COMPILER_GCC && !_CCCL_COMPILER(NVHPC) &&
        // !_CCCL_COMPILER_MSVC
 
 // Enable us to selectively silence cuda compiler warnings
@@ -143,7 +143,7 @@
 #      define _CCCL_NV_DIAG_SUPPRESS(_WARNING) _CCCL_PRAGMA(nv_diagnostic push) _CCCL_PRAGMA(nv_diag_suppress _WARNING)
 #      define _CCCL_NV_DIAG_DEFAULT(_WARNING)  _CCCL_PRAGMA(nv_diagnostic pop)
 #    endif // !_CCCL_COMPILER_MSVC
-#  elif defined(_CCCL_COMPILER_NVHPC)
+#  elif _CCCL_COMPILER(NVHPC)
 #    define _CCCL_NV_DIAG_SUPPRESS(_WARNING) _CCCL_PRAGMA(diagnostic push) _CCCL_PRAGMA(diag_suppress _WARNING)
 #    define _CCCL_NV_DIAG_DEFAULT(_WARNING)  _CCCL_PRAGMA(diagnostic pop)
 #  else // ^^^ __NVCC_DIAG_PRAGMA_SUPPORT__ ^^^ / vvv !__NVCC_DIAG_PRAGMA_SUPPORT__ vvv
