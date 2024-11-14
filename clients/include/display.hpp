@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -108,6 +108,13 @@ struct display_key_t
         threshold,
         percentage,
         pivot,
+
+        min_nnz_per_row,
+        max_nnz_per_row,
+        median_nnz_per_row,
+        min_nnz_per_col,
+        max_nnz_per_col,
+        median_nnz_per_col,
 
         bdir        = bdir_A,
         bdim        = bdim_A,
@@ -420,6 +427,32 @@ struct display_key_t
         case jtype:
         {
             return "jtype";
+        }
+
+        case min_nnz_per_row:
+        {
+            return "min_nnz_per_row";
+        }
+        case max_nnz_per_row:
+        {
+            return "max_nnz_per_row";
+        }
+        case median_nnz_per_row:
+        {
+            return "median_nnz_per_row";
+        }
+
+        case min_nnz_per_col:
+        {
+            return "min_nnz_per_col";
+        }
+        case max_nnz_per_col:
+        {
+            return "max_nnz_per_col";
+        }
+        case median_nnz_per_col:
+        {
+            return "median_nnz_per_col";
         }
         }
     }

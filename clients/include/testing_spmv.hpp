@@ -24,6 +24,7 @@
 #pragma once
 
 #include "auto_testing_bad_arg.hpp"
+#include "rocsparse_matrix_statistics.hpp"
 
 template <rocsparse_format FORMAT, typename I, typename J, typename T>
 struct testing_matrix_type_traits;
@@ -215,6 +216,7 @@ struct testing_spmv_dispatch_traits<rocsparse_format_csc, I, J, A, X, Y, T>
                              device_sparse_matrix<A>& dA,
                              Ts&&... ts)
     {
+
         display_timing_info(trans,
                             trans_value,
                             display_key_t::M,
@@ -767,22 +769,67 @@ public:
             const double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
             const double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
-            traits::display_info(arg,
-                                 display_key_t::trans_A,
-                                 rocsparse_operation2string(trans),
-                                 dA,
-                                 display_key_t::alpha,
-                                 *h_alpha,
-                                 display_key_t::beta,
-                                 *h_beta,
-                                 display_key_t::algorithm,
-                                 rocsparse_spmvalg2string(alg),
-                                 display_key_t::gflops,
-                                 gpu_gflops,
-                                 display_key_t::bandwidth,
-                                 gpu_gbyte,
-                                 display_key_t::time_ms,
-                                 get_gpu_time_msec(gpu_time_used));
+            if(arg.sparsity_pattern_statistics)
+            {
+                int64_t min_nnz_row;
+                int64_t median_nnz_row;
+                int64_t max_nnz_row;
+                rocsparse_matrix_statistics::get_nnz_per_row(
+                    dA, min_nnz_row, median_nnz_row, max_nnz_row);
+
+                int64_t min_nnz_col;
+                int64_t median_nnz_col;
+                int64_t max_nnz_col;
+                rocsparse_matrix_statistics::get_nnz_per_column(
+                    dA, min_nnz_col, median_nnz_col, max_nnz_col);
+                traits::display_info(arg,
+                                     display_key_t::trans_A,
+                                     rocsparse_operation2string(trans),
+                                     dA,
+                                     display_key_t::min_nnz_per_row,
+                                     min_nnz_row,
+                                     display_key_t::max_nnz_per_row,
+                                     max_nnz_row,
+                                     display_key_t::median_nnz_per_row,
+                                     median_nnz_row,
+                                     display_key_t::min_nnz_per_col,
+                                     min_nnz_col,
+                                     display_key_t::max_nnz_per_col,
+                                     max_nnz_col,
+                                     display_key_t::median_nnz_per_col,
+                                     median_nnz_col,
+                                     display_key_t::alpha,
+                                     *h_alpha,
+                                     display_key_t::beta,
+                                     *h_beta,
+                                     display_key_t::algorithm,
+                                     rocsparse_spmvalg2string(alg),
+                                     display_key_t::gflops,
+                                     gpu_gflops,
+                                     display_key_t::bandwidth,
+                                     gpu_gbyte,
+                                     display_key_t::time_ms,
+                                     get_gpu_time_msec(gpu_time_used));
+            }
+            else
+            {
+                traits::display_info(arg,
+                                     display_key_t::trans_A,
+                                     rocsparse_operation2string(trans),
+                                     dA,
+                                     display_key_t::alpha,
+                                     *h_alpha,
+                                     display_key_t::beta,
+                                     *h_beta,
+                                     display_key_t::algorithm,
+                                     rocsparse_spmvalg2string(alg),
+                                     display_key_t::gflops,
+                                     gpu_gflops,
+                                     display_key_t::bandwidth,
+                                     gpu_gbyte,
+                                     display_key_t::time_ms,
+                                     get_gpu_time_msec(gpu_time_used));
+            }
         }
 
         CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));

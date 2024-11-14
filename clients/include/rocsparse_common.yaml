@@ -540,6 +540,7 @@ Arguments:
   - tolm: c_double
   - graph_test: c_bool
   - skip_reproducibility: c_bool
+  - sparsity_pattern_statistics: c_bool
   - filename: c_char*128
   - function: c_char*64
   - name: c_char*64
@@ -667,6 +668,7 @@ Defaults:
   tolm: 1.0
   graph_test: false
   skip_reproducibility: false
+  sparsity_pattern_statistics: false
   workspace_size: 0
   category: nightly
   hardware: all

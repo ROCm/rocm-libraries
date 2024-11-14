@@ -103,33 +103,34 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->gtsv_interleaved_alg = static_cast<rocsparse_gtsv_interleaved_alg>(0);
         this->gpsv_interleaved_alg = static_cast<rocsparse_gpsv_interleaved_alg>(0);
 
-        this->matrix               = static_cast<rocsparse_matrix_init>(0);
-        this->matrix_init_kind     = static_cast<rocsparse_matrix_init_kind>(0);
-        this->unit_check           = static_cast<rocsparse_int>(0);
-        this->timing               = static_cast<rocsparse_int>(1);
-        this->iters                = static_cast<rocsparse_int>(0);
-        this->denseld              = static_cast<int64_t>(0);
-        this->batch_count          = static_cast<rocsparse_int>(0);
-        this->batch_count_A        = static_cast<rocsparse_int>(0);
-        this->batch_count_B        = static_cast<rocsparse_int>(0);
-        this->batch_count_C        = static_cast<rocsparse_int>(0);
-        this->batch_stride         = static_cast<rocsparse_int>(0);
-        this->ld_multiplier_B      = static_cast<rocsparse_int>(2);
-        this->ld_multiplier_C      = static_cast<rocsparse_int>(2);
-        this->algo                 = static_cast<uint32_t>(0);
-        this->numericboost         = static_cast<int>(0);
-        this->boosttol             = static_cast<double>(0);
-        this->boostval             = static_cast<double>(0);
-        this->boostvali            = static_cast<double>(0);
-        this->tolm                 = static_cast<double>(0);
-        this->graph_test           = static_cast<bool>(0);
-        this->skip_reproducibility = static_cast<bool>(0);
-        this->filename[0]          = '\0';
-        this->function[0]          = '\0';
-        this->name[0]              = '\0';
-        this->category[0]          = '\0';
-        this->hardware[0]          = '\0';
-        this->skip_hardware[0]     = '\0';
+        this->matrix                      = static_cast<rocsparse_matrix_init>(0);
+        this->matrix_init_kind            = static_cast<rocsparse_matrix_init_kind>(0);
+        this->unit_check                  = static_cast<rocsparse_int>(0);
+        this->timing                      = static_cast<rocsparse_int>(1);
+        this->iters                       = static_cast<rocsparse_int>(0);
+        this->denseld                     = static_cast<int64_t>(0);
+        this->batch_count                 = static_cast<rocsparse_int>(0);
+        this->batch_count_A               = static_cast<rocsparse_int>(0);
+        this->batch_count_B               = static_cast<rocsparse_int>(0);
+        this->batch_count_C               = static_cast<rocsparse_int>(0);
+        this->batch_stride                = static_cast<rocsparse_int>(0);
+        this->ld_multiplier_B             = static_cast<rocsparse_int>(2);
+        this->ld_multiplier_C             = static_cast<rocsparse_int>(2);
+        this->algo                        = static_cast<uint32_t>(0);
+        this->numericboost                = static_cast<int>(0);
+        this->boosttol                    = static_cast<double>(0);
+        this->boostval                    = static_cast<double>(0);
+        this->boostvali                   = static_cast<double>(0);
+        this->tolm                        = static_cast<double>(0);
+        this->graph_test                  = static_cast<bool>(0);
+        this->skip_reproducibility        = static_cast<bool>(0);
+        this->sparsity_pattern_statistics = static_cast<bool>(0);
+        this->filename[0]                 = '\0';
+        this->function[0]                 = '\0';
+        this->name[0]                     = '\0';
+        this->category[0]                 = '\0';
+        this->hardware[0]                 = '\0';
+        this->skip_hardware[0]            = '\0';
     }
 
     this->precision = 's';
@@ -419,7 +420,11 @@ void rocsparse_arguments_config::set_description(options_description& desc)
 
     ("gtsv_interleaved_alg",
       value<rocsparse_int>(&this->b_gtsv_interleaved_alg)->default_value(rocsparse_gtsv_interleaved_alg_default),
-      "Indicates what algorithm to use when running rocsparse_gtsv_interleaved_batch. Possibly choices are thomas: 1, lu: 2, qr: 3 (default:3)");
+      "Indicates what algorithm to use when running rocsparse_gtsv_interleaved_batch. Possibly choices are thomas: 1, lu: 2, qr: 3 (default:3)")
+
+      ("sparsity_pattern_statistics",
+       "enable sparsity pattern statistics: min,max and median of the number of non-zeros per row and per column of the sparsity pattern of the matrix A will be part of benchmarking results.");
+
 }
 
 int rocsparse_arguments_config::parse(int&argc,char**&argv, options_description&desc)
@@ -553,6 +558,11 @@ int rocsparse_arguments_config::parse(int&argc,char**&argv, options_description&
   {
       std::cerr << "Invalid value for --gtsv_interleaved_alg" << std::endl;
       return -1;
+  }
+
+  if(vm.count("sparsity_pattern_statistics"))
+  {
+    this->sparsity_pattern_statistics = true;
   }
 
   if(this->b_transA == 'N')
