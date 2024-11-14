@@ -108,6 +108,8 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->unit_check                  = static_cast<rocsparse_int>(0);
         this->timing                      = static_cast<rocsparse_int>(1);
         this->iters                       = static_cast<rocsparse_int>(0);
+        this->nfreeiter                   = static_cast<rocsparse_int>(0);
+        this->nmaxiter                    = static_cast<rocsparse_int>(0);
         this->denseld                     = static_cast<int64_t>(0);
         this->batch_count                 = static_cast<rocsparse_int>(0);
         this->batch_count_A               = static_cast<rocsparse_int>(0);
@@ -339,6 +341,14 @@ void rocsparse_arguments_config::set_description(options_description& desc)
     ("iters,i",
      value<rocsparse_int>(&this->iters)->default_value(10),
      "Iterations to run inside timing loop")
+
+    ("nfreeiter",
+     value<rocsparse_int>(&this->nfreeiter)->default_value(20),
+     "Number of free iterations for iterative algorithms")
+
+    ("nmaxiter",
+     value<rocsparse_int>(&this->nmaxiter)->default_value(200),
+     "Maximum number of iterations for iterative algorithms")
 
     ("device,d",
      value<rocsparse_int>(&this->device_id)->default_value(0),

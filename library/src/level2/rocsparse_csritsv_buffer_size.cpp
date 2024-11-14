@@ -41,7 +41,7 @@ rocsparse_status rocsparse::csritsv_buffer_size_template(rocsparse_handle       
 {
 
     // Quick return if possible
-    if(m == 0 || nnz == 0)
+    if(m == 0)
     {
         *buffer_size = 0;
         return rocsparse_status_success;
@@ -49,7 +49,14 @@ rocsparse_status rocsparse::csritsv_buffer_size_template(rocsparse_handle       
 
     if(rocsparse_diag_type_non_unit == descr->diag_type)
     {
-        *buffer_size = sizeof(T) * m * 2 + sizeof(T) * 4;
+        if(nnz == 0)
+        {
+            *buffer_size = 0;
+        }
+        else
+        {
+            *buffer_size = sizeof(T) * m * 2 + sizeof(T) * 4;
+        }
     }
     else
     {

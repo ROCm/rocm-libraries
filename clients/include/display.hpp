@@ -55,6 +55,8 @@ struct display_key_t
         batch_count_C,
         batch_stride,
         iters,
+        nfreeiter,
+        nmaxiter,
         function,
         ctype,
         itype,
@@ -410,6 +412,14 @@ struct display_key_t
         case iters:
         {
             return "iter";
+        }
+        case nfreeiter:
+        {
+            return "nfreeiter";
+        }
+        case nmaxiter:
+        {
+            return "nmaxiter";
         }
         case function:
         {

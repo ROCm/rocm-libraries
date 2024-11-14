@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -39,7 +39,7 @@ extern "C" {
 *  \f$m \times m\f$ matrix, defined in CSR format, a dense solution vector
 *  \f$y\f$ and the right-hand side \f$x\f$ that is multiplied by \f$\alpha\f$, such that
 *  \f[
-*    op(A) \cdot y = \alpha \cdot x,
+*    op(A) y = \alpha x,
 *  \f]
 *  with
 *  \f[
@@ -51,6 +51,27 @@ extern "C" {
 *    \end{array}
 *    \right.
 *  \f]
+*
+*  The Jacobi method applied to the sparse triangular linear system above gives
+*  \f[
+*     y_{k+1} = y_{k} + D^{-1} ( \alpha x - (D + T) y_{k} )
+*  \f]
+*  with \f$A = D + T\f$, \f$D\f$ the diagonal of \f$A\f$ and \f$T\f$ the strict triangular part of \f$A\f$.
+*
+*  The above equation can be also written as
+*  \f[
+*     y_{k+1} = y_{k} + D^{-1} r_k
+*  \f]
+*  where
+*  \f[
+*     r_k = \alpha x - (D + T) y_k.
+*  \f]
+*  Starting with \f$y_0 = \f$ \p y, the method iterates if \f$ k \lt \f$ \p host_nmaxiter and until
+*  \f[
+*     \Vert r_k \Vert_{\infty} \le \epsilon,
+*  \f]
+*  with \f$\epsilon\f$ = \p host_tol.
+*
 *
 *  \note SpITSV requires three stages to complete. The first stage
 *  \ref rocsparse_spitsv_stage_buffer_size will return the size of the temporary storage buffer
@@ -67,11 +88,11 @@ extern "C" {
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
 *  @param[inout]
-*  host_nmaxiter     maximum number of iteration on input and maximum number of iteration on output.
+*  host_nmaxiter     maximum number of iteration on input and number of iteration on output. If the output number of iterations is strictly less than the input maximum number of iterations, then the algorithm converged.
 *  @param[in]
 *  host_tol          if the pointer is null then loop will execute \p nmaxiter[0] iterations. The precision is float for f32 based calculation (including the complex case) and double for f64 based calculation (including the complex case).
 *  @param[out]
-*  host_history      Optional array to record the history. The precision is float for f32 based calculation (including the complex case) and double for f64 based calculation (including the complex case).
+*  host_history      Optional array to record the norm of the residual before each iteration. The precision is float for f32 based calculation (including the complex case) and double for f64 based calculation (including the complex case).
 *  @param[in]
 *  trans        matrix operation type.
 *  @param[in]

@@ -53,6 +53,7 @@ Function name                                                                 ye
 :cpp:func:`rocsparse_csritsv_zero_pivot`                                      x
 :cpp:func:`rocsparse_csritsv_clear`                                           x
 :cpp:func:`rocsparse_Xcsritsv_solve() <rocsparse_scsritsv_solve>`                 x
+:cpp:func:`rocsparse_Xcsritsvx_solve() <rocsparse_scsritsvx_solve>`               x
 :cpp:func:`rocsparse_Xgemvi_buffer_size() <rocsparse_sgemvi_buffer_size>`     x
 :cpp:func:`rocsparse_Xgemvi() <rocsparse_sgemvi>`                             x
 ============================================================================= === ==

@@ -125,6 +125,8 @@ struct Arguments
     rocsparse_int unit_check;
     rocsparse_int timing;
     rocsparse_int iters;
+    rocsparse_int nfreeiter;
+    rocsparse_int nmaxiter;
 
     int64_t       denseld;
     rocsparse_int batch_count;
@@ -266,6 +268,8 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(unit_check);
         ROCSPARSE_FORMAT_CHECK(timing);
         ROCSPARSE_FORMAT_CHECK(iters);
+        ROCSPARSE_FORMAT_CHECK(nfreeiter);
+        ROCSPARSE_FORMAT_CHECK(nmaxiter);
         ROCSPARSE_FORMAT_CHECK(denseld);
         ROCSPARSE_FORMAT_CHECK(batch_count);
         ROCSPARSE_FORMAT_CHECK(batch_count_A);
@@ -503,6 +507,8 @@ private:
         print("unit_check", arg.unit_check);
         print("timing", arg.timing);
         print("iters", arg.iters);
+        print("nfreeiter", arg.nfreeiter);
+        print("nmaxiter", arg.nmaxiter);
         print("denseld", arg.denseld);
         print("batch_count", arg.batch_count);
         print("batch_count_A", arg.batch_count_A);

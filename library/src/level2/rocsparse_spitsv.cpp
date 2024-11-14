@@ -87,24 +87,26 @@ namespace rocsparse
 
         case rocsparse_spitsv_stage_compute:
         {
+            static constexpr rocsparse_int host_nfreeiter = 0;
             RETURN_IF_ROCSPARSE_ERROR(
-                (rocsparse::csritsv_solve_template<I, J, T>)(handle,
-                                                             host_nmaxiter,
-                                                             (const floating_data_t<T>*)host_tol,
-                                                             (floating_data_t<T>*)host_history,
-                                                             trans,
-                                                             (J)mat->rows,
-                                                             (I)mat->nnz,
-                                                             (const T*)alpha,
-                                                             mat->descr,
-                                                             (const T*)mat->val_data,
-                                                             (const I*)mat->row_data,
-                                                             (const J*)mat->col_data,
-                                                             mat->info,
-                                                             (const T*)x->values,
-                                                             (T*)y->values,
-                                                             rocsparse_solve_policy_auto,
-                                                             temp_buffer));
+                (rocsparse::csritsv_solve_ex_template<I, J, T>)(handle,
+                                                                host_nmaxiter,
+                                                                host_nfreeiter,
+                                                                (const floating_data_t<T>*)host_tol,
+                                                                (floating_data_t<T>*)host_history,
+                                                                trans,
+                                                                (J)mat->rows,
+                                                                (I)mat->nnz,
+                                                                (const T*)alpha,
+                                                                mat->descr,
+                                                                (const T*)mat->val_data,
+                                                                (const I*)mat->row_data,
+                                                                (const J*)mat->col_data,
+                                                                mat->info,
+                                                                (const T*)x->values,
+                                                                (T*)y->values,
+                                                                rocsparse_solve_policy_auto,
+                                                                temp_buffer));
             return rocsparse_status_success;
         }
         }

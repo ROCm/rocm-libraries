@@ -529,6 +529,7 @@ rocsparse_status rocsparse_host_csritsv_solve(rocsparse_handle          handle,
 template <typename T>
 void testing_csritsv_bad_arg(const Arguments& arg)
 {
+
     static constexpr bool verbose = false;
     // Create rocsparse handle
     rocsparse_local_handle local_handle;
@@ -543,6 +544,7 @@ void testing_csritsv_bad_arg(const Arguments& arg)
 
     rocsparse_handle          handle            = local_handle;
     rocsparse_int*            host_nmaxiter     = (rocsparse_int*)0x4;
+    rocsparse_int             host_nfreeiter    = 2;
     const floating_data_t<T>* host_tol          = (const floating_data_t<T>*)0x4;
     floating_data_t<T>*       host_history      = (floating_data_t<T>*)0x4;
     rocsparse_operation       trans             = rocsparse_operation_none;
@@ -561,6 +563,7 @@ void testing_csritsv_bad_arg(const Arguments& arg)
     rocsparse_analysis_policy analysis          = rocsparse_analysis_policy_force;
     void*                     temp_buffer       = (void*)0x4;
     size_t*                   buffer_size       = (size_t*)0x4;
+
 #define PARAMS_BUFFER_SIZE \
     handle, trans, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, buffer_size
 
@@ -570,6 +573,11 @@ void testing_csritsv_bad_arg(const Arguments& arg)
 #define PARAMS_SOLVE                                                                        \
     handle, host_nmaxiter, host_tol, host_history, trans, m, nnz, alpha_device_host, descr, \
         csr_val, csr_row_ptr, csr_col_ind, info, x, y, policy, temp_buffer
+
+#define PARAMSX_SOLVE                                                                    \
+    handle, host_nmaxiter, host_nfreeiter, host_tol, host_history, trans, m, nnz,        \
+        alpha_device_host, descr, csr_val, csr_row_ptr, csr_col_ind, info, x, y, policy, \
+        temp_buffer
 
     //
     //
@@ -598,11 +606,27 @@ void testing_csritsv_bad_arg(const Arguments& arg)
     {
         std::cout << "bad_arg_analysis(rocsparse_csritsv_solve<T>, PARAMS_SOLVE)" << std::endl;
     }
-    static constexpr int nargs_to_exclude                  = 2;
-    static constexpr int args_to_exclude[nargs_to_exclude] = {2, 3};
 
-    select_bad_arg_analysis(
-        rocsparse_csritsv_solve<T>, nargs_to_exclude, args_to_exclude, PARAMS_SOLVE);
+    //
+    //
+    //
+    {
+        static constexpr int nargs_to_exclude                  = 2;
+        static constexpr int args_to_exclude[nargs_to_exclude] = {2, 3};
+
+        select_bad_arg_analysis(
+            rocsparse_csritsv_solve<T>, nargs_to_exclude, args_to_exclude, PARAMS_SOLVE);
+    }
+
+    //
+    //
+    //
+    {
+        static constexpr int nargs_to_exclude                  = 2;
+        static constexpr int args_to_exclude[nargs_to_exclude] = {3, 4};
+        select_bad_arg_analysis(
+            rocsparse_csritsv_solve_ex<T>, nargs_to_exclude, args_to_exclude, PARAMSX_SOLVE);
+    }
 
     for(auto matrix_type : rocsparse_matrix_type_t::values)
     {
@@ -615,6 +639,8 @@ void testing_csritsv_bad_arg(const Arguments& arg)
             EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_analysis<T>(PARAMS_ANALYSIS),
                                     rocsparse_status_not_implemented);
             EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_solve<T>(PARAMS_SOLVE),
+                                    rocsparse_status_not_implemented);
+            EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_solve_ex<T>(PARAMSX_SOLVE),
                                     rocsparse_status_not_implemented);
         }
     }
@@ -632,11 +658,15 @@ void testing_csritsv_bad_arg(const Arguments& arg)
     EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_solve<T>(PARAMS_SOLVE),
                             rocsparse_status_requires_sorted_storage);
 
+    EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_solve_ex<T>(PARAMSX_SOLVE),
+                            rocsparse_status_requires_sorted_storage);
+
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_storage_mode(descr, rocsparse_storage_mode_sorted));
 
 #undef PARAMS_BUFFER_SIZE
 #undef PARAMS_ANALYSIS
 #undef PARAMS_SOLVE
+#undef PARAMSX_SOLVE
 
     // Test rocsparse_csritsv_zero_pivot()
     rocsparse_int position;
@@ -664,8 +694,8 @@ void testing_csritsv(const Arguments& arg)
     //
     // Set nmaxiter.
     //
-    static constexpr rocsparse_int s_nmaxiter       = 200;
-    rocsparse_int                  host_nmaxiter[1] = {s_nmaxiter};
+    rocsparse_int host_nmaxiter[1] = {arg.nmaxiter};
+    rocsparse_int host_nfreeiter   = arg.nfreeiter;
 
     //
     // Tolerance for the iterative method.
@@ -689,7 +719,7 @@ void testing_csritsv(const Arguments& arg)
     //
     // Convergence history.
     //
-    floating_data_t<T> host_history[s_nmaxiter];
+    host_vector<floating_data_t<T>> host_history(host_nmaxiter[0]);
 
     //
     // Grab parametrization.
@@ -736,13 +766,20 @@ void testing_csritsv(const Arguments& arg)
     //
 #define PARAMS_BUFFER_SIZE(A_) \
     handle, trans, A_.m, A_.nnz, descr, A_.val, A_.ptr, A_.ind, info, &buffer_size
+
 #define PARAMS_ANALYSIS(A_) \
     handle, trans, A_.m, A_.nnz, descr, A_.val, A_.ptr, A_.ind, info, apol, spol, dbuffer
+
 #define PARAMS_SOLVE(alpha_, A_, x_, y_)                                                       \
     handle, host_nmaxiter, host_tol, host_history, trans, A_.m, A_.nnz, alpha_, descr, A_.val, \
         A_.ptr, A_.ind, info, x_, y_, spol, dbuffer
 
+#define PARAMSX_SOLVE(alpha_, A_, x_, y_)                                                       \
+    handle, host_nmaxiter, host_nfreeiter, host_tol, host_history, trans, A_.m, A_.nnz, alpha_, \
+        descr, A_.val, A_.ptr, A_.ind, info, x_, y_, spol, dbuffer
+
     rocsparse_int host_zero_pivot;
+
 #define HOST_PARAMS_SOLVE(alpha_, A_, x_, y_)                                                  \
     handle, host_nmaxiter, host_tol, host_history, trans, A_.m, A_.nnz, alpha_, descr, A_.val, \
         A_.ptr, A_.ind, x_, y_, hbuffer, &host_zero_pivot
@@ -779,6 +816,9 @@ void testing_csritsv(const Arguments& arg)
         EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_solve<T>(PARAMS_SOLVE(h_alpha, dA, dx, dy)),
                                 rocsparse_status_success);
 
+        EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_solve_ex<T>(PARAMSX_SOLVE(h_alpha, dA, dx, dy)),
+                                rocsparse_status_success);
+
         EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_zero_pivot(handle, descr, info, &pivot),
                                 rocsparse_status_success);
 
@@ -792,12 +832,6 @@ void testing_csritsv(const Arguments& arg)
     // Declare matrix A.
     //
     host_csr_matrix<T> hA;
-
-    //
-    // Configure matrix A.
-    //
-    {
-    }
 
     if(diag == rocsparse_diag_type_unit && rocsparse_matrix_type_triangular == arg.matrix_type)
     {
@@ -878,18 +912,7 @@ void testing_csritsv(const Arguments& arg)
         rocsparse_matrix_factory<T> matrix_factory(arg, to_int, full_rank);
         matrix_factory.init_csr(hA, M, N);
     }
-#if 0
-  if (hA.nnz > hA.m)
-    {
-      hB.ptr[0] = hB.base;
-      for (rocsparse_int i=0;i<hA.m;++i)
-	hB.ptr[i+1] = i;
-      for (rocsparse_int i=1;i<hA.m;++i)
-	hB.ptr[i+1] -= i;
-      host_csr_matrix<T> hh(hA.m,hA.n,hA.nnz - hA.m);
-    }
-  exit(1);
-#endif
+
     //
     // Again, since we import or generate the matrix, Non-squared matrices are not supported.
     //
@@ -907,7 +930,6 @@ void testing_csritsv(const Arguments& arg)
     //
     // Let's normalize ... it helps on horrible matrices.
     //
-
     floating_data_t<T> mx = 0;
     for(rocsparse_int i = 0; i < hA.nnz; ++i)
         mx = std::max(mx, std::abs(hA.val[i]));
@@ -922,20 +944,7 @@ void testing_csritsv(const Arguments& arg)
     //
     host_dense_matrix<T> hx(M, 1);
     rocsparse_matrix_utils::init(hx);
-#if 0
-  { floating_data_t<T> frob = static_cast<floating_data_t<T>>(0);
-    for (rocsparse_int i=0;i<hA.nnz;++i)
-      frob += std::abs(hA.val[i]*hA.val[i]);
-    frob = std::sqrt(frob);
 
-    std::cout << "frob " << frob << std::endl;
-    floating_data_t<T> mx = static_cast<floating_data_t<T>>(0);
-    for (rocsparse_int i=0;i<M;++i)
-      mx = std::max(mx,std::abs(hx[i]));
-    mx *=std::abs( h_alpha[0]);
-    std::cout << "adjusted tolerance " << host_tol[0]*mx * frob << " from " << host_tol[0]<<std::endl;
-    host_tol[0] *= mx * frob; }
-#endif
     //
     // Define and transfer A and X from host to device.
     //
@@ -1013,7 +1022,7 @@ void testing_csritsv(const Arguments& arg)
         CHECK_ROCSPARSE_ERROR(
             (rocsparse_host_csritsv_solve<rocsparse_int, rocsparse_int, T>)(HOST_PARAMS_SOLVE(
                 h_alpha, hA, hx, hy_iterative)));
-        const bool host_iterative_convergence = (host_nmaxiter[0] < s_nmaxiter);
+        const bool host_iterative_convergence = (host_nmaxiter[0] < arg.nmaxiter);
         if(false == host_iterative_convergence)
         {
             //
@@ -1110,7 +1119,7 @@ void testing_csritsv(const Arguments& arg)
         //
         // Call before analysis
         //
-        host_nmaxiter[0] = s_nmaxiter;
+        host_nmaxiter[0] = arg.nmaxiter;
         EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_solve<T>(PARAMS_SOLVE(h_alpha, dA, dx, dy)),
                                 rocsparse_status_invalid_pointer);
         if(verbose)
@@ -1135,50 +1144,22 @@ void testing_csritsv(const Arguments& arg)
                                                             : rocsparse_status_success);
         }
 
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
         if(verbose)
         {
             std::cout << " - compute device iterative, call solve" << std::endl;
         }
 
         CHECK_HIP_ERROR(hipMemset(dy, 0, sizeof(T) * M));
-        host_nmaxiter[0] = s_nmaxiter;
+        host_nmaxiter[0] = arg.nmaxiter;
         CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_solve<T>(PARAMS_SOLVE(h_alpha, dA, dx, dy)));
         {
             auto st = rocsparse_csritsv_zero_pivot(handle, descr, info, solve_pivot);
             EXPECT_ROCSPARSE_STATUS(
                 st, (*solve_pivot != -1) ? rocsparse_status_zero_pivot : rocsparse_status_success);
         }
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
-        const bool device_iterative_convergence = (host_nmaxiter[0] < s_nmaxiter);
 
-        if(device_iterative_convergence != host_iterative_convergence)
-        {
-            if(verbose)
-            {
-                if(trans == rocsparse_operation_none)
-                {
-                    std::cout << " - WARNING host and device iterative convergece differs on "
-                                 "NonTranspose case ... it happens rarely but it does."
-                              << std::endl;
-                    // Let's not be too restrictive ...
-                    // CHECK_ROCSPARSE_ERROR(rocsparse_status_internal_error);
-                }
-                else
-                {
-                    std::cout
-                        << " - WARNING host and device iterative convergece differs, it happens "
-                           "with transpose cases since csrmv uses atomics."
-                        << std::endl;
-                }
-            }
-        }
-        if(verbose)
-        {
-            std::cout << " - compute device iterative, check pivot." << std::endl;
-            std::cout << "h_analysis_pivot " << *h_analysis_pivot << std::endl;
-            std::cout << "h_solve_pivot " << *h_solve_pivot << std::endl;
-        }
+        const bool device_iterative_convergence = (host_nmaxiter[0] < arg.nmaxiter);
+
         h_analysis_pivot.unit_check(analysis_pivot);
         h_solve_pivot.unit_check(solve_pivot);
 
@@ -1194,6 +1175,76 @@ void testing_csritsv(const Arguments& arg)
             {
                 hy_iterative.near_check(dy, tol_compare);
             }
+        }
+
+        host_nmaxiter[0] = arg.nmaxiter;
+        CHECK_HIP_ERROR(hipMemset(dy, 0, sizeof(T) * M));
+        CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_solve_ex<T>(PARAMSX_SOLVE(h_alpha, dA, dx, dy)));
+        {
+            auto st = rocsparse_csritsv_zero_pivot(handle, descr, info, solve_pivot);
+            EXPECT_ROCSPARSE_STATUS(
+                st, (*solve_pivot != -1) ? rocsparse_status_zero_pivot : rocsparse_status_success);
+        }
+        const bool device_iterative_convergence_ex = (host_nmaxiter[0] < arg.nmaxiter);
+        if(*h_analysis_pivot == -1 && *h_solve_pivot == -1)
+        {
+            if(verbose)
+            {
+                std::cout
+                    << " - compute device iterative_ex, compare solutions between host and device."
+                    << std::endl;
+            }
+            if(host_iterative_convergence)
+            {
+                hy_iterative.near_check(dy, tol_compare);
+            }
+        }
+
+        if(device_iterative_convergence != host_iterative_convergence)
+        {
+            if(verbose)
+            {
+                if(trans == rocsparse_operation_none)
+                {
+                    std::cout << " - WARNING host and device iterative convergence differs on "
+                                 "NonTranspose case ... it happens rarely but it does."
+                              << std::endl;
+                }
+                else
+                {
+                    std::cout
+                        << " - WARNING host and device iterative convergence differs, it happens "
+                           "with transpose cases since csrmv uses atomics."
+                        << std::endl;
+                }
+            }
+        }
+
+        if(device_iterative_convergence_ex != host_iterative_convergence)
+        {
+            if(verbose)
+            {
+                if(trans == rocsparse_operation_none)
+                {
+                    std::cout << " - WARNING host and device iterative_ex convergence differs on "
+                                 "NonTranspose case ... it happens rarely but it does."
+                              << std::endl;
+                }
+                else
+                {
+                    std::cout << " - WARNING host and device iterative_ex convergence differs, it "
+                                 "happens "
+                                 "with transpose cases since csrmv uses atomics."
+                              << std::endl;
+                }
+            }
+        }
+
+        if(verbose)
+        {
+            std::cout << " - compute device iterative, check pivot." << std::endl;
+            std::cout << "h_analysis_pivot " << *h_analysis_pivot << std::endl;
+            std::cout << "h_solve_pivot " << *h_solve_pivot << std::endl;
         }
 
         //
@@ -1228,7 +1279,7 @@ void testing_csritsv(const Arguments& arg)
         //
         // Call before analysis
         //
-        host_nmaxiter[0] = s_nmaxiter;
+        host_nmaxiter[0] = arg.nmaxiter;
         EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_solve<T>(PARAMS_SOLVE(h_alpha, dA, dx, dy)),
                                 rocsparse_status_invalid_pointer);
 
@@ -1240,15 +1291,14 @@ void testing_csritsv(const Arguments& arg)
         EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_zero_pivot(handle, descr, info, d_analysis_pivot),
                                 (*h_analysis_pivot != -1) ? rocsparse_status_zero_pivot
                                                           : rocsparse_status_success);
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
 
         CHECK_HIP_ERROR(hipMemset(dy, 0, sizeof(T) * M));
-        host_nmaxiter[0] = s_nmaxiter;
+        host_nmaxiter[0] = arg.nmaxiter;
         CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_solve<T>(PARAMS_SOLVE(d_alpha, dA, dx, dy)));
         EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_zero_pivot(handle, descr, info, d_solve_pivot),
                                 (*h_solve_pivot != -1) ? rocsparse_status_zero_pivot
                                                        : rocsparse_status_success);
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
+
         h_analysis_pivot.unit_check(d_analysis_pivot);
         h_solve_pivot.unit_check(d_solve_pivot);
 
@@ -1272,6 +1322,24 @@ void testing_csritsv(const Arguments& arg)
             }
         }
 
+        CHECK_HIP_ERROR(hipMemset(dy, 0, sizeof(T) * M));
+        host_nmaxiter[0] = arg.nmaxiter;
+        CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_solve_ex<T>(PARAMSX_SOLVE(d_alpha, dA, dx, dy)));
+        EXPECT_ROCSPARSE_STATUS(rocsparse_csritsv_zero_pivot(handle, descr, info, d_solve_pivot),
+                                (*h_solve_pivot != -1) ? rocsparse_status_zero_pivot
+                                                       : rocsparse_status_success);
+
+        h_analysis_pivot.unit_check(d_analysis_pivot);
+        h_solve_pivot.unit_check(d_solve_pivot);
+
+        if(*h_analysis_pivot == -1 && *h_solve_pivot == -1)
+        {
+            if(host_iterative_convergence)
+            {
+                hy_iterative.near_check(dy, tol_compare);
+            }
+        }
+
         free(hbuffer);
         if(verbose)
         {
@@ -1281,6 +1349,8 @@ void testing_csritsv(const Arguments& arg)
 
     if(arg.timing)
     {
+
+        host_nfreeiter = arg.nfreeiter;
 
         int number_cold_calls = 2;
         int number_hot_calls  = arg.iters;
@@ -1293,7 +1363,8 @@ void testing_csritsv(const Arguments& arg)
             CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_analysis<T>(PARAMS_ANALYSIS(dA)));
             CHECK_ROCSPARSE_ERROR(
                 rocsparse_csritsv_zero_pivot(handle, descr, info, h_analysis_pivot));
-            CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_solve<T>(PARAMS_SOLVE(h_alpha, dA, dx, dy)));
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_csritsv_solve_ex<T>(PARAMSX_SOLVE(h_alpha, dA, dx, dy)));
             CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_zero_pivot(handle, descr, info, h_solve_pivot));
             CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_clear(handle, descr, info));
         }
@@ -1308,10 +1379,11 @@ void testing_csritsv(const Arguments& arg)
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
             CHECK_HIP_ERROR(hipMemset(dy, 0, sizeof(T) * M));
-            host_nmaxiter[0]             = s_nmaxiter;
+            host_nmaxiter[0]             = arg.nmaxiter;
             double gpu_solve_time_used_1 = get_time_us();
 
-            CHECK_ROCSPARSE_ERROR(rocsparse_csritsv_solve<T>(PARAMS_SOLVE(h_alpha, dA, dx, dy)));
+            CHECK_ROCSPARSE_ERROR(
+                rocsparse_csritsv_solve_ex<T>(PARAMSX_SOLVE(h_alpha, dA, dx, dy)));
             gpu_solve_time_used_1 = (get_time_us() - gpu_solve_time_used_1);
             gpu_solve_time_used += gpu_solve_time_used_1;
         }
@@ -1328,6 +1400,10 @@ void testing_csritsv(const Arguments& arg)
                             dA.nnz,
                             display_key_t::alpha,
                             *h_alpha,
+                            display_key_t::nfreeiter,
+                            host_nfreeiter,
+                            display_key_t::nmaxiter,
+                            host_nmaxiter[0],
                             display_key_t::pivot,
                             std::min(*h_analysis_pivot, *h_solve_pivot),
                             display_key_t::trans,

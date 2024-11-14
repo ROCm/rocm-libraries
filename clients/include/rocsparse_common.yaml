@@ -524,6 +524,8 @@ Arguments:
   - unit_check: rocsparse_int
   - timing: rocsparse_int
   - iters: rocsparse_int
+  - nfreeiter: rocsparse_int
+  - nmaxiter: rocsparse_int
   - denseld: c_int64
   - batch_count: rocsparse_int
   - batch_count_A: rocsparse_int
@@ -652,6 +654,8 @@ Defaults:
   unit_check: 1
   timing: 0
   iters: 10
+  nfreeiter: 20
+  nmaxiter: 200
   denseld: -1
   batch_count: -1
   batch_count_A: -1

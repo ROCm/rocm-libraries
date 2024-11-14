@@ -89,7 +89,7 @@ Function name                                                                 ye
 :cpp:func:`rocsparse_Xbsrsv_buffer_size() <rocsparse_sbsrsv_buffer_size>`     x
 :cpp:func:`rocsparse_Xbsrsv_analysis() <rocsparse_sbsrsv_analysis>`               x
 :cpp:func:`rocsparse_bsrsv_zero_pivot`                                            x
-:cpp:func:`rocsparse_bsrsv_clear`                                             
+:cpp:func:`rocsparse_bsrsv_clear`
 :cpp:func:`rocsparse_Xbsrsv_solve() <rocsparse_sbsrsv_solve>`                 x
 :cpp:func:`rocsparse_Xcoomv() <rocsparse_scoomv>`                             x
 :cpp:func:`rocsparse_Xcsrmv_analysis() <rocsparse_scsrmv_analysis>`               x
@@ -105,6 +105,7 @@ Function name                                                                 ye
 :cpp:func:`rocsparse_csritsv_zero_pivot`                                          x
 :cpp:func:`rocsparse_csritsv_clear`                                               x
 :cpp:func:`rocsparse_Xcsritsv_solve() <rocsparse_scsritsv_solve>`                 x
+:cpp:func:`rocsparse_Xcsritsv_solve() <rocsparse_scsritsvx_solve>`                x
 :cpp:func:`rocsparse_Xellmv() <rocsparse_sellmv>`                             x
 :cpp:func:`rocsparse_Xgebsrmv() <rocsparse_sgebsrmv>`                         x
 :cpp:func:`rocsparse_Xgemvi_buffer_size() <rocsparse_sgemvi_buffer_size>`     x
@@ -314,7 +315,7 @@ Function name                                        yes no
 :cpp:func:`rocsparse_extract()`                      x
 ==================================================== === ==
 
-For :cpp:func:`rocsparse_spmv()`, :cpp:func:`rocsparse_spmm()`, :cpp:func:`rocsparse_spsv()`, and :cpp:func:`rocsparse_spsm()` 
+For :cpp:func:`rocsparse_spmv()`, :cpp:func:`rocsparse_spmm()`, :cpp:func:`rocsparse_spsv()`, and :cpp:func:`rocsparse_spsm()`
 hipGraph is supported when passing buffer size or compute stages but is not supported when passing the preprocess stage.
 
 For :cpp:func:`rocsparse_sddmm()` hipGraph is supported only when using the default algorithm.

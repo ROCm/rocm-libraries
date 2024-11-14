@@ -83,6 +83,7 @@ set(rocsparse_source
   src/level2/rocsparse_csritsv_buffer_size.cpp
   src/level2/rocsparse_csritsv_analysis.cpp
   src/level2/rocsparse_csritsv_solve.cpp
+  src/level2/rocsparse_csritsv_solve_ex.cpp
   src/level2/rocsparse_coosv.cpp
   src/level2/rocsparse_ellmv.cpp
   src/level2/rocsparse_hybmv.cpp

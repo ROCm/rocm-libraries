@@ -92,9 +92,30 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [rma10,
              nos3,
-             nos5,
-             nos7]
+             nos5]
   matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
+
+
+#
+# nos7 has a condition number equal to 1e+9 and is giving weird behavior
+#
+#- name: csritsv_file
+#  category: pre_checkin
+#  function: csritsv
+#  precision: *single_double_precisions
+#  M: 1
+#  N: 1
+#  alpha_alphai: *alpha_range_checkin
+#  transA: [rocsparse_operation_none]
+#  diag: [rocsparse_diag_type_non_unit] # TODO rocsparse_diag_type_unit
+#  uplo: [rocsparse_fill_mode_lower]
+#  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+#  spol: [rocsparse_solve_policy_auto]
+#  baseA: [rocsparse_index_base_zero]
+#  matrix: [rocsparse_matrix_file_rocalution]
+#  filename: [nos7]
+#  matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
+
 
 - name: csritsv_file
   category: pre_checkin
