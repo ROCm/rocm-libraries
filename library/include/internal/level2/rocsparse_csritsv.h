@@ -365,9 +365,9 @@ rocsparse_status rocsparse_csritsv_clear(rocsparse_handle          handle,
 *  \f[
 *     r_k = \alpha x - (D + T) y_k.
 *  \f]
-*  Starting with \f$y_0 = \f$ \p y, the method iterates if \f$ k \lt \f$ \p host_nmaxiter and until
+*  Starting with \f$y_0 = \f$ \p y, the method iterates if \f$ 0 \le k \lt \f$ \p host_nmaxiter and if
 *  \f[
-*     \Vert r_k \Vert_{\infty} \le \epsilon,
+*     \Vert r_k \Vert_{\infty} \gt \epsilon,
 *  \f]
 *  with \f$\epsilon\f$ = \p host_tol.
 *
@@ -660,13 +660,13 @@ ROCSPARSE_EXPORT rocsparse_status
 *  \f[
 *     r_k = \alpha x - (D + T) y_k.
 *  \f]
-*  Starting with \f$y_0 = \f$ \p y, the method iterates if \f$ k \lt \f$ \p host_nmaxiter and until
+*  Starting with \f$y_0 = \f$ \p y, the method iterates if \f$ 0 \le k \lt \f$ \p host_nmaxiter and if
 *  \f[
-*     \Vert r_k \Vert_{\infty} \le \epsilon,
+*     \Vert r_k \Vert_{\infty} \gt \epsilon,
 *  \f]
 *  with \f$\epsilon\f$ = \p host_tol.
 *
-*  The parameter \p host_nfreeiter is used to control the frequence of the stopping criteria evaluation, thus potentially improving the performance of the algorithm with less norm calculation. Between each iteration of index \f$ k \f$, \p host_nfreeiter are performed without stopping criteria evaluation. Thus, if the convergence is obtained with \f$ k \f$ This means \f$ k ( \f$ \p host_nfreeiter \f$ + 1) \f$ iterations.
+*  The parameter \p host_nfreeiter is used to control the frequence of the stopping criteria evaluation, thus potentially improving the performance of the algorithm with less norm calculation. Between each iteration of index \f$ k \f$, \p host_nfreeiter are performed without stopping criteria evaluation. Thus, if the convergence is obtained at index \f$ k \f$, that means \f$ (k + 1) \f$ \p host_nfreeiter \f$ + k \f$ iterations have been performed.
 *
 *  \p rocsparse_csritsv_solve_ex requires a user allocated temporary buffer. Its size is
 *  returned by rocsparse_scsritsv_buffer_size(), rocsparse_dcsritsv_buffer_size(),

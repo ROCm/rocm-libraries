@@ -222,6 +222,7 @@ set(rocsparse_source
   src/precond/itilu0/rocsparse_csritilu0_buffer_size.cpp
   src/precond/itilu0/rocsparse_csritilu0_preprocess.cpp
   src/precond/itilu0/rocsparse_csritilu0_compute.cpp
+  src/precond/itilu0/rocsparse_csritilu0_compute_ex.cpp
   src/precond/itilu0/rocsparse_csritilu0_history.cpp
   src/precond/itilu0/rocsparse_csritilu0_async_inplace.cpp
   src/precond/itilu0/rocsparse_csritilu0_async_split.cpp

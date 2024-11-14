@@ -628,6 +628,7 @@ public:
         static rocsparse_status run(rocsparse_handle handle_,
                                     J                options_,
                                     J* __restrict__ nmaxiter_,
+                                    J                  nfreeiter_,
                                     floating_data_t<T> tol_,
                                     J                  m_,
                                     I                  nnz_,
@@ -708,8 +709,53 @@ public:
             //
             floating_data_t<T> nrm_indicator_previous = static_cast<floating_data_t<T>>(0);
             bool               converged              = false;
+
             for(J iter = 0; iter < nmaxiter; ++iter)
             {
+                for(J freeiter = 0; freeiter < nfreeiter_; ++freeiter)
+                {
+                    rocsparse::kernel_correction_dispatch<BLOCKSIZE, T, I, J>(
+                        m_,
+                        mean,
+                        handle_->wavefront_size,
+                        stream,
+                        m_,
+                        nnz_,
+                        ptr_begin_,
+                        ptr_end_,
+                        ind_,
+                        val_,
+                        base_,
+                        lptr_begin_,
+                        lptr_end_,
+                        lind_,
+                        lval_,
+                        layout_x_next.lval,
+                        lbase_,
+                        uptr_begin_,
+                        uptr_end_,
+                        uind_,
+                        uval_,
+                        layout_x_next.uval,
+                        ubase_,
+                        dval_,
+                        layout_x_next.dval);
+                    //
+                    // Copy (before stopping criteria).
+                    //
+                    RETURN_IF_ROCSPARSE_ERROR(copy_unkwowns(handle_,
+                                                            lnnz_,
+                                                            layout_x_next.lval,
+                                                            lval_,
+                                                            unnz_,
+                                                            layout_x_next.uval,
+                                                            uval_,
+                                                            m_,
+                                                            layout_x_next.dval,
+                                                            dval_,
+                                                            hipMemcpyDeviceToDevice));
+                }
+
                 floating_data_t<T> nrm_corr     = static_cast<floating_data_t<T>>(0);
                 floating_data_t<T> nrm_residual = static_cast<floating_data_t<T>>(0);
 

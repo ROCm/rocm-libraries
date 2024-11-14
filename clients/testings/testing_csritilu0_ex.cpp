@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
  *
  * ************************************************************************ */
 
-#include "testing_csritilu0.hpp"
+#include "testing_csritilu0_ex.hpp"
 
 #include "rocsparse.hpp"
 #include "rocsparse_enum.hpp"
@@ -93,10 +93,10 @@ static rocsparse_status csrilu0(rocsparse_handle          handle_,
     return rocsparse_status_success;
 }
 
-void testing_csritilu0_extra(const Arguments& arg) {}
+void testing_csritilu0_ex_extra(const Arguments& arg) {}
 
 template <typename T>
-void testing_csritilu0_bad_arg(const Arguments& arg)
+void testing_csritilu0_ex_bad_arg(const Arguments& arg)
 {
 
     rocsparse_local_handle local_handle;
@@ -169,37 +169,55 @@ void testing_csritilu0_bad_arg(const Arguments& arg)
     }
 
     //
-    // rocsparse_csritilu0_compute.
+    // rocsparse_csritilu0_compute_ex
     //
     {
         rocsparse_int*     nmaxiter    = (rocsparse_int*)0x4;
+        rocsparse_int      nfreeiter   = 2;
         size_t             buffer_size = 1;
         T*                 val         = (T*)0x4;
         T*                 ilu0        = (T*)0x4;
         void*              buffer      = (void*)0x4;
         floating_data_t<T> tol         = static_cast<floating_data_t<T>>(1.0e-8);
 
-#define PARAMS_COMPUTE \
-    handle, alg, options, nmaxiter, tol, m, nnz, ptr, ind, val, ilu0, base, buffer_size, buffer
-        // 0     1      2      3         4   5   6    7    8    9    10    11    12             13
+        {
+#define PARAMS_COMPUTE      \
+    handle, /*0*/           \
+        alg, /*1*/          \
+        options, /*2*/      \
+        nmaxiter, /*3*/     \
+        nfreeiter, /*4*/    \
+        tol, /*5*/          \
+        m, /*6*/            \
+        nnz, /*7*/          \
+        ptr, /*8*/          \
+        ind, /*9*/          \
+        val, /*10*/         \
+        ilu0, /*11*/        \
+        base, /*12*/        \
+        buffer_size, /*13*/ \
+        buffer /*14*/
 
-        static constexpr int nargs_to_exclude   = 3;
-        static constexpr int args_to_exclude[3] = {2, 4, 12};
+            static constexpr int nargs_to_exclude   = 3;
+            static constexpr int args_to_exclude[3] = {2, 5, 13};
 
-        select_bad_arg_analysis(
-            rocsparse_csritilu0_compute<T>, nargs_to_exclude, args_to_exclude, PARAMS_COMPUTE);
+            select_bad_arg_analysis(rocsparse_csritilu0_compute_ex<T>,
+                                    nargs_to_exclude,
+                                    args_to_exclude,
+                                    PARAMS_COMPUTE);
 
-        options                 = -1;
-        rocsparse_status status = rocsparse_csritilu0_compute<T>(PARAMS_COMPUTE);
-        EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_value, status);
-        options = 0;
+            options                 = -1;
+            rocsparse_status status = rocsparse_csritilu0_compute_ex<T>(PARAMS_COMPUTE);
+            EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_value, status);
+            options = 0;
 
-        tol    = -1;
-        status = rocsparse_csritilu0_compute<T>(PARAMS_COMPUTE);
-        EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_value, status);
-        tol = 1.0e-8;
+            tol    = -1;
+            status = rocsparse_csritilu0_compute_ex<T>(PARAMS_COMPUTE);
+            EXPECT_ROCSPARSE_STATUS(rocsparse_status_invalid_value, status);
+            tol = 1.0e-8;
 
 #undef PARAMS_COMPUTE
+        }
     }
 }
 
@@ -211,20 +229,23 @@ struct csritilu0_params_t
     rocsparse_int        maxiter;
     floating_data_t<T>   tol;
     rocsparse_datatype   datatype;
+    rocsparse_int        nfreeiter;
     csritilu0_params_t() = delete;
     csritilu0_params_t(rocsparse_itilu0_alg alg_,
                        rocsparse_int        options_,
                        rocsparse_int        maxiter_,
+                       rocsparse_int        nfreeiter_,
                        floating_data_t<T>   tol_)
         : alg(alg_)
         , options(options_)
         , maxiter(maxiter_)
         , tol(tol_)
-        , datatype(rocsparse_datatype_t::get<T>()){};
+        , datatype(rocsparse_datatype_t::get<T>())
+        , nfreeiter(nfreeiter_){};
 };
 
 template <typename T>
-void testing_csritilu0(const Arguments& arg)
+void testing_csritilu0_ex(const Arguments& arg)
 {
     static constexpr bool verbose = false;
 
@@ -242,7 +263,7 @@ void testing_csritilu0(const Arguments& arg)
     // options |= rocsparse_itilu0_option_compute_nrm_correction; // Compute the norm of the correction.
     // options |= rocsparse_itilu0_option_coo_format; // Use internal sparse coordinate format.
 
-    csritilu0_params_t<T> p(arg.itilu0_alg, options, arg.nmaxiter, tol);
+    csritilu0_params_t<T> p(arg.itilu0_alg, options, arg.nmaxiter, arg.nfreeiter, tol);
     //
     // Set constant parameters.
     //
@@ -391,23 +412,24 @@ void testing_csritilu0(const Arguments& arg)
         {
             p.maxiter = arg.nmaxiter;
             CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-            status = rocsparse_csritilu0_compute<T>(handle,
-                                                    p.alg,
-                                                    p.options,
+            status = rocsparse_csritilu0_compute_ex<T>(handle,
+                                                       p.alg,
+                                                       p.options,
 
-                                                    &p.maxiter,
-                                                    p.tol,
+                                                       &p.maxiter,
+                                                       p.nfreeiter,
+                                                       p.tol,
 
-                                                    dA.m,
-                                                    dA.nnz,
-                                                    dA.ptr,
-                                                    dA.ind,
-                                                    dA.val,
-                                                    dA_csrilu0.val,
-                                                    dA.base,
+                                                       dA.m,
+                                                       dA.nnz,
+                                                       dA.ptr,
+                                                       dA.ind,
+                                                       dA.val,
+                                                       dA_csrilu0.val,
+                                                       dA.base,
 
-                                                    buffer_size,
-                                                    buffer);
+                                                       buffer_size,
+                                                       buffer);
             CHECK_ROCSPARSE_ERROR(status);
             if(dA.m == 0 || dA.nnz == 0)
             {
@@ -463,23 +485,24 @@ void testing_csritilu0(const Arguments& arg)
 
         p.maxiter = arg.nmaxiter;
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-        status = rocsparse_csritilu0_compute<T>(handle,
-                                                p.alg,
-                                                p.options,
+        status = rocsparse_csritilu0_compute_ex<T>(handle,
+                                                   p.alg,
+                                                   p.options,
 
-                                                &p.maxiter,
-                                                p.tol,
+                                                   &p.maxiter,
+                                                   p.nfreeiter,
+                                                   p.tol,
 
-                                                dA.m,
-                                                dA.nnz,
-                                                dA.ptr,
-                                                dA.ind,
-                                                dA.val,
-                                                ilu0,
-                                                dA.base,
+                                                   dA.m,
+                                                   dA.nnz,
+                                                   dA.ptr,
+                                                   dA.ind,
+                                                   dA.val,
+                                                   ilu0,
+                                                   dA.base,
 
-                                                buffer_size,
-                                                buffer);
+                                                   buffer_size,
+                                                   buffer);
         if(status == rocsparse_status_zero_pivot)
         {
             std::cout << "rocsparse_csritilu0_compute divergence " << std::endl;
@@ -569,23 +592,24 @@ void testing_csritilu0(const Arguments& arg)
                                                     buffer);
 
             CHECK_ROCSPARSE_ERROR(status);
-            status = rocsparse_csritilu0_compute<T>(handle,
-                                                    p.alg,
-                                                    p.options,
+            status = rocsparse_csritilu0_compute_ex<T>(handle,
+                                                       p.alg,
+                                                       p.options,
 
-                                                    &p.maxiter,
-                                                    p.tol,
+                                                       &p.maxiter,
+                                                       p.nfreeiter,
+                                                       p.tol,
 
-                                                    dA.m,
-                                                    dA.nnz,
-                                                    dA.ptr,
-                                                    dA.ind,
-                                                    dA.val,
-                                                    ilu0,
-                                                    dA.base,
+                                                       dA.m,
+                                                       dA.nnz,
+                                                       dA.ptr,
+                                                       dA.ind,
+                                                       dA.val,
+                                                       ilu0,
+                                                       dA.base,
 
-                                                    buffer_size,
-                                                    buffer);
+                                                       buffer_size,
+                                                       buffer);
             CHECK_ROCSPARSE_ERROR(status);
         }
 
@@ -624,23 +648,24 @@ void testing_csritilu0(const Arguments& arg)
             double gpu_solve_time_used_iter = get_time_us();
             p.maxiter                       = arg.nmaxiter;
 
-            status = rocsparse_csritilu0_compute<T>(handle,
-                                                    p.alg,
-                                                    p.options,
+            status = rocsparse_csritilu0_compute_ex<T>(handle,
+                                                       p.alg,
+                                                       p.options,
 
-                                                    &p.maxiter,
-                                                    p.tol,
+                                                       &p.maxiter,
+                                                       p.nfreeiter,
+                                                       p.tol,
 
-                                                    dA.m,
-                                                    dA.nnz,
-                                                    dA.ptr,
-                                                    dA.ind,
-                                                    dA.val,
-                                                    ilu0,
-                                                    dA.base,
+                                                       dA.m,
+                                                       dA.nnz,
+                                                       dA.ptr,
+                                                       dA.ind,
+                                                       dA.val,
+                                                       ilu0,
+                                                       dA.base,
 
-                                                    buffer_size,
-                                                    buffer);
+                                                       buffer_size,
+                                                       buffer);
 
             gpu_solve_time_used_iter = (get_time_us() - gpu_solve_time_used_iter);
             gpu_solve_time_used += gpu_solve_time_used_iter;
@@ -659,6 +684,8 @@ void testing_csritilu0(const Arguments& arg)
                             dA.nnz,
                             "maxiter",
                             p.maxiter,
+                            "freeiter",
+                            p.nfreeiter,
                             "tol",
                             p.tol,
                             "presolve",
@@ -670,9 +697,9 @@ void testing_csritilu0(const Arguments& arg)
     }
 }
 
-#define INSTANTIATE(TYPE)                                                \
-    template void testing_csritilu0_bad_arg<TYPE>(const Arguments& arg); \
-    template void testing_csritilu0<TYPE>(const Arguments& arg)
+#define INSTANTIATE(TYPE)                                                   \
+    template void testing_csritilu0_ex_bad_arg<TYPE>(const Arguments& arg); \
+    template void testing_csritilu0_ex<TYPE>(const Arguments& arg)
 INSTANTIATE(float);
 INSTANTIATE(double);
 INSTANTIATE(rocsparse_float_complex);

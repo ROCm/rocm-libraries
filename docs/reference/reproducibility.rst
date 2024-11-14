@@ -177,6 +177,7 @@ Function name                                                                   
 :cpp:func:`rocsparse_csritilu0_buffer_size`                                                                           x
 :cpp:func:`rocsparse_csritilu0_preprocess`                                                                                x
 :cpp:func:`rocsparse_Xcsritilu0_compute() <rocsparse_scsritilu0_compute>`                                                 x
+:cpp:func:`rocsparse_Xcsritilu0_compute_ex() <rocsparse_scsritilu0_compute_ex>`                                           x
 :cpp:func:`rocsparse_Xcsritilu0_history() <rocsparse_scsritilu0_history>`                                                 x
 :cpp:func:`rocsparse_Xgtsv_buffer_size() <rocsparse_sgtsv_buffer_size>`                                               x
 :cpp:func:`rocsparse_Xgtsv() <rocsparse_sgtsv>`                                                                       x

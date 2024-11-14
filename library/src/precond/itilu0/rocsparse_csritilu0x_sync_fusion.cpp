@@ -432,90 +432,120 @@ namespace rocsparse
                         T* __restrict__ dval0_,
                         T* __restrict__ dval_)
     {
-        static constexpr uint32_t nid = BLOCKSIZE / WFSIZE;
-        const J                   lid = hipThreadIdx_x & (WFSIZE - 1);
-        const J                   wid = hipThreadIdx_x / WFSIZE;
-        const J                   row = nid * hipBlockIdx_x + wid;
-        if(row < m_)
+
+        static constexpr uint32_t nid  = BLOCKSIZE / WFSIZE;
+        const J                   lid  = hipThreadIdx_x & (WFSIZE - 1);
+        const J                   wid  = hipThreadIdx_x / WFSIZE;
+        const J                   row0 = BLOCKSIZE * hipBlockIdx_x + wid;
+        J                         iter = 0;
+        if(row0 < m_)
         {
-            for(J iter = 0; iter < niter_; ++iter)
+            for(; iter < niter_; ++iter)
             {
-                const J nl     = lptr_end_[row] - lptr_begin_[row];
-                const I lshift = lptr_begin_[row] - lbase_;
-                const I begin  = ((ptr_begin_[row] - base_) + lid);
-                const I end    = (ptr_end_[row] - base_);
 
-                for(I k = begin; k < end; k += WFSIZE)
+                for(J l = 0; l < WFSIZE; ++l)
                 {
-                    const J    col    = ind_[k] - base_;
-                    const I    ushift = uptr_begin_[col] - ubase_;
-                    const bool in_L   = (row > col);
-                    const bool in_U   = (row < col);
-                    const J    nu     = uptr_end_[col] - uptr_begin_[col];
-                    J          i = 0, j = 0;
-                    T          sum = rocsparse::sparse_dotproduct(nl,
-                                                         lind_ + lshift,
-                                                         lval0_ + lshift,
-                                                         lbase_,
-                                                         nu,
-                                                         uind_ + ushift,
-                                                         uval0_ + ushift,
-                                                         ubase_,
-                                                         i,
-                                                         j);
+                    J row = row0 + nid * l;
 
-                    T s = val_[k] - sum;
-                    if(in_L)
+                    if(row < m_)
                     {
-                        s /= dval0_[col];
-                    }
+                        const J nl     = lptr_end_[row] - lptr_begin_[row];
+                        const I lshift = lptr_begin_[row] - lbase_;
+                        const I begin  = ((ptr_begin_[row] - base_) + lid);
+                        const I end    = (ptr_end_[row] - base_);
 
-                    //
-                    // Assign.
-                    //
-                    const bool assignable = !std::isinf(std::abs(s));
-                    if(assignable)
-                    {
-                        if(in_L)
+                        for(I k = begin; k < end; k += WFSIZE)
                         {
-                            for(J h = i; h < nl; ++h)
+                            const J    col    = ind_[k] - base_;
+                            const I    ushift = uptr_begin_[col] - ubase_;
+                            const bool in_L   = (row > col);
+                            const bool in_U   = (row < col);
+                            const J    nu     = uptr_end_[col] - uptr_begin_[col];
+                            J          i = 0, j = 0;
+                            T          sum = rocsparse::sparse_dotproduct(nl,
+                                                                 lind_ + lshift,
+                                                                 lval0_ + lshift,
+                                                                 lbase_,
+                                                                 nu,
+                                                                 uind_ + ushift,
+                                                                 uval0_ + ushift,
+                                                                 ubase_,
+                                                                 i,
+                                                                 j);
+
+                            T s = val_[k] - sum;
+                            if(in_L)
                             {
-                                if((lind_[lshift + h] - lbase_) == col)
+                                if(std::abs(dval0_[col]) > 0)
                                 {
-                                    lval_[lshift + h] = s;
-                                    break;
+                                    s /= dval0_[col];
+                                }
+                                else
+                                {
+                                    s = 0;
+                                }
+                            }
+
+                            //
+                            // Assign.
+                            //
+                            floating_data_t<T> tmp        = std::abs(s);
+                            const bool         assignable = (!std::isinf(tmp) && !std::isnan(tmp));
+                            if(assignable)
+                            {
+                                if(in_L)
+                                {
+                                    for(J h = i; h < nl; ++h)
+                                    {
+                                        if((lind_[lshift + h] - lbase_) == col)
+                                        {
+                                            lval_[lshift + h] = s;
+                                            break;
+                                        }
+                                    }
+                                }
+                                else if(in_U)
+                                {
+                                    for(J h = j; h < nu; ++h)
+                                    {
+                                        if((uind_[ushift + h] - ubase_) == row)
+                                        {
+                                            uval_[ushift + h] = s;
+                                            break;
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    dval_[col] = s;
                                 }
                             }
                         }
-                        else if(in_U)
-                        {
-                            for(J h = j; h < nu; ++h)
-                            {
-                                if((uind_[ushift + h] - ubase_) == row)
-                                {
-                                    uval_[ushift + h] = s;
-                                    break;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            dval_[col] = s;
-                        }
                     }
                 }
 
-                for(I i = uptr_begin_[row] + lid; i < uptr_end_[row]; i += WFSIZE)
+                //
+                // COPY
+                //
+                for(J row = row0; row < BLOCKSIZE * (hipBlockIdx_x + 1); row += nid)
                 {
-                    uval0_[i] = uval_[i];
-                }
-                for(I i = lptr_begin_[row] + lid; i < lptr_end_[row]; i += WFSIZE)
-                {
-                    lval0_[i] = lval_[i];
-                }
-                if(lid == 0)
-                {
-                    dval0_[row] = dval_[row];
+                    if(row < m_)
+                    {
+                        for(I ii = lptr_begin_[row] - lbase_ + lid; ii < lptr_end_[row] - lbase_;
+                            ii += WFSIZE)
+                        {
+                            lval0_[ii] = lval_[ii];
+                        }
+                        for(I ii = uptr_begin_[row] - ubase_ + lid; ii < uptr_end_[row] - ubase_;
+                            ii += WFSIZE)
+                        {
+                            uval0_[ii] = uval_[ii];
+                        }
+                        if(lid == 0)
+                        {
+                            dval0_[row] = dval_[row];
+                        }
+                    }
                 }
             }
         }
@@ -812,6 +842,7 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
         static rocsparse_status run(rocsparse_handle handle_,
                                     J                options_,
                                     J* __restrict__ nmaxiter_,
+                                    J                  nfreeiter_,
                                     floating_data_t<T> tol_,
                                     J                  m_,
                                     I                  nnz_,
@@ -914,6 +945,41 @@ struct rocsparse::csritilu0x_driver_t<rocsparse_itilu0_alg_sync_split_fusion>
             bool               converged              = false;
             for(J iter = 0; iter < nmaxiter; ++iter)
             {
+
+                for(J freeiter = 0; freeiter < nfreeiter_; ++freeiter)
+                {
+                    rocsparse::kernel_freerun_dispatch<BLOCKSIZE, T, I, J>(m_,
+                                                                           mean,
+                                                                           handle_->wavefront_size,
+                                                                           handle_->stream,
+                                                                           1,
+                                                                           //
+                                                                           m_,
+                                                                           nnz_,
+                                                                           ptr_begin_,
+                                                                           ptr_end_,
+                                                                           ind_,
+                                                                           val_,
+                                                                           base_,
+                                                                           //
+                                                                           lptr_begin_,
+                                                                           lptr_end_,
+                                                                           lind_,
+                                                                           lval_,
+                                                                           layout_next.lval,
+                                                                           lbase_,
+                                                                           //
+                                                                           uptr_begin_,
+                                                                           uptr_end_,
+                                                                           uind_,
+                                                                           uval_,
+                                                                           layout_next.uval,
+                                                                           ubase_,
+                                                                           //
+                                                                           dval_,
+                                                                           layout_next.dval);
+                }
+
                 if(!stopping_criteria && !compute_nrm_corr && !compute_nrm_residual)
                 {
                     rocsparse::kernel_freerun_dispatch<BLOCKSIZE, T, I, J>(m_,

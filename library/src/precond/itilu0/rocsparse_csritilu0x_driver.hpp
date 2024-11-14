@@ -294,6 +294,7 @@ namespace rocsparse
             static rocsparse_status run(rocsparse_handle handle_,
                                         J                options_,
                                         J* __restrict__ nsweeps_,
+                                        J                  nfreeiter_,
                                         floating_data_t<T> tol_,
                                         J                  m_,
                                         I                  nnz_,

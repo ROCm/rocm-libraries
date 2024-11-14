@@ -105,6 +105,7 @@ set(ROCSPARSE_TEST_SOURCES
   test_csric0.cpp
   test_csrilu0.cpp
   test_csritilu0.cpp
+  test_csritilu0_ex.cpp
   test_gtsv_no_pivot.cpp
   test_gtsv_no_pivot_strided_batch.cpp
   test_gtsv_interleaved_batch.cpp
@@ -235,6 +236,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_csric0.cpp
 ../testings/testing_csrilu0.cpp
 ../testings/testing_csritilu0.cpp
+../testings/testing_csritilu0_ex.cpp
 ../testings/testing_gtsv_no_pivot.cpp
 ../testings/testing_gtsv_no_pivot_strided_batch.cpp
 ../testings/testing_gtsv_interleaved_batch.cpp

@@ -71,6 +71,7 @@ namespace rocsparse
                                         rocsparse_itilu0_alg alg_,
                                         J                    options_,
                                         J*                   nsweeps_,
+                                        J                    nfreeiter_,
                                         floating_data_t<T>   tol_,
                                         J                    m_,
                                         I                    nnz_,

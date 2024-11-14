@@ -344,11 +344,11 @@ void rocsparse_arguments_config::set_description(options_description& desc)
 
     ("nfreeiter",
      value<rocsparse_int>(&this->nfreeiter)->default_value(20),
-     "Number of free iterations for iterative algorithms")
+     "Number of free iterations for iterative algorithms (default: 20)")
 
     ("nmaxiter",
-     value<rocsparse_int>(&this->nmaxiter)->default_value(200),
-     "Maximum number of iterations for iterative algorithms")
+     value<rocsparse_int>(&this->nmaxiter)->default_value(1000),
+     "Maximum number of iterations for iterative algorithms (default: 1000)")
 
     ("device,d",
      value<rocsparse_int>(&this->device_id)->default_value(0),

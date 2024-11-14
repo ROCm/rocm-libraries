@@ -123,6 +123,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_csric0.cpp
 ../testings/testing_csrilu0.cpp
 ../testings/testing_csritilu0.cpp
+../testings/testing_csritilu0_ex.cpp
 ../testings/testing_gpsv_interleaved_batch.cpp
 ../testings/testing_gtsv.cpp
 ../testings/testing_gtsv_no_pivot.cpp

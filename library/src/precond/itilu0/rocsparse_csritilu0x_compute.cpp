@@ -70,6 +70,7 @@ rocsparse_status rocsparse::csritilu0x_compute_template(rocsparse_handle     han
                                                         rocsparse_itilu0_alg alg_,
                                                         rocsparse_int        options_,
                                                         J* __restrict__ nsweeps_,
+                                                        J                  nfreeiter_,
                                                         floating_data_t<T> tol_,
                                                         J                  m_,
                                                         I                  nnz_,
@@ -123,6 +124,7 @@ rocsparse_status rocsparse::csritilu0x_compute_template(rocsparse_handle     han
                                                                     handle_,
                                                                     options_,
                                                                     nsweeps_,
+                                                                    nfreeiter_,
                                                                     tol_,
                                                                     m_,
                                                                     nnz_,
@@ -158,6 +160,7 @@ rocsparse_status rocsparse::csritilu0x_compute_impl(rocsparse_handle     handle_
                                                     rocsparse_itilu0_alg alg_,
                                                     rocsparse_int        options_,
                                                     J* __restrict__ nsweeps_,
+                                                    J                  nfreeiter_,
                                                     floating_data_t<T> tol_,
                                                     J                  m_,
                                                     I                  nnz_,
@@ -197,6 +200,7 @@ rocsparse_status rocsparse::csritilu0x_compute_impl(rocsparse_handle     handle_
                          rocsparse::replaceX<T>("rocsparse_Xcsritilu0x"),
                          options_,
                          (const void*&)nsweeps_,
+                         nfreeiter_,
                          tol_,
                          m_,
                          nnz_,
@@ -331,6 +335,7 @@ rocsparse_status rocsparse::csritilu0x_compute_impl(rocsparse_handle     handle_
                                                                      alg_,
                                                                      options_,
                                                                      nsweeps_,
+                                                                     nfreeiter_,
                                                                      tol_,
                                                                      m_,
                                                                      nnz_,
@@ -367,6 +372,7 @@ rocsparse_status rocsparse::csritilu0x_compute_impl(rocsparse_handle     handle_
         rocsparse_itilu0_alg alg_,                                          \
         J                    options_,                                      \
         J* __restrict__ nsweeps_,                                           \
+        J                  nfreeiter_,                                      \
         floating_data_t<T> tol_,                                            \
         J                  m_,                                              \
         I                  nnz_,                                            \

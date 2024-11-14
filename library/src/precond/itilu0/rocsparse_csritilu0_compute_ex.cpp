@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -72,6 +72,7 @@ namespace rocsparse
                                                        rocsparse_itilu0_alg          alg_,
                                                        J                             options_,
                                                        J*                            nmaxiter_,
+                                                       J                             nfreeiter_,
                                                        rocsparse::floating_data_t<T> tol_,
                                                        J                             m_,
                                                        I                             nnz_,
@@ -95,13 +96,13 @@ namespace rocsparse
             nmaxiter_[0] = 0;
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_zero_pivot);
         }
-        static constexpr J nfreeiter = 0;
+
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::compute_dispatch<T, I, J>(alg_,
                                                                         handle_,
                                                                         alg_,
                                                                         options_,
                                                                         nmaxiter_,
-                                                                        nfreeiter,
+                                                                        nfreeiter_,
                                                                         tol_,
                                                                         m_,
                                                                         nnz_,
@@ -120,25 +121,27 @@ namespace rocsparse
                                             rocsparse_itilu0_alg          alg, //1
                                             J                             options, //2
                                             J*                            nmaxiter, //3
-                                            rocsparse::floating_data_t<T> tol, //4
-                                            J                             m, //5
-                                            I                             nnz, //6
-                                            const I* __restrict__ ptr, //7
-                                            const J* __restrict__ ind, //8
-                                            const T* __restrict__ val, //9
-                                            T* __restrict__ ilu0, //10
-                                            rocsparse_index_base base, //11
-                                            size_t               buffer_size, //12
+                                            J                             nfreeiter, //4
+                                            rocsparse::floating_data_t<T> tol, //5
+                                            J                             m, //6
+                                            I                             nnz, //7
+                                            const I* __restrict__ ptr, //8
+                                            const J* __restrict__ ind, //9
+                                            const T* __restrict__ val, //10
+                                            T* __restrict__ ilu0, //11
+                                            rocsparse_index_base base, //12
+                                            size_t               buffer_size, //13
                                             void* __restrict__ buffer)
     {
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
         // Logging
         log_trace(handle,
-                  "rocsparse_csritilu0_compute",
+                  "rocsparse_csritilu0_compute_ex",
                   alg,
                   options,
                   (const void*&)nmaxiter,
+                  nfreeiter,
                   tol,
                   m,
                   nnz,
@@ -152,20 +155,22 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_ENUM(1, alg);
         ROCSPARSE_CHECKARG(2, options, (options < 0), rocsparse_status_invalid_value);
         ROCSPARSE_CHECKARG_POINTER(3, nmaxiter);
-        ROCSPARSE_CHECKARG(4, tol, (tol < 0), rocsparse_status_invalid_value);
-        ROCSPARSE_CHECKARG_SIZE(5, m);
-        ROCSPARSE_CHECKARG_SIZE(6, nnz);
-        ROCSPARSE_CHECKARG_ARRAY(7, m, ptr);
-        ROCSPARSE_CHECKARG_ARRAY(8, nnz, ind);
-        ROCSPARSE_CHECKARG_ARRAY(9, nnz, val);
-        ROCSPARSE_CHECKARG_ARRAY(10, nnz, ilu0);
-        ROCSPARSE_CHECKARG_ENUM(11, base);
-        ROCSPARSE_CHECKARG_ARRAY(13, buffer_size, buffer);
+        ROCSPARSE_CHECKARG_SIZE(4, nfreeiter);
+        ROCSPARSE_CHECKARG(5, tol, (tol < 0), rocsparse_status_invalid_value);
+        ROCSPARSE_CHECKARG_SIZE(6, m);
+        ROCSPARSE_CHECKARG_SIZE(7, nnz);
+        ROCSPARSE_CHECKARG_ARRAY(8, m, ptr);
+        ROCSPARSE_CHECKARG_ARRAY(9, nnz, ind);
+        ROCSPARSE_CHECKARG_ARRAY(10, nnz, val);
+        ROCSPARSE_CHECKARG_ARRAY(11, nnz, ilu0);
+        ROCSPARSE_CHECKARG_ENUM(12, base);
+        ROCSPARSE_CHECKARG_ARRAY(14, buffer_size, buffer);
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csritilu0_compute_template(handle,
                                                                         alg,
                                                                         options,
                                                                         nmaxiter,
+                                                                        nfreeiter,
                                                                         tol,
                                                                         m,
                                                                         nnz,
@@ -185,6 +190,7 @@ namespace rocsparse
                                      rocsparse_itilu0_alg          alg,                    \
                                      J                             options,                \
                                      J*                            nmaxiter,               \
+                                     J                             nfreeiter,              \
                                      rocsparse::floating_data_t<T> tol,                    \
                                      J                             m,                      \
                                      I                             nnz,                    \
@@ -201,6 +207,7 @@ namespace rocsparse
                                                                               alg,         \
                                                                               options,     \
                                                                               nmaxiter,    \
+                                                                              nfreeiter,   \
                                                                               tol,         \
                                                                               m,           \
                                                                               nnz,         \
@@ -218,9 +225,9 @@ namespace rocsparse
         RETURN_ROCSPARSE_EXCEPTION();                                                      \
     }
 
-IMPL(rocsparse_scsritilu0_compute, float, rocsparse_int, rocsparse_int);
-IMPL(rocsparse_dcsritilu0_compute, double, rocsparse_int, rocsparse_int);
-IMPL(rocsparse_ccsritilu0_compute, rocsparse_float_complex, rocsparse_int, rocsparse_int);
-IMPL(rocsparse_zcsritilu0_compute, rocsparse_double_complex, rocsparse_int, rocsparse_int);
+IMPL(rocsparse_scsritilu0_compute_ex, float, rocsparse_int, rocsparse_int);
+IMPL(rocsparse_dcsritilu0_compute_ex, double, rocsparse_int, rocsparse_int);
+IMPL(rocsparse_ccsritilu0_compute_ex, rocsparse_float_complex, rocsparse_int, rocsparse_int);
+IMPL(rocsparse_zcsritilu0_compute_ex, rocsparse_double_complex, rocsparse_int, rocsparse_int);
 
 #undef IMPL

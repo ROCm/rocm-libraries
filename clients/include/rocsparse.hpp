@@ -1176,12 +1176,30 @@ REAL_COMPLEX_TEMPLATE(csric0,
                       rocsparse_solve_policy    policy,
                       void*                     temp_buffer);
 
+// csritilu0_compute_ex
+REAL_COMPLEX_TEMPLATE(csritilu0_compute_ex,
+                      rocsparse_handle     handle,
+                      rocsparse_itilu0_alg alg,
+                      rocsparse_int        options,
+                      rocsparse_int*       nmaxiter,
+                      rocsparse_int        nfreeiter,
+                      floating_data_t<T>   tol_correction,
+                      rocsparse_int        m,
+                      rocsparse_int        nnz,
+                      const rocsparse_int* ptr,
+                      const rocsparse_int* ind,
+                      const T*             val,
+                      T*                   ilu0,
+                      rocsparse_index_base base,
+                      size_t               buffer_size_,
+                      void*                buffer);
+
 // csritilu0_compute
 REAL_COMPLEX_TEMPLATE(csritilu0_compute,
                       rocsparse_handle     handle,
                       rocsparse_itilu0_alg alg,
                       rocsparse_int        options,
-                      rocsparse_int*       nsweeps,
+                      rocsparse_int*       nmaxiter,
                       floating_data_t<T>   tol_correction,
                       rocsparse_int        m,
                       rocsparse_int        nnz,
