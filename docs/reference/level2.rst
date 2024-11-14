@@ -224,6 +224,17 @@ rocsparse_csritsv_solve()
   :outline:
 .. doxygenfunction:: rocsparse_zcsritsv_solve
 
+rocsparse_csritsv_solve_ex()
+----------------------------
+
+.. doxygenfunction:: rocsparse_scsritsv_solve_ex
+  :outline:
+.. doxygenfunction:: rocsparse_dcsritsv_solve_ex
+  :outline:
+.. doxygenfunction:: rocsparse_ccsritsv_solve_ex
+  :outline:
+.. doxygenfunction:: rocsparse_zcsritsv_solve_ex
+
 rocsparse_csritsv_clear()
 -------------------------
 

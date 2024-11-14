@@ -241,6 +241,7 @@ Function name                                                                 si
 :cpp:func:`rocsparse_csritsv_zero_pivot`
 :cpp:func:`rocsparse_csritsv_clear`
 :cpp:func:`rocsparse_Xcsritsv_solve() <rocsparse_scsritsv_solve>`             x      x      x              x
+:cpp:func:`rocsparse_Xcsritsv_solve_ex() <rocsparse_scsritsv_solve_ex>`       x      x      x              x
 :cpp:func:`rocsparse_Xellmv() <rocsparse_sellmv>`                             x      x      x              x
 :cpp:func:`rocsparse_Xhybmv() <rocsparse_shybmv>`                             x      x      x              x
 :cpp:func:`rocsparse_Xgebsrmv() <rocsparse_sgebsrmv>`                         x      x      x              x
@@ -321,6 +322,7 @@ Function name                                                                   
 :cpp:func:`rocsparse_csritilu0_buffer_size`
 :cpp:func:`rocsparse_csritilu0_preprocess`
 :cpp:func:`rocsparse_Xcsritilu0_compute() <rocsparse_scsritilu0_compute>`                                             x      x      x              x
+:cpp:func:`rocsparse_Xcsritilu0_compute_ex() <rocsparse_scsritilu0_compute_ex>`                                       x      x      x              x
 :cpp:func:`rocsparse_Xcsritilu0_history() <rocsparse_scsritilu0_history>`                                             x      x      x              x
 :cpp:func:`rocsparse_Xgtsv_buffer_size() <rocsparse_sgtsv_buffer_size>`                                               x      x      x              x
 :cpp:func:`rocsparse_Xgtsv() <rocsparse_sgtsv>`                                                                       x      x      x              x
