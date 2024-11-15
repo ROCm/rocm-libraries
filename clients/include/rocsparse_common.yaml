@@ -655,7 +655,7 @@ Defaults:
   timing: 0
   iters: 10
   nfreeiter: 20
-  nmaxiter: 200
+  nmaxiter: 1000
   denseld: -1
   batch_count: -1
   batch_count_A: -1
