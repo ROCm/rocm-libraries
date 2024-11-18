@@ -3148,6 +3148,523 @@ struct default_radix_sort_onesweep_config<
                                  block_radix_rank_algorithm::match>
 {};
 
+// Based on key_type = double, value_type = int64_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                      && (sizeof(value_type) > 4))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = double, value_type = int
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                      && (sizeof(value_type) > 2))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = double, value_type = short
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                      && (sizeof(value_type) > 1))>>
+    : radix_sort_onesweep_config<kernel_config<512, 12>,
+                                 kernel_config<512, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = double, value_type = int8_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = double, value_type = empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = float, value_type = int64_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                      && (sizeof(value_type) > 4))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = float, value_type = int
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                      && (sizeof(value_type) > 2))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = float, value_type = short
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                      && (sizeof(value_type) > 1))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = float, value_type = int8_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = float, value_type = empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = rocprim::half, value_type = int64_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = rocprim::half, value_type = int
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = rocprim::half, value_type = short
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
+    : radix_sort_onesweep_config<kernel_config<512, 22>,
+                                 kernel_config<512, 22>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = rocprim::half, value_type = int8_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<512, 22>,
+                                 kernel_config<512, 22>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = rocprim::half, value_type = empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<512, 22>,
+                                 kernel_config<512, 22>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int64_t, value_type = int64_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 8)
+                      && (sizeof(value_type) > 4))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int64_t, value_type = int
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 4)
+                      && (sizeof(value_type) > 2))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int64_t, value_type = short
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 2)
+                      && (sizeof(value_type) > 1))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int64_t, value_type = int8_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<512, 12>,
+                                 kernel_config<512, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int64_t, value_type = empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int, value_type = int64_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 8)
+                      && (sizeof(value_type) > 4))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int, value_type = int
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 4)
+                      && (sizeof(value_type) > 2))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int, value_type = short
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 2)
+                      && (sizeof(value_type) > 1))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int, value_type = int8_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int, value_type = empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = short, value_type = int64_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 8)
+                      && (sizeof(value_type) > 4))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = short, value_type = int
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 4)
+                      && (sizeof(value_type) > 2))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = short, value_type = short
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 2)
+                      && (sizeof(value_type) > 1))>>
+    : radix_sort_onesweep_config<kernel_config<512, 22>,
+                                 kernel_config<512, 22>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = short, value_type = int8_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = short, value_type = empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<512, 22>,
+                                 kernel_config<512, 22>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int8_t, value_type = int64_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 6>,
+                                 kernel_config<1024, 6>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int8_t, value_type = int
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int8_t, value_type = short
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
+    : radix_sort_onesweep_config<kernel_config<512, 22>,
+                                 kernel_config<512, 22>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int8_t, value_type = int8_t
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                      && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 12>,
+                                 kernel_config<1024, 12>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
+// Based on key_type = int8_t, value_type = empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_onesweep_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : radix_sort_onesweep_config<kernel_config<1024, 22>,
+                                 kernel_config<1024, 22>,
+                                 8,
+                                 block_radix_rank_algorithm::match>
+{};
+
 } // end namespace detail
 
 END_ROCPRIM_NAMESPACE

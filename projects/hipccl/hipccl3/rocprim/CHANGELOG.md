@@ -2,10 +2,10 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-
 ## (Unreleased) rocPRIM 3.4.0 for ROCm 6.4.0
 
 ### Added
+
 * Added extended tests to `rtest.py`. These tests are extra tests that did not fit the criteria of smoke and regression tests. These tests will take much longer to run relative to smoke and regression tests.
  * Use `python rtest.py [--emulation|-e|--test|-t]=extended` to run these tests.
 * Added regression tests to `rtest.py`. Regression tests are a subset of tests that caused hardware problems for past emulation environments.
@@ -13,12 +13,17 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added the parallel `find_first_of` device function with autotuned configurations, this function is similar to `std::find_first_of`, it searches for the first occurrence of any of the provided elements.
 * Added `--emulation` option added for `rtest.py`
   * Unit tests can be run with `[--emulation|-e|--test|-t]=<test_name>`
+* Added tuned configurations for segmented radix sort for gfx942 to improve performance on this architecture.
 
 ### Changed
+
 * Changed the subset of tests that are run for smoke tests such that the smoke test will complete with faster run-time and to never exceed 2GB of vram usage. Use `python rtest.py [--emulation|-e|--test|-t]=smoke` to run these tests.
 * The `rtest.py` options have changed. `rtest.py` is now run with at least either `--test|-t` or `--emulation|-e`, but not both options.
+* Changed the internal algorithm of block radix sort to use rank match to improve performance of various radix sort related algorithms.
+* Disabled padding in various cases where higher occupancy resulted in better performance despite more bank conflicts.
 
 ### Resolved issues
+
 * Fixed an issue where `rmake.py` would generate wrong CMAKE commands while using Linux environment
 * Fixed an issue where `rocprim::partial_sort_copy` would yield a compile error if the input iterator is const.
 * Fixed incorrect 128-bit signed and unsigned integers type traits.

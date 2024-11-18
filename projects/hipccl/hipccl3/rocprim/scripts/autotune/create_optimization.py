@@ -41,7 +41,7 @@ from collections import defaultdict
 from typing import Dict, List, Callable, Optional, Tuple
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-TARGET_ARCHITECTURES = ['gfx803', 'gfx900', 'gfx906', 'gfx908', 'gfx90a', 'gfx1030', 'gfx1100', 'gfx1102']
+TARGET_ARCHITECTURES = ['gfx803', 'gfx900', 'gfx906', 'gfx908', 'gfx90a', 'gfx942', 'gfx1030', 'gfx1100', 'gfx1102']
 # C++ typename used for optional types
 EMPTY_TYPENAME = "empty_type"
 

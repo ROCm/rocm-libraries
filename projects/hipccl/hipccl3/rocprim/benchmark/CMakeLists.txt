@@ -24,6 +24,9 @@ option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various c
 include(../cmake/ConfigAutotune.cmake)
 include(ConfigAutotuneSettings.cmake)
 
+option(BENCHMARK_TUNE_PARAM_NAMES "Tuning parameter names" "")
+option(BENCHMARK_TUNE_PARAMS "Tuning parameters" "")
+
 if(BENCHMARK_CONFIG_TUNING)
   add_custom_target("benchmark_config_tuning")
 endif()
@@ -35,6 +38,12 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${BENCHMARK_TARGET}.parallel.cpp.in")
       message(STATUS "found ${BENCHMARK_TARGET}.parallel.cpp.in file, compiling in parallel.")
       read_config_autotune_settings(${BENCHMARK_TARGET} list_across_names list_across output_pattern_suffix)
+
+      if(BENCHMARK_TUNE_PARAM_NAMES AND BENCHMARK_TUNE_PARAMS)
+        set(list_across_names "${BENCHMARK_TUNE_PARAM_NAMES}")
+        set(list_across "${BENCHMARK_TUNE_PARAMS}")
+      endif()
+
       #make sure that variables are not empty, i.e. there actually is an entry for that benchmark in benchmark/ConfigAutotuneSettings.cmake
       if(list_across_names)
         add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})

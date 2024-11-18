@@ -154,6 +154,18 @@ constexpr unsigned int get_lds_banks_no()
     return 32;
 }
 
+/// \brief Returns the minimum LDS size in bytes available on this device architecture.
+ROCPRIM_HOST_DEVICE
+constexpr unsigned int get_min_lds_size()
+{
+#if defined(__GFX11__) || defined(__GFX10__)
+    return (1 << 17) /* 128 KiB*/;
+#else
+    // On host the lowest should be returned!
+    return (1 << 16) /* 64 KiB */;
+#endif
+}
+
 // Finds biggest fundamental type for type T that sizeof(T) is
 // a multiple of that type's size.
 template<class T>
@@ -407,6 +419,25 @@ ROCPRIM_HOST_DEVICE auto bit_cast(const Source& source)
     return dest;
 #endif
 }
+
+template<typename... Ts>
+struct select_max_by_value;
+
+template<typename T>
+struct select_max_by_value<T>
+{
+    using type = T;
+};
+
+template<typename T, typename U, typename... Vs>
+struct select_max_by_value<T, U, Vs...>
+{
+    using tail = typename select_max_by_value<U, Vs...>::type;
+    using type = std::conditional_t<(T::value >= tail::value), T, tail>;
+};
+
+template<typename... Ts>
+using select_max_by_value_t = typename select_max_by_value<Ts...>::type;
 
 } // end namespace detail
 END_ROCPRIM_NAMESPACE

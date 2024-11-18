@@ -25,6 +25,7 @@
 #include "../functional.hpp"
 
 #include "block_scan.hpp"
+#include "config.hpp"
 
 #include "detail/block_radix_rank_basic.hpp"
 #include "detail/block_radix_rank_match.hpp"
@@ -60,7 +61,8 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::basic>
     template<unsigned int BlockSizeX,
              unsigned int RadixBits,
              unsigned int BlockSizeY,
-             unsigned int BlockSizeZ>
+             unsigned int BlockSizeZ,
+             block_padding_hint>
     using type = block_radix_rank<BlockSizeX, RadixBits, false, BlockSizeY, BlockSizeZ>;
 };
 
@@ -70,7 +72,8 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::basic_memoize>
     template<unsigned int BlockSizeX,
              unsigned int RadixBits,
              unsigned int BlockSizeY,
-             unsigned int BlockSizeZ>
+             unsigned int BlockSizeZ,
+             block_padding_hint>
     using type = block_radix_rank<BlockSizeX, RadixBits, true, BlockSizeY, BlockSizeZ>;
 };
 
@@ -80,8 +83,9 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::match>
     template<unsigned int BlockSizeX,
              unsigned int RadixBits,
              unsigned int BlockSizeY,
-             unsigned int BlockSizeZ>
-    using type = block_radix_rank_match<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ>;
+             unsigned int BlockSizeZ,
+             block_padding_hint PaddingHint>
+    using type = block_radix_rank_match<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint>;
 };
 } // namespace detail
 
@@ -96,6 +100,7 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::match>
 /// the same values from shared memory twice, at the expense of more register usage.
 /// \tparam BlockSizeY - the number of threads in a block's y dimension, defaults to 1.
 /// \tparam BlockSizeZ - the number of threads in a block's z dimension, defaults to 1.
+/// \tparam PaddingHint - a hint that decides when to use padding. May not always be applicable.
 ///
 /// \par Overview
 /// * Key type must be an arithmetic type (that is, an integral type or a floating point type).
@@ -135,17 +140,18 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::match>
 /// \endcode
 template<unsigned int               BlockSizeX,
          unsigned int               RadixBits,
-         block_radix_rank_algorithm Algorithm  = block_radix_rank_algorithm::default_algorithm,
-         unsigned int               BlockSizeY = 1,
-         unsigned int               BlockSizeZ = 1>
+         block_radix_rank_algorithm Algorithm   = block_radix_rank_algorithm::default_algorithm,
+         unsigned int               BlockSizeY  = 1,
+         unsigned int               BlockSizeZ  = 1,
+         block_padding_hint         PaddingHint = block_padding_hint::avoid_conflicts>
 class block_radix_rank
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     : private detail::select_block_radix_rank_impl<
-          Algorithm>::template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ>
+          Algorithm>::template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint>
 #endif
 {
     using base_type = typename detail::select_block_radix_rank_impl<
-        Algorithm>::template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ>;
+        Algorithm>::template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint>;
 
 public:
     /// \brief The number of digits each thread will process.

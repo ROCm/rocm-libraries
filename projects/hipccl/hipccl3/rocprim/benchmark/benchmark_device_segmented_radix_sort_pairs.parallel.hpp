@@ -131,10 +131,10 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
                                         seed.get_0());
 
         std::vector<value_type> values_input
-            = get_random_data<key_type>(size,
-                                        generate_limits<key_type>::min(),
-                                        generate_limits<key_type>::max(),
-                                        seed.get_0());
+            = get_random_data<value_type>(size,
+                                          generate_limits<value_type>::min(),
+                                          generate_limits<value_type>::max(),
+                                          seed.get_0());
 
         size_t batch_size = 1;
         if(size < target_size)
@@ -286,97 +286,40 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
 
 template<typename Tp, template<Tp> class T, bool enable, Tp... Idx>
 struct decider;
-template<unsigned int BlockSize,
+
+template<unsigned int LongBits,
+         unsigned int ShortBits,
+         unsigned int BlockSize,
          unsigned int ItemsPerThread,
+         unsigned int WarpSmallLWS,
+         unsigned int WarpSmallIPT,
+         unsigned int WarpSmallBS,
+         unsigned int WarpPartition,
+         unsigned int WarpMediumLWS,
+         unsigned int WarpMediumIPT,
+         unsigned int WarpMediumBS,
          typename Key,
          typename Value,
-         bool PartitionAllowed>
+         bool UnpartitionWarpAllowed = true>
 struct device_segmented_radix_sort_benchmark_generator
 {
-    template<unsigned int LongBits>
-    struct create_lrb
-    {
-        template<unsigned int ShortBits>
-        struct create_srb
-        {
-            template<bool EnableUnpartitionedWarpSort>
-            struct create_euws
-            {
-                template<unsigned int LogicalWarpSizeSmall>
-                struct create_lwss
-                {
-                    template<unsigned int PartitioningThreshold>
-                    struct create_pt
-                    {
-                        void operator()(
-                            std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-                        {
-                            storage.emplace_back(
-                                std::make_unique<device_segmented_radix_sort_benchmark<
-                                    Key,
-                                    Value,
-                                    rocprim::segmented_radix_sort_config<
-                                        LongBits,
-                                        ShortBits,
-                                        rocprim::kernel_config<BlockSize, ItemsPerThread>,
-                                        rocprim::WarpSortConfig<LogicalWarpSizeSmall / 2,
-                                                                ItemsPerThread / 2,
-                                                                BlockSize,
-                                                                PartitioningThreshold,
-                                                                LogicalWarpSizeSmall,
-                                                                ItemsPerThread,
-                                                                BlockSize>,
-                                        EnableUnpartitionedWarpSort>>>());
-                        }
-                    };
-
-                    void
-                        operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-                    {
-                        static_for_each<std::integer_sequence<unsigned int, 5>, create_pt>(storage);
-                    }
-                };
-
-                void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-                {
-                    if(PartitionAllowed)
-                    {
-
-                        static_for_each<std::integer_sequence<unsigned int, 8, 16, 32>,
-                                        create_lwss>(storage);
-                    }
-                    else
-                    {
-                        storage.emplace_back(
-                            std::make_unique<device_segmented_radix_sort_benchmark<
-                                Key,
-                                Value,
-                                rocprim::segmented_radix_sort_config<
-                                    LongBits,
-                                    ShortBits,
-                                    rocprim::kernel_config<BlockSize, ItemsPerThread>,
-                                    rocprim::DisabledWarpSortConfig,
-                                    EnableUnpartitionedWarpSort>>>());
-                    }
-                }
-            };
-
-            void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-            {
-                static_for_each<std::integer_sequence<bool, true>, create_euws>(storage);
-            }
-        };
-
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-        {
-            decider<unsigned int, create_srb, 1u << LongBits <= BlockSize, 2, 4>::do_the_thing(
-                storage);
-        }
-    };
-
     static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
     {
-        static_for_each<std::integer_sequence<unsigned int, 6, 7>, create_lrb>(storage);
+        storage.emplace_back(std::make_unique<device_segmented_radix_sort_benchmark<
+                                 Key,
+                                 Value,
+                                 rocprim::segmented_radix_sort_config<
+                                     LongBits,
+                                     ShortBits,
+                                     rocprim::kernel_config<BlockSize, ItemsPerThread>,
+                                     rocprim::WarpSortConfig<WarpSmallLWS,
+                                                             WarpSmallIPT,
+                                                             WarpSmallBS,
+                                                             WarpPartition,
+                                                             WarpMediumLWS,
+                                                             WarpMediumIPT,
+                                                             WarpMediumBS>,
+                                     UnpartitionWarpAllowed>>>());
     }
 };
 
