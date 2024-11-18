@@ -112,5 +112,9 @@ cat ${code_cov_path}/code_cov_${gpu}.report
 mv ${code_cov_path}/code_cov_${gpu}_text/coverage/*/*/*/*/*/*/lib \
     ${code_cov_path}/code_cov_${gpu}_text/lib
 rm -rf ${code_cov_path}/code_cov_${gpu}_text/coverage
+
 # zip the text report for archiving.
-zip -r ${code_cov_path}/code_cov_${gpu}.zip ${code_cov_path}/code_cov_${gpu}_text
+cwd=$(pwd)
+pushd ${code_cov_path}
+zip -r ${cwd}/code_cov_${gpu}.zip ./code_cov_${gpu}_text
+popd
