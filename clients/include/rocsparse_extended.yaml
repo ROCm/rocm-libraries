@@ -1,0 +1,357 @@
+# ########################################################################
+# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+# Template used to process YAML from log files
+---
+include: rocsparse_common.yaml
+#include: known_bugs.yaml
+
+# This is a minimal smoke test of rocsparse functionality
+# It will run at least a single small sized function test for all of the functions.
+# Algorithm variations controlled by enums will be tested but those that are selected by size will not be
+# exhaustive as very small sizes are only used
+
+Definitions:
+
+- &common
+  storage: [rocsparse_storage_mode_sorted]
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- &alpha_beta
+  alpha: [1.0]
+  alphai: [1.0, 1.2]
+  beta: [0.0, 1.0, 1.9]
+  betai: [0.0, 1.0, 0.3]
+
+- &dims
+  M: [50]
+  N: [50]
+  K: [65]
+
+- &blockdims
+  block_dim: [3]
+  row_block_dimA: [3]
+  col_block_dimA: [4]
+
+- &batches
+  batch_count: [4]
+  batch_count_A: [12]
+  batch_count_B: [15]
+  batch_count_C: [9]
+  batch_stride: [445]
+
+- &formats
+  index_type_I: i32
+  index_type_J: i32
+  B_row_indextype: i32
+  B_col_indextype: i32
+  formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
+  formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
+
+###########
+# Level 1 #
+###########
+
+- &level1_shared
+  <<: *common
+  <<: *alpha_beta
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [1200]
+  nnz: [10]
+
+###########
+# Level 2 #
+###########
+
+- &level2_shared
+  <<: *common
+  <<: *alpha_beta
+  <<: *dims
+  precision: *single_double_precisions_complex_real
+
+- &level2_shared_mixed_index
+  <<: *level2_shared
+  indextype: *i32i32_i64i32_i64i64
+
+###########
+# Level 3 #
+###########
+
+- &level3_shared
+  <<: *common
+  <<: *alpha_beta
+  <<: *dims
+  <<: *blockdims
+  <<: *batches
+  precision: *single_double_precisions_complex_real
+
+- &level3_shared_mixed_index
+  <<: *level3_shared
+  indextype: *i32i32_i64i32_i64i64
+
+#########
+# Extra #
+#########
+
+- &extra_shared
+  <<: *common
+  <<: *alpha_beta
+  <<: *dims
+  <<: *blockdims
+  precision: *single_double_precisions_complex_real
+
+- &extra_shared_mixed_index
+  <<: *extra_shared
+  indextype: *i32i32_i64i32_i64i64
+
+###########
+# Precond #
+###########
+
+- &precond_shared
+  <<: *common
+  <<: *dims
+  <<: *blockdims
+  precision: *single_double_precisions_complex_real
+
+##############
+# Reordering #
+##############
+
+- &reordering_shared
+  <<: *common
+  <<: *dims
+  precision: *single_double_precisions_complex_real
+  percentage: [0.5]
+
+##############
+# Conversion #
+##############
+
+- &conversion_shared
+  <<: *common
+  <<: *dims
+  <<: *batches
+  precision: *single_double_precisions_complex_real
+  denseld: [71]
+  nnz: [10]
+
+- &conversion_shared_mixed_index
+  <<: *conversion_shared
+  indextype: *i32i32_i64i32_i64i64
+
+- &conversion_shared_formats
+  <<: *conversion_shared
+  <<: *formats
+  precision: f32_r
+
+
+Tests:
+
+###########
+# Level 1 #
+###########
+
+- name: level1
+  category: quick
+  function:
+    - axpby: *level1_shared
+    - axpyi: *level1_shared
+    - dotci: *level1_shared
+    - doti: *level1_shared
+    - gather: *level1_shared
+    - gthr: *level1_shared
+    - gthrz: *level1_shared
+    - rot: *level1_shared
+    - roti: *level1_shared
+    - scatter: *level1_shared
+    - sctr: *level1_shared
+    - spvv: *level1_shared
+
+###########
+# Level 2 #
+###########
+
+- name: level2
+  category: quick
+  function:
+    - bsrmv: *level2_shared
+    - bsrsv: *level2_shared
+    - bsrxmv: *level2_shared
+    - coomv: *level2_shared
+    - csritsv: *level2_shared
+    - csrmv: *level2_shared
+    - csrsv: *level2_shared
+    - ellmv: *level2_shared
+    - gebsrmv: *level2_shared
+    - gemvi: *level2_shared
+    - hybmv: *level2_shared
+    - spitsv_csr: *level2_shared_mixed_index
+    - spmv_bsr: *level2_shared_mixed_index
+    - spmv_coo: *level2_shared
+    - spmv_coo_aos: *level2_shared
+    - spmv_csc: *level2_shared_mixed_index
+    - spmv_csr: *level2_shared_mixed_index
+    - spmv_ell: *level2_shared
+    - spsv_csr: *level2_shared_mixed_index
+    - spsv_coo: *level2_shared
+
+###########
+# Level 3 #
+###########
+
+- name: level3
+  category: quick
+  function:
+    - bsrmm: *level3_shared
+    - bsrsm: *level3_shared
+    - csrmm: *level3_shared
+    - csrsm: *level3_shared
+    - gebsrmm: *level3_shared
+    - sddmm: *level3_shared_mixed_index
+    - spsm_coo: *level3_shared_mixed_index
+    - spsm_csr: *level3_shared_mixed_index
+    - spmm_bell: *level3_shared
+    - spmm_coo: *level3_shared
+    - spmm_csc: *level3_shared_mixed_index
+    - spmm_csr: *level3_shared_mixed_index
+    - spmm_batched_bell: *level3_shared
+    - spmm_batched_coo: *level3_shared
+    - spmm_batched_csc: *level3_shared_mixed_index
+    - spmm_batched_csr: *level3_shared_mixed_index
+
+#########
+# Extra #
+#########
+
+- name: extra
+  category: quick
+  function:
+    - bsrgeam: *extra_shared
+    - bsrgemm: *extra_shared
+    - csrgeam: *extra_shared
+    - csrgemm: *extra_shared
+    - spgemm_bsr: *extra_shared_mixed_index
+    - spgemm_csr: *extra_shared_mixed_index
+
+###########
+# Precond #
+###########
+
+- name: precond
+  category: quick
+  function:
+    - bsric0: *precond_shared
+    - bsrilu0: *precond_shared
+    - csric0: *precond_shared
+    - csrilu0: *precond_shared
+    - csricsv: *precond_shared
+    - csrilusv: *precond_shared
+    - csritilu0: *precond_shared
+
+##############
+# Reordering #
+##############
+
+- name: reordering
+  category: quick
+  function:
+    - csrcolor: *reordering_shared
+
+##############
+# Conversion #
+##############
+
+- name: conversion
+  category: quick
+  function:
+    - bsr2csr: *conversion_shared
+    - coo2csr: *conversion_shared
+    - coo2dense: *conversion_shared
+    - csc2dense: *conversion_shared
+    - csr2bsr: *conversion_shared
+    - csr2coo: *conversion_shared
+    - csr2dense: *conversion_shared
+    - csr2csc: *conversion_shared
+    - csr2csr_compress: *conversion_shared
+    - csr2ell: *conversion_shared
+    - csr2gebsr: *conversion_shared
+    - csr2hyb: *conversion_shared
+    - dense2coo: *conversion_shared
+    - dense2csc: *conversion_shared
+    - dense2csr: *conversion_shared
+    - ell2csr: *conversion_shared
+    - gebsr2csr: *conversion_shared
+    - gebsr2gebsc: *conversion_shared
+    - gebsr2gebsr: *conversion_shared
+    - hyb2csr: *conversion_shared
+    - dense_to_sparse_coo: *conversion_shared
+    - dense_to_sparse_csc: *conversion_shared_mixed_index
+    - dense_to_sparse_csr: *conversion_shared_mixed_index
+    - sparse_to_dense_coo: *conversion_shared
+    - sparse_to_dense_csc: *conversion_shared_mixed_index
+    - sparse_to_dense_csr: *conversion_shared_mixed_index
+    - sparse_to_sparse: *conversion_shared_formats
+    - coosort: *conversion_shared
+    - csrsort: *conversion_shared
+    - cscsort: *conversion_shared
+    - identity: *conversion_shared
+    - inverse_permutation: *conversion_shared
+    - nnz: *conversion_shared
+    - prune_csr2csr: *conversion_shared
+    - prune_csr2csr_by_percentage: *conversion_shared
+    - prune_dense2csr: *conversion_shared
+    - prune_dense2csr_by_percentage: *conversion_shared
+    - spmat_descr: *conversion_shared_mixed_index
+    - spvec_descr: *conversion_shared
+    - dnmat_descr: *conversion_shared
+    - dnvec_descr: *conversion_shared
+    - copy_info: *conversion_shared
+    - bsrpad_value: *conversion_shared
+    - check_matrix_coo: *conversion_shared
+    - check_matrix_csc: *conversion_shared
+    - check_matrix_csr: *conversion_shared
+    - check_matrix_ell: *conversion_shared
+    - check_matrix_gebsc: *conversion_shared
+    - check_matrix_gebsr: *conversion_shared
+    - check_matrix_hyb: *conversion_shared
+    - check_spmat: *conversion_shared_mixed_index
+    - const_dnmat_descr: *conversion_shared
+    - const_dnvec_descr: *conversion_shared
+    - const_spmat_descr: *conversion_shared_mixed_index
+    - const_spvec_descr: *conversion_shared
+    - gpsv_interleaved_batch: *conversion_shared
+    - gtsv: *conversion_shared
+    - gtsv_interleaved_batch: *conversion_shared
+    - gtsv_no_pivot: *conversion_shared
+    - gtsv_no_pivot_strided_batch: *conversion_shared
+

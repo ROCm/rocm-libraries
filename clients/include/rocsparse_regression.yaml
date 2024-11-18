@@ -1,0 +1,188 @@
+# ########################################################################
+# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+# Template used to process YAML from log files
+---
+include: rocsparse_common.yaml
+#include: known_bugs.yaml
+
+# This is a minimal smoke test of rocsparse functionality
+# It will run at least a single small sized function test for all of the functions.
+# Algorithm variations controlled by enums will be tested but those that are selected by size will not be
+# exhaustive as very small sizes are only used
+
+Definitions:
+
+- &common
+  M: 1
+  N: 1
+  K: 1
+  storage: [rocsparse_storage_mode_sorted]
+  direction: [rocsparse_direction_row]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
+
+- &alpha_beta
+    - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
+    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
+
+Tests:
+
+#################################################################################
+# SpMV in CSR format                                                            #
+#################################################################################
+# We test this, as it is most important algorithm in rocsparse.                 #
+# There is no special hardware requirements. It uses LDS and atomicAdd(fp32/64) #
+# in some rare cases. Atomics are agent wide.                                   #
+#################################################################################
+- name: level2_spmv_csr_real
+  category: pre_checkin
+  function: spmv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  <<: *common
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  alpha_beta: *alpha_beta
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_stream]
+  filename: [nos4]
+
+- name: level2_spmv_csr_complex
+  category: pre_checkin
+  function: spmv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  <<: *common
+  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  alpha_beta: *alpha_beta
+  spmv_alg: [rocsparse_spmv_alg_csr_stream, rocsparse_spmv_alg_csr_lrb]
+  filename: [Chevron2]
+
+#################################################################################
+# SpSV in CSR format                                                            #
+#################################################################################
+# Algorithm has internal dependencies within the matrix and uses spin looping   #
+# to wait until data dependencies have been resolved by other wavefronts / work #
+# groups. The spin loop repeatedly querries the status by using atomic_load     #
+# (relaxed) from global memory. Once a dependency has been resolved, it is      #
+# stored in global memory using atomic_store (release). Atomics are agent wide. #
+#################################################################################
+- name: level2_spsv_csr_real
+  category: pre_checkin
+  function: spsv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  <<: *common
+  alpha_alphai: *alpha_beta
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  filename: [mac_econ_fwd500]
+
+- name: level2_spsv_csr_complex
+  category: pre_checkin
+  function: spsv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  <<: *common
+  alpha_alphai: *alpha_beta
+  transA: [rocsparse_operation_conjugate_transpose]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  filename: [Chevron2]
+
+#################################################################################
+# SpGEMM in CSR format                                                          #
+#################################################################################
+# This algorithm uses hash tables to merge two matrix rows. It makes extensive  #
+# use of workgroup-wide atomicCAS in LDS.                                       #
+#################################################################################
+- name: extra_spgemm_csr_real
+  category: pre_checkin
+  function: spgemm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  <<: *common
+  N: [13, 523]
+  alpha_beta: *alpha_beta
+  filename: [nos4]
+
+- name: extra_spgemm_csr_complex
+  category: pre_checkin
+  function: spgemm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  <<: *common
+  N: [21, 719]
+  alpha_beta: *alpha_beta
+  filename: [Chevron2]
+
+#################################################################################
+# csrilusv in CSR format                                                        #
+#################################################################################
+# Combination of multiple spin-looping algorithms that depend on each other.    #
+# Part of this algorithm spin-loops also on LDS.                                #
+#################################################################################
+- name: precond_csrilusv_csr_real
+  category: pre_checkin
+  function: csrilusv
+  precision: *single_double_precisions
+  <<: *common
+  filename: [mac_econ_fwd500]
+
+- name: precond_csrilusv_csr_complex
+  category: pre_checkin
+  function: csrilusv
+  precision: *single_double_precisions_complex
+  <<: *common
+  filename: [Chevron2]
+
+#################################################################################
+# SpMM in CSR format                                                            #
+#################################################################################
+# Similar to csrmv, this algorithm is one of the most important ones in         #
+# rocsparse. It uses LDS but there is nothing special in terms of hardware      #
+# requirements.                                                                 #
+#################################################################################
+- name: level3_spmm_csr_real
+  category: pre_checkin
+  function: spmm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  <<: *common
+  N: [4, 19, 73]
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  filename: [nos4]
+
+- name: level3_spmm_csr_complex
+  category: pre_checkin
+  function: spmm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  <<: *common
+  N: [3, 21]
+  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  filename: [Chevron2]

@@ -164,16 +164,26 @@ if(BUILD_CLIENTS_TESTS)
                     DEPENDS include/rocsparse_template.yaml
                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
+  set(ROCSPARSE_SMOKE "${PROJECT_BINARY_DIR}/staging/rocsparse_smoke.yaml")
+  set(ROCSPARSE_REGRESSION "${PROJECT_BINARY_DIR}/staging/rocsparse_regression.yaml")
+  set(ROCSPARSE_EXTENDED "${PROJECT_BINARY_DIR}/staging/rocsparse_extended.yaml")
+  add_custom_command(OUTPUT "${ROCSPARSE_SMOKE}" "${ROCSPARSE_REGRESSION}" "${ROCSPARSE_EXTENDED}"
+                    COMMAND ${CMAKE_COMMAND} -E copy include/rocsparse_smoke.yaml "${ROCSPARSE_SMOKE}"
+                    COMMAND ${CMAKE_COMMAND} -E copy include/rocsparse_regression.yaml "${ROCSPARSE_REGRESSION}"
+                    COMMAND ${CMAKE_COMMAND} -E copy include/rocsparse_extended.yaml "${ROCSPARSE_EXTENDED}"
+                    DEPENDS include/rocsparse_smoke.yaml include/rocsparse_regression.yaml include/rocsparse_extended.yaml
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
   set(ROCSPARSE_GENTEST "${PROJECT_BINARY_DIR}/staging/rocsparse_gentest.py")
   add_custom_command(OUTPUT "${ROCSPARSE_GENTEST}"
                     COMMAND ${CMAKE_COMMAND} -E copy common/rocsparse_gentest.py "${ROCSPARSE_GENTEST}"
                     DEPENDS common/rocsparse_gentest.py
                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
-  add_custom_target(rocsparse-common DEPENDS "${ROCSPARSE_COMMON}" "${ROCSPARSE_TEMPLATE}" "${ROCSPARSE_GENTEST}" "${ROCSPARSE_CONVERT}")
+  add_custom_target(rocsparse-common DEPENDS "${ROCSPARSE_COMMON}" "${ROCSPARSE_TEMPLATE}" "${ROCSPARSE_SMOKE}" "${ROCSPARSE_GENTEST}" "${ROCSPARSE_CONVERT}")
 
   rocm_install(
-    FILES "${ROCSPARSE_COMMON}" "${ROCSPARSE_TEMPLATE}"
+    FILES "${ROCSPARSE_COMMON}" "${ROCSPARSE_TEMPLATE}" "${ROCSPARSE_SMOKE}"
     COMPONENT clients-common
     DESTINATION "${CMAKE_INSTALL_DATADIR}/rocsparse/test"
     )

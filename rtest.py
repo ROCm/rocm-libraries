@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # ########################################################################
-# Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -56,8 +56,14 @@ def parse_args():
     parser = argparse.ArgumentParser(description="""
     Checks build arguments
     """)
-    parser.add_argument('-t', '--test', required=True,
-                        help='Test set to run from rtest.xml (required, e.g. osdb)')
+
+    # Mutually exclusive group for --test and --emulation
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-t', '--test',
+                       help='Test set to run from rtest.xml (required, e.g. osdb)')
+    group.add_argument(      '--emulation', type=str, choices=['smoke', 'regression', 'extended'],
+                        help='Enable specific emulation test mode, e.g. smoke test')
+
     parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                         help='Test Debug build (optional, default: false)')
     parser.add_argument('-o', '--output', type=str, required=False, default="xml",
@@ -68,7 +74,20 @@ def parse_args():
                         help='Return as if test failed (optional, default: false)')
     # parser.add_argument('-v', '--verbose', required=False, default = False, action='store_true',
     #                     help='Verbose install (optional, default: False)')
-    return parser.parse_args()
+
+    args = parser.parse_args()
+
+    # Treat --emulation=xxx the same as -t xxx
+    emulation_to_test = {
+        'smoke': 'smoke',
+        'regression': 'regression',
+        'extended': 'extended'
+    }
+
+    if args.emulation in emulation_to_test:
+        args.test = emulation_to_test[args.emulation]
+
+    return args
 
 
 def vram_detect():
@@ -190,9 +209,11 @@ def run_cmd(cmd, test = False, time_limit = 0):
             proc = subprocess.run(cmdline, check=True, stderr=subprocess.STDOUT, shell=True)
             status = proc.returncode
         else:
+            sub_env = os.environ.copy()
+            sub_env["PATH"] = os.getcwd() + os.pathsep + sub_env["PATH"]
             error = False
             timeout = False
-            test_proc = subprocess.Popen(shlex.split(cmdline), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
+            test_proc = subprocess.Popen(cmdline, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, env=sub_env)
             if time_limit > 0:
                 start = time.monotonic()
                 #p = multiprocessing.Process(target=time_stop, args=(start, test_proc.pid))
@@ -237,7 +258,7 @@ def batch(script, xml):
     else:
         if args.debug: build_type = "debug"
         else: build_type = "release"
-        test_dir = f"{args.install_dir}//{build_type}//clients//staging"
+        test_dir = f"{args.install_dir}/{build_type}/clients/staging"
     fail = False
     for i in range(len(script)):
         cmdline = script[i]

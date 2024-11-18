@@ -12,6 +12,7 @@ Documentation for rocSPARSE is available at
 * Added BSR format to SpMM generic routine `rocsparse_spmm`
 * Added `GPU_TARGETS` to replace the now deprecated `AMDGPU_TARGETS` in cmake files
 * Added `azurelinux` OS name for correcting gfortran dependency
+* Added test filters `smoke`, `regression`, and `extended` for emulation tests.
 
 ### Changed
 
