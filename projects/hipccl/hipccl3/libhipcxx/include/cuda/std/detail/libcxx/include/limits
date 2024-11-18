@@ -445,7 +445,7 @@ protected:
   static constexpr bool has_signaling_NaN        = true;
   static constexpr float_denorm_style has_denorm = denorm_present;
   static constexpr bool has_denorm_loss          = false;
-#if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
+#if _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
   _LIBCUDACXX_HIDE_FROM_ABI static type infinity() noexcept
   {
     return __builtin_huge_valf();
@@ -458,7 +458,7 @@ protected:
   {
     return __builtin_nansf("");
   }
-#else
+#else // ^^^ _CCCL_COMPILER(NVRTC) ^^^ // vvv !_CCCL_COMPILER(NVRTC) vvv
   _LIBCUDACXX_HIDE_FROM_ABI static constexpr type infinity() noexcept
   {
     return __builtin_huge_valf();
@@ -471,7 +471,7 @@ protected:
   {
     return __builtin_nansf("");
   }
-#endif
+#endif // !_CCCL_COMPILER(NVRTC)
   _LIBCUDACXX_HIDE_FROM_ABI static constexpr type denorm_min() noexcept
   {
     return __FLT_DENORM_MIN__;
@@ -533,7 +533,7 @@ protected:
   static constexpr bool has_signaling_NaN        = true;
   static constexpr float_denorm_style has_denorm = denorm_present;
   static constexpr bool has_denorm_loss          = false;
-#if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
+#if _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
   _LIBCUDACXX_HIDE_FROM_ABI static type infinity() noexcept
   {
     return __builtin_huge_val();
@@ -546,7 +546,7 @@ protected:
   {
     return __builtin_nans("");
   }
-#else
+#else // ^^^ _CCCL_COMPILER(NVRTC) ^^^ // vvv !_CCCL_COMPILER(NVRTC) vvv
   _LIBCUDACXX_HIDE_FROM_ABI static constexpr type infinity() noexcept
   {
     return __builtin_huge_val();
@@ -559,7 +559,7 @@ protected:
   {
     return __builtin_nans("");
   }
-#endif
+#endif // !_CCCL_COMPILER(NVRTC)
   _LIBCUDACXX_HIDE_FROM_ABI static constexpr type denorm_min() noexcept
   {
     return __DBL_DENORM_MIN__;

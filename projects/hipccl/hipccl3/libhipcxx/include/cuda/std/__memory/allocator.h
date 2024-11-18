@@ -50,9 +50,9 @@
 #include <cuda/std/__utility/forward.h>
 #include <cuda/std/cstddef>
 
-#if defined(_CCCL_HAS_CONSTEXPR_ALLOCATION) && !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
+#if defined(_CCCL_HAS_CONSTEXPR_ALLOCATION) && !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <memory>
-#endif // _CCCL_HAS_CONSTEXPR_ALLOCATION && !_CCCL_COMPILER_NVRTC
+#endif // _CCCL_HAS_CONSTEXPR_ALLOCATION && !_CCCL_COMPILER(NVRTC)
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 

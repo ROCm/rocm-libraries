@@ -8,11 +8,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef __CCCL_EXCEPTIONS_H
-#define __CCCL_EXCEPTIONS_H
+#ifndef _CUDA_STD_INITIALIZER_LIST
+#define _CUDA_STD_INITIALIZER_LIST
 
-#include <cuda/std/__cccl/compiler.h>
-#include <cuda/std/__cccl/system_header.h>
+#include <cuda/std/detail/__config>
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
 #  pragma GCC system_header
@@ -22,13 +21,12 @@
 #  pragma system_header
 #endif // no system header
 
-#ifndef _CCCL_NO_EXCEPTIONS
-#  if defined(CCCL_DISABLE_EXCEPTIONS) // Escape hatch for users to manually disable exceptions
-#    define _CCCL_NO_EXCEPTIONS
-#  elif _CCCL_COMPILER(NVRTC) || (defined(_CCCL_COMPILER_MSVC) && _CPPUNWIND == 0) \
-    || (!defined(_CCCL_COMPILER_MSVC) && !__EXCEPTIONS) // Catches all non msvc based compilers
-#    define _CCCL_NO_EXCEPTIONS
-#  endif
-#endif // !_CCCL_NO_EXCEPTIONS
+#if !_CCCL_COMPILER(NVRTC)
+#  include <initializer_list>
+#endif // !_CCCL_COMPILER(NVRTC)
 
-#endif // __CCCL_EXCEPTIONS_H
+_LIBCUDACXX_BEGIN_NAMESPACE_STD
+using ::std::initializer_list;
+_LIBCUDACXX_END_NAMESPACE_STD
+
+#endif // _CUDA_STD_INITIALIZER_LIST

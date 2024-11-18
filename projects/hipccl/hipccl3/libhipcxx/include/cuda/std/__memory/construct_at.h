@@ -66,9 +66,9 @@
 #  include <new>
 #endif // _CCCL_CUDA_COMPILER_CLANG
 #if _CCCL_STD_VER >= 2020 // need to backfill ::std::construct_at
-#  if !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
+#  if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #    include <memory>
-#  endif // _CCCL_COMPILER_NVRTC
+#  endif // _CCCL_COMPILER(NVRTC)
 
 // NOTE(HIP/AMD): HIPRTC requires explicit std::construct_at fallback definition.
 // The __cpp_lib_constexpr_dynamic_alloc macro may be defined by system headers

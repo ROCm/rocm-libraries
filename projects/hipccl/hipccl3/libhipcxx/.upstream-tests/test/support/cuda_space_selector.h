@@ -44,7 +44,7 @@
 #  include <new>
 #endif
 
-#if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
+#if _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #  define LAMBDA [=]
 #else
 #  define LAMBDA [=] __host__ __device__
