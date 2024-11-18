@@ -291,7 +291,7 @@ int main(int argc, char* argv[])
     config_autotune_register::register_benchmark_subset(benchmarks,
                                                         parallel_instance,
                                                         parallel_instances,
-                                                        size,
+                                                        min_size,
                                                         seed,
                                                         stream);
 #else

@@ -470,6 +470,7 @@ struct segmented_radix_sort_config_params
     /// \brief Number of bits in long iterations.
     unsigned int long_radix_bits = 0;
     /// \brief Number of bits in short iterations.
+    /// \deprecated The short radix bits parameter is no longer used and will be removed in a future version.
     unsigned int short_radix_bits = 0;
     /// \brief If set to \p true, warp sort can be used to sort the small segments, even if no partitioning happens.
     bool enable_unpartitioned_warp_sort = true;
@@ -567,6 +568,7 @@ struct DisabledWarpSortConfig
 ///
 /// \tparam LongRadixBits - number of bits in long iterations.
 /// \tparam ShortRadixBits - number of bits in short iterations, must be equal to or less than `LongRadixBits`.
+/// Deprecated and no longer used.
 /// \tparam SortConfig - configuration of radix sort kernel. Must be `kernel_config`.
 /// \tparam WarpSortConfig - configuration of the warp sort that is used on the short segments.
 template<unsigned int LongRadixBits,
@@ -584,6 +586,7 @@ struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_
     static constexpr unsigned int long_radix_bits = LongRadixBits;
 
     /// \brief Number of bits in short iterations.
+    /// \deprecated The short radix bits parameter is no longer used and will be removed in a future version.
     static constexpr unsigned int short_radix_bits = ShortRadixBits;
 
     /// \brief Number of threads in a block.

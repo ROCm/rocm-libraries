@@ -25,15 +25,15 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
-#include "../thread/radix_key_codec.hpp"
-#include "../warp/detail/warp_scan_crosslane.hpp"
-
-#include "../intrinsics.hpp"
 #include "../functional.hpp"
+#include "../intrinsics/thread.hpp"
+#include "../thread/radix_key_codec.hpp"
 #include "../types.hpp"
 
+#include "../warp/warp_exchange.hpp"
 #include "block_exchange.hpp"
 #include "block_radix_rank.hpp"
+#include "rocprim/block/config.hpp"
 
 /// \addtogroup blockmodule
 /// @{
@@ -50,6 +50,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \tparam Value - the value type. Default type empty_type indicates
 /// a keys-only sort.
 /// \tparam RadixBitsPerPass - amount of bits to sort per pass. The Default is 4.
+/// \tparam RadixRankAlgorithm the rank algorithm used.
 ///
 /// \par Overview
 /// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
@@ -97,54 +98,67 @@ BEGIN_ROCPRIM_NAMESPACE
 template<class Key,
          unsigned int BlockSizeX,
          unsigned int ItemsPerThread,
-         class Value                   = empty_type,
-         unsigned int BlockSizeY       = 1,
-         unsigned int BlockSizeZ       = 1,
-         unsigned int RadixBitsPerPass = 4>
+         class Value             = empty_type,
+         unsigned int BlockSizeY = 1,
+         unsigned int BlockSizeZ = 1,
+         unsigned int RadixBitsPerPass
+         = (BlockSizeX * BlockSizeY * BlockSizeZ) % device_warp_size() == 0 ? 8 /* match */
+                                                                            : 4 /* basic_memoize */,
+         block_radix_rank_algorithm RadixRankAlgorithm
+         = (BlockSizeX * BlockSizeY * BlockSizeZ) % device_warp_size() == 0
+               ? block_radix_rank_algorithm::match
+               : block_radix_rank_algorithm::basic_memoize,
+         block_padding_hint PaddingHint = block_padding_hint::lds_occupancy_bound>
 class block_radix_sort
 {
     static_assert(RadixBitsPerPass > 0 && RadixBitsPerPass < 32,
                   "The RadixBitsPerPass should be larger than 0 and smaller than the size "
                   "of an unsigned int");
 
-    static constexpr unsigned int BlockSize           = BlockSizeX * BlockSizeY * BlockSizeZ;
-    static constexpr bool         with_values         = !std::is_same<Value, empty_type>::value;
+    static constexpr unsigned int BlockSize   = BlockSizeX * BlockSizeY * BlockSizeZ;
+    static constexpr bool         with_values = !std::is_same<Value, empty_type>::value;
+    static constexpr bool warp_striped = RadixRankAlgorithm == block_radix_rank_algorithm::match;
 
-    using block_rank_type = ::rocprim::block_radix_rank<BlockSizeX,
-                                                        RadixBitsPerPass,
-                                                        block_radix_rank_algorithm::basic_memoize,
-                                                        BlockSizeY,
-                                                        BlockSizeZ>;
+#if __HIP_DEVICE_COMPILE__
+    static_assert(!warp_striped || (BlockSize % device_warp_size()) == 0,
+                  "When using 'block_radix_rank_algorithm::match', the block size should be a "
+                  "multiple of the warp size");
+#endif
+
+    static constexpr bool is_key_and_value_aligned
+        = alignof(Key) == alignof(Value) && sizeof(Key) == sizeof(Value);
+
+    using block_rank_type = ::rocprim::
+        block_radix_rank<BlockSizeX, RadixBitsPerPass, RadixRankAlgorithm, BlockSizeY, BlockSizeZ, PaddingHint>;
     using keys_exchange_type
-        = ::rocprim::block_exchange<Key, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ>;
+        = ::rocprim::block_exchange<Key, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ, PaddingHint>;
     using values_exchange_type
-        = ::rocprim::block_exchange<Value, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ>;
+        = ::rocprim::block_exchange<Value, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ, PaddingHint>;
 
     // Struct used for creating a raw_storage object for this primitive's temporary storage.
     union storage_type_
     {
-        typename keys_exchange_type::storage_type     keys_exchange;
-        typename values_exchange_type::storage_type   values_exchange;
-        typename block_rank_type::storage_type        rank;
+        typename keys_exchange_type::storage_type   keys_exchange;
+        typename values_exchange_type::storage_type values_exchange;
+        typename block_rank_type::storage_type      rank;
     };
 
 public:
-
-    /// \brief Struct used to allocate a temporary memory that is required for thread
-    /// communication during operations provided by related parallel primitive.
-    ///
-    /// Depending on the implemention the operations exposed by parallel primitive may
-    /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords <tt>__shared__</tt>. It can be aliased to
-    /// an externally allocated memory, or be a part of a union type with other storage types
-    /// to increase shared memory reusability.
-    #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
+/// \brief Struct used to allocate a temporary memory that is required for thread
+/// communication during operations provided by related parallel primitive.
+///
+/// Depending on the implemention the operations exposed by parallel primitive may
+/// require a temporary storage for thread communication. The storage should be allocated
+/// using keywords <tt>__shared__</tt>. It can be aliased to
+/// an externally allocated memory, or be a part of a union type with other storage types
+/// to increase shared memory reusability.
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using storage_type = detail::raw_storage<storage_type_>;
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
-    #else
+#else
     using storage_type = storage_type_; // only for Doxygen
-    #endif
+#endif
 
     /// \brief Performs ascending radix sort over keys partitioned across threads in a block.
     ///
@@ -193,11 +207,12 @@ public:
     /// then after sort they will be equal <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt>.
     /// \endparblock
     template<class Decomposer = ::rocprim::identity_decomposer>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void sort(Key (&keys)[ItemsPerThread],
-                                            storage_type& storage,
-                                            unsigned int  begin_bit  = 0,
-                                            unsigned int  end_bit    = 8 * sizeof(Key),
-                                            Decomposer    decomposer = {})
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key (&keys)[ItemsPerThread],
+              storage_type& storage,
+              unsigned int  begin_bit  = 0,
+              unsigned int  end_bit    = 8 * sizeof(Key),
+              Decomposer    decomposer = {})
     {
         empty_type values[ItemsPerThread];
         sort_impl<false>(keys, values, storage, begin_bit, end_bit, decomposer);
@@ -275,11 +290,12 @@ public:
     /// then after sort they will be equal <tt>{[256, 255], ..., [4, 3], [2, 1]}</tt>.
     /// \endparblock
     template<class Decomposer = ::rocprim::identity_decomposer>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void sort_desc(Key (&keys)[ItemsPerThread],
-                                                 storage_type& storage,
-                                                 unsigned int  begin_bit  = 0,
-                                                 unsigned int  end_bit    = 8 * sizeof(Key),
-                                                 Decomposer    decomposer = {})
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_desc(Key (&keys)[ItemsPerThread],
+                   storage_type& storage,
+                   unsigned int  begin_bit  = 0,
+                   unsigned int  end_bit    = 8 * sizeof(Key),
+                   Decomposer    decomposer = {})
     {
         empty_type values[ItemsPerThread];
         sort_impl<true>(keys, values, storage, begin_bit, end_bit, decomposer);
@@ -367,13 +383,13 @@ public:
     /// equal <tt>{[128, 128], [127, 127]  ..., [2, 2], [1, 1]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void
-        sort(Key (&keys)[ItemsPerThread],
-             typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
-             storage_type& storage,
-             unsigned int  begin_bit  = 0,
-             unsigned int  end_bit    = 8 * sizeof(Key),
-             Decomposer    decomposer = {})
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key (&keys)[ItemsPerThread],
+              typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+              storage_type& storage,
+              unsigned int  begin_bit  = 0,
+              unsigned int  end_bit    = 8 * sizeof(Key),
+              Decomposer    decomposer = {})
     {
         sort_impl<false>(keys, values, storage, begin_bit, end_bit, decomposer);
     }
@@ -466,13 +482,13 @@ public:
     /// will be equal <tt>{[1, 1], [2, 2]  ..., [128, 128]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void
-        sort_desc(Key (&keys)[ItemsPerThread],
-                  typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
-                  storage_type& storage,
-                  unsigned int  begin_bit  = 0,
-                  unsigned int  end_bit    = 8 * sizeof(Key),
-                  Decomposer    decomposer = {})
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_desc(Key (&keys)[ItemsPerThread],
+                   typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                   storage_type& storage,
+                   unsigned int  begin_bit  = 0,
+                   unsigned int  end_bit    = 8 * sizeof(Key),
+                   Decomposer    decomposer = {})
     {
         sort_impl<true>(keys, values, storage, begin_bit, end_bit, decomposer);
     }
@@ -558,11 +574,12 @@ public:
     /// then after sort they will be equal <tt>{[1, 129], [2, 130]  ..., [128, 256]}</tt>.
     /// \endparblock
     template<class Decomposer = ::rocprim::identity_decomposer>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void sort_to_striped(Key (&keys)[ItemsPerThread],
-                                                       storage_type& storage,
-                                                       unsigned int  begin_bit  = 0,
-                                                       unsigned int  end_bit    = 8 * sizeof(Key),
-                                                       Decomposer    decomposer = {})
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_to_striped(Key (&keys)[ItemsPerThread],
+                         storage_type& storage,
+                         unsigned int  begin_bit  = 0,
+                         unsigned int  end_bit    = 8 * sizeof(Key),
+                         Decomposer    decomposer = {})
     {
         empty_type values[ItemsPerThread];
         sort_impl<false, true>(keys, values, storage, begin_bit, end_bit, decomposer);
@@ -644,11 +661,12 @@ public:
     /// then after sort they will be equal <tt>{[256, 128], ..., [130, 2], [129, 1]}</tt>.
     /// \endparblock
     template<class Decomposer = ::rocprim::identity_decomposer>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
-                                                            storage_type& storage,
-                                                            unsigned int  begin_bit = 0,
-                                                            unsigned int  end_bit = 8 * sizeof(Key),
-                                                            Decomposer    decomposer = {})
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
+                              storage_type& storage,
+                              unsigned int  begin_bit  = 0,
+                              unsigned int  end_bit    = 8 * sizeof(Key),
+                              Decomposer    decomposer = {})
     {
         empty_type values[ItemsPerThread];
         sort_impl<true, true>(keys, values, storage, begin_bit, end_bit, decomposer);
@@ -738,13 +756,13 @@ public:
     /// equal <tt>{[-8, -4], [-7, -3], [-6, -2], [-5, -1]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void
-        sort_to_striped(Key (&keys)[ItemsPerThread],
-                        typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
-                        storage_type& storage,
-                        unsigned int  begin_bit  = 0,
-                        unsigned int  end_bit    = 8 * sizeof(Key),
-                        Decomposer    decomposer = {})
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_to_striped(Key (&keys)[ItemsPerThread],
+                         typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                         storage_type& storage,
+                         unsigned int  begin_bit  = 0,
+                         unsigned int  end_bit    = 8 * sizeof(Key),
+                         Decomposer    decomposer = {})
     {
         sort_impl<false, true>(keys, values, storage, begin_bit, end_bit, decomposer);
     }
@@ -835,7 +853,8 @@ public:
     /// equal <tt>{[10, 50], [20, 60], [30, 70], [40, 80]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void sort_desc_to_striped(
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_desc_to_striped(
         Key (&keys)[ItemsPerThread],
         typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
         storage_type& storage,
@@ -877,28 +896,251 @@ public:
         sort_desc_to_striped(keys, values, storage, begin_bit, end_bit, decomposer);
     }
 
+    /// \brief Performs ascending radix sort over key-value pairs in a *warp-striped order*
+    /// partitioned across threads in a block, results are saved in a striped arrangement.
+    ///
+    /// \see block_radix_sort::sort_to_striped
+    template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_warp_striped_to_striped(
+        Key (&keys)[ItemsPerThread],
+        typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+        storage_type& storage,
+        unsigned int  begin_bit  = 0,
+        unsigned int  end_bit    = 8 * sizeof(Key),
+        Decomposer    decomposer = {})
+    {
+        static_assert(warp_striped,
+                      "'sort_warp_striped_to_striped' can only be used with "
+                      "'block_radix_rank_algorithm::match'.");
+
+        sort_impl<false, true, false>(keys, values, storage, begin_bit, end_bit, decomposer);
+    }
+
+    /// \brief Performs ascending radix sort over key-value pairs in a *warp-striped order*
+    ///
+    /// \see block_radix_sort::sort_to_striped
+    /// partitioned across threads in a block, results are saved in a striped arrangement.
+    template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_warp_striped_to_striped(
+        Key (&keys)[ItemsPerThread],
+        typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+        unsigned int begin_bit  = 0,
+        unsigned int end_bit    = 8 * sizeof(Key),
+        Decomposer   decomposer = {})
+    {
+        static_assert(warp_striped,
+                      "'sort_warp_striped_to_striped' can only be used with "
+                      "'block_radix_rank_algorithm::match'.");
+
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        sort_warp_striped_to_striped(keys, values, storage, begin_bit, end_bit, decomposer);
+    }
+
+    /// \brief Performs ascending radix sort over key-value pairs in a *warp-striped order*
+    /// partitioned across threads in a block, results are saved in a striped arrangement.
+    ///
+    /// \see block_radix_sort::sort_to_striped
+    template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_warp_striped_to_striped(Key (&keys)[ItemsPerThread],
+                                      storage_type& storage,
+                                      unsigned int  begin_bit  = 0,
+                                      unsigned int  end_bit    = 8 * sizeof(Key),
+                                      Decomposer    decomposer = {})
+    {
+        static_assert(warp_striped,
+                      "'sort_warp_striped_to_striped' can only be used with "
+                      "'block_radix_rank_algorithm::match'.");
+
+        empty_type values[ItemsPerThread];
+        sort_impl<false, true, false>(keys, values, storage, begin_bit, end_bit, decomposer);
+    }
+
+    /// \brief Performs ascending radix sort over key-value pairs in a *warp-striped order*
+    /// partitioned across threads in a block, results are saved in a striped arrangement.
+    ///
+    /// \see block_radix_sort::sort_to_striped
+    template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_warp_striped_to_striped(Key (&keys)[ItemsPerThread],
+                                      unsigned int begin_bit  = 0,
+                                      unsigned int end_bit    = 8 * sizeof(Key),
+                                      Decomposer   decomposer = {})
+    {
+        static_assert(warp_striped,
+                      "'sort_warp_striped_to_striped' can only be used with "
+                      "'block_radix_rank_algorithm::match'.");
+
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        sort_warp_striped_to_striped(keys, storage, begin_bit, end_bit, decomposer);
+    }
+
+    /// \brief Performs descending radix sort over key-value pairs in a *warp-striped order*
+    /// partitioned across threads in a block, results are saved in a striped arrangement.
+    ///
+    /// \see block_radix_sort::sort_desc_to_striped
+    template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_desc_warp_striped_to_striped(
+        Key (&keys)[ItemsPerThread],
+        typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+        storage_type& storage,
+        unsigned int  begin_bit  = 0,
+        unsigned int  end_bit    = 8 * sizeof(Key),
+        Decomposer    decomposer = {})
+    {
+        static_assert(warp_striped,
+                      "'sort_warp_striped_to_striped' can only be used with "
+                      "'block_radix_rank_algorithm::match'.");
+
+        sort_impl<true, true, false>(keys, values, storage, begin_bit, end_bit, decomposer);
+    }
+
+    /// \brief Performs descending radix sort over key-value pairs in a *warp-striped order*
+    /// partitioned across threads in a block, results are saved in a striped arrangement.
+    ///
+    /// \see block_radix_sort::sort_desc_to_striped
+    template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_desc_warp_striped_to_striped(
+        Key (&keys)[ItemsPerThread],
+        typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+        unsigned int begin_bit  = 0,
+        unsigned int end_bit    = 8 * sizeof(Key),
+        Decomposer   decomposer = {})
+    {
+        static_assert(warp_striped,
+                      "'sort_warp_striped_to_striped' can only be used with "
+                      "'block_radix_rank_algorithm::match'.");
+
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        sort_desc_warp_striped_to_striped(keys, values, storage, begin_bit, end_bit, decomposer);
+    }
+
+    /// \brief Performs descending radix sort over key-value pairs in a *warp-striped order*
+    /// partitioned across threads in a block, results are saved in a striped arrangement.
+    ///
+    /// \see block_radix_sort::sort_desc_to_striped
+    template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_desc_warp_striped_to_striped(Key (&keys)[ItemsPerThread],
+                                           storage_type& storage,
+                                           unsigned int  begin_bit  = 0,
+                                           unsigned int  end_bit    = 8 * sizeof(Key),
+                                           Decomposer    decomposer = {})
+    {
+        static_assert(warp_striped,
+                      "'sort_warp_striped_to_striped' can only be used with "
+                      "'block_radix_rank_algorithm::match'.");
+
+        empty_type values[ItemsPerThread];
+        sort_impl<true, true, false>(keys, values, storage, begin_bit, end_bit, decomposer);
+    }
+
+    /// \brief Performs descending radix sort over key-value pairs in a *warp-striped order*
+    /// partitioned across threads in a block, results are saved in a striped arrangement.
+    ///
+    /// \see block_radix_sort::sort_desc_to_striped
+    template<bool WithValues = with_values, class Decomposer = ::rocprim::identity_decomposer>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_desc_warp_striped_to_striped(Key (&keys)[ItemsPerThread],
+                                           unsigned int begin_bit  = 0,
+                                           unsigned int end_bit    = 8 * sizeof(Key),
+                                           Decomposer   decomposer = {})
+    {
+        static_assert(warp_striped,
+                      "'sort_warp_striped_to_striped' can only be used with "
+                      "'block_radix_rank_algorithm::match'.");
+
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        sort_desc_warp_striped_to_striped(keys, storage, begin_bit, end_bit, decomposer);
+    }
+
 private:
-    template<bool Descending, bool ToStriped = false, class SortedValue, class Decomposer>
-    ROCPRIM_DEVICE ROCPRIM_INLINE void sort_impl(Key (&keys)[ItemsPerThread],
-                                                 SortedValue (&values)[ItemsPerThread],
-                                                 storage_type& storage,
-                                                 unsigned int  begin_bit,
-                                                 unsigned int  end_bit,
-                                                 Decomposer    decomposer)
+    static constexpr bool use_warp_exchange
+        = device_warp_size() % ItemsPerThread == 0 && ItemsPerThread <= 4;
+
+    template<class SortedValue>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void blocked_to_warp_striped(Key (&keys)[ItemsPerThread],
+                                 SortedValue (&values)[ItemsPerThread],
+                                 storage_type& storage,
+                                 std::false_type)
+    {
+        keys_exchange_type().blocked_to_warp_striped(keys, keys, storage.get().keys_exchange);
+        if ROCPRIM_IF_CONSTEXPR(is_key_and_value_aligned)
+        {
+            // If keys and values are aligned, then the LDS for both exchanges is
+            // local per wave. We can relax the data dependency!
+            ::rocprim::wave_barrier();
+        }
+        else
+        {
+            ::rocprim::syncthreads();
+        }
+        values_exchange_type().blocked_to_warp_striped(values,
+                                                       values,
+                                                       storage.get().values_exchange);
+    }
+
+    template<class SortedValue>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void blocked_to_warp_striped(Key (&keys)[ItemsPerThread],
+                                 SortedValue (&values)[ItemsPerThread],
+                                 storage_type& /* storage */,
+                                 std::true_type)
+    {
+        ::rocprim::warp_exchange<Key, ItemsPerThread>{}.blocked_to_striped_shuffle(keys, keys);
+        ::rocprim::warp_exchange<SortedValue, ItemsPerThread>{}.blocked_to_striped_shuffle(values,
+                                                                                           values);
+    }
+
+    template<bool Descending,
+             bool ToStriped             = false,
+             bool TryEmulateWarpStriped = true,
+             class SortedValue,
+             class Decomposer>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort_impl(Key (&keys)[ItemsPerThread],
+                   SortedValue (&values)[ItemsPerThread],
+                   storage_type& storage,
+                   unsigned int  begin_bit,
+                   unsigned int  end_bit,
+                   Decomposer    decomposer)
     {
         using key_codec = ::rocprim::radix_key_codec<Key, Descending>;
 
+        // 'rank_keys' may be invoked multiple times. We encode the key once and move the
+        // encoded during the majority of sort to save on some compute.
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             key_codec::encode_inplace(keys[i], decomposer);
         }
 
+        // If we're using warp striped radix rank but our input is in a blocked layout, we
+        // can emulate the correct input through an exchange to a warp striped layout.
+        if ROCPRIM_IF_CONSTEXPR(TryEmulateWarpStriped && warp_striped && ItemsPerThread > 1)
+        {
+            // This appears to be slower with high large items per thread.
+            constexpr bool use_warp_exchange
+                = device_warp_size() % ItemsPerThread == 0 && ItemsPerThread <= 4;
+            blocked_to_warp_striped(keys,
+                                    values,
+                                    storage,
+                                    std::integral_constant<bool, use_warp_exchange>{});
+            // Storage has been dirtied. 'rank_keys' does not always align nicely with this
+            // so a full block synchronization is needed.
+            ::rocprim::syncthreads();
+        }
+
+        unsigned int ranks[ItemsPerThread];
         while(true)
         {
             const int pass_bits = min(RadixBitsPerPass, end_bit - begin_bit);
 
-            unsigned int ranks[ItemsPerThread];
             block_rank_type().rank_keys(
                 keys,
                 ranks,
@@ -907,12 +1149,20 @@ private:
                 { return key_codec::extract_digit(key, begin_bit, pass_bits, decomposer); });
             begin_bit += RadixBitsPerPass;
 
-            exchange_keys(storage, keys, ranks);
-            exchange_values(storage, values, ranks);
-
             if(begin_bit >= end_bit)
             {
                 break;
+            }
+
+            if ROCPRIM_IF_CONSTEXPR(warp_striped)
+            {
+                exchange_keys_warp_striped(storage, keys, ranks);
+                exchange_values_warp_striped(storage, values, ranks);
+            }
+            else
+            {
+                exchange_keys(storage, keys, ranks);
+                exchange_values(storage, values, ranks);
             }
 
             // Synchronization required to make block_rank wait on the next iteration.
@@ -921,10 +1171,16 @@ private:
 
         if ROCPRIM_IF_CONSTEXPR(ToStriped)
         {
-            to_striped_keys(storage, keys);
-            to_striped_values(storage, values);
+            exchange_to_striped_keys(storage, keys, ranks);
+            exchange_to_striped_values(storage, values, ranks);
+        }
+        else
+        {
+            exchange_keys(storage, keys, ranks);
+            exchange_values(storage, values, ranks);
         }
 
+        // Done with 'rank_keys' so we can decode back to the original key.
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
@@ -932,9 +1188,10 @@ private:
         }
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void exchange_keys(storage_type& storage,
-                                                     Key (&keys)[ItemsPerThread],
-                                                     const unsigned int (&ranks)[ItemsPerThread])
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void exchange_keys(storage_type& storage,
+                       Key (&keys)[ItemsPerThread],
+                       const unsigned int (&ranks)[ItemsPerThread])
     {
         storage_type_& storage_ = storage.get();
         ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
@@ -957,35 +1214,74 @@ private:
                          empty_type (&values)[ItemsPerThread],
                          const unsigned int (&ranks)[ItemsPerThread])
     {
-        (void) storage;
-        (void) values;
-        (void) ranks;
+        (void)storage;
+        (void)values;
+        (void)ranks;
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void to_striped_keys(storage_type& storage,
-                                                       Key (&keys)[ItemsPerThread])
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void exchange_keys_warp_striped(storage_type& storage,
+                                    Key (&keys)[ItemsPerThread],
+                                    const unsigned int (&ranks)[ItemsPerThread])
     {
         storage_type_& storage_ = storage.get();
         ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
-        keys_exchange_type().blocked_to_striped(keys, keys, storage_.keys_exchange);
+        keys_exchange_type().scatter_to_warp_striped(keys, keys, ranks, storage_.keys_exchange);
     }
 
     template<class SortedValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void to_striped_values(storage_type& storage,
-                           SortedValue (&values)[ItemsPerThread])
+    void exchange_values_warp_striped(storage_type& storage,
+                                      SortedValue (&values)[ItemsPerThread],
+                                      const unsigned int (&ranks)[ItemsPerThread])
     {
         storage_type_& storage_ = storage.get();
         ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
-        values_exchange_type().blocked_to_striped(values, values, storage_.values_exchange);
+        values_exchange_type().scatter_to_warp_striped(values,
+                                                       values,
+                                                       ranks,
+                                                       storage_.values_exchange);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void to_striped_values(storage_type& storage,
-                           empty_type * values)
+    void exchange_values_warp_striped(storage_type& storage,
+                                      empty_type (&values)[ItemsPerThread],
+                                      const unsigned int (&ranks)[ItemsPerThread])
     {
-        (void) storage;
-        (void) values;
+        (void)storage;
+        (void)values;
+        (void)ranks;
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void exchange_to_striped_keys(storage_type& storage,
+                                  Key (&keys)[ItemsPerThread],
+                                  const unsigned int (&ranks)[ItemsPerThread])
+    {
+        storage_type_& storage_ = storage.get();
+        ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
+        keys_exchange_type().scatter_to_striped(keys, keys, ranks, storage_.keys_exchange);
+    }
+
+    template<class SortedValue>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void exchange_to_striped_values(storage_type& storage,
+                                    SortedValue (&values)[ItemsPerThread],
+                                    const unsigned int (&ranks)[ItemsPerThread])
+    {
+        storage_type_& storage_ = storage.get();
+        ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
+        values_exchange_type().scatter_to_striped(values, values, ranks, storage_.values_exchange);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void exchange_to_striped_values(storage_type& storage,
+                                    empty_type*   values,
+                                    const unsigned int (&ranks)[ItemsPerThread])
+    {
+        (void)ranks;
+        (void)storage;
+        (void)values;
     }
 };
 

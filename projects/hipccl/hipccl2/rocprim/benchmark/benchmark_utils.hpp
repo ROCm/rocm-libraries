@@ -208,7 +208,10 @@ inline auto generate_random_data_n(OutputIterator it,
     using T = typename std::iterator_traits<OutputIterator>::value_type;
 
     // Generate floats when T is half
-    using dis_type = std::conditional_t<std::is_same<rocprim::half, T>::value, float, T>;
+    using dis_type = std::conditional_t<std::is_same<rocprim::half, T>::value
+                                            || std::is_same<rocprim::bfloat16, T>::value,
+                                        float,
+                                        T>;
     std::uniform_real_distribution<dis_type> distribution((dis_type)min, (dis_type)max);
     std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
@@ -929,6 +932,11 @@ template<>
 inline const char* Traits<rocprim::half>::name()
 {
     return "rocprim::half";
+}
+template<>
+inline const char* Traits<rocprim::bfloat16>::name()
+{
+    return "rocprim::bfloat16";
 }
 template<>
 inline const char* Traits<long long>::name()

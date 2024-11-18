@@ -57,6 +57,7 @@
 #include "block/block_scan.hpp"
 #include "block/block_sort.hpp"
 #include "block/block_store.hpp"
+#include "block/config.hpp"
 
 #include "device/device_adjacent_difference.hpp"
 #include "device/device_binary_search.hpp"
