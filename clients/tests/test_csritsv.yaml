@@ -130,6 +130,7 @@ Tests:
   apol: [ rocsparse_analysis_policy_force]
   spol: [rocsparse_solve_policy_auto]
   baseA: [rocsparse_index_base_zero]
+  nmaxiter: [200]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [mc2depi]
   matrix_type: [rocsparse_matrix_type_triangular]
