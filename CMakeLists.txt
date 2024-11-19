@@ -608,7 +608,6 @@ set(
   test/unit/DataTypesTest.cpp
   test/unit/DependencyTest.cpp
   test/unit/ErrorTest.cpp
-  test/unit/ExpressionTransformationTest.cpp
   test/unit/F6Test.cpp
   test/unit/F8Test.cpp
   test/unit/FP4Test.cpp
