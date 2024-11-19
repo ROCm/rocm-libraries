@@ -98,9 +98,12 @@ inline const char* rocsparse_status_to_string(rocsparse_status status)
         return "rocsparse_status_type_mismatch";
     case rocsparse_status_requires_sorted_storage:
         return "rocsparse_status_requires_sorted_storage";
-    default:
-        return "<undefined rocsparse_status value>";
+    case rocsparse_status_thrown_exception:
+        return "rocsparse_status_thrown_exception";
+    case rocsparse_status_continue:
+        return "rocsparse_status_continue";
     }
+    return "<undefined rocsparse_status value>";
 }
 
 inline const char* rocsparse_data_status_to_string(rocsparse_data_status status)
@@ -123,9 +126,8 @@ inline const char* rocsparse_data_status_to_string(rocsparse_data_status status)
         return "rocsparse_data_status_invalid_sorting";
     case rocsparse_data_status_invalid_fill:
         return "rocsparse_data_status_invalid_fill";
-    default:
-        return "<undefined rocsparse_status value>";
     }
+    return "<undefined rocsparse_data_status value>";
 }
 
 inline void rocsparse_expect_status(rocsparse_status status, rocsparse_status expect)
