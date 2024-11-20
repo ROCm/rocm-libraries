@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -116,7 +116,7 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
         HIP_CHECK(hipDeviceSynchronize());
 
         Iterator x;
-        x.bind_texture(d_input, sizeof(T) * input.size());
+        HIP_CHECK(x.bind_texture(d_input, sizeof(T) * input.size()));
 
         // Calculate expected results on host
         std::vector<T> expected(size);
@@ -153,8 +153,8 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
             ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
 
-        x.unbind_texture();
-        hipFree(d_input);
-        hipFree(d_output);
+        HIP_CHECK(x.unbind_texture());
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
     }
 }

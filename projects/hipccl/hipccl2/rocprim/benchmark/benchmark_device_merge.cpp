@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "benchmark_device_merge.parallel.hpp"
 #include "benchmark_utils.hpp"
 // CmdParser
 #include "cmdparser.hpp"
@@ -41,267 +42,22 @@
 #include <cstdio>
 #include <cstdlib>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
-namespace rp = rocprim;
-
-const unsigned int batch_size = 10;
-const unsigned int warmup_size = 5;
-
-template<class Key>
-void run_merge_keys_benchmark(benchmark::State&   state,
-                              size_t              size,
-                              const managed_seed& seed,
-                              hipStream_t         stream)
-{
-    using key_type = Key;
-    using compare_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, half_less, rocprim::less<key_type>>::type;
-
-    const size_t size1 = size / 2;
-    const size_t size2 = size - size1;
-
-    compare_op_type compare_op;
-
-    // Generate data
-    const auto random_range = limit_random_range<key_type>(0, size);
-
-    std::vector<key_type> keys_input1
-        = get_random_data<key_type>(size1, random_range.first, random_range.second, seed.get_0());
-    std::vector<key_type> keys_input2
-        = get_random_data<key_type>(size2, random_range.first, random_range.second, seed.get_1());
-    std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
-    std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
-
-    key_type * d_keys_input1;
-    key_type * d_keys_input2;
-    key_type * d_keys_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input1), size1 * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input2), size2 * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_keys_input1, keys_input1.data(),
-            size1 * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(
-        hipMemcpy(
-            d_keys_input2, keys_input2.data(),
-            size2 * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    void * d_temporary_storage = nullptr;
-    size_t temporary_storage_bytes = 0;
-    HIP_CHECK(
-        rp::merge(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input1, d_keys_input2, d_keys_output, size1, size2,
-            compare_op, stream, false
-        )
-    );
-
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
-    {
-        HIP_CHECK(
-            rp::merge(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input1, d_keys_input2, d_keys_output, size1, size2,
-                compare_op, stream, false
-            )
-        );
+#define CREATE_BENCHMARK(...)                                          \
+    {                                                                  \
+        const device_merge_benchmark<__VA_ARGS__> instance;            \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
     }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    for (auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            HIP_CHECK(
-                rp::merge(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input1, d_keys_input2, d_keys_output, size1, size2,
-                    compare_op, stream, false
-                )
-            );
-        }
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-    }
-
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_keys_input1));
-    HIP_CHECK(hipFree(d_keys_input2));
-    HIP_CHECK(hipFree(d_keys_output));
-}
-
-template<class Key, class Value>
-void run_merge_pairs_benchmark(benchmark::State&   state,
-                               size_t              size,
-                               const managed_seed& seed,
-                               hipStream_t         stream)
-{
-    using key_type = Key;
-    using value_type = Value;
-    using compare_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, half_less, rocprim::less<key_type>>::type;
-
-    const size_t size1 = size / 2;
-    const size_t size2 = size - size1;
-
-    compare_op_type compare_op;
-
-    // Generate data
-    const auto            random_range = limit_random_range<key_type>(0, size);
-    std::vector<key_type> keys_input1
-        = get_random_data<key_type>(size1, random_range.first, random_range.second, seed.get_0());
-    std::vector<key_type> keys_input2
-        = get_random_data<key_type>(size2, random_range.first, random_range.second, seed.get_1());
-    std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
-    std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
-    std::vector<value_type> values_input1(size1);
-    std::vector<value_type> values_input2(size2);
-    std::iota(values_input1.begin(), values_input1.end(), 0);
-    std::iota(values_input2.begin(), values_input2.end(), size1);
-
-    key_type * d_keys_input1;
-    key_type * d_keys_input2;
-    key_type * d_keys_output;
-    value_type * d_values_input1;
-    value_type * d_values_input2;
-    value_type * d_values_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input1), size1 * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input2), size2 * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input1), size1 * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input2), size2 * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_output), size * sizeof(value_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_keys_input1, keys_input1.data(),
-            size1 * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(
-        hipMemcpy(
-            d_keys_input2, keys_input2.data(),
-            size2 * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    void * d_temporary_storage = nullptr;
-    size_t temporary_storage_bytes = 0;
-    HIP_CHECK(
-        rp::merge(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input1, d_keys_input2, d_keys_output,
-            d_values_input1, d_values_input2, d_values_output,
-            size1, size2,
-            compare_op, stream, false
-        )
-    );
-
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
-    {
-        HIP_CHECK(
-            rp::merge(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input1, d_keys_input2, d_keys_output,
-                d_values_input1, d_values_input2, d_values_output,
-                size1, size2,
-                compare_op, stream, false
-            )
-        );
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
-
-    for (auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            HIP_CHECK(
-                rp::merge(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input1, d_keys_input2, d_keys_output,
-                    d_values_input1, d_values_input2, d_values_output,
-                    size1, size2,
-                    compare_op, stream, false
-                )
-            );
-        }
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-    }
-
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    state.SetBytesProcessed(state.iterations() * batch_size * size * (sizeof(key_type) + sizeof(value_type)));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_keys_input1));
-    HIP_CHECK(hipFree(d_keys_input2));
-    HIP_CHECK(hipFree(d_keys_output));
-    HIP_CHECK(hipFree(d_values_input1));
-    HIP_CHECK(hipFree(d_values_input2));
-    HIP_CHECK(hipFree(d_values_output));
-}
 
 #define CREATE_MERGE_KEYS_BENCHMARK(Key)                                                          \
     benchmark::RegisterBenchmark(                                                                 \
         bench_naming::format_name("{lvl:device,algo:merge,key_type:" #Key ",cfg:default_config}") \
             .c_str(),                                                                             \
         [=](benchmark::State& state)                                                              \
-        { run_merge_keys_benchmark<Key>(state, size, seed, stream); })
+        { run_merge_keys_benchmark<Key>(state, bytes, seed, stream); })
 
 #define CREATE_MERGE_PAIRS_BENCHMARK(Key, Value)                                                \
     benchmark::RegisterBenchmark(                                                               \
@@ -309,23 +65,34 @@ void run_merge_pairs_benchmark(benchmark::State&   state,
                                   ",cfg:default_config}")                                       \
             .c_str(),                                                                           \
         [=](benchmark::State& state)                                                            \
-        { run_merge_pairs_benchmark<Key, Value>(state, size, seed, stream); })
+        { run_merge_pairs_benchmark<Key, Value>(state, bytes, seed, stream); })
 
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
     parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
+#ifdef BENCHMARK_CONFIG_TUNING
+    // optionally run an evenly split subset of benchmarks, when making multiple program invocations
+    parser.set_optional<int>("parallel_instance",
+                             "parallel_instance",
+                             0,
+                             "parallel instance index");
+    parser.set_optional<int>("parallel_instances",
+                             "parallel_instances",
+                             1,
+                             "total parallel instances");
+#endif
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
+    const size_t bytes = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -336,33 +103,43 @@ int main(int argc, char *argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
+    // Add benchmarks
+    std::vector<benchmark::internal::Benchmark*> benchmarks = {};
+#ifdef BENCHMARK_CONFIG_TUNING
+    const int parallel_instance  = parser.get<int>("parallel_instance");
+    const int parallel_instances = parser.get<int>("parallel_instances");
+    config_autotune_register::register_benchmark_subset(benchmarks,
+                                                        parallel_instance,
+                                                        parallel_instances,
+                                                        bytes,
+                                                        seed,
+                                                        stream);
+#else // BENCHMARK_CONFIG_TUNING
     using custom_int2 = custom_type<int, int>;
     using custom_double2 = custom_type<double, double>;
 
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks =
-    {
-        CREATE_MERGE_KEYS_BENCHMARK(int),
-        CREATE_MERGE_KEYS_BENCHMARK(long long),
-        CREATE_MERGE_KEYS_BENCHMARK(int8_t),
-        CREATE_MERGE_KEYS_BENCHMARK(uint8_t),
-        CREATE_MERGE_KEYS_BENCHMARK(rocprim::half),
-        CREATE_MERGE_KEYS_BENCHMARK(short),
-        CREATE_MERGE_KEYS_BENCHMARK(custom_int2),
-        CREATE_MERGE_KEYS_BENCHMARK(custom_double2),
+    CREATE_BENCHMARK(int)
+    CREATE_BENCHMARK(long long)
+    CREATE_BENCHMARK(int8_t)
+    CREATE_BENCHMARK(uint8_t)
+    CREATE_BENCHMARK(rocprim::half)
+    CREATE_BENCHMARK(short)
+    CREATE_BENCHMARK(custom_int2)
+    CREATE_BENCHMARK(custom_double2)
 
-        CREATE_MERGE_PAIRS_BENCHMARK(int, int),
-        CREATE_MERGE_PAIRS_BENCHMARK(long long, long long),
-        CREATE_MERGE_PAIRS_BENCHMARK(int8_t, int8_t),
-        CREATE_MERGE_PAIRS_BENCHMARK(uint8_t, uint8_t),
-        CREATE_MERGE_PAIRS_BENCHMARK(rocprim::half, rocprim::half),
-        CREATE_MERGE_PAIRS_BENCHMARK(short, short),
-        CREATE_MERGE_PAIRS_BENCHMARK(custom_int2, custom_int2),
-        CREATE_MERGE_PAIRS_BENCHMARK(custom_double2, custom_double2),
-    };
+    CREATE_BENCHMARK(int, int)
+    CREATE_BENCHMARK(long long, long long)
+    CREATE_BENCHMARK(int8_t, int8_t)
+    CREATE_BENCHMARK(uint8_t, uint8_t)
+    CREATE_BENCHMARK(rocprim::half, rocprim::half)
+    CREATE_BENCHMARK(short, short)
+    CREATE_BENCHMARK(custom_int2, custom_int2)
+    CREATE_BENCHMARK(custom_double2, custom_double2)
+
+#endif // BENCHMARK_CONFIG_TUNING
 
     // Use manual timing
     for(auto& b : benchmarks)

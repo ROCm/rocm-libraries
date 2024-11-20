@@ -87,8 +87,8 @@ auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine
     using key_type = typename std::iterator_traits<KeyIter>::value_type;
     test_utils::generate_random_data_n(keys_input,
                                        size,
-                                       std::numeric_limits<key_type>::min(),
-                                       std::numeric_limits<key_type>::max(),
+                                       test_utils::numeric_limits<key_type>::min(),
+                                       test_utils::numeric_limits<key_type>::max(),
                                        rng_engine);
 }
 
@@ -1302,8 +1302,8 @@ void sort_keys_over_4g()
 
     std::vector<key_type> keys_input
         = test_utils::get_random_data<key_type>(size,
-                                                std::numeric_limits<key_type>::min(),
-                                                std::numeric_limits<key_type>::max(),
+                                                test_utils::numeric_limits<key_type>::min(),
+                                                test_utils::numeric_limits<key_type>::max(),
                                                 seed_value);
 
     //generate histogram of the randomly generated values
@@ -1373,7 +1373,7 @@ void sort_keys_over_4g()
                         hipMemcpyDeviceToHost));
 
     size_t counter = 0;
-    for(size_t i = 0; i <= std::numeric_limits<key_type>::max(); ++i)
+    for(size_t i = 0; i <= test_utils::numeric_limits<key_type>::max(); ++i)
     {
         for(size_t j = 0; j < histogram[i]; ++j)
         {
@@ -1390,6 +1390,88 @@ void sort_keys_over_4g()
     {
         gHelper.cleanupGraphHelper();
         HIP_CHECK(hipStreamDestroy(stream));
+    }
+}
+
+inline void sort_keys_large_sizes()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using key_type                   = uint8_t;
+    constexpr unsigned int start_bit = 0;
+    constexpr unsigned int end_bit   = 8;
+
+    hipStream_t stream = 0;
+
+    // Currently, CI enforces a hard limit of 96 GB on memory allocations.
+    // Temporarily use sizes that will require less space than the limit.
+    const std::vector<size_t> sizes = test_utils::get_large_sizes<35>(seeds[0]);
+    for(const size_t size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        std::vector<key_type> keys_input(size);
+        std::iota(keys_input.begin(), keys_input.end(), 0);
+
+        key_type* d_keys;
+        HIP_CHECK_MEMORY(test_common_utils::hipMallocHelper(&d_keys, size * sizeof(key_type)));
+        HIP_CHECK(
+            hipMemcpy(d_keys, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
+
+        void*  d_temporary_storage     = nullptr;
+        size_t temporary_storage_bytes = 0;
+        HIP_CHECK(rocprim::radix_sort_keys(d_temporary_storage,
+                                           temporary_storage_bytes,
+                                           d_keys,
+                                           d_keys,
+                                           size,
+                                           start_bit,
+                                           end_bit,
+                                           stream));
+
+        ASSERT_GT(temporary_storage_bytes, 0U);
+
+        HIP_CHECK_MEMORY(
+            test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+        HIP_CHECK(rocprim::radix_sort_keys(d_temporary_storage,
+                                           temporary_storage_bytes,
+                                           d_keys,
+                                           d_keys,
+                                           size,
+                                           start_bit,
+                                           end_bit,
+                                           stream));
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+
+        std::vector<key_type> keys_output(size);
+        HIP_CHECK(
+            hipMemcpy(keys_output.data(), d_keys, size * sizeof(key_type), hipMemcpyDeviceToHost));
+
+        HIP_CHECK(hipFree(d_keys));
+
+        // Check if output values are as expected
+        const size_t unique_keys    = size_t(rocprim::numeric_limits<key_type>::max()) + 1;
+        const size_t segment_length = rocprim::detail::ceiling_div(size, unique_keys);
+        const size_t full_segments  = size % unique_keys == 0 ? unique_keys : size % unique_keys;
+        for(size_t i = 0; i < size; i += 4321)
+        {
+            key_type expected;
+            if(i / segment_length < full_segments)
+            {
+                expected = key_type(i / segment_length);
+            }
+            else
+            {
+                expected = key_type((i - full_segments * segment_length) / (segment_length - 1)
+                                    + full_segments);
+            }
+            ASSERT_EQ(keys_output[i], expected) << "with index = " << i;
+        }
     }
 }
 

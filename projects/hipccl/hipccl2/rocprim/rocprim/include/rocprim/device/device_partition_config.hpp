@@ -28,6 +28,7 @@
 #include "detail/config/device_partition_two_way_predicate.hpp"
 #include "detail/config/device_select_flag.hpp"
 #include "detail/config/device_select_predicate.hpp"
+#include "detail/config/device_select_predicated_flag.hpp"
 #include "detail/config/device_select_unique.hpp"
 #include "detail/config/device_select_unique_by_key.hpp"
 
@@ -147,6 +148,22 @@ struct wrapped_partition_config<default_config,
     };
 };
 
+template<typename KeyType, typename ValueType>
+struct wrapped_partition_config<default_config,
+                                partition_subalgo::select_predicated_flag,
+                                KeyType,
+                                ValueType>
+{
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr partition_config_params params
+            = default_select_predicated_flag_config<static_cast<unsigned int>(Arch),
+                                                    KeyType,
+                                                    ValueType>{};
+    };
+};
+
 template<typename KeyType>
 struct wrapped_partition_config<default_config,
                                 partition_subalgo::select_unique,
@@ -238,6 +255,14 @@ constexpr partition_config_params
                              partition_subalgo::select_predicate,
                              KeyType,
                              empty_type>::architecture_config<Arch>::params;
+
+template<typename KeyType, typename ValueType>
+template<target_arch Arch>
+constexpr partition_config_params
+    wrapped_partition_config<default_config,
+                             partition_subalgo::select_predicated_flag,
+                             KeyType,
+                             ValueType>::architecture_config<Arch>::params;
 
 template<typename KeyType>
 template<target_arch Arch>

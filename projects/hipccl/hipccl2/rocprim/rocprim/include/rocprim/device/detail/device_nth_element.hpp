@@ -28,6 +28,7 @@
 #include "../../block/block_store.hpp"
 
 #include "../../config.hpp"
+#include "../../common.hpp"
 #include "../../intrinsics.hpp"
 #include "../../type_traits.hpp"
 
@@ -48,37 +49,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start)                           \
-    do                                                                                           \
-    {                                                                                            \
-        hipError_t _error = hipGetLastError();                                                   \
-        if(_error != hipSuccess)                                                                 \
-            return _error;                                                                       \
-        if(debug_synchronous)                                                                    \
-        {                                                                                        \
-            std::cout << name << "(" << size << ")";                                             \
-            hipError_t __error = hipStreamSynchronize(stream);                                   \
-            if(__error != hipSuccess)                                                            \
-                return __error;                                                                  \
-            auto _end = std::chrono::steady_clock::now();                                        \
-            auto _d   = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
-        }                                                                                        \
-    }                                                                                            \
-    while(0)
-
-#define RETURN_ON_ERROR(...)              \
-    do                                    \
-    {                                     \
-        hipError_t error = (__VA_ARGS__); \
-        if(error != hipSuccess)           \
-        {                                 \
-            return error;                 \
-        }                                 \
-    }                                     \
-    while(0)
-
 struct nth_element_onesweep_lookback_state
 {
     // The two most significant bits are used to indicate the status of the prefix - leaving the other 30 bits for the
@@ -687,15 +657,16 @@ ROCPRIM_INLINE hipError_t
             std::cout << "iteration: " << iteration++ << '\n';
         }
 
-        RETURN_ON_ERROR(hipMemsetAsync(buckets, 0, sizeof(*buckets) * num_buckets, stream));
+        ROCPRIM_RETURN_ON_ERROR(hipMemsetAsync(buckets, 0, sizeof(*buckets) * num_buckets, stream));
 
-        RETURN_ON_ERROR(
+        ROCPRIM_RETURN_ON_ERROR(
             hipMemsetAsync(equality_buckets, 0, sizeof(*equality_buckets) * num_buckets, stream));
 
         // Reset lookback scan states to zero, indicating empty prefix.
-        RETURN_ON_ERROR(nth_element_onesweep_lookback_state::reset(lookback_states,
-                                                                   num_partitions * num_blocks,
-                                                                   stream));
+        ROCPRIM_RETURN_ON_ERROR(
+            nth_element_onesweep_lookback_state::reset(lookback_states,
+                                                       num_partitions * num_blocks,
+                                                       stream));
 
         start_timer();
         kernel_find_splitters<config>
@@ -730,21 +701,21 @@ ROCPRIM_INLINE hipError_t
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("kernel_copy_buckets", size, start);
 
         // Copy the results in keys_buffer back to the keys
-        RETURN_ON_ERROR(transform(keys_buffer,
-                                  keys,
-                                  size,
-                                  ::rocprim::identity<key_type>(),
-                                  stream,
-                                  debug_synchronous));
+        ROCPRIM_RETURN_ON_ERROR(transform(keys_buffer,
+                                          keys,
+                                          size,
+                                          ::rocprim::identity<key_type>(),
+                                          stream,
+                                          debug_synchronous));
 
         n_th_element_iteration_data h_nth_element_data;
-        RETURN_ON_ERROR(hipMemcpyAsync(&h_nth_element_data,
-                                       nth_element_data,
-                                       sizeof(h_nth_element_data),
-                                       hipMemcpyDeviceToHost,
-                                       stream));
+        ROCPRIM_RETURN_ON_ERROR(hipMemcpyAsync(&h_nth_element_data,
+                                               nth_element_data,
+                                               sizeof(h_nth_element_data),
+                                               hipMemcpyDeviceToHost,
+                                               stream));
 
-        RETURN_ON_ERROR(hipStreamSynchronize(stream));
+        ROCPRIM_RETURN_ON_ERROR(hipStreamSynchronize(stream));
 
         size_t offset          = h_nth_element_data.offset;
         size_t bucket_size     = h_nth_element_data.size;
@@ -768,8 +739,7 @@ ROCPRIM_INLINE hipError_t
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
-#undef RETURN_ON_ERROR
+
 
 } // namespace detail
 

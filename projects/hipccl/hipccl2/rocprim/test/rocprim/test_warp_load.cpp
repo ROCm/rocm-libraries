@@ -279,7 +279,8 @@ TYPED_TEST(WarpLoadTest, WarpLoadGuarded)
     constexpr unsigned int block_size = 1024;
     constexpr unsigned int items_count = items_per_thread * block_size;
     constexpr unsigned int valid_items = warp_size / 4;
-    constexpr T oob_default = std::numeric_limits<T>::max();
+
+    const T oob_default = test_utils::numeric_limits<T>::max();
 
     int device_id = test_common_utils::obtain_device_from_ctest();
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size, device_id);

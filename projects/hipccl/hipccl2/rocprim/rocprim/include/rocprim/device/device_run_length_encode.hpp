@@ -26,6 +26,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/various.hpp"
 
 #include "../iterator/constant_iterator.hpp"
@@ -42,25 +43,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 /// \addtogroup devicemodule
 /// @{
-
-namespace detail
-{
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        if(error != hipSuccess) return error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto error = hipStreamSynchronize(stream); \
-            if(error != hipSuccess) return error; \
-            auto end = std::chrono::high_resolution_clock::now(); \
-            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-            std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
-
-} // end detail namespace
 
 /// \brief Parallel run-length encoding for device level.
 ///
@@ -357,9 +339,9 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
     ptr += counts_tmp_bytes;
     all_runs_count_tmp = reinterpret_cast<count_type *>(ptr);
 
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
 
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    if(debug_synchronous) start = std::chrono::steady_clock::now();
     error = ::rocprim::reduce_by_key<typename config::reduce_by_key>(
         temporary_storage, reduce_by_key_bytes,
         input,
@@ -376,7 +358,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
         reduce_op, ::rocprim::equal_to<input_type>(),
         stream, debug_synchronous
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::reduce_by_key", size, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::reduce_by_key", size, start);
 
     // Read count of all runs (including trivial runs)
     count_type all_runs_count;
@@ -389,7 +371,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
         return error;
 
     // Select non-trivial runs
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    if(debug_synchronous) start = std::chrono::steady_clock::now();
     error = ::rocprim::select<typename config::select>(
         temporary_storage, select_bytes,
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
@@ -399,12 +381,12 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
         non_trivial_runs_select_op,
         stream, debug_synchronous
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::select", all_runs_count, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::select", all_runs_count, start);
 
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 
 /// @}
 // end of group devicemodule

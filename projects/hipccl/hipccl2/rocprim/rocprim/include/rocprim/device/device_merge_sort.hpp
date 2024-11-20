@@ -26,6 +26,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 
@@ -135,21 +136,6 @@ void device_block_merge_mergepath_kernel(KeysInputIterator    keys_input,
                                                                                  compare_function,
                                                                                  merge_partitions);
 }
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto _error = hipGetLastError(); \
-        if(_error != hipSuccess) return _error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto __error = hipStreamSynchronize(stream); \
-            if(__error != hipSuccess) return __error; \
-            auto _end = std::chrono::high_resolution_clock::now(); \
-            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
 
 template<typename Config, typename KeysInputIterator, typename OffsetT, typename CompareOpT>
 ROCPRIM_KERNEL __launch_bounds__(
@@ -323,7 +309,7 @@ inline hipError_t merge_sort_block_merge(
     }
 
     // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
 
     bool temporary_store = true;
     for(OffsetT block = sorted_block_size; block < size; block *= 2)
@@ -338,7 +324,7 @@ inline hipError_t merge_sort_block_merge(
             if(use_mergepath && block >= merge_mergepath_items_per_block)
             {
                 if(debug_synchronous)
-                    start = std::chrono::high_resolution_clock::now();
+                    start = std::chrono::steady_clock::now();
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(device_block_merge_mergepath_partition_kernel<config>),
                     dim3(merge_partition_number_of_blocks),
@@ -357,7 +343,7 @@ inline hipError_t merge_sort_block_merge(
                     start);
 
                 if(debug_synchronous)
-                    start = std::chrono::high_resolution_clock::now();
+                    start = std::chrono::steady_clock::now();
                 hipLaunchKernelGGL(HIP_KERNEL_NAME(device_block_merge_mergepath_kernel<config>),
                                    calculate_grid_dim(merge_mergepath_number_of_blocks,
                                                       merge_mergepath_block_size),
@@ -380,7 +366,7 @@ inline hipError_t merge_sort_block_merge(
             else
             {
                 if(debug_synchronous)
-                    start = std::chrono::high_resolution_clock::now();
+                    start = std::chrono::steady_clock::now();
                 // As this kernel is only called with small sizes, it is safe to use 32-bit integers
                 // for size and block.
                 hipLaunchKernelGGL(HIP_KERNEL_NAME(device_block_merge_oddeven_kernel<config>),
@@ -397,7 +383,7 @@ inline hipError_t merge_sort_block_merge(
                                    compare_function);
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_block_merge_oddeven_kernel",
                                                             size,
-                                                            start)
+                                                            start);
             }
             return hipSuccess;
         };
@@ -483,9 +469,9 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
     }
 
     // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
     if(debug_synchronous)
-        start = std::chrono::high_resolution_clock::now();
+        start = std::chrono::steady_clock::now();
 
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(block_sort_kernel<config>),
@@ -636,7 +622,7 @@ inline hipError_t merge_sort_impl(
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 
 } // end of detail namespace
 

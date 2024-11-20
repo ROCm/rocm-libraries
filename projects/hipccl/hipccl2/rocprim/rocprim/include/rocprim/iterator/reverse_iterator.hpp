@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,6 +43,13 @@ BEGIN_ROCPRIM_NAMESPACE
 ///
 /// \tparam SourceIterator - type of the wrapped iterator.
 template<class SourceIterator>
+class reverse_iterator;
+
+template<class SourceIterator>
+ROCPRIM_HOST_DEVICE
+constexpr reverse_iterator<SourceIterator> make_reverse_iterator(SourceIterator source_iterator);
+
+template<class SourceIterator>
 class reverse_iterator
 {
 public:
@@ -62,20 +69,43 @@ public:
     /// The category of the iterator.
     using iterator_category = std::random_access_iterator_tag;
 
+    /// \brief Constructs a new default reverse_iterator.
+    ROCPRIM_HOST_DEVICE constexpr reverse_iterator() : source_iterator_(nullptr)
+    {}
+
     /// \brief Constructs a new reverse_iterator using the supplied source.
-    ROCPRIM_HOST_DEVICE
-    reverse_iterator(SourceIterator source_iterator) : source_iterator_(source_iterator) {}
+    [[deprecated("The initialisation constructor of 'rocprim::reverse_iterator<Iter>' will be "
+                 "marked explicit in ROCm 7.0. Use 'rocprim::make_reverse_iterator' "
+                 "instead.")]] ROCPRIM_HOST_DEVICE constexpr /*explicit*/
+        reverse_iterator(SourceIterator source_iterator)
+        : source_iterator_(source_iterator)
+    {}
 
-    #ifndef DOXYGEN_SHOULD_SKIP_THIS
+    /// \brief Constructs a new reverse_iterator using that of the supplied source.
+    template<class OtherSourceIterator>
+    ROCPRIM_HOST_DEVICE constexpr reverse_iterator(
+        const reverse_iterator<OtherSourceIterator>& source_reverse_iterator)
+        : source_iterator_(source_reverse_iterator.base())
+    {}
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
     ROCPRIM_HOST_DEVICE
-    reverse_iterator& operator++()
+    constexpr SourceIterator base() const
+    {
+        return source_iterator_;
+    }
+
+    ROCPRIM_HOST_DEVICE
+    constexpr reverse_iterator&
+        operator++()
     {
         --source_iterator_;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE
-    reverse_iterator operator++(int)
+    constexpr reverse_iterator
+        operator++(int)
     {
         reverse_iterator old = *this;
         --source_iterator_;
@@ -83,14 +113,16 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE
-    reverse_iterator& operator--()
+    constexpr reverse_iterator&
+        operator--()
     {
         ++source_iterator_;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE
-    reverse_iterator operator--(int)
+    constexpr reverse_iterator
+        operator--(int)
     {
         reverse_iterator old = *this;
         ++source_iterator_;
@@ -98,86 +130,99 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE
-    reference operator*()
+    constexpr reference
+        operator*() const
     {
         return *(source_iterator_ - static_cast<difference_type>(1));
     }
 
     ROCPRIM_HOST_DEVICE
-    reference operator[](difference_type distance)
+    constexpr reference
+        operator[](difference_type distance) const
     {
         reverse_iterator i = (*this) + distance;
         return *i;
     }
 
     ROCPRIM_HOST_DEVICE
-    reverse_iterator operator+(difference_type distance) const
+    constexpr reverse_iterator
+        operator+(difference_type distance) const
     {
-        return reverse_iterator(source_iterator_ - distance);
+        return rocprim::make_reverse_iterator(source_iterator_ - distance);
     }
 
     ROCPRIM_HOST_DEVICE
-    reverse_iterator& operator+=(difference_type distance)
+    constexpr reverse_iterator&
+        operator+=(difference_type distance)
     {
         source_iterator_ -= distance;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE
-    reverse_iterator operator-(difference_type distance) const
+    constexpr reverse_iterator
+        operator-(difference_type distance) const
     {
-        return reverse_iterator(source_iterator_ + distance);
+        return rocprim::make_reverse_iterator(source_iterator_ + distance);
     }
 
     ROCPRIM_HOST_DEVICE
-    reverse_iterator& operator-=(difference_type distance)
+    constexpr reverse_iterator&
+        operator-=(difference_type distance)
     {
         source_iterator_ += distance;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE
-    difference_type operator-(reverse_iterator other) const
+    constexpr difference_type
+        operator-(reverse_iterator other) const
     {
         return other.source_iterator_ - source_iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    bool operator==(reverse_iterator other) const
+    constexpr bool
+        operator==(reverse_iterator other) const
     {
         return source_iterator_ == other.source_iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    bool operator!=(reverse_iterator other) const
+    constexpr bool
+        operator!=(reverse_iterator other) const
     {
         return source_iterator_ != other.source_iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    bool operator<(reverse_iterator other) const
+    constexpr bool
+        operator<(reverse_iterator other) const
     {
         return other.source_iterator_ < source_iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    bool operator<=(reverse_iterator other) const
+    constexpr bool
+        operator<=(reverse_iterator other) const
     {
         return other.source_iterator_ <= source_iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    bool operator>(reverse_iterator other) const
+    constexpr bool
+        operator>(reverse_iterator other) const
     {
         return other.source_iterator_ > source_iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    bool operator>=(reverse_iterator other) const
+    constexpr bool
+        operator>=(reverse_iterator other) const
     {
         return other.source_iterator_ >= source_iterator_;
     }
-    #endif // DOXYGEN_SHOULD_SKIP_THIS
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:
     SourceIterator source_iterator_;
@@ -185,8 +230,9 @@ private:
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 template<class SourceIterator>
-ROCPRIM_HOST_DEVICE reverse_iterator<SourceIterator>
-                    operator+(typename reverse_iterator<SourceIterator>::difference_type distance,
+ROCPRIM_HOST_DEVICE
+constexpr reverse_iterator<SourceIterator>
+    operator+(typename reverse_iterator<SourceIterator>::difference_type distance,
               const reverse_iterator<SourceIterator>&                    iterator)
 {
     return iterator + distance;
@@ -200,10 +246,13 @@ ROCPRIM_HOST_DEVICE reverse_iterator<SourceIterator>
 /// \param source_iterator - the iterator to wrap in the created \p reverse_iterator.
 /// \return A \p reverse_iterator that wraps \p source_iterator.
 template<class SourceIterator>
-ROCPRIM_HOST_DEVICE reverse_iterator<SourceIterator>
-                    make_reverse_iterator(SourceIterator source_iterator)
+ROCPRIM_HOST_DEVICE
+constexpr reverse_iterator<SourceIterator> make_reverse_iterator(SourceIterator source_iterator)
 {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     return reverse_iterator<SourceIterator>(source_iterator);
+#pragma clang diagnostic pop
 }
 
 END_ROCPRIM_NAMESPACE

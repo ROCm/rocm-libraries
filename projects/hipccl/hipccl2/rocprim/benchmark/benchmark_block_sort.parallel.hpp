@@ -228,10 +228,13 @@ public:
     }
 
     void run(benchmark::State&   state,
-             size_t              N,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
+        // Calculate the number of elements N
+        size_t N = bytes / sizeof(KeyType);
+
         const auto size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
         std::vector<KeyType> input = get_random_data<KeyType>(size,

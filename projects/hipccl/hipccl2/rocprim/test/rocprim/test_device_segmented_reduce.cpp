@@ -452,9 +452,9 @@ void testLargeIndices()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed);
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(aggregates_output, aggregates_expected));
 
-        hipFree(d_offsets);
-        hipFree(d_temp_storage);
-        hipFree(d_aggregates_output);
+        HIP_CHECK(hipFree(d_offsets));
+        HIP_CHECK(hipFree(d_temp_storage));
+        HIP_CHECK(hipFree(d_aggregates_output));
 
         if(use_graphs)
         {

@@ -14,7 +14,7 @@ develop performant GPU-accelerated code on AMD ROCm platforms.
   * Including
     [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang)
     compiler
-* C++14
+* C++17
 * Python 3.6 or higher (HIP on Windows only, required only for install script)
 * Visual Studio 2019 with Clang support (HIP on Windows only)
 * Strawberry Perl (HIP on Windows only)
@@ -110,11 +110,6 @@ You can build and install rocPRIM on Linux or Windows.
   # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the compiler.
   # Using HIP-clang:
   [CXX=hipcc] cmake -DBUILD_BENCHMARK=ON ../.
-  #
-  # ! EXPERIMENTAL !
-  # Alternatively one may build using the experimental (and highly incomplete) HIP-CPU back-end for host-side
-  # execution using any C++17 conforming compiler (supported by HIP-CPU). AMDGPU_* options are unavailable in this case. 
-  #   USE_HIP_CPU - OFF by default
 
   # Build
   make -j4

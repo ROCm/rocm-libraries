@@ -68,25 +68,10 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
       GTest::GTest
       GTest::Main
   )
-  if(NOT USE_HIP_CPU)
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        rocprim_hip
-    )
-  else()
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        rocprim
-        Threads::Threads
-        hip_cpu_rt::hip_cpu_rt
-    )
-    if(STL_DEPENDS_ON_TBB)
-      target_link_libraries(${TEST_TARGET}
-        PRIVATE
-          TBB::tbb
-      )
-    endif()
-  endif()
+  target_link_libraries(${TEST_TARGET}
+    PRIVATE
+      rocprim_hip
+  )
 
   target_compile_options(${TEST_TARGET}
     PRIVATE
@@ -125,6 +110,7 @@ endfunction()
 add_hip_test("hip.device_api" hip/test_hip_api.cpp)
 add_hip_test("hip.async_copy" hip/test_hip_async_copy.cpp)
 add_hip_test("hip.ordered_block_id" hip/test_ordered_block_id.cpp)
+
 # rocPRIM test
 add_subdirectory(rocprim)
 

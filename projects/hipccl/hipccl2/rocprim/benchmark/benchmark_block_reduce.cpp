@@ -42,7 +42,7 @@
 #include <cstdlib>
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
 namespace rp = rocprim;
@@ -106,8 +106,10 @@ template<
     unsigned int ItemsPerThread,
     unsigned int Trials = 100
 >
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
+void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
 {
+    // Calculate the number of elements N
+    size_t N = bytes / sizeof(T);
     // Make sure size is a multiple of BlockSize
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
@@ -171,7 +173,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
                                      .c_str(),                                                     \
                                  run_benchmark<Benchmark, T, BS, IPT>,                             \
                                  stream,                                                           \
-                                 size)
+                                 bytes)
 
 #define BENCHMARK_TYPE(type, block) \
     CREATE_BENCHMARK(type, block, 1), \
@@ -186,7 +188,7 @@ template<class Benchmark>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string&                            method_name,
                     hipStream_t                                   stream,
-                    size_t                                        size)
+                    size_t                                        bytes)
 {
     using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
@@ -234,7 +236,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -244,7 +246,7 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
+    const size_t bytes = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
 
@@ -253,19 +255,19 @@ int main(int argc, char *argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
     // using_warp_scan
     using reduce_uwr_t = reduce<rocprim::block_reduce_algorithm::using_warp_reduce>;
-    add_benchmarks<reduce_uwr_t>(benchmarks, "using_warp_reduce", stream, size);
+    add_benchmarks<reduce_uwr_t>(benchmarks, "using_warp_reduce", stream, bytes);
     // reduce then scan
     using reduce_rr_t = reduce<rocprim::block_reduce_algorithm::raking_reduce>;
-    add_benchmarks<reduce_rr_t>(benchmarks, "raking_reduce", stream, size);
+    add_benchmarks<reduce_rr_t>(benchmarks, "raking_reduce", stream, bytes);
     // reduce commutative only
     using reduce_rrco_t = reduce<rocprim::block_reduce_algorithm::raking_reduce_commutative_only>;
-    add_benchmarks<reduce_rrco_t>(benchmarks, "raking_reduce_commutative_only", stream, size);
+    add_benchmarks<reduce_rrco_t>(benchmarks, "raking_reduce_commutative_only", stream, bytes);
 
     // Use manual timing
     for(auto& b : benchmarks)

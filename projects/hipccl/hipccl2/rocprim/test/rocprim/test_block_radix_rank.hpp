@@ -139,18 +139,11 @@ void test_block_radix_rank()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> keys_input;
-        if(rocprim::is_floating_point<T>::value)
-        {
-            keys_input = test_utils::get_random_data<T>(size, T(-1000), T(+1000), seed_value);
-        }
-        else
-        {
-            keys_input = test_utils::get_random_data<T>(size,
-                                                        std::numeric_limits<T>::min(),
-                                                        std::numeric_limits<T>::max(),
-                                                        seed_value);
-        }
+        std::vector<T> keys_input
+            = test_utils::get_random_data<T>(size,
+                                             test_utils::generate_limits<T>::min(),
+                                             test_utils::generate_limits<T>::max(),
+                                             seed_value);
 
         // Calculated expected results on host
         std::vector<unsigned int> expected(size);

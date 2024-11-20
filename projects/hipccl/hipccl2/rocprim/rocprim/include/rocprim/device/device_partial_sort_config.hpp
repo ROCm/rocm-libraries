@@ -36,20 +36,27 @@ BEGIN_ROCPRIM_NAMESPACE
 /// Must be \p nth_element_config or \p default_config.
 /// \tparam MergeSortConfig - configuration of device-level merge sort operation.
 /// Must be \p merge_sort_config or \p default_config.
-template<class NthElementConfig, class MergeSortConfig = default_config>
+/// \tparam RadixSortConfig - configuration of device-level radix sort operation.
+/// Must be \p radix_sort_config or \p default_config.
+template<class NthElementConfig,
+         class MergeSortConfig = default_config,
+         class RadixSortConfig = default_config>
 struct partial_sort_config
 {
     /// \brief Configuration of device-level nth element operation.
     using nth_element = NthElementConfig;
     /// \brief Configuration of device-level merge sort operation.
     using merge_sort = MergeSortConfig;
+    /// \brief Configuration of device-level radix sort operation.
+    using radix_sort = RadixSortConfig;
 };
 
 namespace detail
 {
 
 template<typename Type>
-using default_partial_sort_config = partial_sort_config<default_config, default_config>;
+using default_partial_sort_config
+    = partial_sort_config<default_config, default_config, default_config>;
 
 } // end namespace detail
 

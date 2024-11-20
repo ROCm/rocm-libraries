@@ -31,6 +31,7 @@
 #include "detail/lookback_scan_state.hpp"
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
@@ -136,25 +137,6 @@ ROCPRIM_KERNEL
                                                     previous_accumulated,
                                                     number_of_tiles_launch);
 }
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start)                           \
-    do                                                                                           \
-    {                                                                                            \
-        auto _error = hipGetLastError();                                                         \
-        if(_error != hipSuccess)                                                                 \
-            return _error;                                                                       \
-        if(debug_synchronous)                                                                    \
-        {                                                                                        \
-            std::cout << name << "(" << size << ")";                                             \
-            auto __error = hipStreamSynchronize(stream);                                         \
-            if(__error != hipSuccess)                                                            \
-                return __error;                                                                  \
-            auto _end = std::chrono::high_resolution_clock::now();                               \
-            auto _d   = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
-        }                                                                                        \
-    }                                                                                            \
-    while(false)
 
 template<lookback_scan_determinism Determinism,
          class Config,
@@ -318,7 +300,7 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
             = ceiling_div(number_of_tiles_launch, tiles_per_block);
 
         // Start point for time measurements
-        std::chrono::high_resolution_clock::time_point start;
+        std::chrono::steady_clock::time_point start;
         if(debug_synchronous)
         {
             std::cout << "index:            " << i << '\n';
@@ -326,7 +308,7 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
             std::cout << "number of tiles:  " << number_of_tiles_launch << '\n';
             std::cout << "number of blocks: " << number_of_blocks_launch << '\n';
 
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::steady_clock::now();
         }
 
         with_scan_state(
@@ -376,7 +358,7 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 
 } // namespace detail
 

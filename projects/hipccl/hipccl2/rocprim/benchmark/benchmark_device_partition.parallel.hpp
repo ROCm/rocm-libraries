@@ -131,10 +131,13 @@ struct device_partition_flag_benchmark : public config_autotune_interface
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(DataType);
+
         std::vector<DataType> input = get_random_data<DataType>(size,
                                                                 generate_limits<DataType>::min(),
                                                                 generate_limits<DataType>::max(),
@@ -244,16 +247,16 @@ struct device_partition_flag_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        hipFree(d_input);
+        HIP_CHECK(hipFree(d_input));
         if(is_tuning)
         {
-            hipFree(d_flags_2);
-            hipFree(d_flags_1);
+            HIP_CHECK(hipFree(d_flags_2));
+            HIP_CHECK(hipFree(d_flags_1));
         }
-        hipFree(d_flags_0);
-        hipFree(d_output);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_flags_0));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
@@ -274,10 +277,13 @@ struct device_partition_predicate_benchmark : public config_autotune_interface
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(DataType);
+
         // all data types can represent [0, 127], -1 so a predicate can select all
         std::vector<DataType> input = get_random_data<DataType>(size,
                                                                 static_cast<DataType>(0),
@@ -360,10 +366,10 @@ struct device_partition_predicate_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
@@ -386,10 +392,13 @@ struct device_partition_two_way_flag_benchmark : public config_autotune_interfac
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(DataType);
+        
         std::vector<DataType> input = get_random_data<DataType>(size,
                                                                 generate_limits<DataType>::min(),
                                                                 generate_limits<DataType>::max(),
@@ -503,17 +512,17 @@ struct device_partition_two_way_flag_benchmark : public config_autotune_interfac
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        hipFree(d_input);
+        HIP_CHECK(hipFree(d_input));
         if(is_tuning)
         {
-            hipFree(d_flags_2);
-            hipFree(d_flags_1);
+            HIP_CHECK(hipFree(d_flags_2));
+            HIP_CHECK(hipFree(d_flags_1));
         }
-        hipFree(d_flags_0);
-        hipFree(d_output_selected);
-        hipFree(d_output_rejected);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_flags_0));
+        HIP_CHECK(hipFree(d_output_selected));
+        HIP_CHECK(hipFree(d_output_rejected));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
@@ -534,10 +543,13 @@ struct device_partition_two_way_predicate_benchmark : public config_autotune_int
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(DataType);
+
         // all data types can represent [0, 127], -1 so a predicate can select all
         std::vector<DataType> input = get_random_data<DataType>(size,
                                                                 static_cast<DataType>(0),
@@ -623,11 +635,11 @@ struct device_partition_two_way_predicate_benchmark : public config_autotune_int
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        hipFree(d_input);
-        hipFree(d_output_selected);
-        hipFree(d_output_rejected);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output_selected));
+        HIP_CHECK(hipFree(d_output_rejected));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
@@ -648,10 +660,13 @@ struct device_partition_three_way_benchmark : public config_autotune_interface
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(DataType);
+
         // all data types can represent [0, 127], -1 so a predicate can select all
         std::vector<DataType> input = get_random_data<DataType>(size,
                                                                 static_cast<DataType>(0),
@@ -759,12 +774,12 @@ struct device_partition_three_way_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        hipFree(d_input);
-        hipFree(d_output_first);
-        hipFree(d_output_second);
-        hipFree(d_output_unselected);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output_first));
+        HIP_CHECK(hipFree(d_output_second));
+        HIP_CHECK(hipFree(d_output_unselected));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
     static constexpr bool is_tuning = Probability == partition_three_way_probability::tuning;

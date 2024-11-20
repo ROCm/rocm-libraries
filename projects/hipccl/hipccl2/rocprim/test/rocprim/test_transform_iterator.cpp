@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -182,9 +182,9 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
         // Check if output values are as expected
         test_utils::assert_near(output[0], expected, test_utils::precision<value_type> * size);
 
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
 }

@@ -210,6 +210,8 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
                 stream,
                 debug_synchronous));
 
+            HIP_CHECK(hipDeviceSynchronize());
+
             HIP_CHECK(hipFree(d_temporary_storage));
 
             std::vector<key_type> unique_output(runs_count_expected);

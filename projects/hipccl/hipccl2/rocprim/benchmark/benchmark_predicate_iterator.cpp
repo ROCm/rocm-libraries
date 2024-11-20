@@ -40,8 +40,8 @@
 #include <cstdio>
 #include <cstdlib>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 #endif
 
 const unsigned int batch_size  = 10;
@@ -75,15 +75,24 @@ struct increment
 };
 
 template<class T, class Predicate, class Transform>
+struct transform_op
+{
+    __device__
+    auto operator()(T v) const
+    {
+        return Predicate{}(v) ? Transform{}(v) : v;
+    }
+};
+
+template<class T, class Predicate, class Transform>
 struct transform_it
 {
     using value_type = T;
 
     void operator()(T* d_input, T* d_output, const size_t size, const hipStream_t stream)
     {
-        auto t_it = rocprim::make_transform_iterator(
-            d_input,
-            [&] __device__(T v) { return Predicate{}(v) ? Transform{}(v) : v; });
+        auto t_it
+            = rocprim::make_transform_iterator(d_input, transform_op<T, Predicate, Transform>{});
         HIP_CHECK(rocprim::transform(t_it, d_output, size, identity<T>{}, stream));
     }
 };
@@ -116,11 +125,14 @@ struct write_predicate_it
 
 template<class IteratorBenchmark>
 void run_benchmark(benchmark::State&   state,
-                   size_t              size,
+                   size_t              bytes,
                    const managed_seed& seed,
                    hipStream_t         stream)
 {
     using T = typename IteratorBenchmark::value_type;
+
+    // Calculate the number of elements 
+    size_t size = bytes / sizeof(T);
 
     const auto     random_range = limit_random_range<T>(0, 99);
     std::vector<T> input
@@ -179,7 +191,7 @@ void run_benchmark(benchmark::State&   state,
                                                            ",key_type:" #T ",cfg:default_config}") \
                                      .c_str(),                                                     \
                                  run_benchmark<B<T, less_than<T, C>, increment<T, 5>>>,            \
-                                 size,                                                             \
+                                 bytes,                                                             \
                                  seed,                                                             \
                                  stream)
 
@@ -205,7 +217,7 @@ void run_benchmark(benchmark::State&   state,
 int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -216,7 +228,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
+    const size_t bytes   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -227,7 +239,7 @@ int main(int argc, char* argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     using custom_128 = custom_type<int64_t, int64_t>;

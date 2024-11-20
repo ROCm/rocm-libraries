@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_DEVICE_SCAN_BY_KEY_HPP_
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
@@ -83,23 +84,6 @@ void __global__ __launch_bounds__(device_params<Config>().kernel_config.block_si
         previous_last_value);
 }
 
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start)                           \
-    do                                                                                           \
-    {                                                                                            \
-        auto _error = hipGetLastError();                                                         \
-        if(_error != hipSuccess)                                                                 \
-            return _error;                                                                       \
-        if(debug_synchronous)                                                                    \
-        {                                                                                        \
-            std::cout << name << "(" << size << ")";                                             \
-            auto __error = hipStreamSynchronize(stream);                                         \
-            if(__error != hipSuccess)                                                            \
-                return __error;                                                                  \
-            auto _end = std::chrono::high_resolution_clock::now();                               \
-            auto _d   = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
-        }                                                                                        \
-    } while(false)
 
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
@@ -245,14 +229,14 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         const unsigned int init_grid_size = ceiling_div(scan_blocks, block_size);
 
         // Start point for time measurements
-        std::chrono::high_resolution_clock::time_point start;
+        std::chrono::steady_clock::time_point start;
         if(debug_synchronous)
         {
             std::cout << "index:            " << i << '\n';
             std::cout << "current_size:     " << current_size << '\n';
             std::cout << "number of blocks: " << scan_blocks << '\n';
 
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::steady_clock::now();
         }
 
         with_scan_state(
@@ -274,7 +258,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 
         if(debug_synchronous)
         {
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::steady_clock::now();
         }
         with_scan_state(
             [&](auto& scan_state)
@@ -304,7 +288,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 }
 
 /// \addtogroup devicemodule

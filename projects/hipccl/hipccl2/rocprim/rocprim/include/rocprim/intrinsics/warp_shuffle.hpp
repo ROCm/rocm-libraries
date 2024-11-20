@@ -67,18 +67,10 @@ warp_shuffle_op(const T& input, ShuffleOp&& op)
     for(int i = 0; i < words_no; i++)
     {
         const size_t s = std::min(sizeof(int), sizeof(T) - i * sizeof(int));
-        int word;
-#ifdef __HIP_CPU_RT__
-        std::memcpy(&word, reinterpret_cast<const char*>(&input) + i * sizeof(int), s);
-#else
+        int          word;
         __builtin_memcpy(&word, reinterpret_cast<const char*>(&input) + i * sizeof(int), s);
-#endif
         word = op(word);
-#ifdef __HIP_CPU_RT__
-        std::memcpy(reinterpret_cast<char*>(&output) + i * sizeof(int), &word, s);
-#else
         __builtin_memcpy(reinterpret_cast<char*>(&output) + i * sizeof(int), &word, s);
-#endif
     }
 
     return output;
@@ -99,13 +91,8 @@ T warp_move_dpp(const T& input)
             //       __builtin_amdgcn_update_dpp, hence fail to parse the template altogether. (Except MSVC
             //       because even using /permissive- they somehow still do delayed parsing of the body of
             //       function templates, even though they pinky-swear they don't.)
-#if !defined(__HIP_CPU_RT__)
             return ::__builtin_amdgcn_mov_dpp(v, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
-#else
-            return v;
-#endif
-        }
-    );
+        });
 }
 
 /// \brief Swizzle for any data type.

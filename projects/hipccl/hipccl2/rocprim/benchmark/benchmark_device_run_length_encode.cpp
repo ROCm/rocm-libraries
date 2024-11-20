@@ -137,12 +137,15 @@ void run_encode_benchmark(benchmark::State&   state,
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            rp::run_length_encode(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input, size,
-                d_unique_output, d_counts_output, d_runs_count_output,
-                stream, false
-            );
+            HIP_CHECK(rp::run_length_encode(d_temporary_storage,
+                                            temporary_storage_bytes,
+                                            d_input,
+                                            size,
+                                            d_unique_output,
+                                            d_counts_output,
+                                            d_runs_count_output,
+                                            stream,
+                                            false));
         }
 
         // Record stop event and wait until it completes
@@ -261,12 +264,15 @@ void run_non_trivial_runs_benchmark(benchmark::State&   state,
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            rp::run_length_encode_non_trivial_runs(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input, size,
-                d_offsets_output, d_counts_output, d_runs_count_output,
-                stream, false
-            );
+            HIP_CHECK(rp::run_length_encode_non_trivial_runs(d_temporary_storage,
+                                                             temporary_storage_bytes,
+                                                             d_input,
+                                                             size,
+                                                             d_offsets_output,
+                                                             d_counts_output,
+                                                             d_runs_count_output,
+                                                             stream,
+                                                             false));
         }
 
         // Record stop event and wait until it completes

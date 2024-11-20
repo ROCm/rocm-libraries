@@ -198,18 +198,11 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
 
         // Generate data
         auto keys_output = std::make_unique<key_type[]>(size);
-        if(rocprim::is_floating_point<key_type>::value)
-        {
-            test_utils::generate_random_data_n(keys_output.get(), size, -100, +100, rng_engine);
-        }
-        else
-        {
-            test_utils::generate_random_data_n(keys_output.get(),
-                                               size,
-                                               test_utils::numeric_limits<key_type>::min(),
-                                               test_utils::numeric_limits<key_type>::max(),
-                                               rng_engine);
-        }
+        test_utils::generate_random_data_n(keys_output.get(),
+                                           size,
+                                           test_utils::generate_limits<key_type>::min(),
+                                           test_utils::generate_limits<key_type>::max(),
+                                           rng_engine);
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_output.get(), keys_output.get() + size);
@@ -304,18 +297,11 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
 
         // Generate data
         auto keys_output = std::make_unique<key_type[]>(size);
-        if(rocprim::is_floating_point<key_type>::value)
-        {
-            test_utils::generate_random_data_n(keys_output.get(), size, -100, +100, rng_engine);
-        }
-        else
-        {
-            test_utils::generate_random_data_n(keys_output.get(),
-                                               size,
-                                               test_utils::numeric_limits<key_type>::min(),
-                                               test_utils::numeric_limits<key_type>::max(),
-                                               rng_engine);
-        }
+        test_utils::generate_random_data_n(keys_output.get(),
+                                           size,
+                                           test_utils::generate_limits<key_type>::min(),
+                                           test_utils::generate_limits<key_type>::max(),
+                                           rng_engine);
 
         std::vector<value_type> values_output(size);
         std::iota(values_output.begin(), values_output.end(), 0u);

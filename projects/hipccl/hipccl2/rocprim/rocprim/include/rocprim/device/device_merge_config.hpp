@@ -26,6 +26,8 @@
 #include "../config.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
+#include "detail/config/device_merge.hpp"
+#include "detail/device_config_helper.hpp"
 
 #include "config_types.hpp"
 
@@ -34,135 +36,45 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \brief Configuration of device-level merge primitives.
-template<unsigned int BlockSize, unsigned int ItemsPerThread>
-using merge_config = kernel_config<BlockSize, ItemsPerThread>;
-
 namespace detail
 {
 
+// generic struct that instantiates custom configurations
+template<typename Config, typename, typename>
+struct wrapped_merge_config
+{
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr merge_config_params params = Config();
+    };
+};
+
+// specialized for rocprim::default_config, which instantiates the default_ALGO_config
+template<typename KeyType, typename ValueType>
+struct wrapped_merge_config<default_config, KeyType, ValueType>
+{
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr merge_config_params params
+            = default_merge_config<static_cast<unsigned int>(Arch), KeyType, ValueType>{};
+    };
+};
+
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+template<typename Config, typename Key, typename Value>
+template<target_arch Arch>
+constexpr merge_config_params
+    wrapped_merge_config<Config, Key, Value>::architecture_config<Arch>::params;
+
 template<class Key, class Value>
-struct merge_config_803
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+template<target_arch Arch>
+constexpr merge_config_params
+    wrapped_merge_config<rocprim::default_config, Key, Value>::architecture_config<Arch>::params;
+#endif // DOXYGEN_DOCUMENTATION_BUILD
 
-    // TODO Tune when merge-by-key is ready
-    using type = merge_config<limit_block_size<256u,
-                                               rocprim::max(sizeof(Key), sizeof(Value)),
-                                               ROCPRIM_WARP_SIZE_64>::value,
-                              ::rocprim::max(1u, 10u / item_scale)>;
-};
-
-template<class Key>
-struct merge_config_803<Key, empty_type>
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
-
-    using type
-        = select_type<select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
-                      select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
-                      select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
-                      merge_config<limit_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
-                                   ::rocprim::max(1u, 10u / item_scale)>>;
-};
-
-template<class Key, class Value>
-struct merge_config_900
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
-
-    // TODO Tune when merge-by-key is ready
-    using type = merge_config<limit_block_size<256u,
-                                               rocprim::max(sizeof(Key), sizeof(Value)),
-                                               ROCPRIM_WARP_SIZE_64>::value,
-                              ::rocprim::max(1u, 10u / item_scale)>;
-};
-
-template<class Key>
-struct merge_config_900<Key, empty_type>
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
-
-    using type
-        = select_type<select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
-                      select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
-                      select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
-                      merge_config<limit_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
-                                   ::rocprim::max(1u, 10u / item_scale)>>;
-};
-
-// TODO: We need to update these parameters
-template<class Key, class Value>
-struct merge_config_90a
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
-
-    // TODO Tune when merge-by-key is ready
-    using type = merge_config<limit_block_size<256u,
-                                               rocprim::max(sizeof(Key), sizeof(Value)),
-                                               ROCPRIM_WARP_SIZE_64>::value,
-                              ::rocprim::max(1u, 10u / item_scale)>;
-};
-
-template<class Key>
-struct merge_config_90a<Key, empty_type>
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
-
-    using type
-        = select_type<select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
-                      select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
-                      select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
-                      merge_config<limit_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
-                                   ::rocprim::max(1u, 10u / item_scale)>>;
-};
-
-// TODO: We need to update these parameters
-template<class Key, class Value>
-struct merge_config_1030
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
-
-    // TODO Tune when merge-by-key is ready
-    using type = merge_config<limit_block_size<256u,
-                                               rocprim::max(sizeof(Key), sizeof(Value)),
-                                               ROCPRIM_WARP_SIZE_64>::value,
-                              ::rocprim::max(1u, 10u / item_scale)>;
-};
-
-template<class Key>
-struct merge_config_1030<Key, empty_type>
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
-
-    using type
-        = select_type<select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
-                      select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
-                      select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
-                      merge_config<limit_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
-                                   ::rocprim::max(1u, 10u / item_scale)>>;
-};
-
-template<unsigned int TargetArch, class Key, class Value>
-struct default_merge_config
-    : select_arch<
-        TargetArch,
-        select_arch_case<803, merge_config_803<Key, Value>>,
-        select_arch_case<900, merge_config_900<Key, Value>>,
-        select_arch_case<ROCPRIM_ARCH_90a, merge_config_90a<Key, Value>>,
-        select_arch_case<1030, merge_config_1030<Key, Value>>,
-        merge_config_900<Key, Value>
-    > { };
-
-} // end namespace detail
+} // namespace detail
 
 END_ROCPRIM_NAMESPACE
 

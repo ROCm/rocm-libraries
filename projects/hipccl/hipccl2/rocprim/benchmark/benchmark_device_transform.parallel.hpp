@@ -70,11 +70,14 @@ struct device_transform_benchmark : public config_autotune_interface
     static constexpr unsigned int warmup_size = 5;
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
         using output_type = T;
+
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(T);
 
         static constexpr bool debug_synchronous = false;
 
@@ -143,8 +146,8 @@ struct device_transform_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        hipFree(d_input);
-        hipFree(d_output);
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
     }
 };
 

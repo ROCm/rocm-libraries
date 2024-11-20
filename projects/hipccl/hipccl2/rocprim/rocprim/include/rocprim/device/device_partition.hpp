@@ -27,6 +27,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
@@ -95,25 +96,11 @@ ROCPRIM_KERNEL
         std::cout << name << "(" << size << ")"; \
         auto error = hipStreamSynchronize(stream); \
         if(error != hipSuccess) return error; \
-        auto end = std::chrono::high_resolution_clock::now(); \
+        auto end = std::chrono::steady_clock::now(); \
         auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
         std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
     }
 
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto _error = hipGetLastError(); \
-        if(_error != hipSuccess) return _error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto __error = hipStreamSynchronize(stream); \
-            if(__error != hipSuccess) return __error; \
-            auto _end = std::chrono::high_resolution_clock::now(); \
-            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
 
 template<partition_subalgo SubAlgo,
          class Config,
@@ -148,6 +135,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 
     constexpr bool write_only_selected = SubAlgo == partition_subalgo::select_flag
                                          || SubAlgo == partition_subalgo::select_predicate
+                                         || SubAlgo == partition_subalgo::select_predicated_flag
                                          || SubAlgo == partition_subalgo::select_unique
                                          || SubAlgo == partition_subalgo::select_unique_by_key;
 
@@ -156,9 +144,12 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     constexpr bool is_flag = SubAlgo == partition_subalgo::partition_two_way_flag
                              || SubAlgo == partition_subalgo::partition_flag
                              || SubAlgo == partition_subalgo::select_flag;
+    constexpr bool is_predicated_flag = SubAlgo == partition_subalgo::select_predicated_flag;
     constexpr select_method method
-        = is_unique ? select_method::unique
-                    : (is_flag ? select_method::flag : select_method::predicate);
+        = is_unique
+              ? select_method::unique
+              : (is_predicated_flag ? select_method::predicated_flag
+                                    : (is_flag ? select_method::flag : select_method::predicate));
 
     detail::target_arch target_arch;
     hipError_t          result = host_target_arch(stream, target_arch);
@@ -216,7 +207,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     }
 
     // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
 
     bool use_sleep;
     result = is_sleep_scan_state_used(stream, use_sleep);
@@ -296,7 +287,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             std::cout << "current size " << current_size << '\n';
             std::cout << "current number of blocks " << current_number_of_blocks << '\n';
 
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::steady_clock::now();
         }
 
         with_scan_state(
@@ -311,9 +302,9 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             });
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel",
                                                     current_number_of_blocks,
-                                                    start)
+                                                    start);
 
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+        if(debug_synchronous) start = std::chrono::steady_clock::now();
 
         with_scan_state(
             [&](const auto scan_state)
@@ -334,7 +325,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                         current_number_of_blocks,
                         predicates...);
             });
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start);
 
         std::swap(selected_count, prev_selected_count);
     }
@@ -353,7 +344,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 #undef ROCPRIM_DETAIL_HIP_SYNC
 
 } // end of detail namespace

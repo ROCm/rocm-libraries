@@ -222,8 +222,8 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
     );
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, initial_value));
 
-    hipFree(d_output);
-    hipFree(d_temp_storage);
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_temp_storage));
 
     if (TestFixture::use_graphs)
     {
@@ -354,9 +354,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceSum)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output[0], expected, test_utils::precision<U> * size));
 
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
             {
@@ -506,9 +506,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
             test_utils::assert_eq(output[0].key, expected.key);
             test_utils::assert_eq(output[0].value, expected.value);
 
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
             {
@@ -605,8 +605,8 @@ void testLargeIndices()
 
             ASSERT_EQ(output, expected_output);
 
-            hipFree(d_temp_storage);
-            hipFree(d_output);
+            HIP_CHECK(hipFree(d_temp_storage));
+            HIP_CHECK(hipFree(d_output));
 
             if(use_graphs)
             {
@@ -745,9 +745,9 @@ TYPED_TEST(RocprimDeviceReducePrecisionTests, ReduceSumInputEqualExponentFunctio
         // Check if output values are as expected
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, precision));
 
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_temp_storage));
 
         if (TestFixture::use_graphs)
         {
@@ -874,9 +874,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
                     ? 0
                     : std::max(test_utils::precision<T>, test_utils::precision<U>)));
 
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
             {

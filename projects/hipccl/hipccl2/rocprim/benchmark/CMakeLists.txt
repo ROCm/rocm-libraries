@@ -77,24 +77,10 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
       rocprim
       benchmark::benchmark
   )
-  if(NOT USE_HIP_CPU)
-    target_link_libraries(${BENCHMARK_TARGET}
-      PRIVATE
-        rocprim_hip
-    )
-  else()
-    target_link_libraries(${BENCHMARK_TARGET}
-      PRIVATE
-        Threads::Threads
-        hip_cpu_rt::hip_cpu_rt
-    )
-    if(STL_DEPENDS_ON_TBB)
-      target_link_libraries(${BENCHMARK_TARGET}
-        PRIVATE
-          TBB::tbb
-      )
-    endif()
-  endif()
+  target_link_libraries(${BENCHMARK_TARGET}
+    PRIVATE
+      rocprim_hip
+  )
 
   target_compile_options(${BENCHMARK_TARGET}
     PRIVATE
@@ -143,9 +129,11 @@ add_rocprim_benchmark(benchmark_block_scan.cpp)
 add_rocprim_benchmark(benchmark_block_sort.cpp)
 add_rocprim_benchmark(benchmark_config_dispatch.cpp)
 add_rocprim_benchmark(benchmark_device_adjacent_difference.cpp)
+add_rocprim_benchmark(benchmark_device_adjacent_find.cpp)
 add_rocprim_benchmark(benchmark_device_batch_memcpy.cpp)
 add_rocprim_benchmark(benchmark_device_binary_search.cpp)
 add_rocprim_benchmark(benchmark_device_find_first_of.cpp)
+add_rocprim_benchmark(benchmark_device_find_end.cpp)
 add_rocprim_benchmark(benchmark_device_histogram.cpp)
 add_rocprim_benchmark(benchmark_device_merge.cpp)
 add_rocprim_benchmark(benchmark_device_merge_sort.cpp)
@@ -165,7 +153,9 @@ add_rocprim_benchmark(benchmark_device_run_length_encode.cpp)
 add_rocprim_benchmark(benchmark_device_scan.cpp)
 add_rocprim_benchmark(benchmark_device_scan_deterministic.cpp)
 add_rocprim_benchmark(benchmark_device_scan_by_key.cpp)
+add_rocprim_benchmark(benchmark_device_search.cpp)
 add_rocprim_benchmark(benchmark_device_scan_by_key_deterministic.cpp)
+add_rocprim_benchmark(benchmark_device_search_n.cpp)
 add_rocprim_benchmark(benchmark_device_select.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_radix_sort_keys.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_radix_sort_pairs.cpp)

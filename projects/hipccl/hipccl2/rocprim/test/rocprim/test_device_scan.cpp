@@ -317,8 +317,8 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
 
     ASSERT_FALSE(out_of_bounds.get());
 
-    hipFree(d_output);
-    hipFree(d_temp_storage);
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_temp_storage));
 
     if (TestFixture::use_graphs)
     {
@@ -471,9 +471,9 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * size));
 
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
             {
@@ -634,9 +634,9 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * size));
 
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
             {
@@ -812,10 +812,10 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * size));
 
-            hipFree(d_keys);
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_keys));
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
             {
@@ -996,10 +996,10 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * size));
 
-            hipFree(d_keys);
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_keys));
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
             {
@@ -1177,8 +1177,8 @@ void testLargeIndicesInclusiveScan()
 
             ASSERT_EQ(output, expected_output);
 
-            hipFree(d_temp_storage);
-            hipFree(d_output);
+            HIP_CHECK(hipFree(d_temp_storage));
+            HIP_CHECK(hipFree(d_output));
 
             if(UseGraphs)
             {
@@ -1310,8 +1310,8 @@ void testLargeIndicesExclusiveScan()
 
             ASSERT_EQ(output, expected_output);
 
-            hipFree(d_temp_storage);
-            hipFree(d_output);
+            HIP_CHECK(hipFree(d_temp_storage));
+            HIP_CHECK(hipFree(d_output));
 
             if(UseGraphs)
             {
@@ -1823,11 +1823,11 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, precision));
 
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_future_input);
-            hipFree(d_initial_value);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_future_input));
+            HIP_CHECK(hipFree(d_initial_value));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
             {

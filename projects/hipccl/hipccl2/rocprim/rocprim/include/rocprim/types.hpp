@@ -56,19 +56,16 @@ struct make_vector_type
 /// template parameter should not be used.
 struct empty_type {};
 
-/// \brief Binary operator that takes two instances of empty_type, usually used
-/// as nop replacement for the HIP-CPU back-end
-struct empty_binary_op
-{
-    /// \brief Invocation operator.
-    constexpr empty_type operator()(const empty_type&, const empty_type&) const { return empty_type{}; }
-};
-
 /// \brief A decomposer that must be passed to the radix sort algorithms when
 /// sorting keys that are arithmetic types.
 /// To sort custom types, a custom decomposer should be provided.
 struct identity_decomposer
 {};
+
+/// \brief 128 bit unsigned integer
+using uint128_t = __uint128_t;
+/// \brief 128 bit signed integer
+using int128_t = __int128_t;
 
 /// \brief Half-precision floating point type
 using half = ::__half;
@@ -87,19 +84,10 @@ using lane_mask_type = unsigned long long int;
 #endif
 
 /// \brief Native half-precision floating point type
-#ifdef __HIP_CPU_RT__
-using native_half = half;
-#else
 using native_half = _Float16;
-#endif
 
 /// \brief native bfloat16 type
-#ifdef __HIP_CPU_RT__
-// TODO: Find a better type
 using native_bfloat16 = bfloat16;
-#else
-using native_bfloat16 = bfloat16;
-#endif
 
 END_ROCPRIM_NAMESPACE
 

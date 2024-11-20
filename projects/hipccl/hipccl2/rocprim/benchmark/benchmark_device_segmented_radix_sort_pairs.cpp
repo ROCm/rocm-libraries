@@ -39,8 +39,8 @@
 #include <string>
 #include <vector>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
 namespace rp = rocprim;
@@ -62,13 +62,16 @@ template<class Key, class Value>
 void run_sort_pairs_benchmark(benchmark::State&   state,
                               size_t              num_segments,
                               size_t              mean_segment_length,
-                              size_t              target_size,
+                              size_t              target_bytes,
                               const managed_seed& seed,
                               hipStream_t         stream)
 {
     using offset_type = int;
     using key_type    = Key;
     using value_type  = Value;
+
+    // Calculate the number of elements 
+    size_t target_size = target_bytes / sizeof(key_type);
 
     // Generate data
     std::vector<offset_type> offsets;
@@ -228,12 +231,15 @@ void run_sort_pairs_benchmark(benchmark::State&   state,
 
 template<class KeyT, class ValueT>
 void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                               size_t                                        max_size,
+                               size_t                                        max_bytes,
                                size_t                                        min_size,
                                size_t                                        target_size,
                                const managed_seed&                           seed,
                                hipStream_t                                   stream)
 {
+    // Calculate the number of elements 
+    size_t max_size = max_bytes / sizeof(KeyT);
+
     std::string key_name   = Traits<KeyT>::name();
     std::string value_name = Traits<ValueT>::name();
     for(const auto segment_count : segment_counts)
@@ -267,7 +273,7 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
 int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -290,7 +296,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
+    const size_t bytes   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -301,7 +307,7 @@ int main(int argc, char* argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
@@ -313,37 +319,37 @@ int main(int argc, char* argv[])
     config_autotune_register::register_benchmark_subset(benchmarks,
                                                         parallel_instance,
                                                         parallel_instances,
-                                                        size,
+                                                        bytes,
                                                         seed,
                                                         stream);
 #else
     using custom_float2  = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
-    add_sort_pairs_benchmarks<int, float>(benchmarks, size, min_size, size / 2, seed, stream);
+    add_sort_pairs_benchmarks<int, float>(benchmarks, bytes, min_size, bytes / 2, seed, stream);
     add_sort_pairs_benchmarks<long long, double>(benchmarks,
-                                                 size,
+                                                 bytes,
                                                  min_size,
-                                                 size / 2,
+                                                 bytes / 2,
                                                  seed,
                                                  stream);
-    add_sort_pairs_benchmarks<int8_t, int8_t>(benchmarks, size, min_size, size / 2, seed, stream);
-    add_sort_pairs_benchmarks<uint8_t, uint8_t>(benchmarks, size, min_size, size / 2, seed, stream);
+    add_sort_pairs_benchmarks<int8_t, int8_t>(benchmarks, bytes, min_size, bytes / 2, seed, stream);
+    add_sort_pairs_benchmarks<uint8_t, uint8_t>(benchmarks, bytes, min_size, bytes / 2, seed, stream);
     add_sort_pairs_benchmarks<rocprim::half, rocprim::half>(benchmarks,
-                                                            size,
+                                                            bytes,
                                                             min_size,
-                                                            size / 2,
+                                                            bytes / 2,
                                                             seed,
                                                             stream);
     add_sort_pairs_benchmarks<int, custom_float2>(benchmarks,
-                                                  size,
+                                                  bytes,
                                                   min_size,
-                                                  size / 2,
+                                                  bytes / 2,
                                                   seed,
                                                   stream);
     add_sort_pairs_benchmarks<long long, custom_double2>(benchmarks,
-                                                         size,
+                                                         bytes,
                                                          min_size,
-                                                         size / 2,
+                                                         bytes / 2,
                                                          seed,
                                                          stream);
 #endif
