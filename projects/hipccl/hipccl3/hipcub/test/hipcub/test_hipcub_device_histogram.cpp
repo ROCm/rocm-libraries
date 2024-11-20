@@ -30,6 +30,7 @@
 
 // hipcub API
 #include "hipcub/device/device_histogram.hpp"
+#include "hipcub/iterator/counting_input_iterator.hpp"
 #include "hipcub/iterator/transform_input_iterator.hpp"
 
 // rows, columns, (row_stride - columns * Channels)
@@ -139,7 +140,9 @@ typedef ::testing::Types<params1<int, 10, 0, 10>,
                          params1<double, 10, 0, 1000, double, int>,
                          params1<int, 123, 100, 5635, int>,
                          params1<double, 55, -123, +123, double>,
-                         params1<int, 10, 0, 10, int, int, true>>
+                         params1<int, 10, 0, 10, int, int, true>,
+                         // Regression: sample_type = int and level_type = size_t
+                         params1<int, 123, 100, 5635, size_t>>
     Params1;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramEven, Params1);
@@ -340,6 +343,105 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
     }
 }
 
+// Test HistogramEven overflow
+template<class Params>
+class HipcubDeviceHistogramEvenOverflow : public ::testing::Test
+{
+public:
+    using params = Params;
+};
+
+typedef ::testing::Types<params1<uint16_t, 1, 0, 10>,
+                         params1<uint16_t, 2, 0, 10>,
+                         params1<uint32_t, 1, 0, 10>,
+                         params1<uint32_t, 2, 0, 10>,
+                         params1<uint64_t, 1, 0, 10>,
+                         params1<uint64_t, 2, 0, 10>>
+    Params1Overflow;
+
+TYPED_TEST_SUITE(HipcubDeviceHistogramEvenOverflow, Params1Overflow);
+
+TYPED_TEST(HipcubDeviceHistogramEvenOverflow, EvenOverflow)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using sample_type           = typename TestFixture::params::sample_type;
+    using counter_type          = uint32_t;
+    using level_type            = sample_type;
+    constexpr unsigned int bins = TestFixture::params::bins;
+
+    // native host types
+    using native_level_type = test_utils::convert_to_fundamental_t<level_type>;
+
+    const native_level_type n_lower_level = 0;
+    const native_level_type n_upper_level = std::numeric_limits<sample_type>::max();
+
+    level_type lower_level = test_utils::convert_to_device<level_type>(n_lower_level);
+    level_type upper_level = test_utils::convert_to_device<level_type>(n_upper_level);
+
+    hipStream_t stream = 0; // default
+
+    const size_t size = 1000;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        auto          d_input = hipcub::CountingInputIterator<sample_type>{0UL};
+        counter_type* d_histogram;
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_histogram, bins * sizeof(counter_type)));
+
+        size_t     temporary_storage_bytes = 0;
+        hipError_t error                   = hipcub::DeviceHistogram::HistogramEven(nullptr,
+                                                                  temporary_storage_bytes,
+                                                                  d_input,
+                                                                  d_histogram,
+                                                                  bins + 1,
+                                                                  lower_level,
+                                                                  upper_level,
+                                                                  int(size),
+                                                                  stream);
+
+        // Allocate a some amount of temp storage bytes in case of an overflow of the bin
+        //  computation. Note that the subsequent algorithm invocation will also fail.
+        if(error == hipErrorInvalidValue)
+        {
+            temporary_storage_bytes = 3;
+        }
+
+        void* d_temporary_storage;
+        HIP_CHECK(
+            test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+        error = hipcub::DeviceHistogram::HistogramEven(d_temporary_storage,
+                                                       temporary_storage_bytes,
+                                                       d_input,
+                                                       d_histogram,
+                                                       bins + 1,
+                                                       lower_level,
+                                                       upper_level,
+                                                       int(size),
+                                                       stream);
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_histogram));
+
+        if(bins == 1 || sizeof(sample_type) <= 4UL)
+        {
+            ASSERT_EQ(error, hipSuccess);
+        }
+        else
+        {
+            ASSERT_EQ(error, hipErrorInvalidValue);
+        }
+    }
+}
+
 template<class SampleType,
          unsigned int Bins,
          int          StartLevel  = 0,
@@ -376,7 +478,9 @@ typedef ::testing::Types<
     params2<test_utils::bfloat16, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
     params2<float, 456, -100, 1, 123>,
     params2<double, 3, 10000, 1000, 1000, double, unsigned int>,
-    params2<int, 10, 0, 1, 10, int, int, true>>
+    params2<int, 10, 0, 1, 10, int, int, true>,
+    // Regression: sample_type = int and level_type = size_t
+    params2<int, 10, 0, 1, 10, size_t>>
     Params2;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramRange, Params2);
@@ -629,7 +733,9 @@ typedef ::testing::Types<params3<int, 4, 3, 2000, 0, 2000>,
                          params3<double, 4, 2, 10, 0, 1000, double, int>,
                          params3<int, 3, 2, 123, 100, 5635, int>,
                          params3<double, 4, 3, 55, -123, +123, double>,
-                         params3<int, 4, 3, 2000, 0, 2000, int, int, true>>
+                         params3<int, 4, 3, 2000, 0, 2000, int, int, true>,
+                         // Regression: sample_type = int and level_type = size_t
+                         params3<int, 4, 3, 2000, 0, 2000, size_t>>
     Params3;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramMultiEven, Params3);
@@ -951,7 +1057,9 @@ typedef ::testing::Types<
     params4<test_utils::bfloat16, 3, 1, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
     params4<float, 4, 2, 456, -100, 1, 123>,
     params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>,
-    params4<int, 4, 3, 10, 0, 1, 10, int, int, true>>
+    params4<int, 4, 3, 10, 0, 1, 10, int, int, true>,
+    // Regression: sample_type = int and level_type = size_t
+    params4<int, 4, 3, 10, 0, 1, 10, size_t>>
     Params4;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramMultiRange, Params4);

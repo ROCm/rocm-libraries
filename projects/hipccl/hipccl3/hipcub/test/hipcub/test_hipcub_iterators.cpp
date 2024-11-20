@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -148,13 +148,13 @@ void iterator_test_function(IteratorType d_itr, std::vector<T> &h_reference)
     IteratorType *h_itrs = (IteratorType*)malloc(sizeof(IteratorType) * 2);
 
     T* device_output;
-    g_allocator.DeviceAllocate((void**)&device_output, output.size() * sizeof(typename decltype(output)::value_type));
+    HIP_CHECK(g_allocator.DeviceAllocate((void**)&device_output, output.size() * sizeof(T)));
 
     // Run unguarded kernel
     Kernel<<<1, 1>>>(d_itr, device_output, d_itrs);
 
-    hipPeekAtLastError();
-    hipDeviceSynchronize();
+    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(
             hipMemcpy(
@@ -174,14 +174,14 @@ void iterator_test_function(IteratorType d_itr, std::vector<T> &h_reference)
 
     for(size_t i = 0; i < output.size(); i++)
     {
-        ASSERT_EQ(output[i], h_reference[i]);
+        ASSERT_EQ(output[i], h_reference[i]) << i;
     }
 
     IteratorType h_itr = d_itr + 21;
     ASSERT_TRUE(h_itr == h_itrs[0]);
     ASSERT_TRUE(d_itr == h_itrs[1]);
 
-    g_allocator.DeviceFree(device_output);
+    HIP_CHECK(g_allocator.DeviceFree(device_output));
 }
 
 TYPED_TEST_SUITE(HipcubIteratorTests, HipcubIteratorTestsParams);
@@ -215,14 +215,14 @@ TYPED_TEST(HipcubIteratorTests, TestCacheModifiedInput)
     h_reference[7] = h_data[0];          // Value at offset 0;
 
     T *d_data = NULL;
-    g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES);
+    HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES));
 
     HIP_CHECK(hipMemcpy(d_data, h_data.data(), TEST_VALUES * sizeof(T), hipMemcpyHostToDevice));
 
     IteratorType d_itr((T*) d_data);
     iterator_test_function<IteratorType, T>(d_itr, h_reference);
 
-    g_allocator.DeviceFree(d_data);
+    HIP_CHECK(g_allocator.DeviceFree(d_data));
 }
 
 TYPED_TEST(HipcubIteratorTests, TestConstant)
@@ -305,7 +305,7 @@ TYPED_TEST(HipcubIteratorTests, TestTransform)
 
     // Allocate device arrays
     T *d_data = NULL;
-    g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES);
+    HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES));
 
     HIP_CHECK(
         hipMemcpy(
@@ -333,7 +333,7 @@ TYPED_TEST(HipcubIteratorTests, TestTransform)
 
     iterator_test_function<IteratorType, T>(d_itr, h_reference);
 
-    g_allocator.DeviceFree(d_data);
+    HIP_CHECK(g_allocator.DeviceFree(d_data));
 }
 
 TYPED_TEST(HipcubIteratorTests, TestTexObj)
@@ -344,62 +344,70 @@ TYPED_TEST(HipcubIteratorTests, TestTexObj)
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, device_id));
     std::string deviceName = std::string(props.gcnArchName);
-    if (deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0) {
+    if(deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0)
+    {
         // This is a gfx94x or gfx120x device, so skip this test
         GTEST_SKIP() << "Test not run on gfx94x or gfx120x as texture cache API is not supported";
     }
 
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::input_type;
-    using CastT = typename TestFixture::input_type;
+    using T            = typename TestFixture::input_type;
+    using CastT        = typename TestFixture::input_type;
     using IteratorType = hipcub::TexObjInputIterator<T>;
 
     //
     // Test iterator manipulation in kernel
     //
 
-    constexpr uint32_t TEST_VALUES          = 11000;
-    constexpr uint32_t DUMMY_OFFSET         = 500;
-    constexpr uint32_t DUMMY_TEST_VALUES    = TEST_VALUES - DUMMY_OFFSET;
+    constexpr uint32_t TEST_VALUES       = 11000;
+    constexpr uint32_t DUMMY_OFFSET      = 500;
+    constexpr uint32_t DUMMY_TEST_VALUES = TEST_VALUES - DUMMY_OFFSET;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
 
-        //T *h_data = new T[TEST_VALUES];
-        std::vector<T> h_data(TEST_VALUES);
-        std::vector<T> output = test_utils::get_random_data<T>(TEST_VALUES, T(2), T(200), seed_value);
+        std::vector<T> output
+            = test_utils::get_random_data<T>(TEST_VALUES, T(2), T(200), seed_value);
 
         // Allocate device arrays
-        T *d_data   = NULL;
-        T *d_dummy  = NULL;
-        g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES);
-        hipMemcpy(d_data, h_data.data(), sizeof(T) * TEST_VALUES, hipMemcpyHostToDevice);
+        T* d_data  = NULL;
+        T* d_dummy = NULL;
+        HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES));
+        HIP_CHECK(hipMemcpy(d_data, output.data(), sizeof(T) * TEST_VALUES, hipMemcpyHostToDevice));
 
-        g_allocator.DeviceAllocate((void**)&d_dummy, sizeof(T) * DUMMY_TEST_VALUES);
-        hipMemcpy(d_dummy, h_data.data() + DUMMY_OFFSET, sizeof(T) * DUMMY_TEST_VALUES, hipMemcpyHostToDevice);
+        HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_dummy, sizeof(T) * DUMMY_TEST_VALUES));
+        HIP_CHECK(hipMemcpy(d_dummy,
+                            output.data() + DUMMY_OFFSET,
+                            sizeof(T) * DUMMY_TEST_VALUES,
+                            hipMemcpyHostToDevice));
 
         // Initialize reference data
         constexpr uint32_t array_size = 8;
-        std::vector<T> h_reference(array_size);
-        h_reference[0] = h_data[0];          // Value at offset 0
-        h_reference[1] = h_data[100];        // Value at offset 100
-        h_reference[2] = h_data[1000];       // Value at offset 1000
-        h_reference[3] = h_data[10000];      // Value at offset 10000
-        h_reference[4] = h_data[1];          // Value at offset 1
-        h_reference[5] = h_data[21];         // Value at offset 21
-        h_reference[6] = h_data[11];         // Value at offset 11
-        h_reference[7] = h_data[0];          // Value at offset 0;
+        std::vector<T>     h_reference(array_size);
+        h_reference[0] = output[0]; // Value at offset 0
+        h_reference[1] = output[100]; // Value at offset 100
+        h_reference[2] = output[1000]; // Value at offset 1000
+        h_reference[3] = output[10000]; // Value at offset 10000
+        h_reference[4] = output[1]; // Value at offset 1
+        h_reference[5] = output[21]; // Value at offset 21
+        h_reference[6] = output[11]; // Value at offset 11
+        h_reference[7] = output[0]; // Value at offset 0;
 
         // Create and bind obj-based test iterator
         IteratorType d_obj_itr;
-        d_obj_itr.BindTexture((CastT*) d_data, sizeof(T) * TEST_VALUES);
+        HIP_CHECK(d_obj_itr.BindTexture((CastT*)d_data, sizeof(T) * TEST_VALUES));
+
+        // Create and bind dummy iterator of same type to check with interference
+        IteratorType d_obj_itr2;
+        HIP_CHECK(d_obj_itr2.BindTexture((CastT*)d_dummy, sizeof(T) * DUMMY_TEST_VALUES));
 
         iterator_test_function<IteratorType, T>(d_obj_itr, h_reference);
 
-        g_allocator.DeviceFree(d_data);
-        g_allocator.DeviceFree(d_dummy);
+        HIP_CHECK(g_allocator.DeviceFree(d_data));
+        HIP_CHECK(g_allocator.DeviceFree(d_dummy));
     }
 }
 
@@ -411,66 +419,70 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, device_id));
     std::string deviceName = std::string(props.gcnArchName);
-    if (deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0) {
+    if(deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0)
+    {
         // This is a gfx94x or gfx120x device, so skip this test
         GTEST_SKIP() << "Test not run on gfx94x or gfx120x as texture cache API is not supported";
     }
 
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::input_type;
-    using CastT = typename TestFixture::input_type;
+    using T            = typename TestFixture::input_type;
+    using CastT        = typename TestFixture::input_type;
     using IteratorType = hipcub::TexRefInputIterator<T, __LINE__>;
 
     //
     // Test iterator manipulation in kernel
     //
 
-    constexpr uint32_t TEST_VALUES          = 11000;
-    constexpr uint32_t DUMMY_OFFSET         = 500;
-    constexpr uint32_t DUMMY_TEST_VALUES    = TEST_VALUES - DUMMY_OFFSET;
+    constexpr uint32_t TEST_VALUES       = 11000;
+    constexpr uint32_t DUMMY_OFFSET      = 500;
+    constexpr uint32_t DUMMY_TEST_VALUES = TEST_VALUES - DUMMY_OFFSET;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
 
-        //T *h_data = new T[TEST_VALUES];
-        std::vector<T> h_data(TEST_VALUES);
-        std::vector<T> output = test_utils::get_random_data<T>(TEST_VALUES, T(2), T(200), seed_value);
+        std::vector<T> output
+            = test_utils::get_random_data<T>(TEST_VALUES, T(2), T(200), seed_value);
 
         // Allocate device arrays
-        T *d_data   = NULL;
-        T *d_dummy  = NULL;
-        g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES);
-        hipMemcpy(d_data, h_data.data(), sizeof(T) * TEST_VALUES, hipMemcpyHostToDevice);
+        T* d_data  = NULL;
+        T* d_dummy = NULL;
+        HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES));
+        HIP_CHECK(hipMemcpy(d_data, output.data(), sizeof(T) * TEST_VALUES, hipMemcpyHostToDevice));
 
-        g_allocator.DeviceAllocate((void**)&d_dummy, sizeof(T) * DUMMY_TEST_VALUES);
-        hipMemcpy(d_dummy, h_data.data() + DUMMY_OFFSET, sizeof(T) * DUMMY_TEST_VALUES, hipMemcpyHostToDevice);
+        HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_dummy, sizeof(T) * DUMMY_TEST_VALUES));
+        HIP_CHECK(hipMemcpy(d_dummy,
+                            output.data() + DUMMY_OFFSET,
+                            sizeof(T) * DUMMY_TEST_VALUES,
+                            hipMemcpyHostToDevice));
 
         // Initialize reference data
         constexpr uint32_t array_size = 8;
-        std::vector<T> h_reference(array_size);
-        h_reference[0] = h_data[0];          // Value at offset 0
-        h_reference[1] = h_data[100];        // Value at offset 100
-        h_reference[2] = h_data[1000];       // Value at offset 1000
-        h_reference[3] = h_data[10000];      // Value at offset 10000
-        h_reference[4] = h_data[1];          // Value at offset 1
-        h_reference[5] = h_data[21];         // Value at offset 21
-        h_reference[6] = h_data[11];         // Value at offset 11
-        h_reference[7] = h_data[0];          // Value at offset 0;
+        std::vector<T>     h_reference(array_size);
+        h_reference[0] = output[0]; // Value at offset 0
+        h_reference[1] = output[100]; // Value at offset 100
+        h_reference[2] = output[1000]; // Value at offset 1000
+        h_reference[3] = output[10000]; // Value at offset 10000
+        h_reference[4] = output[1]; // Value at offset 1
+        h_reference[5] = output[21]; // Value at offset 21
+        h_reference[6] = output[11]; // Value at offset 11
+        h_reference[7] = output[0]; // Value at offset 0;
 
         // Create and bind ref-based test iterator
         IteratorType d_ref_itr;
-        d_ref_itr.BindTexture((CastT*) d_data, sizeof(T) * TEST_VALUES);
+        HIP_CHECK(d_ref_itr.BindTexture((CastT*)d_data, sizeof(T) * TEST_VALUES));
 
         // Create and bind dummy iterator of same type to check with interference
         IteratorType d_ref_itr2;
-        d_ref_itr2.BindTexture((CastT*) d_dummy, sizeof(T) * DUMMY_TEST_VALUES);
+        HIP_CHECK(d_ref_itr2.BindTexture((CastT*)d_dummy, sizeof(T) * DUMMY_TEST_VALUES));
 
         iterator_test_function<IteratorType, T>(d_ref_itr, h_reference);
 
-        g_allocator.DeviceFree(d_data);
-        g_allocator.DeviceFree(d_dummy);
+        HIP_CHECK(g_allocator.DeviceFree(d_data));
+        HIP_CHECK(g_allocator.DeviceFree(d_dummy));
     }
 }
 
@@ -482,58 +494,58 @@ TYPED_TEST(HipcubIteratorTests, TestTexTransform)
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, device_id));
     std::string deviceName = std::string(props.gcnArchName);
-    if (deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0) {
+    if(deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0)
+    {
         // This is a gfx94x or gfx120x device, so skip this test
         GTEST_SKIP() << "Test not run on gfx94x or gfx120x as texture cache API is not supported";
     }
 
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::input_type;
-    using CastT = typename TestFixture::input_type;
+    using T                   = typename TestFixture::input_type;
     using TextureIteratorType = hipcub::TexRefInputIterator<T, __LINE__>;
 
-    constexpr uint32_t TEST_VALUES          = 11000;
+    constexpr uint32_t TEST_VALUES = 11000;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
 
-        //T *h_data = new T[TEST_VALUES];
-        std::vector<T> h_data(TEST_VALUES);
-        std::vector<T> output = test_utils::get_random_data<T>(TEST_VALUES, T(2), T(200), seed_value);
+        std::vector<T> output
+            = test_utils::get_random_data<T>(TEST_VALUES, T(2), T(200), seed_value);
 
         // Allocate device arrays
-        T *d_data   = NULL;
-        g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES);
-        hipMemcpy(d_data, h_data.data(), sizeof(T) * TEST_VALUES, hipMemcpyHostToDevice);
+        T* d_data = NULL;
+        HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES));
+        HIP_CHECK(hipMemcpy(d_data, output.data(), sizeof(T) * TEST_VALUES, hipMemcpyHostToDevice));
 
         TransformOp<T> op;
 
         // Initialize reference data
         constexpr uint32_t array_size = 8;
-        std::vector<T> h_reference(array_size);
-        h_reference[0] = op(h_data[0]);          // Value at offset 0
-        h_reference[1] = op(h_data[100]);        // Value at offset 100
-        h_reference[2] = op(h_data[1000]);       // Value at offset 1000
-        h_reference[3] = op(h_data[10000]);      // Value at offset 10000
-        h_reference[4] = op(h_data[1]);          // Value at offset 1
-        h_reference[5] = op(h_data[21]);         // Value at offset 21
-        h_reference[6] = op(h_data[11]);         // Value at offset 11
-        h_reference[7] = op(h_data[0]);          // Value at offset 0;
+        std::vector<T>     h_reference(array_size);
+        h_reference[0] = op(output[0]); // Value at offset 0
+        h_reference[1] = op(output[100]); // Value at offset 100
+        h_reference[2] = op(output[1000]); // Value at offset 1000
+        h_reference[3] = op(output[10000]); // Value at offset 10000
+        h_reference[4] = op(output[1]); // Value at offset 1
+        h_reference[5] = op(output[21]); // Value at offset 21
+        h_reference[6] = op(output[11]); // Value at offset 11
+        h_reference[7] = op(output[0]); // Value at offset 0;
 
         // Create and bind ref-based test iterator
         TextureIteratorType d_tex_itr;
-        d_tex_itr.BindTexture((CastT*) d_data, sizeof(T) * TEST_VALUES);
+        HIP_CHECK(d_tex_itr.BindTexture(d_data, sizeof(T) * TEST_VALUES));
 
         // Create transform iterator
-        hipcub::TransformInputIterator<T, TransformOp<T>, TextureIteratorType> xform_itr(d_tex_itr, op);
+        hipcub::TransformInputIterator<T, TransformOp<T>, TextureIteratorType> xform_itr(d_tex_itr,
+                                                                                         op);
 
         iterator_test_function<
             hipcub::TransformInputIterator<T, TransformOp<T>, TextureIteratorType>,
-            T>
-            (xform_itr, h_reference);
+            T>(xform_itr, h_reference);
 
-        g_allocator.DeviceFree(d_data);
+        HIP_CHECK(g_allocator.DeviceFree(d_data));
     }
 }

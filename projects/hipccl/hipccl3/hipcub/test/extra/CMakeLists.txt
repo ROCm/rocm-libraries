@@ -42,7 +42,7 @@ include(VerifyCompiler)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 2.4.0)
+  set(CCCL_MINIMUM_VERSION 2.5.0)
   if(NOT DOWNLOAD_CUB)
     find_package(CUB ${CCCL_MINIMUM_VERSION} CONFIG)
     find_package(Thrust ${CCCL_MINIMUM_VERSION} CONFIG)
@@ -112,9 +112,17 @@ endif()
 find_package(hipcub CONFIG REQUIRED)
 
 # Build CXX flags
-set(CMAKE_CXX_STANDARD 14)
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if (CMAKE_CXX_STANDARD EQUAL 14)
+  message(WARNING "C++14 will be deprecated in the next major release")
+elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+endif()
 
 # Enable testing (ctest)
 enable_testing()

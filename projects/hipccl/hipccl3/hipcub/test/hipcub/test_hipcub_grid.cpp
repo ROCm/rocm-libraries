@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -198,7 +198,7 @@ __global__ void KernelGridQueueInit(hipcub::GridQueue<OffsetT> tile_queue)
 {
     if ((threadIdx.x == 0) && (blockIdx.x == 0))
     {
-        tile_queue.ResetDrain();
+        (void)tile_queue.ResetDrain();
     }
 }
 

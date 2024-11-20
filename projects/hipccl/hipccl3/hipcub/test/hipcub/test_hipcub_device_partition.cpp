@@ -212,11 +212,11 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
                 test_utils::cleanupGraphHelper(graph, graph_instance);
             }
 
-            hipFree(d_input);
-            hipFree(d_flags);
-            hipFree(d_output);
-            hipFree(d_selected_count_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_flags));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_selected_count_output));
+            HIP_CHECK(hipFree(d_temp_storage));
         }
     }
 
@@ -389,10 +389,10 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
                 test_utils::cleanupGraphHelper(graph, graph_instance);
             }
 
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_selected_count_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_selected_count_output));
+            HIP_CHECK(hipFree(d_temp_storage));
         }
     }
 
@@ -575,12 +575,12 @@ TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
                 test_utils::cleanupGraphHelper(graph, graph_instance);
             }
 
-            hipFree(d_input);
-            hipFree(d_first_output);
-            hipFree(d_second_output);
-            hipFree(d_unselected_output);
-            hipFree(d_selected_counts);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_first_output));
+            HIP_CHECK(hipFree(d_second_output));
+            HIP_CHECK(hipFree(d_unselected_output));
+            HIP_CHECK(hipFree(d_selected_counts));
+            HIP_CHECK(hipFree(d_temp_storage));
         }
     }
 

@@ -165,7 +165,7 @@ public:
      */
     virtual ~GridBarrierLifetime()
     {
-        HostReset();
+        (void)HostReset();
     }
 
 

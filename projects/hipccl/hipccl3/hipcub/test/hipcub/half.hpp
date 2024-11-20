@@ -235,20 +235,31 @@ struct half_t
 
     /// Multiply
     __host__ __device__ __forceinline__
-    half_t operator*(const half_t &other)
+    half_t
+        operator*(const half_t& other) const
     {
         return half_t(float(*this) * float(other));
     }
 
     /// Divide
-    __host__ __device__ __forceinline__ half_t operator/(const half_t& other) const
+    __host__ __device__ __forceinline__
+    half_t&
+        operator/=(const half_t& other)
     {
-        return half_t(float(*this) / float(other));
+        return *this = half_t(float(*this) / float(other));
+    }
+
+    friend __host__ __device__ __forceinline__
+    half_t
+        operator/(half_t self, const half_t& other)
+    {
+        return self /= other;
     }
 
     /// Add
     __host__ __device__ __forceinline__
-    half_t operator+(const half_t &other)
+    half_t
+        operator+(const half_t& other) const
     {
         return half_t(float(*this) + float(other));
     }

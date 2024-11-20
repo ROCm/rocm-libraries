@@ -148,7 +148,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
                 test_utils::cleanupGraphHelper(graph, graph_instance);
             }
 
-            hipFree(d_input);
+            HIP_CHECK(hipFree(d_input));
         }
     }
 
@@ -238,7 +238,7 @@ TEST(HipcubDeviceForTestsTempStore, ForEachTempStore)
             // Check if have same number of odd numbers
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_count, expected));
 
-            hipFree(d_input);
+            HIP_CHECK(hipFree(d_input));
         }
     }
 }
@@ -316,7 +316,7 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
                 test_utils::cleanupGraphHelper(graph, graph_instance);
             }
 
-            hipFree(d_input);
+            HIP_CHECK(hipFree(d_input));
         }
     }
 

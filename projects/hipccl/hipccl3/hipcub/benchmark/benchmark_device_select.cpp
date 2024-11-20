@@ -113,11 +113,11 @@ void run_flagged_benchmark(benchmark::State& state,
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-    hipFree(d_input);
-    hipFree(d_flags);
-    hipFree(d_output);
-    hipFree(d_selected_count_output);
-    hipFree(d_temp_storage);
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_flags));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_selected_count_output));
+    HIP_CHECK(hipFree(d_temp_storage));
     HIP_CHECK(hipDeviceSynchronize());
 }
 
@@ -211,7 +211,104 @@ void run_selectop_benchmark(benchmark::State& state,
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_selected_count_output));
+    HIP_CHECK(hipFree(d_temp_storage));
+    HIP_CHECK(hipDeviceSynchronize());
+}
+
+template<class T, class FlagType>
+void run_flagged_if_benchmark(benchmark::State& state,
+                              size_t            size,
+                              const hipStream_t stream,
+                              float             true_probability)
+{
+    std::vector<T> input
+        = benchmark_utils::get_random_data<T>(size,
+                                              benchmark_utils::generate_limits<T>::min(),
+                                              benchmark_utils::generate_limits<T>::max());
+
+    std::vector<FlagType> flags
+        = benchmark_utils::get_random_data01<FlagType>(size, true_probability);
+
+    SelectOperator<T> select_flag_op(true_probability);
+
+    T*            d_input;
+    FlagType*     d_flags;
+    T*            d_output;
+    unsigned int* d_selected_count_output;
+    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_flags, flags.size() * sizeof(FlagType)));
+    HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+    HIP_CHECK(hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(d_flags, flags.data(), flags.size() * sizeof(FlagType), hipMemcpyHostToDevice));
+    HIP_CHECK(hipDeviceSynchronize());
+    // Allocate temporary storage memory
+    size_t temp_storage_size_bytes = 0;
+
+    // Get size of d_temp_storage
+    HIP_CHECK(hipcub::DeviceSelect::FlaggedIf(nullptr,
+                                              temp_storage_size_bytes,
+                                              d_input,
+                                              d_flags,
+                                              d_output,
+                                              d_selected_count_output,
+                                              input.size(),
+                                              select_flag_op,
+                                              stream));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // allocate temporary storage
+    void* d_temp_storage = nullptr;
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Warm-up
+    for(size_t i = 0; i < 10; i++)
+    {
+        HIP_CHECK(hipcub::DeviceSelect::FlaggedIf(d_temp_storage,
+                                                  temp_storage_size_bytes,
+                                                  d_input,
+                                                  d_flags,
+                                                  d_output,
+                                                  d_selected_count_output,
+                                                  input.size(),
+                                                  select_flag_op,
+                                                  stream));
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    const unsigned int batch_size = 10;
+    for(auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        for(size_t i = 0; i < batch_size; i++)
+        {
+            HIP_CHECK(hipcub::DeviceSelect::FlaggedIf(d_temp_storage,
+                                                      temp_storage_size_bytes,
+                                                      d_input,
+                                                      d_flags,
+                                                      d_output,
+                                                      d_selected_count_output,
+                                                      input.size(),
+                                                      select_flag_op,
+                                                      stream));
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds
+            = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
+
     hipFree(d_input);
+    hipFree(d_flags);
     hipFree(d_output);
     hipFree(d_selected_count_output);
     hipFree(d_temp_storage);
@@ -301,10 +398,10 @@ void run_unique_benchmark(benchmark::State& state,
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-    hipFree(d_input);
-    hipFree(d_output);
-    hipFree(d_selected_count_output);
-    hipFree(d_temp_storage);
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_selected_count_output));
+    HIP_CHECK(hipFree(d_temp_storage));
 }
 
 template<class KeyT, class ValueT>
@@ -414,12 +511,12 @@ void run_unique_by_key_benchmark(benchmark::State& state,
                             * (sizeof(KeyT) + sizeof(ValueT)));
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-    hipFree(d_keys_input);
-    hipFree(d_values_input);
-    hipFree(d_keys_output);
-    hipFree(d_values_output);
-    hipFree(d_selected_count_output);
-    hipFree(d_temp_storage);
+    HIP_CHECK(hipFree(d_keys_input));
+    HIP_CHECK(hipFree(d_values_input));
+    HIP_CHECK(hipFree(d_keys_output));
+    HIP_CHECK(hipFree(d_values_output));
+    HIP_CHECK(hipFree(d_selected_count_output));
+    HIP_CHECK(hipFree(d_temp_storage));
 }
 
 #define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p)                                                   \
@@ -438,6 +535,17 @@ void run_unique_by_key_benchmark(benchmark::State& state,
                     ",selected_output_data_type:unsigned int>.(probability:" #p ")") \
             .c_str(),                                                                \
         &run_selectop_benchmark<T>,                                                  \
+        size,                                                                        \
+        stream,                                                                      \
+        p)
+
+#define CREATE_SELECT_FLAGGED_IF_BENCHMARK(T, F, p)                                  \
+    benchmark::RegisterBenchmark(                                                    \
+        std::string("device_select_flagged_if<data_type:" #T ",flag_type:" #F        \
+                    ",output_data_type:" #T                                          \
+                    ",selected_output_data_type:unsigned int>.(probability:" #p ")") \
+            .c_str(),                                                                \
+        &run_flagged_if_benchmark<T, F>,                                             \
         size,                                                                        \
         stream,                                                                      \
         p)
@@ -471,6 +579,12 @@ void run_unique_by_key_benchmark(benchmark::State& state,
 #define BENCHMARK_IF_TYPE(type)                                                       \
     CREATE_SELECT_IF_BENCHMARK(type, 0.05f), CREATE_SELECT_IF_BENCHMARK(type, 0.25f), \
         CREATE_SELECT_IF_BENCHMARK(type, 0.5f), CREATE_SELECT_IF_BENCHMARK(type, 0.75f)
+
+#define BENCHMARK_FLAGGED_IF_TYPE(type, value)                  \
+    CREATE_SELECT_FLAGGED_IF_BENCHMARK(type, value, 0.05f),     \
+        CREATE_SELECT_FLAGGED_IF_BENCHMARK(type, value, 0.25f), \
+        CREATE_SELECT_FLAGGED_IF_BENCHMARK(type, value, 0.5f),  \
+        CREATE_SELECT_FLAGGED_IF_BENCHMARK(type, value, 0.75f)
 
 #define BENCHMARK_UNIQUE_TYPE(type)                                             \
     CREATE_UNIQUE_BENCHMARK(type, 0.05f), CREATE_UNIQUE_BENCHMARK(type, 0.25f), \
@@ -522,6 +636,13 @@ int main(int argc, char* argv[])
            BENCHMARK_IF_TYPE(uint8_t),
            BENCHMARK_IF_TYPE(int8_t),
            BENCHMARK_IF_TYPE(custom_int_double),
+
+           BENCHMARK_FLAGGED_IF_TYPE(int, unsigned char),
+           BENCHMARK_FLAGGED_IF_TYPE(float, unsigned char),
+           BENCHMARK_FLAGGED_IF_TYPE(double, unsigned char),
+           BENCHMARK_FLAGGED_IF_TYPE(uint8_t, uint8_t),
+           BENCHMARK_FLAGGED_IF_TYPE(int8_t, int8_t),
+           BENCHMARK_FLAGGED_IF_TYPE(custom_double2, unsigned char),
 
            BENCHMARK_UNIQUE_TYPE(int),
            BENCHMARK_UNIQUE_TYPE(float),

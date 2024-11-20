@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -223,7 +223,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
                     << "where index = " << i;
             }
         }
-        hipFree(device_data);
+        HIP_CHECK(hipFree(device_data));
     }
 }
 
@@ -340,7 +340,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
                     << "where index = " << i;
             }
         }
-        hipFree(device_data);
+        HIP_CHECK(hipFree(device_data));
     }
 }
 
@@ -466,8 +466,8 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
                 << "where index = " << i;
         }
 
-        hipFree(device_data);
-        hipFree(device_src_offsets);
+        HIP_CHECK(hipFree(device_data));
+        HIP_CHECK(hipFree(device_src_offsets));
     }
 }
 
@@ -578,7 +578,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
                     << "where index = " << i;
             }
         }
-        hipFree(device_data);
+        HIP_CHECK(hipFree(device_data));
     }
 }
 
@@ -690,7 +690,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
                     << "where index = " << i;
             }
         }
-        hipFree(device_data);
+        HIP_CHECK(hipFree(device_data));
     }
 }
 

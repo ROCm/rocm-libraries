@@ -23,6 +23,7 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/warp/warp_reduce.hpp"
+#include <type_traits>
 
 template<
     class T,
@@ -107,14 +108,11 @@ typedef ::testing::Types<
 
 TYPED_TEST_SUITE(HipcubWarpReduceTests, HipcubWarpReduceTestParams);
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__
 __launch_bounds__(BlockSize)
-void warp_reduce_kernel(T* device_input, T* device_output)
+auto warp_reduce_kernel(T* device_input, T* device_output) ->
+    typename std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     // Minimum size is 1
     constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
@@ -132,6 +130,16 @@ void warp_reduce_kernel(T* device_input, T* device_output)
     {
         device_output[index / LogicalWarpSize] = value;
     }
+}
+
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__
+__launch_bounds__(BlockSize)
+auto warp_reduce_kernel(T* /*device_input*/, T* /*device_output*/) ->
+    typename std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{
+    // This kernel should never be actually called; tests are filtered out at runtime
+    // if the device does not support the LogicalWarpSize
 }
 
 TYPED_TEST(HipcubWarpReduceTests, Reduce)
@@ -257,14 +265,11 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
     }
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__
 __launch_bounds__(BlockSize)
-void warp_reduce_valid_kernel(T* device_input, T* device_output, const int valid)
+auto warp_reduce_valid_kernel(T* device_input, T* device_output, const int valid) ->
+    typename std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     // Minimum size is 1
     constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
@@ -282,6 +287,16 @@ void warp_reduce_valid_kernel(T* device_input, T* device_output, const int valid
     {
         device_output[index / LogicalWarpSize] = value;
     }
+}
+
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__
+__launch_bounds__(BlockSize)
+auto warp_reduce_valid_kernel(T* /*device_input*/, T* /*device_output*/, const int /*valid*/) ->
+    typename std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{
+    // This kernel should never be actually called; tests are filtered out at runtime
+    // if the device does not support the LogicalWarpSize
 }
 
 TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
@@ -407,15 +422,11 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
     }
 }
 
-template<
-    class T,
-    class Flag,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
+template<class T, class Flag, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__
 __launch_bounds__(BlockSize)
-void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
+auto head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output) ->
+    typename std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     // Minimum size is 1
     constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
@@ -430,6 +441,16 @@ void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
     value = wreduce_t(storage[warp_id]).HeadSegmentedSum(value, flag);
 
     output[index] = value;
+}
+
+template<class T, class Flag, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__
+__launch_bounds__(BlockSize)
+auto head_segmented_warp_reduce_kernel(T* /*input*/, Flag* /*flags*/, T* /*output*/) ->
+    typename std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{
+    // This kernel should never be actually called; tests are filtered out at runtime
+    // if the device does not support the LogicalWarpSize
 }
 
 TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
@@ -610,15 +631,11 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
     }
 }
 
-template<
-    class T,
-    class Flag,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
+template<class T, class Flag, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__
 __launch_bounds__(BlockSize)
-void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
+auto tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output) ->
+    typename std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     // Minimum size is 1
     constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
@@ -634,6 +651,16 @@ void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
     value = wreduce_t(storage[warp_id]).TailSegmentedReduce(value, flag, reduce_op);
 
     output[index] = value;
+}
+
+template<class T, class Flag, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__
+__launch_bounds__(BlockSize)
+auto tail_segmented_warp_reduce_kernel(T* /*input*/, Flag* /*flags*/, T* /*output*/) ->
+    typename std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{
+    // This kernel should never be actually called; tests are filtered out at runtime
+    // if the device does not support the LogicalWarpSize
 }
 
 TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)

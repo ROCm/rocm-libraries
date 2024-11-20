@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,9 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
 template<class T, unsigned int WarpSize, unsigned int Trials>
-__global__ __launch_bounds__(64) void warp_reduce_kernel(const T* d_input, T* d_output)
+__global__ __launch_bounds__(64)
+auto warp_reduce_kernel(const T* d_input, T* d_output)
+    -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
@@ -48,10 +50,16 @@ __global__ __launch_bounds__(64) void warp_reduce_kernel(const T* d_input, T* d_
     d_output[i] = value;
 }
 
+template<class T, unsigned int WarpSize, unsigned int Trials>
+__global__ __launch_bounds__(64)
+auto warp_reduce_kernel(const T* /*d_input*/, T* /*d_output*/)
+    -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
+{}
+
 template<class T, class Flag, unsigned int WarpSize, unsigned int Trials>
-__global__ __launch_bounds__(64) void segmented_warp_reduce_kernel(const T* d_input,
-                                                                   Flag*    d_flags,
-                                                                   T*       d_output)
+__global__ __launch_bounds__(64)
+auto segmented_warp_reduce_kernel(const T* d_input, Flag* d_flags, T* d_output)
+    -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
@@ -68,6 +76,12 @@ __global__ __launch_bounds__(64) void segmented_warp_reduce_kernel(const T* d_in
 
     d_output[i] = value;
 }
+
+template<class T, class Flag, unsigned int WarpSize, unsigned int Trials>
+__global__ __launch_bounds__(64)
+auto segmented_warp_reduce_kernel(const T* /*d_input*/, Flag* /*d_flags*/, T* /*d_output*/)
+    -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
+{}
 
 template<bool         Segmented,
          unsigned int WarpSize,

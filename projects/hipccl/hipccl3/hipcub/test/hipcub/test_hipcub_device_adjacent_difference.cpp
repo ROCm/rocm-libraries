@@ -457,8 +457,8 @@ TYPED_TEST(HipcubDeviceAdjacentDifferenceLargeTests, LargeIndicesAndOpOnce)
 
             ASSERT_EQ(flags[0], 1);
             ASSERT_EQ(flags[1], 1);
-            hipFree(d_temp_storage);
-            hipFree(d_flags);
+            HIP_CHECK(hipFree(d_temp_storage));
+            HIP_CHECK(hipFree(d_flags));
         }
     }
 }

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2023, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -39,6 +39,18 @@
 #include <hipcub/iterator/discard_output_iterator.hpp>
 
 #define AssertEquals(a, b) if ((a) != (b)) { std::cerr << "\n(" << __FILE__ << ": " << __LINE__ << ")\n"; exit(1);}
+
+#define HIP_CHECK(condition)                                                           \
+    do                                                                                 \
+    {                                                                                  \
+        hipError_t error = condition;                                                  \
+        if(error != hipSuccess)                                                        \
+        {                                                                              \
+            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+            exit(error);                                                               \
+        }                                                                              \
+    }                                                                                  \
+    while(0);
 
 template <typename T>
 T CoutCast(T val) { return val; }
@@ -248,7 +260,7 @@ struct CommandLineArgs
             error = hipSetDevice(dev);
             if (error) break;
 
-            hipMemGetInfo(&device_free_physmem, &device_total_physmem);
+            HIP_CHECK(hipMemGetInfo(&device_free_physmem, &device_total_physmem));
 
             // int ptx_version = 0;
             // error = hipcub::PtxVersion(ptx_version);
@@ -418,7 +430,7 @@ int CompareDeviceResults(
     T *h_data = (T*) malloc(num_items * sizeof(T));
 
     // Copy data back
-    hipMemcpy(h_data, d_data, sizeof(T) * num_items, hipMemcpyDeviceToHost);
+    HIP_CHECK(hipMemcpy(h_data, d_data, sizeof(T) * num_items, hipMemcpyDeviceToHost));
 
     // Display data
     if (display_data)
@@ -463,8 +475,8 @@ int CompareDeviceDeviceResults(
     T *h_data = (T*) malloc(num_items * sizeof(T));
 
     // Copy data back
-    hipMemcpy(h_reference, d_reference, sizeof(T) * num_items, hipMemcpyDeviceToHost);
-    hipMemcpy(h_data, d_data, sizeof(T) * num_items, hipMemcpyDeviceToHost);
+    HIP_CHECK(hipMemcpy(h_reference, d_reference, sizeof(T) * num_items, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_data, d_data, sizeof(T) * num_items, hipMemcpyDeviceToHost));
 
     // Display data
     if (display_data) {
@@ -614,31 +626,31 @@ struct GpuTimer
 
     GpuTimer()
     {
-        hipEventCreate(&start);
-        hipEventCreate(&stop);
+        HIP_CHECK(hipEventCreate(&start));
+        HIP_CHECK(hipEventCreate(&stop));
     }
 
     ~GpuTimer()
     {
-        hipEventDestroy(start);
-        hipEventDestroy(stop);
+        HIP_CHECK(hipEventDestroy(start));
+        HIP_CHECK(hipEventDestroy(stop));
     }
 
     void Start()
     {
-        hipEventRecord(start, 0);
+        HIP_CHECK(hipEventRecord(start, 0));
     }
 
     void Stop()
     {
-        hipEventRecord(stop, 0);
+        HIP_CHECK(hipEventRecord(stop, 0));
     }
 
     float ElapsedMillis()
     {
         float elapsed;
-        hipEventSynchronize(stop);
-        hipEventElapsedTime(&elapsed, start, stop);
+        HIP_CHECK(hipEventSynchronize(stop));
+        HIP_CHECK(hipEventElapsedTime(&elapsed, start, stop));
         return elapsed;
     }
 };

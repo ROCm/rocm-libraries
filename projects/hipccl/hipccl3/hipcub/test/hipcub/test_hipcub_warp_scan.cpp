@@ -23,6 +23,7 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/warp/warp_scan.hpp"
+#include <type_traits>
 
 // Params for tests
 template<
@@ -45,7 +46,6 @@ public:
     using type = typename Params::type;
     static constexpr unsigned int warp_size = Params::warp_size;
 };
-
 typedef ::testing::Types<
 
     // shuffle based scan
@@ -108,14 +108,10 @@ typedef ::testing::Types<
 
 TYPED_TEST_SUITE(HipcubWarpScanTests, HipcubWarpScanTestParams);
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_inclusive_scan_kernel(T* device_input, T* device_output)
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize)
+auto warp_inclusive_scan_kernel(T* device_input, T* device_output)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     // Minimum size is 1
     constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
@@ -131,6 +127,12 @@ void warp_inclusive_scan_kernel(T* device_input, T* device_output)
 
     device_output[index] = value;
 }
+
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize)
+auto warp_inclusive_scan_kernel(T* /*device_input*/, T* /*device_output*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
 
 TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
 {
@@ -256,17 +258,12 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
     }
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_inclusive_scan_reduce_kernel(
-    T* device_input,
-    T* device_output,
-    T* device_output_reductions)
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize)
+auto warp_inclusive_scan_reduce_kernel(T* device_input,
+                                       T* device_output,
+                                       T* device_output_reductions)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     // Minimum size is 1
     constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
@@ -294,6 +291,14 @@ void warp_inclusive_scan_reduce_kernel(
         device_output_reductions[index / LogicalWarpSize] = reduction;
     }
 }
+
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize)
+auto warp_inclusive_scan_reduce_kernel(T* /*device_input*/,
+                                       T* /*device_output*/,
+                                       T* /*device_output_reductions*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
 
 TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
 {
@@ -438,14 +443,10 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
     }
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize)
+auto warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     // Minimum size is 1
     constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
@@ -461,6 +462,12 @@ void warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
 
     device_output[index] = value;
 }
+
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize)
+auto warp_exclusive_scan_kernel(T* /*device_input*/, T* /*device_output*/, T /*init*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
 
 TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
 {
@@ -589,18 +596,13 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
     }
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_exclusive_scan_reduce_kernel(
-    T* device_input,
-    T* device_output,
-    T* device_output_reductions,
-    T init)
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize)
+auto warp_exclusive_scan_reduce_kernel(T* device_input,
+                                       T* device_output,
+                                       T* device_output_reductions,
+                                       T  init)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     // Minimum size is 1
     constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
@@ -621,6 +623,15 @@ void warp_exclusive_scan_reduce_kernel(
         device_output_reductions[index / LogicalWarpSize] = reduction;
     }
 }
+
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize)
+auto warp_exclusive_scan_reduce_kernel(T* /*device_input*/,
+                                       T* /*device_output*/,
+                                       T* /*device_output_reductions*/,
+                                       T /*init*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
 
 TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
 {
@@ -778,18 +789,13 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
     }
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_scan_kernel(
-    T* device_input,
-    T* device_inclusive_output,
-    T* device_exclusive_output,
-    T init)
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize)
+auto warp_scan_kernel(T* device_input,
+                      T* device_inclusive_output,
+                      T* device_exclusive_output,
+                      T  init)
+    -> std::enable_if_t<test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     // Minimum size is 1
     constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
@@ -807,6 +813,15 @@ void warp_scan_kernel(
     device_inclusive_output[index] = inclusive_output;
     device_exclusive_output[index] = exclusive_output;
 }
+
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__ __launch_bounds__(BlockSize)
+auto warp_scan_kernel(T* /*device_input*/,
+                      T* /*device_inclusive_output*/,
+                      T* /*device_exclusive_output*/,
+                      T /*init*/)
+    -> std::enable_if_t<!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+{}
 
 TYPED_TEST(HipcubWarpScanTests, Scan)
 {
