@@ -227,7 +227,6 @@ template <class T> struct is_const_or_const_ref<T const> : std::true_type{};
 #endif
 
 // std::invoke from C++17
-// https://stackoverflow.com/questions/38288042/c11-14-invoke-workaround
 THRUST_EXEC_CHECK_DISABLE
 template <typename Fn, typename... Args,
 #ifdef THRUST_OPTIONAL_LIBCXX_MEM_FN_WORKAROUND
