@@ -91,7 +91,7 @@ namespace __copy {
             class InputIt,
             class Size,
             class OutputIt>
-  OutputIt __host__
+  OutputIt _CCCL_HOST
   cross_system_copy_n(thrust::execution_policy<System1>& sys1,
                       thrust::execution_policy<System2>& sys2,
                       InputIt                            begin,
@@ -118,7 +118,7 @@ namespace __copy {
             class InputIt,
             class Size,
             class OutputIt>
-  OutputIt __host__
+  OutputIt _CCCL_HOST
   cross_system_copy_n(thrust::cpp::execution_policy<H>&      host_s,
                       thrust::cuda_cub::execution_policy<D>& device_s,
                       InputIt                                first,
@@ -166,7 +166,7 @@ namespace __copy {
             class InputIt,
             class Size,
             class OutputIt>
-  OutputIt __host__
+  OutputIt _CCCL_HOST
   cross_system_copy_n(thrust::cuda_cub::execution_policy<D>& device_s,
                       thrust::cpp::execution_policy<H>&   host_s,
                       InputIt                             first,
@@ -207,7 +207,7 @@ namespace __copy {
             class InputIt,
             class Size,
             class OutputIt>
-  OutputIt __host__
+  OutputIt _CCCL_HOST
   cross_system_copy_n(cross_system<System1, System2> systems,
                       InputIt  begin,
                       Size     n,
@@ -226,7 +226,7 @@ namespace __copy {
             class System2,
             class InputIterator,
             class OutputIterator>
-  OutputIterator __host__
+  OutputIterator _CCCL_HOST
   cross_system_copy(cross_system<System1, System2> systems,
                     InputIterator  begin,
                     InputIterator  end,

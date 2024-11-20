@@ -4,6 +4,7 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 
+#include "include/host_device.h"
 #include <assert.h>
 
 // We have a matrix stored in a `thrust::device_vector`. We want to perform a

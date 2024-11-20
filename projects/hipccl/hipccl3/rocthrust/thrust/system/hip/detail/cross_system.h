@@ -46,10 +46,10 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
     policy1 &sys1;
     policy2 &sys2;
 
-    inline __host__ __device__
+    inline THRUST_HOST_DEVICE
     cross_system(policy1 &sys1, policy2 &sys2) : sys1(sys1), sys2(sys2) {}
 
-    inline __host__ __device__
+    inline THRUST_HOST_DEVICE
     cross_system<Sys2, Sys1> rotate() const
     {
         return cross_system<Sys2, Sys1>(sys2, sys1);
@@ -58,7 +58,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 
   // Device to host.
   template <class Sys1, class Sys2>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto direction_of_copy(
     thrust::system::hip::execution_policy<Sys1> const&
   , thrust::cpp::execution_policy<Sys2> const&
@@ -71,7 +71,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 
   // Host to device.
   template <class Sys1, class Sys2>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto direction_of_copy(
     thrust::cpp::execution_policy<Sys1> const&
   , thrust::system::hip::execution_policy<Sys2> const&
@@ -84,7 +84,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 
   // Device to device.
   template <class Sys1, class Sys2>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto direction_of_copy(
     thrust::system::hip::execution_policy<Sys1> const&
   , thrust::system::hip::execution_policy<Sys2> const&
@@ -97,7 +97,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 
   // Device to device.
   template <class DerivedPolicy>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto direction_of_copy(execution_policy<DerivedPolicy> const &)
   THRUST_DECLTYPE_RETURNS(
     thrust::detail::integral_constant<
@@ -106,7 +106,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
   )
 
   template <class Sys1, class Sys2>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto direction_of_copy(
     execution_policy<cross_system<Sys1, Sys2>> const &systems
   )
@@ -123,7 +123,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy0>(),
                                          std::declval<ExecutionPolicy1>()))>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto is_device_to_host_copy(
     ExecutionPolicy0 const&
   , ExecutionPolicy1 const&
@@ -140,7 +140,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             // MSVC2015 WAR: put decltype here instead of in trailing return type
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto is_device_to_host_copy(ExecutionPolicy const& )
     noexcept ->
       thrust::detail::integral_constant<
@@ -156,7 +156,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy0>(),
                                          std::declval<ExecutionPolicy1>()))>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto is_host_to_device_copy(
     ExecutionPolicy0 const&
   , ExecutionPolicy1 const&
@@ -173,7 +173,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             // MSVC2015 WAR: put decltype here instead of in trailing return type
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto is_host_to_device_copy(ExecutionPolicy const& )
     noexcept ->
       thrust::detail::integral_constant<
@@ -189,7 +189,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy0>(),
                                          std::declval<ExecutionPolicy1>()))>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto is_device_to_device_copy(
     ExecutionPolicy0 const&
   , ExecutionPolicy1 const&
@@ -206,7 +206,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             // MSVC2015 WAR: put decltype here instead of in trailing return type
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
-  constexpr __host__ __device__
+  constexpr THRUST_HOST_DEVICE
   auto is_device_to_device_copy(ExecutionPolicy const& )
     noexcept ->
       thrust::detail::integral_constant<
@@ -220,37 +220,37 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 
   // Device to host.
   template <class Sys1, class Sys2>
-  __host__ __device__ auto select_device_system(thrust::hip::execution_policy<Sys1>& sys1,
+  THRUST_HOST_DEVICE auto select_device_system(thrust::hip::execution_policy<Sys1>& sys1,
                                                 thrust::execution_policy<Sys2>&)
       THRUST_DECLTYPE_RETURNS(sys1)
 
       // Device to host.
       template <class Sys1, class Sys2>
-      __host__ __device__ auto select_device_system(thrust::hip::execution_policy<Sys1> const& sys1,
+      THRUST_HOST_DEVICE auto select_device_system(thrust::hip::execution_policy<Sys1> const& sys1,
                                                     thrust::execution_policy<Sys2> const&)
           THRUST_DECLTYPE_RETURNS(sys1)
 
       // Host to device.
       template <class Sys1, class Sys2>
-      __host__ __device__ auto select_device_system(thrust::execution_policy<Sys1>&,
+      THRUST_HOST_DEVICE auto select_device_system(thrust::execution_policy<Sys1>&,
                                                     thrust::hip::execution_policy<Sys2>& sys2)
           THRUST_DECLTYPE_RETURNS(sys2)
 
       // Host to device.
       template <class Sys1, class Sys2>
-      __host__ __device__ auto select_device_system(thrust::execution_policy<Sys1> const&,
+      THRUST_HOST_DEVICE auto select_device_system(thrust::execution_policy<Sys1> const&,
                                                     thrust::hip::execution_policy<Sys2> const& sys2)
           THRUST_DECLTYPE_RETURNS(sys2)
 
       // Device to device.
       template <class Sys1, class Sys2>
-      __host__ __device__ auto select_device_system(thrust::hip::execution_policy<Sys1>& sys1,
+      THRUST_HOST_DEVICE auto select_device_system(thrust::hip::execution_policy<Sys1>& sys1,
                                                     thrust::hip::execution_policy<Sys2>&)
           THRUST_DECLTYPE_RETURNS(sys1)
 
       // Device to device.
       template <class Sys1, class Sys2>
-      __host__ __device__ auto select_device_system(thrust::hip::execution_policy<Sys1> const& sys1,
+      THRUST_HOST_DEVICE auto select_device_system(thrust::hip::execution_policy<Sys1> const& sys1,
                                                     thrust::hip::execution_policy<Sys2> const&)
           THRUST_DECLTYPE_RETURNS(sys1)
 
@@ -258,43 +258,43 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 
       // Device to host.
       template <class Sys1, class Sys2>
-      __host__ __device__ auto select_host_system(thrust::hip::execution_policy<Sys1>&,
+      THRUST_HOST_DEVICE auto select_host_system(thrust::hip::execution_policy<Sys1>&,
                                                   thrust::execution_policy<Sys2>& sys2)
           THRUST_DECLTYPE_RETURNS(sys2)
 
       // Device to host.
       template <class Sys1, class Sys2>
-      __host__ __device__ auto select_host_system(thrust::hip::execution_policy<Sys1> const&,
+      THRUST_HOST_DEVICE auto select_host_system(thrust::hip::execution_policy<Sys1> const&,
                                                   thrust::execution_policy<Sys2> const& sys2)
           THRUST_DECLTYPE_RETURNS(sys2)
 
       // Host to device.
       template <class Sys1, class Sys2>
-      __host__ __device__ auto select_host_system(thrust::execution_policy<Sys1>& sys1,
+      THRUST_HOST_DEVICE auto select_host_system(thrust::execution_policy<Sys1>& sys1,
                                                   thrust::hip::execution_policy<Sys2>&)
           THRUST_DECLTYPE_RETURNS(sys1)
 
       // Host to device.
       template <class Sys1, class Sys2>
-      __host__ __device__ auto select_host_system(thrust::execution_policy<Sys1> const& sys1,
+      THRUST_HOST_DEVICE auto select_host_system(thrust::execution_policy<Sys1> const& sys1,
                                                   thrust::hip::execution_policy<Sys2> const&)
           THRUST_DECLTYPE_RETURNS(sys1)
 
       // Device to device.
       template <class Sys1, class Sys2>
-      __host__ __device__
+      THRUST_HOST_DEVICE
       auto select_host_system(thrust::execution_policy<Sys1>& sys1, thrust::execution_policy<Sys2>&)
           THRUST_DECLTYPE_RETURNS(sys1)
 
       // Device to device.
       template <class Sys1, class Sys2>
-      __host__ __device__ auto select_host_system(thrust::execution_policy<Sys1> const& sys1,
+      THRUST_HOST_DEVICE auto select_host_system(thrust::execution_policy<Sys1> const& sys1,
                                                   thrust::execution_policy<Sys2> const&)
           THRUST_DECLTYPE_RETURNS(sys1)
 
       // Device to host.
       template <class Sys1, class Sys2>
-      __host__ __device__ cross_system<Sys1, Sys2> select_system(
+      THRUST_HOST_DEVICE cross_system<Sys1, Sys2> select_system(
           execution_policy<Sys1> const& sys1, thrust::cpp::execution_policy<Sys2> const& sys2)
   {
     thrust::execution_policy<Sys1> &     non_const_sys1 = const_cast<execution_policy<Sys1> &>(sys1);
@@ -304,7 +304,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 
   // Host to device.
   template <class Sys1, class Sys2>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   cross_system<Sys1, Sys2>
   select_system(thrust::cpp::execution_policy<Sys1> const &sys1,
                 execution_policy<Sys2> const &             sys2)

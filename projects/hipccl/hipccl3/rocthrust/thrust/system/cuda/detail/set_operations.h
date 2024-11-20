@@ -1346,13 +1346,13 @@ namespace __set_operations {
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class ItemsIt1,
           class ItemsIt2,
           class OutputIt,
           class CompareOp>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 set_difference(execution_policy<Derived> &policy,
                ItemsIt1                   items1_first,
                ItemsIt1                   items1_last,
@@ -1391,7 +1391,7 @@ template <class Derived,
           class ItemsIt1,
           class ItemsIt2,
           class OutputIt>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 set_difference(execution_policy<Derived> &policy,
                ItemsIt1                   items1_first,
                ItemsIt1                   items1_last,
@@ -1412,13 +1412,13 @@ set_difference(execution_policy<Derived> &policy,
 /*****************************/
 
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class ItemsIt1,
           class ItemsIt2,
           class OutputIt,
           class CompareOp>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 set_intersection(execution_policy<Derived> &policy,
                  ItemsIt1                   items1_first,
                  ItemsIt1                   items1_last,
@@ -1457,7 +1457,7 @@ template <class Derived,
           class ItemsIt1,
           class ItemsIt2,
           class OutputIt>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 set_intersection(execution_policy<Derived> &policy,
                  ItemsIt1                   items1_first,
                  ItemsIt1                   items1_last,
@@ -1478,13 +1478,13 @@ set_intersection(execution_policy<Derived> &policy,
 
 /*****************************/
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class ItemsIt1,
           class ItemsIt2,
           class OutputIt,
           class CompareOp>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 set_symmetric_difference(execution_policy<Derived> &policy,
                          ItemsIt1                   items1_first,
                          ItemsIt1                   items1_last,
@@ -1523,7 +1523,7 @@ template <class Derived,
           class ItemsIt1,
           class ItemsIt2,
           class OutputIt>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 set_symmetric_difference(execution_policy<Derived> &policy,
                          ItemsIt1                   items1_first,
                          ItemsIt1                   items1_last,
@@ -1543,13 +1543,13 @@ set_symmetric_difference(execution_policy<Derived> &policy,
 
 /*****************************/
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class ItemsIt1,
           class ItemsIt2,
           class OutputIt,
           class CompareOp>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 set_union(execution_policy<Derived> &policy,
           ItemsIt1                   items1_first,
           ItemsIt1                   items1_last,
@@ -1588,7 +1588,7 @@ template <class Derived,
           class ItemsIt1,
           class ItemsIt2,
           class OutputIt>
-OutputIt __host__ __device__
+OutputIt _CCCL_HOST_DEVICE
 set_union(execution_policy<Derived> &policy,
           ItemsIt1                   items1_first,
           ItemsIt1                   items1_last,
@@ -1615,7 +1615,7 @@ set_union(execution_policy<Derived> &policy,
 
 /*****************************/
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeysIt1,
           class KeysIt2,
@@ -1624,7 +1624,7 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> __host__ __device__
+pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE
 set_difference_by_key(execution_policy<Derived> &policy,
                       KeysIt1                    keys1_first,
                       KeysIt1                    keys1_last,
@@ -1670,7 +1670,7 @@ template <class Derived,
           class ItemsIt2,
           class KeysOutputIt,
           class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> __host__ __device__
+pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE
 set_difference_by_key(execution_policy<Derived> &policy,
                       KeysIt1                    keys1_first,
                       KeysIt1                    keys1_last,
@@ -1696,7 +1696,7 @@ set_difference_by_key(execution_policy<Derived> &policy,
 
 /*****************************/
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeysIt1,
           class KeysIt2,
@@ -1705,7 +1705,7 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> __host__ __device__
+pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE
 set_intersection_by_key(execution_policy<Derived> &policy,
                         KeysIt1                    keys1_first,
                         KeysIt1                    keys1_last,
@@ -1749,7 +1749,7 @@ template <class Derived,
           class ItemsIt2,
           class KeysOutputIt,
           class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> __host__ __device__
+pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE
 set_intersection_by_key(execution_policy<Derived> &policy,
                         KeysIt1                    keys1_first,
                         KeysIt1                    keys1_last,
@@ -1773,7 +1773,7 @@ set_intersection_by_key(execution_policy<Derived> &policy,
 
 /*****************************/
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeysIt1,
           class KeysIt2,
@@ -1782,7 +1782,7 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> __host__ __device__
+pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE
 set_symmetric_difference_by_key(execution_policy<Derived> &policy,
                                 KeysIt1                    keys1_first,
                                 KeysIt1                    keys1_last,
@@ -1829,7 +1829,7 @@ template <class Derived,
           class ItemsIt2,
           class KeysOutputIt,
           class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> __host__ __device__
+pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE
 set_symmetric_difference_by_key(execution_policy<Derived> &policy,
                                 KeysIt1                    keys1_first,
                                 KeysIt1                    keys1_last,
@@ -1855,7 +1855,7 @@ set_symmetric_difference_by_key(execution_policy<Derived> &policy,
 
 /*****************************/
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeysIt1,
           class KeysIt2,
@@ -1864,7 +1864,7 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> __host__ __device__
+pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE
 set_union_by_key(execution_policy<Derived> &policy,
                  KeysIt1                    keys1_first,
                  KeysIt1                    keys1_last,
@@ -1910,7 +1910,7 @@ template <class Derived,
           class ItemsIt2,
           class KeysOutputIt,
           class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> __host__ __device__
+pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE
 set_union_by_key(execution_policy<Derived> &policy,
                  KeysIt1                    keys1_first,
                  KeysIt1                    keys1_last,

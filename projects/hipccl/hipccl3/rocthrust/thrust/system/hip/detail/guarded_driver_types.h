@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,24 +24,24 @@
 // carefully save their definitions and restore them
 
 
-#ifdef __host__
-#  pragma push_macro("__host__")
-#  undef __host__
+#ifdef THRUST_HOST
+#  pragma push_macro("THRUST_HOST")
+#  undef THRUST_HOST
 #  define THRUST_HOST_NEEDS_RESTORATION
 #endif
-#ifdef __device__
-#  pragma push_macro("__device__")
-#  undef __device__
+#ifdef THRUST_DEVICE
+#  pragma push_macro("THRUST_DEVICE")
+#  undef THRUST_DEVICE
 #  define THRUST_DEVICE_NEEDS_RESTORATION
 #endif
 
 #include <hip/amd_detail/host_defines.h>
 
 #ifdef THRUST_HOST_NEEDS_RESTORATION
-#  pragma pop_macro("__host__")
+#  pragma pop_macro("THRUST_HOST")
 #  undef THRUST_HOST_NEEDS_RESTORATION
 #endif
 #ifdef THRUST_DEVICE_NEEDS_RESTORATION
-#  pragma pop_macro("__device__")
+#  pragma pop_macro("THRUST_DEVICE")
 #  undef THRUST_DEVICE_NEEDS_RESTORATION
 #endif

@@ -221,11 +221,10 @@ struct const_ref_plus_mod3
 
     const_ref_plus_mod3(T * table) : table(table) {}
 
-    __host__ __device__
-    const T& operator()(T a, T b)
-    {
-        return table[(int) (a + b)];
-    }
+  THRUST_HOST_DEVICE const T& operator()(T a, T b)
+  {
+    return table[(int) (a + b)];
+  }
 };
 
 static void TestInclusiveScanWithConstAccumulator(void)

@@ -25,12 +25,12 @@
 
 THRUST_NAMESPACE_BEGIN
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
          typename OutputType>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputType inner_product(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                          InputIterator1 first1,
                          InputIterator1 last1,
@@ -42,14 +42,14 @@ OutputType inner_product(const thrust::detail::execution_policy_base<DerivedPoli
 } // end inner_product()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
          typename OutputType,
          typename BinaryFunction1,
          typename BinaryFunction2>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputType inner_product(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                          InputIterator1 first1,
                          InputIterator1 last1,

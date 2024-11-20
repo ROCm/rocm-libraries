@@ -38,13 +38,13 @@
 
 struct in_place
 {
-    template <typename T, typename Policy = thrust::detail::device_t>
-    float64_t run(thrust::device_vector<T>& input)
+    template <typename T, typename Policy>
+    float64_t run(thrust::device_vector<T>& input, Policy policy)
     {
         bench_utils::gpu_timer d_timer;
 
         d_timer.start(0);
-        thrust::adjacent_difference(Policy {}, input.cbegin(), input.cend(), input.begin());
+        thrust::adjacent_difference(policy, input.cbegin(), input.cend(), input.begin());
         d_timer.stop(0);
 
         return d_timer.get_duration();
@@ -63,9 +63,12 @@ void run_benchmark(benchmark::State& state, const std::size_t elements, const st
     // Generate input
     thrust::device_vector<T> input = bench_utils::generate(elements, seed_type);
 
+    bench_utils::caching_allocator_t alloc {};
+    thrust::detail::device_t         policy {};
+
     for(auto _ : state)
     {
-        float64_t duration = benchmark.template run<T>(input);
+        float64_t duration = benchmark.template run<T>(input, policy(alloc));
         state.SetIterationTime(duration);
         gpu_times.push_back(duration);
     }
@@ -138,7 +141,7 @@ int main(int argc, char* argv[])
     }
 
     // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks(new bench_utils::CustomReporter);
+    benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
 
     // Finish
     benchmark::Shutdown();

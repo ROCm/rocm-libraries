@@ -125,7 +125,7 @@ namespace __parallel_for
     }
 } // __parallel_for
 
-__thrust_exec_check_disable__ template <class Derived, class F, class Size>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class F, class Size>
 void THRUST_HIP_FUNCTION
 parallel_for(execution_policy<Derived>& policy, F f, Size count)
 {
@@ -137,7 +137,7 @@ parallel_for(execution_policy<Derived>& policy, F f, Size count)
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static void par(execution_policy<Derived>& policy, F f, Size count)
         {
             hipStream_t stream = hip_rocprim::stream(policy);
@@ -147,7 +147,7 @@ parallel_for(execution_policy<Derived>& policy, F f, Size count)
                                         "parallel_for: failed to synchronize");
         }
 
-        __device__
+        THRUST_DEVICE
         static void seq(execution_policy<Derived>& policy, F f, Size count)
         {
             (void)policy;

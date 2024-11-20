@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -276,7 +276,7 @@ template<typename DerivedPolicy>
  *
  *  struct printf_functor
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
@@ -324,7 +324,7 @@ static const detail::host_t host;
  *
  *  struct printf_functor
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
@@ -364,7 +364,7 @@ THRUST_INLINE_CONSTANT detail::device_t device;
  *
  *  struct printf_functor
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);

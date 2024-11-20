@@ -28,7 +28,7 @@ THRUST_NAMESPACE_BEGIN
 
 #if THRUST_CPP_DIALECT < 2011
 template <typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>::complex()
 {
   real(T());
@@ -37,7 +37,7 @@ complex<T>::complex()
 #endif
 
 template <typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>::complex(const T& re)
 #if THRUST_CPP_DIALECT >= 2011
   // Initialize the storage in the member initializer list using C++ unicorn
@@ -53,7 +53,7 @@ complex<T>::complex(const T& re)
 
 
 template <typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>::complex(const T& re, const T& im)
 #if THRUST_CPP_DIALECT >= 2011
   // Initialize the storage in the member initializer list using C++ unicorn
@@ -69,7 +69,7 @@ complex<T>::complex(const T& re, const T& im)
 
 #if THRUST_CPP_DIALECT < 2011
 template <typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>::complex(const complex<T>& z)
 {
   real(z.real());
@@ -79,7 +79,7 @@ complex<T>::complex(const complex<T>& z)
 
 template <typename T>
 template <typename U>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>::complex(const complex<U>& z)
 #if THRUST_CPP_DIALECT >= 2011
   // Initialize the storage in the member initializer list using C++ unicorn
@@ -95,7 +95,7 @@ complex<T>::complex(const complex<U>& z)
 #endif
 
 template <typename T>
-__host__ THRUST_STD_COMPLEX_DEVICE
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE
 complex<T>::complex(const std::complex<T>& z)
 #if THRUST_CPP_DIALECT >= 2011
   // Initialize the storage in the member initializer list using C++ unicorn
@@ -111,7 +111,7 @@ complex<T>::complex(const std::complex<T>& z)
 
 template <typename T>
 template <typename U>
-__host__ THRUST_STD_COMPLEX_DEVICE
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE
 complex<T>::complex(const std::complex<U>& z)
 #if THRUST_CPP_DIALECT >= 2011
   // Initialize the storage in the member initializer list using C++ unicorn
@@ -131,7 +131,7 @@ complex<T>::complex(const std::complex<U>& z)
 /* --- Assignment Operators --- */
 
 template <typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator=(const T& re)
 {
   real(re);
@@ -141,7 +141,7 @@ complex<T>& complex<T>::operator=(const T& re)
 
 #if THRUST_CPP_DIALECT < 2011
 template <typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator=(const complex<T>& z)
 {
   real(z.real());
@@ -152,7 +152,7 @@ complex<T>& complex<T>::operator=(const complex<T>& z)
 
 template <typename T>
 template <typename U>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator=(const complex<U>& z)
 {
   real(T(z.real()));
@@ -161,7 +161,7 @@ complex<T>& complex<T>::operator=(const complex<U>& z)
 }
 
 template <typename T>
-__host__ THRUST_STD_COMPLEX_DEVICE
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE
 complex<T>& complex<T>::operator=(const std::complex<T>& z)
 {
   real(THRUST_STD_COMPLEX_REAL(z));
@@ -171,7 +171,7 @@ complex<T>& complex<T>::operator=(const std::complex<T>& z)
 
 template <typename T>
 template <typename U>
-__host__ THRUST_STD_COMPLEX_DEVICE
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE
 complex<T>& complex<T>::operator=(const std::complex<U>& z)
 {
   real(T(THRUST_STD_COMPLEX_REAL(z)));
@@ -185,7 +185,7 @@ complex<T>& complex<T>::operator=(const std::complex<U>& z)
 
 template <typename T>
 template <typename U>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator+=(const complex<U>& z)
 {
   *this = *this + z;
@@ -194,7 +194,7 @@ complex<T>& complex<T>::operator+=(const complex<U>& z)
 
 template <typename T>
 template <typename U>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator-=(const complex<U>& z)
 {
   *this = *this - z;
@@ -203,7 +203,7 @@ complex<T>& complex<T>::operator-=(const complex<U>& z)
 
 template <typename T>
 template <typename U>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator*=(const complex<U>& z)
 {
   *this = *this * z;
@@ -212,7 +212,7 @@ complex<T>& complex<T>::operator*=(const complex<U>& z)
 
 template <typename T>
 template <typename U>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator/=(const complex<U>& z)
 {
   *this = *this / z;
@@ -221,7 +221,7 @@ complex<T>& complex<T>::operator/=(const complex<U>& z)
 
 template <typename T>
 template <typename U>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator+=(const U& z)
 {
   *this = *this + z;
@@ -230,7 +230,7 @@ complex<T>& complex<T>::operator+=(const U& z)
 
 template <typename T>
 template <typename U>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator-=(const U& z)
 {
   *this = *this - z;
@@ -239,7 +239,7 @@ complex<T>& complex<T>::operator-=(const U& z)
 
 template <typename T>
 template <typename U>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator*=(const U& z)
 {
   *this = *this * z;
@@ -248,7 +248,7 @@ complex<T>& complex<T>::operator*=(const U& z)
 
 template <typename T>
 template <typename U>
-__host__ __device__
+THRUST_HOST_DEVICE
 complex<T>& complex<T>::operator/=(const U& z)
 {
   *this = *this / z;
@@ -260,70 +260,70 @@ complex<T>& complex<T>::operator/=(const U& z)
 /* --- Equality Operators --- */
 
 template <typename T0, typename T1>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(const complex<T0>& x, const complex<T1>& y)
 {
   return x.real() == y.real() && x.imag() == y.imag();
 }
 
 template <typename T0, typename T1>
-__host__ THRUST_STD_COMPLEX_DEVICE
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE
 bool operator==(const complex<T0>& x, const std::complex<T1>& y)
 {
   return x.real() == THRUST_STD_COMPLEX_REAL(y) && x.imag() == THRUST_STD_COMPLEX_IMAG(y);
 }
 
 template <typename T0, typename T1>
-__host__ THRUST_STD_COMPLEX_DEVICE
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE
 bool operator==(const std::complex<T0>& x, const complex<T1>& y)
 {
   return THRUST_STD_COMPLEX_REAL(x) == y.real() && THRUST_STD_COMPLEX_IMAG(x) == y.imag();
 }
 
 template <typename T0, typename T1>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(const T0& x, const complex<T1>& y)
 {
   return x == y.real() && y.imag() == T1();
 }
 
 template <typename T0, typename T1>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(const complex<T0>& x, const T1& y)
 {
   return x.real() == y && x.imag() == T1();
 }
 
 template <typename T0, typename T1>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(const complex<T0>& x, const complex<T1>& y)
 {
   return !(x == y);
 }
 
 template <typename T0, typename T1>
-__host__ THRUST_STD_COMPLEX_DEVICE
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE
 bool operator!=(const complex<T0>& x, const std::complex<T1>& y)
 {
   return !(x == y);
 }
 
 template <typename T0, typename T1>
-__host__ THRUST_STD_COMPLEX_DEVICE
+THRUST_HOST THRUST_STD_COMPLEX_DEVICE
 bool operator!=(const std::complex<T0>& x, const complex<T1>& y)
 {
   return !(x == y);
 }
 
 template <typename T0, typename T1>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(const T0& x, const complex<T1>& y)
 {
   return !(x == y);
 }
 
 template <typename T0, typename T1>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(const complex<T0>& x, const T1& y)
 {
   return !(x == y);

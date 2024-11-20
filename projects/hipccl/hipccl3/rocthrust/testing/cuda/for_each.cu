@@ -5,13 +5,20 @@
 
 static const size_t NUM_REGISTERS = 64;
 
-template <size_t N> __host__ __device__ void f   (int * x) { int temp = *x; f<N - 1>(x + 1); *x = temp;};
-template <>         __host__ __device__ void f<0>(int * /*x*/) { }
+template <size_t N>
+THRUST_HOST_DEVICE void f(int* x)
+{
+  int temp = *x;
+  f<N - 1>(x + 1);
+  *x = temp;
+};
+template <>
+THRUST_HOST_DEVICE void f<0>(int* /*x*/)
+{}
 template <size_t N>
 struct CopyFunctorWithManyRegisters
 {
-  __host__ __device__
-  void operator()(int * ptr)
+  THRUST_HOST_DEVICE void operator()(int* ptr)
   {
       f<N>(ptr);
   }
@@ -53,9 +60,11 @@ DECLARE_UNITTEST(TestForEachNLargeRegisterFootprint);
 template <typename T>
 struct mark_present_for_each
 {
-  T * ptr;
-  __host__ __device__ void
-  operator()(T x){ ptr[(int) x] = 1; }
+  T* ptr;
+  THRUST_HOST_DEVICE void operator()(T x)
+  {
+    ptr[(int) x] = 1;
+  }
 };
 
 

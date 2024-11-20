@@ -42,21 +42,19 @@
 
 struct by_key
 {
-    template <typename KeyT,
-              typename ValueT,
-              typename OpT,
-              typename Policy = thrust::detail::device_t>
+    template <typename KeyT, typename ValueT, typename OpT, typename Policy>
     float64_t run(thrust::device_vector<KeyT>&   input_keys,
                   thrust::device_vector<ValueT>& input_vals,
                   thrust::device_vector<KeyT>&   output_keys,
                   thrust::device_vector<ValueT>& output_vals,
                   const std::size_t              elements_in_A,
-                  const OpT                      op)
+                  const OpT                      op,
+                  Policy                         policy)
     {
         bench_utils::gpu_timer d_timer;
 
         d_timer.start(0);
-        op(Policy {},
+        op(policy,
            input_keys.cbegin(),
            input_keys.cbegin() + elements_in_A,
            input_keys.cbegin() + elements_in_A,
@@ -111,10 +109,13 @@ void run_benchmark(benchmark::State& state,
 
     const std::size_t elements_in_AB = thrust::distance(output_keys.begin(), result_ends.first);
 
+    bench_utils::caching_allocator_t alloc {};
+    thrust::detail::device_t         policy {};
+
     for(auto _ : state)
     {
         float64_t duration = benchmark.template run<KeyT, ValueT, OpT>(
-            input_keys, input_vals, output_keys, output_vals, elements_in_A, op);
+            input_keys, input_vals, output_keys, output_vals, elements_in_A, op, policy(alloc));
         state.SetIterationTime(duration);
         gpu_times.push_back(duration);
     }

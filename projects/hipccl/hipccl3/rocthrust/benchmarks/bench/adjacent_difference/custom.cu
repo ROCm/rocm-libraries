@@ -57,14 +57,14 @@ struct custom_op
 template <int Val>
 struct custom
 {
-    template <typename T, typename Policy = thrust::detail::device_t>
-    float64_t run(thrust::device_vector<T>& input, thrust::device_vector<T>& output)
+    template <typename T, typename Policy>
+    float64_t run(thrust::device_vector<T>& input, thrust::device_vector<T>& output, Policy policy)
     {
         bench_utils::gpu_timer d_timer;
 
         d_timer.start(0);
         thrust::adjacent_difference(
-            Policy {}, input.cbegin(), input.cend(), output.begin(), custom_op<T> {Val});
+            policy, input.cbegin(), input.cend(), output.begin(), custom_op<T> {Val});
         d_timer.stop(0);
 
         return d_timer.get_duration();
@@ -86,9 +86,12 @@ void run_benchmark(benchmark::State& state, const std::size_t elements, const st
     // Output
     thrust::device_vector<T> output(elements);
 
+    bench_utils::caching_allocator_t alloc {};
+    thrust::detail::device_t         policy {};
+
     for(auto _ : state)
     {
-        float64_t duration = benchmark.template run<T>(input, output);
+        float64_t duration = benchmark.template run<T>(input, output, policy(alloc));
         state.SetIterationTime(duration);
         gpu_times.push_back(duration);
     }
@@ -161,7 +164,7 @@ int main(int argc, char* argv[])
     }
 
     // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks(new bench_utils::CustomReporter);
+    benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
 
     // Finish
     benchmark::Shutdown();

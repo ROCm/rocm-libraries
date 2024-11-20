@@ -50,14 +50,16 @@ struct less_then_t
 
 struct _if
 {
-    template <typename T, typename Policy = thrust::detail::device_t>
-    float64_t
-    run(thrust::device_vector<T>& input, thrust::device_vector<T>& output, less_then_t<T> select_op)
+    template <typename T, typename Policy>
+    float64_t run(thrust::device_vector<T>& input,
+                  thrust::device_vector<T>& output,
+                  less_then_t<T>            select_op,
+                  Policy                    policy)
     {
         bench_utils::gpu_timer d_timer;
 
         d_timer.start(0);
-        thrust::copy_if(Policy {}, input.cbegin(), input.cend(), output.begin(), select_op);
+        thrust::copy_if(policy, input.cbegin(), input.cend(), output.begin(), select_op);
         d_timer.stop(0);
 
         return d_timer.get_duration();
@@ -88,9 +90,12 @@ void run_benchmark(benchmark::State& state,
     // Output
     thrust::device_vector<T> output(selected_elements);
 
+    bench_utils::caching_allocator_t alloc {};
+    thrust::detail::device_t         policy {};
+
     for(auto _ : state)
     {
-        float64_t duration = benchmark.template run<T>(input, output, select_op);
+        float64_t duration = benchmark.template run<T>(input, output, select_op, policy(alloc));
         state.SetIterationTime(duration);
         gpu_times.push_back(duration);
     }
@@ -170,7 +175,7 @@ int main(int argc, char* argv[])
     }
 
     // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks(new bench_utils::CustomReporter);
+    benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
 
     // Finish
     benchmark::Shutdown();

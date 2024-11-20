@@ -12,7 +12,7 @@
   struct THRUST_PP_CAT2(name, _fn)                                            \
   {                                                                           \
     template <typename ForwardIt, typename Sentinel, typename UnaryFunction>  \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last, UnaryFunction&& f                   \
     ) const                                                                   \
@@ -41,7 +41,7 @@ DEFINE_ASYNC_FOR_EACH_CALLABLE(
 struct inplace_divide_by_2
 {
   template <typename T>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   void operator()(T& x) const
   {
     x /= 2;
@@ -56,7 +56,7 @@ struct test_async_for_each
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0_data(unittest::random_integers<T>(n));

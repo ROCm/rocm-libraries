@@ -30,7 +30,7 @@ struct return_value
     return_value(void){}
     return_value(T v):val(v){}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     T operator()(void){ return val; }
 };
 
@@ -57,7 +57,7 @@ DECLARE_VECTOR_UNITTEST(TestGenerateSimple);
 
 
 template<typename ForwardIterator, typename Generator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void generate(my_system &system, ForwardIterator /*first*/, ForwardIterator, Generator)
 {
     system.validate_dispatch();
@@ -76,7 +76,7 @@ DECLARE_UNITTEST(TestGenerateDispatchExplicit);
 
 
 template<typename ForwardIterator, typename Generator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
 {
     *first = 13;
@@ -149,7 +149,7 @@ DECLARE_VECTOR_UNITTEST(TestGenerateNSimple);
 
 
 template<typename ForwardIterator, typename Size, typename Generator>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator generate_n(my_system &system, ForwardIterator first, Size, Generator)
 {
     system.validate_dispatch();
@@ -169,7 +169,7 @@ DECLARE_UNITTEST(TestGenerateNDispatchExplicit);
 
 
 template<typename ForwardIterator, typename Size, typename Generator>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator generate_n(my_tag, ForwardIterator first, Size, Generator)
 {
     *first = 13;

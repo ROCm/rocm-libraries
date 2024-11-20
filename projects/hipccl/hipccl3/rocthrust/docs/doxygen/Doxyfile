@@ -2134,7 +2134,7 @@ PREDEFINED             = THRUST_DOXYGEN \
                          "THRUST_MR_DEFAULT_ALIGNMENT=alignof(std::max_align_t)" \
                          __cpp_lib_remove_cvref=201711 \
                          THRUST_PREVENT_MACRO_SUBSTITUTION= \
-                         __thrust_exec_check_disable__= \
+                         THRUST_EXEC_CHECK_DISABLE= \
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this
 # tag can be used to specify a list of macro names that should be expanded. The

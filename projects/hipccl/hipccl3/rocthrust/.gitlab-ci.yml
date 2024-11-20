@@ -12,6 +12,7 @@ include:
       - /deps-rocm.yaml
       - /deps-windows.yaml
       - /deps-nvcc.yaml
+      - /deps-compiler-acceleration.yaml
       - /gpus-rocm.yaml
       - /gpus-nvcc.yaml
       - /rules.yaml
@@ -46,17 +47,21 @@ copyright-date:
   extends:
     - .deps:rocm
     - .deps:cmake-latest
+    - .deps:compiler-acceleration
   before_script:
     - !reference [".deps:rocm", before_script]
     - !reference [".deps:cmake-latest", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
 
 .cmake-minimum:
   extends:
     - .deps:rocm
     - .deps:cmake-minimum
+    - .deps:compiler-acceleration
   before_script:
     - !reference [".deps:rocm", before_script]
     - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
 
 .install-rocprim:
   script:
@@ -69,8 +74,11 @@ copyright-date:
       -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=OFF
+      -D BUILD_HIPSTDPAR_TEST=OFF
       -D BUILD_EXAMPLE=OFF
       -D ROCM_DEP_ROCMCORE=OFF
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
       -S $ROCPRIM_DIR
       -B $ROCPRIM_DIR/build
     - cd $ROCPRIM_DIR/build
@@ -91,7 +99,7 @@ copyright-date:
     - !reference [.install-rocprim, script]
     - | # Setup env vars for testing
         rng_seed_count=0; prng_seeds="0";
-        if [[ $CI_COMMIT_BRANCH == "develop_stream" ]]; then 
+        if [[ $CI_COMMIT_BRANCH == "develop_stream" ]]; then
             rng_seed_count=3
             prng_seeds="0, 1000"
         fi
@@ -111,6 +119,9 @@ copyright-date:
       -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
       -D RNG_SEED_COUNT=$rng_seed_count
       -D PRNG_SEEDS=$prng_seeds
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CUDA_COMPILER_LAUNCHER=phc_sccache_cuda
       -S $CI_PROJECT_DIR
       -B $CI_PROJECT_DIR/build
     - cmake --build $CI_PROJECT_DIR/build
@@ -198,10 +209,10 @@ build:windows:
       -D CMAKE_INSTALL_PREFIX:PATH="$ROCPRIM_DIR/build/install" *>&1
     - \& cmake --build "$ROCPRIM_DIR/build" --target install *>&1
     # Configure and build rocThrust
-    - \& cmake 
-      -S "$CI_PROJECT_DIR" 
-      -B "$CI_PROJECT_DIR/build" 
-      -G Ninja 
+    - \& cmake
+      -S "$CI_PROJECT_DIR"
+      -B "$CI_PROJECT_DIR/build"
+      -G Ninja
       -D CMAKE_BUILD_TYPE=Release
       -D GPU_TARGETS=$GPU_TARGET
       -D BUILD_TEST=ON
@@ -327,10 +338,12 @@ test:rocm-windows-install:
     - .deps:nvcc
     - .gpus:nvcc-gpus
     - .deps:cmake-latest
+    - .deps:compiler-acceleration
     - .rules:manual
   before_script:
     - !reference [".deps:nvcc", before_script]
     - !reference [".deps:cmake-latest", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
 
 build:cuda-and-omp:
   stage: build
@@ -340,7 +353,7 @@ build:cuda-and-omp:
   tags:
     - build
   variables:
-    CCCL_GIT_BRANCH: v2.3.2
+    CCCL_GIT_BRANCH: v2.4.0
     CCCL_DIR: ${CI_PROJECT_DIR}/cccl
   needs: []
   script:
@@ -349,16 +362,21 @@ build:cuda-and-omp:
     - rm -R $CCCL_DIR/thrust/thrust
     - cp -r $CI_PROJECT_DIR/thrust $CCCL_DIR/thrust
     # Build tests and examples from CCCL Thrust
+    # CCCL 2.4.0 breaks compilation of tests. Compile examples only until we
+    # match v2.5.0.
     - cmake
       -G Ninja
       -D CMAKE_BUILD_TYPE=Release
       -D CMAKE_CUDA_ARCHITECTURES="$GPU_TARGETS"
-      -D THRUST_ENABLE_TESTING=ON
+      -D THRUST_ENABLE_TESTING=OFF
       -D THRUST_ENABLE_EXAMPLES=ON
       -D THRUST_ENABLE_BENCHMARKS=OFF
       -D THRUST_ENABLE_MULTICONFIG=ON
       -D THRUST_MULTICONFIG_ENABLE_SYSTEM_OMP=ON
       -D THRUST_MULTICONFIG_ENABLE_SYSTEM_CUDA=ON
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CUDA_COMPILER_LAUNCHER=phc_sccache_cuda
       -B $CI_PROJECT_DIR/build
       -S $CCCL_DIR/thrust
     - cmake --build $CI_PROJECT_DIR/build

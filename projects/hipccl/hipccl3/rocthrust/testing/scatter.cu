@@ -52,7 +52,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestScatterSimple);
 template<typename InputIterator1,
          typename InputIterator2,
          typename RandomAccessIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void scatter(my_system &system,
              InputIterator1,
              InputIterator1,
@@ -82,7 +82,7 @@ DECLARE_UNITTEST(TestScatterDispatchExplicit);
 template<typename InputIterator1,
          typename InputIterator2,
          typename RandomAccessIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void scatter(my_tag,
              InputIterator1,
              InputIterator1,
@@ -186,7 +186,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename InputIterator3,
          typename RandomAccessIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void scatter_if(my_system &system,
                 InputIterator1,
                 InputIterator1,
@@ -218,7 +218,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename InputIterator3,
          typename RandomAccessIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 void scatter_if(my_tag,
                 InputIterator1,
                 InputIterator1,
@@ -248,7 +248,7 @@ template <typename T>
 class is_even_scatter_if
 {
     public:
-    __host__ __device__ bool operator()(const T i) const { return (i % 2) == 0; }
+    THRUST_HOST_DEVICE bool operator()(const T i) const { return (i % 2) == 0; }
 };
 
 template <typename T>

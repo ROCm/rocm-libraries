@@ -34,11 +34,11 @@ namespace sequential
 {
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator for_each(sequential::execution_policy<DerivedPolicy> &,
                        InputIterator first,
                        InputIterator last,
@@ -63,7 +63,7 @@ template<typename DerivedPolicy,
          typename InputIterator,
          typename Size,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator for_each_n(sequential::execution_policy<DerivedPolicy> &,
                          InputIterator first,
                          Size n,

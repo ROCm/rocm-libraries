@@ -292,7 +292,7 @@ inclusive_scan_n(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
                                      InputIt                    input_it,
                                      Size                       num_items,
                                      OutputIt                   result,
@@ -300,7 +300,7 @@ inclusive_scan_n(execution_policy<Derived>& policy,
         {
             return __scan::inclusive_scan(policy, input_it, result, num_items, scan_op);
         }
-        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
                                        InputIt                    input_it,
                                        Size                       num_items,
                                        OutputIt                   result,
@@ -348,7 +348,7 @@ inclusive_scan(execution_policy<Derived>& policy,
                                                thrust::plus<>{});
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class InputIt,
                                         class Size,
                                         class OutputIt,
@@ -364,7 +364,7 @@ OutputIt THRUST_HIP_FUNCTION exclusive_scan_n(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
                                      InputIt                    first,
                                      Size                       num_items,
                                      OutputIt                   result,
@@ -374,7 +374,7 @@ OutputIt THRUST_HIP_FUNCTION exclusive_scan_n(execution_policy<Derived>& policy,
             return __scan::exclusive_scan(policy, first, result, num_items, init, scan_op);
         }
 
-        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
                                        InputIt                    first,
                                        Size                       num_items,
                                        OutputIt                   result,

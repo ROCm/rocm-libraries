@@ -27,9 +27,9 @@
 THRUST_NAMESPACE_BEGIN
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   void uninitialized_fill(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                           ForwardIterator first,
                           ForwardIterator last,
@@ -40,9 +40,9 @@ __host__ __device__
 } // end uninitialized_fill()
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator, typename Size, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator uninitialized_fill_n(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                                        ForwardIterator first,
                                        Size n,

@@ -856,13 +856,13 @@ namespace __merge {
 //-------------------------
 
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeysIt1,
           class KeysIt2,
           class ResultIt,
           class CompareOp>
-ResultIt __host__ __device__
+ResultIt _CCCL_HOST_DEVICE
 merge(execution_policy<Derived>& policy,
       KeysIt1                    keys1_first,
       KeysIt1                    keys1_last,
@@ -897,7 +897,7 @@ merge(execution_policy<Derived>& policy,
 }
 
 template <class Derived, class KeysIt1, class KeysIt2, class ResultIt>
-ResultIt __host__ __device__
+ResultIt _CCCL_HOST_DEVICE
 merge(execution_policy<Derived>& policy,
       KeysIt1                    keys1_first,
       KeysIt1                    keys1_last,
@@ -915,7 +915,7 @@ merge(execution_policy<Derived>& policy,
                          less<keys_type>());
 }
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeysIt1,
           class KeysIt2,
@@ -924,7 +924,7 @@ template <class Derived,
           class KeysOutputIt,
           class ItemsOutputIt,
           class CompareOp>
-pair<KeysOutputIt, ItemsOutputIt> __host__ __device__
+pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE
 merge_by_key(execution_policy<Derived> &policy,
              KeysIt1                    keys1_first,
              KeysIt1                    keys1_last,
@@ -968,7 +968,7 @@ template <class Derived,
           class ItemsIt2,
           class KeysOutputIt,
           class ItemsOutputIt>
-pair<KeysOutputIt, ItemsOutputIt> __host__ __device__
+pair<KeysOutputIt, ItemsOutputIt> _CCCL_HOST_DEVICE
 merge_by_key(execution_policy<Derived> &policy,
              KeysIt1                    keys1_first,
              KeysIt1                    keys1_last,

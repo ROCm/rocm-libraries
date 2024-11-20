@@ -52,7 +52,7 @@
 THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy, typename ForwardIterator1, typename ForwardIterator2>
-thrust::pair<ForwardIterator1, ForwardIterator2> __host__ __device__
+thrust::pair<ForwardIterator1, ForwardIterator2> THRUST_HOST_DEVICE
 unique_by_key(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
               ForwardIterator1                                            keys_first,
               ForwardIterator1                                            keys_last,
@@ -62,7 +62,7 @@ template <typename DerivedPolicy,
           typename InputIterator2,
           typename OutputIterator1,
           typename OutputIterator2>
- __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
+ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2>
 unique_by_key_copy(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
                    InputIterator1                                              keys_first,
                    InputIterator1                                              keys_last,
@@ -157,7 +157,7 @@ namespace __unique_by_key
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeyInputIt,
                                         class ValInputIt,
                                         class KeyOutputIt,
@@ -175,7 +175,7 @@ pair<KeyOutputIt, ValOutputIt>
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static pair<KeyOutputIt, ValOutputIt> par(execution_policy<Derived>& policy,
                                                   KeyInputIt                 keys_first,
                                                   KeyInputIt                 keys_last,
@@ -192,7 +192,7 @@ pair<KeyOutputIt, ValOutputIt>
                                                   values_result,
                                                   binary_pred);
         }
-        __device__
+        THRUST_DEVICE
         static pair<KeyOutputIt, ValOutputIt> seq(execution_policy<Derived>& policy,
                                                   KeyInputIt                 keys_first,
                                                   KeyInputIt                 keys_last,
@@ -253,7 +253,7 @@ unique_by_key(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static pair<KeyInputIt, ValInputIt> par(execution_policy<Derived>& policy,
+        THRUST_HOST static pair<KeyInputIt, ValInputIt> par(execution_policy<Derived>& policy,
                                                          KeyInputIt                 keys_first,
                                                          KeyInputIt                 keys_last,
                                                          ValInputIt                 values_first,
@@ -262,7 +262,7 @@ unique_by_key(execution_policy<Derived>& policy,
             return hip_rocprim::unique_by_key_copy(
                 policy, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
         }
-        __device__ static pair<KeyInputIt, ValInputIt> seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static pair<KeyInputIt, ValInputIt> seq(execution_policy<Derived>& policy,
                                                            KeyInputIt                 keys_first,
                                                            KeyInputIt                 keys_last,
                                                            ValInputIt                 values_first,

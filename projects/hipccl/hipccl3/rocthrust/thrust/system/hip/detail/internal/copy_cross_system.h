@@ -78,7 +78,7 @@ namespace __copy
     }
 
     template <class System1, class System2, class InputIt, class Size, class OutputIt>
-    OutputIt __host__ /* WORKAROUND */ __device__
+    OutputIt THRUST_HOST /* WORKAROUND */ THRUST_DEVICE
     cross_system_copy_n(thrust::execution_policy<System1>& sys1,
                         thrust::execution_policy<System2>& sys2,
                         InputIt                            begin,
@@ -151,7 +151,7 @@ namespace __copy
         // struct workaround is required for HIP-clang
         struct workaround
         {
-            __host__ static OutputIt par(thrust::cpp::execution_policy<H>&         host_s,
+            THRUST_HOST static OutputIt par(thrust::cpp::execution_policy<H>&         host_s,
                                          thrust::hip_rocprim::execution_policy<D>& device_s,
                                          InputIt                                   first,
                                          Size                                      num_items,
@@ -160,7 +160,7 @@ namespace __copy
                 return cross_system_copy_n_hd_nt(host_s, device_s, first, num_items, result);
             }
 
-            __device__ static OutputIt seq(thrust::cpp::execution_policy<H>&         host_s,
+            THRUST_DEVICE static OutputIt seq(thrust::cpp::execution_policy<H>&         host_s,
                                            thrust::hip_rocprim::execution_policy<D>& device_s,
                                            InputIt                                   first,
                                            Size                                      num_items,
@@ -230,7 +230,7 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-            __host__ static void par(thrust::hip_rocprim::execution_policy<D>& device_s,
+            THRUST_HOST static void par(thrust::hip_rocprim::execution_policy<D>& device_s,
                                      thrust::cpp::execution_policy<H>&         host_s,
                                      InputIt                                   first,
                                      Size                                      num_items,
@@ -239,7 +239,7 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
                 result = cross_system_copy_n_dh_nt(device_s, host_s, first, num_items, result);
             }
 
-            __device__ static void seq(thrust::hip_rocprim::execution_policy<D>& device_s,
+            THRUST_DEVICE static void seq(thrust::hip_rocprim::execution_policy<D>& device_s,
                                        thrust::cpp::execution_policy<H>&         host_s,
                                        InputIt                                   first,
                                        Size                                      num_items,

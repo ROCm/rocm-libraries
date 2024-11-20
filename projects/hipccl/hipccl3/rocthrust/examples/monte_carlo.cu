@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <cmath>
 
+#include "include/host_device.h"
+
 // we could vary M & N to find the perf sweet spot
 
 __host__ __device__

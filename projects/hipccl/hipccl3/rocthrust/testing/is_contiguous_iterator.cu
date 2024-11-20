@@ -43,7 +43,7 @@ THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<
 >::value));
 
 template <typename T>
-__host__
+THRUST_HOST
 void test_is_contiguous_iterator()
 {
   THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<
@@ -125,7 +125,7 @@ void test_is_contiguous_iterator()
 DECLARE_GENERIC_UNITTEST(test_is_contiguous_iterator);
 
 template <typename Vector>
-__host__
+THRUST_HOST
 void test_is_contiguous_iterator_vectors()
 {
   THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<

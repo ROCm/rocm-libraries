@@ -14,7 +14,7 @@
   struct THRUST_PP_CAT2(name, _fn)                                            \
   {                                                                           \
     template <typename ForwardIt, typename Sentinel, typename OutputIt>       \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last, OutputIt&& output                   \
     ) const                                                                   \
@@ -62,7 +62,7 @@ struct test_async_copy_host_to_device
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -97,7 +97,7 @@ struct test_async_copy_device_to_host
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -138,7 +138,7 @@ struct test_async_copy_device_to_device
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -185,7 +185,7 @@ struct test_async_copy_counting_iterator_input_to_device_vector
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::counting_iterator<T> first(0);
@@ -247,7 +247,7 @@ struct test_async_copy_counting_iterator_input_to_host_vector
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::counting_iterator<T> first(0);
@@ -295,7 +295,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
 template <typename T>
 struct test_async_copy_roundtrip
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -327,7 +327,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
 template <typename T>
 struct test_async_copy_after
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0(unittest::random_integers<T>(n));

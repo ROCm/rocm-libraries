@@ -407,7 +407,7 @@ namespace __partition
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class InputIt,
                                         class StencilIt,
                                         class SelectedOutIt,
@@ -425,7 +425,7 @@ partition_copy(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
+        THRUST_HOST static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
                                                                InputIt                    first,
                                                                InputIt                    last,
                                                                StencilIt                  stencil,
@@ -437,7 +437,7 @@ partition_copy(execution_policy<Derived>& policy,
                 policy, first, last, stencil, selected_result, rejected_result, predicate);
         }
 
-        __device__ static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
                                                                  InputIt                    first,
                                                                  InputIt                    last,
                                                                  StencilIt                  stencil,
@@ -461,7 +461,7 @@ partition_copy(execution_policy<Derived>& policy,
   #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class InputIt,
                                         class SelectedOutIt,
                                         class RejectedOutIt,
@@ -477,7 +477,7 @@ partition_copy(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-        __host__
+        THRUST_HOST
         static pair<SelectedOutIt, RejectedOutIt> par(
           execution_policy<Derived>& policy,
           InputIt                    first,
@@ -490,7 +490,7 @@ partition_copy(execution_policy<Derived>& policy,
                 policy, first, last, selected_result, rejected_result, predicate);
         }
 
-        __device__
+        THRUST_DEVICE
         static pair<SelectedOutIt, RejectedOutIt> seq(
           execution_policy<Derived>& policy,
           InputIt                    first,
@@ -514,7 +514,7 @@ partition_copy(execution_policy<Derived>& policy,
     #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class InputIt,
                                         class SelectedOutIt,
                                         class RejectedOutIt,
@@ -530,7 +530,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
+        THRUST_HOST static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
                                                                InputIt                    first,
                                                                InputIt                    last,
                                                                SelectedOutIt selected_result,
@@ -541,7 +541,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
                 policy, first, last, selected_result, rejected_result, predicate);
         }
 
-        __device__ static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
                                                                  InputIt                    first,
                                                                  InputIt                    last,
                                                                  SelectedOutIt selected_result,
@@ -563,7 +563,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
   #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class InputIt,
                                         class StencilIt,
                                         class SelectedOutIt,
@@ -581,7 +581,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-      __host__
+      THRUST_HOST
       static pair<SelectedOutIt, RejectedOutIt> par(
         execution_policy<Derived>& policy,
         InputIt                    first,
@@ -594,7 +594,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
           return __partition::partition_copy(
               policy, first, last, stencil, selected_result, rejected_result, predicate);
       }
-      __device__
+      THRUST_DEVICE
       static pair<SelectedOutIt, RejectedOutIt> seq(
         execution_policy<Derived>& policy,
         InputIt                    first,
@@ -623,7 +623,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
 }
 
 /// inplace
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class Iterator,
                                         class StencilIt,
                                         class Predicate>
@@ -637,7 +637,7 @@ partition(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-      __host__
+      THRUST_HOST
       static Iterator par(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -654,7 +654,7 @@ partition(execution_policy<Derived>& policy,
         hip_rocprim::reverse<Derived,Iterator>(policy, result, last);
         return result;
       }
-      __device__
+      THRUST_DEVICE
       static Iterator seq(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -677,7 +677,7 @@ partition(execution_policy<Derived>& policy,
   #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived, class Iterator, class Predicate>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class Iterator, class Predicate>
 Iterator THRUST_HIP_FUNCTION
 partition(execution_policy<Derived>& policy,
           Iterator                   first,
@@ -687,7 +687,7 @@ partition(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-      __host__
+      THRUST_HOST
       static Iterator par(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -695,7 +695,7 @@ partition(execution_policy<Derived>& policy,
       {
           return __partition::partition_inplace(policy, first, last, predicate);
       }
-      __device__
+      THRUST_DEVICE
       static Iterator seq(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -717,7 +717,7 @@ partition(execution_policy<Derived>& policy,
 
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class Iterator,
                                         class StencilIt,
                                         class Predicate>
@@ -731,7 +731,7 @@ stable_partition(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-      __host__
+      THRUST_HOST
       static Iterator par(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -743,7 +743,7 @@ stable_partition(execution_policy<Derived>& policy,
           return result;
       }
 
-      __device__
+      THRUST_DEVICE
       static Iterator seq(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -766,7 +766,7 @@ stable_partition(execution_policy<Derived>& policy,
   #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived, class Iterator, class Predicate>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class Iterator, class Predicate>
 Iterator THRUST_HIP_FUNCTION
 stable_partition(execution_policy<Derived>& policy,
                  Iterator                   first,
@@ -776,7 +776,7 @@ stable_partition(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-      __host__
+      THRUST_HOST
       static Iterator par(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,
@@ -787,7 +787,7 @@ stable_partition(execution_policy<Derived>& policy,
           return result;
       }
 
-      __device__
+      THRUST_DEVICE
       static Iterator seq(execution_policy<Derived>& policy,
                           Iterator                   first,
                           Iterator                   last,

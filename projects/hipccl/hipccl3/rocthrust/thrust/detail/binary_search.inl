@@ -25,9 +25,9 @@
 
 THRUST_NAMESPACE_BEGIN
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename LessThanComparable>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator lower_bound(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                             ForwardIterator first,
                             ForwardIterator last,
@@ -38,9 +38,9 @@ ForwardIterator lower_bound(const thrust::detail::execution_policy_base<DerivedP
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator, typename T, typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator lower_bound(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                             ForwardIterator first,
                             ForwardIterator last,
@@ -52,9 +52,9 @@ ForwardIterator lower_bound(const thrust::detail::execution_policy_base<DerivedP
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator, typename LessThanComparable>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator upper_bound(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                             ForwardIterator first,
                             ForwardIterator last,
@@ -65,9 +65,9 @@ ForwardIterator upper_bound(const thrust::detail::execution_policy_base<DerivedP
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy, typename ForwardIterator, typename T, typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator upper_bound(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                             ForwardIterator first,
                             ForwardIterator last,
@@ -79,9 +79,9 @@ ForwardIterator upper_bound(const thrust::detail::execution_policy_base<DerivedP
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename LessThanComparable>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool binary_search(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                    ForwardIterator first,
                    ForwardIterator last,
@@ -92,9 +92,9 @@ bool binary_search(const thrust::detail::execution_policy_base<DerivedPolicy> &e
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename T, typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool binary_search(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                    ForwardIterator first,
                    ForwardIterator last,
@@ -106,9 +106,9 @@ bool binary_search(const thrust::detail::execution_policy_base<DerivedPolicy> &e
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename T, typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 thrust::pair<ForwardIterator, ForwardIterator>
 equal_range(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
             ForwardIterator first,
@@ -121,9 +121,9 @@ equal_range(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename LessThanComparable>
-__host__ __device__
+THRUST_HOST_DEVICE
 thrust::pair<ForwardIterator, ForwardIterator>
 equal_range(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
             ForwardIterator first,
@@ -135,9 +135,9 @@ equal_range(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename InputIterator, typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator lower_bound(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                            ForwardIterator first,
                            ForwardIterator last,
@@ -150,9 +150,9 @@ OutputIterator lower_bound(const thrust::detail::execution_policy_base<DerivedPo
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename InputIterator, typename OutputIterator, typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator lower_bound(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                            ForwardIterator first,
                            ForwardIterator last,
@@ -166,9 +166,9 @@ OutputIterator lower_bound(const thrust::detail::execution_policy_base<DerivedPo
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename InputIterator, typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator upper_bound(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                            ForwardIterator first,
                            ForwardIterator last,
@@ -181,9 +181,9 @@ OutputIterator upper_bound(const thrust::detail::execution_policy_base<DerivedPo
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename InputIterator, typename OutputIterator, typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator upper_bound(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                            ForwardIterator first,
                            ForwardIterator last,
@@ -197,9 +197,9 @@ OutputIterator upper_bound(const thrust::detail::execution_policy_base<DerivedPo
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename InputIterator, typename OutputIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator binary_search(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                              ForwardIterator first,
                              ForwardIterator last,
@@ -212,9 +212,9 @@ OutputIterator binary_search(const thrust::detail::execution_policy_base<Derived
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename ForwardIterator, typename InputIterator, typename OutputIterator, typename StrictWeakOrdering>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator binary_search(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
                              ForwardIterator first,
                              ForwardIterator last,

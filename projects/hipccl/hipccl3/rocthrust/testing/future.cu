@@ -33,8 +33,7 @@ using future_value_types = unittest::type_list<
 template <typename T>
 struct test_future_default_constructed
 {
-  __host__
-  void operator()()
+  THRUST_HOST void operator()()
   {
     THRUST_STATIC_ASSERT(
       (std::is_same<
@@ -97,8 +96,7 @@ DECLARE_GENERIC_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_future_new_stream
 {
-  __host__
-  void operator()()
+  THRUST_HOST void operator()()
   {
     auto f0 = thrust::device_future<T>(thrust::new_stream);
 
@@ -134,8 +132,7 @@ DECLARE_GENERIC_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_future_convert_to_event
 {
-  __host__
-  void operator()()
+  THRUST_HOST void operator()()
   {
     auto f0 = thrust::device_future<T>(thrust::new_stream);
 
@@ -164,8 +161,7 @@ DECLARE_GENERIC_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_future_when_all
 {
-  __host__
-  void operator()()
+  THRUST_HOST void operator()()
   {
     // Create futures with new streams.
     auto f0 = thrust::device_future<T>(thrust::new_stream);

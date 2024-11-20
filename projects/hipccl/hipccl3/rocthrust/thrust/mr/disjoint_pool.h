@@ -174,13 +174,13 @@ private:
         std::size_t alignment;
         void_ptr pointer;
 
-        __host__ __device__
+        THRUST_HOST_DEVICE
         bool operator==(const oversized_block_descriptor & other) const
         {
             return size == other.size && alignment == other.alignment && pointer == other.pointer;
         }
 
-        __host__ __device__
+        THRUST_HOST_DEVICE
         bool operator<(const oversized_block_descriptor & other) const
         {
             return size < other.size || (size == other.size && alignment < other.alignment);
@@ -190,12 +190,12 @@ private:
     struct equal_pointers
     {
     public:
-        __host__ __device__
+        THRUST_HOST_DEVICE
         equal_pointers(void_ptr p) : p(p)
         {
         }
 
-        __host__ __device__
+        THRUST_HOST_DEVICE
         bool operator()(const oversized_block_descriptor & desc) const
         {
             return desc.pointer == p;
@@ -208,12 +208,12 @@ private:
     struct matching_alignment
     {
     public:
-        __host__ __device__
+        THRUST_HOST_DEVICE
         matching_alignment(std::size_t requested) : requested(requested)
         {
         }
 
-        __host__ __device__
+        THRUST_HOST_DEVICE
         bool operator()(const oversized_block_descriptor & desc) const
         {
             return desc.alignment >= requested;
@@ -235,14 +235,14 @@ private:
 
     struct pool
     {
-        __host__
+        THRUST_HOST
         pool(const pointer_vector & free)
             : free_blocks(free),
             previous_allocated_count(0)
         {
         }
 
-        __host__
+        THRUST_HOST
         pool(const pool & other)
             : free_blocks(other.free_blocks),
             previous_allocated_count(other.previous_allocated_count)
@@ -253,7 +253,7 @@ private:
         pool & operator=(const pool &) = default;
 #endif
 
-        __host__
+        THRUST_HOST
         ~pool() {}
 
         pointer_vector free_blocks;

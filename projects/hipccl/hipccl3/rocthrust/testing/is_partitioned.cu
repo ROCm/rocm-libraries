@@ -23,8 +23,10 @@
 template<typename T>
 struct is_even
 {
-  __host__ __device__
-  bool operator()(T x) const { return ((int) x % 2) == 0; }
+  THRUST_HOST_DEVICE bool operator()(T x) const
+  {
+    return ((int) x % 2) == 0;
+  }
 };
 
 template<typename Vector>
@@ -79,7 +81,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestIsPartitioned);
 
 
 template<typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool is_partitioned(my_system &system, InputIterator /*first*/, InputIterator, Predicate)
 {
   system.validate_dispatch();
@@ -99,7 +101,7 @@ DECLARE_UNITTEST(TestIsPartitionedDispatchExplicit);
 
 
 template<typename InputIterator, typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool is_partitioned(my_tag, InputIterator first, InputIterator, Predicate)
 {
   *first = 13;

@@ -139,7 +139,11 @@ struct is_libcxx_wrap_iter : false_type {};
 #if defined(_LIBCPP_VERSION)
 template <typename Iterator>
 struct is_libcxx_wrap_iter<
+#  if _LIBCPP_VERSION < 14000 || THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
   _VSTD::__wrap_iter<Iterator>
+#  else
+  std::__wrap_iter<Iterator>
+#  endif
 > : true_type {};
 #endif
 
@@ -232,7 +236,7 @@ using contiguous_iterator_raw_pointer_t =
 
 // Converts a contiguous iterator to a raw pointer:
 template <typename Iterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 contiguous_iterator_raw_pointer_t<Iterator>
 contiguous_iterator_raw_pointer_cast(Iterator it)
 {
@@ -249,7 +253,7 @@ struct try_unwrap_contiguous_iterator_impl
 {
   using type = Iterator;
 
-  static __host__ __device__ type get(Iterator it) { return it; }
+  static THRUST_HOST_DEVICE type get(Iterator it) { return it; }
 };
 
 // Implementation for contiguous iterators -- unwraps to raw pointer.
@@ -258,7 +262,7 @@ struct try_unwrap_contiguous_iterator_impl<Iterator, true /*is_contiguous*/>
 {
   using type = contiguous_iterator_raw_pointer_t<Iterator>;
 
-  static __host__ __device__ type get(Iterator it)
+  static THRUST_HOST_DEVICE type get(Iterator it)
   {
     return contiguous_iterator_raw_pointer_cast(it);
   }
@@ -271,7 +275,7 @@ using try_unwrap_contiguous_iterator_return_t =
 // Casts to a raw pointer if iterator is marked as contiguous, otherwise returns
 // the input iterator.
 template <typename Iterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 try_unwrap_contiguous_iterator_return_t<Iterator>
 try_unwrap_contiguous_iterator(Iterator it)
 {

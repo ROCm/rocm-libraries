@@ -23,6 +23,8 @@ void TestReverseIteratorCopyConstructor(void)
   ASSERT_EQUAL(*d_iter2, *d_iter3);
 }
 DECLARE_UNITTEST(TestReverseIteratorCopyConstructor);
+static_assert(std::is_trivially_copy_constructible<thrust::reverse_iterator<int*>>::value, "");
+static_assert(std::is_trivially_copyable<thrust::reverse_iterator<int*>>::value, "");
 
 void TestReverseIteratorIncrement(void)
 {
@@ -71,7 +73,7 @@ void TestReverseIteratorCopy(void)
   source[3] = 40;
 
   Vector destination(4,0);
-  
+
   thrust::copy(thrust::make_reverse_iterator(source.end()),
                thrust::make_reverse_iterator(source.begin()),
                destination.begin());

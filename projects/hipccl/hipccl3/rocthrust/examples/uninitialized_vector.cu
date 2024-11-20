@@ -10,6 +10,8 @@
 #include <thrust/functional.h>
 #include <cassert>
 
+#include "include/host_device.h"
+
 // uninitialized_allocator is an allocator which
 // derives from device_allocator and which has a
 // no-op construct member function

@@ -21,10 +21,7 @@ namespace unittest
 {
 
 template <typename Event>
-__host__
-void test_event_wait(
-  Event&& e, std::string const& filename = "unknown", int lineno = -1
-)
+THRUST_HOST void test_event_wait(Event&& e, std::string const& filename = "unknown", int lineno = -1)
 {
   ASSERT_EQUAL_WITH_FILE_AND_LINE(true, e.valid_stream(), filename, lineno);
 
@@ -36,10 +33,8 @@ void test_event_wait(
 }
 
 template <typename Future>
-__host__
-auto test_future_value_retrieval(
-  Future&& f, std::string const& filename = "unknown", int lineno = -1
-) -> decltype(f.extract())
+THRUST_HOST auto test_future_value_retrieval(Future&& f, std::string const& filename = "unknown", int lineno = -1)
+  -> decltype(f.extract())
 {
   ASSERT_EQUAL_WITH_FILE_AND_LINE(true, f.valid_stream(), filename, lineno);
   ASSERT_EQUAL_WITH_FILE_AND_LINE(true, f.valid_content(), filename, lineno);

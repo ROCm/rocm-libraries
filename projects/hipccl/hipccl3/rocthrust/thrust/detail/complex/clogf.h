@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved. 
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ namespace complex{
 using thrust::complex;
 
 /* round down to 8 = 24/3 bits */
-__host__ __device__ inline
+THRUST_HOST_DEVICE inline
 float trim(float x){
   uint32_t hx;
   get_float_word(hx, x);
@@ -69,7 +69,7 @@ float trim(float x){
 }
 
 
-__host__ __device__ inline
+THRUST_HOST_DEVICE inline
 complex<float> clogf(const complex<float>& z){
 
   // Adapted from FreeBSDs msun
@@ -192,7 +192,7 @@ complex<float> clogf(const complex<float>& z){
 } // namespace detail
 
 template <>
-__host__ __device__
+THRUST_HOST_DEVICE
 inline complex<float> log(const complex<float>& z){
   return detail::complex::clogf(z);
 }

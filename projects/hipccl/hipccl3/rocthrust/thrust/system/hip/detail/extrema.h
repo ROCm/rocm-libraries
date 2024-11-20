@@ -255,7 +255,7 @@ namespace __extrema
 } // namespace __extrema
 
 /// min element
-__thrust_exec_check_disable__ template <class Derived, class ItemsIt, class BinaryPred>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class ItemsIt, class BinaryPred>
 ItemsIt THRUST_HIP_FUNCTION
 min_element(execution_policy<Derived>& policy,
             ItemsIt                    first,
@@ -286,7 +286,7 @@ min_element(execution_policy<Derived>& policy,
 }
 
 /// max element
-__thrust_exec_check_disable__ template <class Derived, class ItemsIt, class BinaryPred>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class ItemsIt, class BinaryPred>
 ItemsIt THRUST_HIP_FUNCTION
 max_element(execution_policy<Derived>& policy,
             ItemsIt                    first,
@@ -317,7 +317,7 @@ max_element(execution_policy<Derived>& policy,
 }
 
 /// minmax element
-__thrust_exec_check_disable__ template <class Derived, class ItemsIt, class BinaryPred>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class ItemsIt, class BinaryPred>
 pair<ItemsIt, ItemsIt> THRUST_HIP_FUNCTION
 minmax_element(execution_policy<Derived>& policy,
                ItemsIt                    first,

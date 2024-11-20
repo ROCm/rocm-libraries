@@ -50,7 +50,7 @@
 THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
-ForwardIterator __host__ __device__
+ForwardIterator THRUST_HOST_DEVICE
 unique(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
        ForwardIterator                                             first,
        ForwardIterator                                             last,
@@ -60,7 +60,7 @@ template <typename DerivedPolicy,
           typename InputIterator,
           typename OutputIterator,
           typename BinaryPredicate>
-__host__ __device__ OutputIterator
+THRUST_HOST_DEVICE OutputIterator
 unique_copy(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
             InputIterator                                               first,
             InputIterator                                               last,
@@ -144,7 +144,7 @@ namespace __unique
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class InputIt,
                                         class OutputIt,
                                         class BinaryPred>
@@ -158,7 +158,7 @@ unique_copy(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
                                      InputIt                    first,
                                      InputIt                    last,
                                      OutputIt                   result,
@@ -166,7 +166,7 @@ unique_copy(execution_policy<Derived>& policy,
         {
             return __unique::unique(policy, first, last, result, binary_pred);
         }
-        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
                                        InputIt                    first,
                                        InputIt                    last,
                                        OutputIt                   result,
@@ -191,7 +191,7 @@ unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, Outp
     return hip_rocprim::unique_copy(policy, first, last, result, equal_to<input_type>());
 }
 
-__thrust_exec_check_disable__ template <class Derived, class InputIt, class BinaryPred>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class InputIt, class BinaryPred>
 InputIt THRUST_HIP_FUNCTION
 unique(execution_policy<Derived>& policy,
        InputIt                    first,
@@ -201,12 +201,12 @@ unique(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static InputIt
+        THRUST_HOST static InputIt
         par(execution_policy<Derived>& policy, InputIt first, InputIt last, BinaryPred binary_pred)
         {
             return hip_rocprim::unique_copy(policy, first, last, first, binary_pred);
         }
-        __device__ static InputIt
+        THRUST_DEVICE static InputIt
         seq(execution_policy<Derived>& policy, InputIt first, InputIt last, BinaryPred binary_pred)
         {
             return thrust::unique(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
@@ -231,14 +231,14 @@ InputIt THRUST_HIP_FUNCTION unique(execution_policy<Derived>& policy,
 template <typename BinaryPred>
 struct zip_adj_not_predicate {
   template <typename TupleType>
-  bool __host__ __device__ operator()(TupleType&& tuple) {
+  bool THRUST_HOST_DEVICE operator()(TupleType&& tuple) {
       return !binary_pred(thrust::get<0>(tuple), thrust::get<1>(tuple));
   }
   
   BinaryPred binary_pred;
 };
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived,
           class ForwardIt,
           class BinaryPred>

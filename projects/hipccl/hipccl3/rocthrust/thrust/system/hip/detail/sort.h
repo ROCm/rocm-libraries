@@ -389,7 +389,7 @@ namespace __smart_sort
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__ template <class Derived, class ItemsIt, class CompareOp>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class ItemsIt, class CompareOp>
 void THRUST_HIP_FUNCTION
 stable_sort(execution_policy<Derived>& policy,
             ItemsIt                    first,
@@ -399,7 +399,7 @@ stable_sort(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static void par(execution_policy<Derived>& policy,
                         ItemsIt                    first,
                         ItemsIt                    last,
@@ -409,7 +409,7 @@ stable_sort(execution_policy<Derived>& policy,
             __smart_sort::smart_sort<detail::false_type>(
                 policy, first, last, (item_type*)NULL, compare_op);
         }
-        __device__
+        THRUST_DEVICE
         static void seq(execution_policy<Derived>& policy,
                 ItemsIt                    first,
                 ItemsIt                    last,
@@ -425,7 +425,7 @@ stable_sort(execution_policy<Derived>& policy,
     #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived, class ItemsIt, class CompareOp>
+THRUST_EXEC_CHECK_DISABLE template <class Derived, class ItemsIt, class CompareOp>
 void THRUST_HIP_FUNCTION
 sort(execution_policy<Derived>& policy,
      ItemsIt                    first,
@@ -435,7 +435,7 @@ sort(execution_policy<Derived>& policy,
     hip_rocprim::stable_sort(policy, first, last, compare_op);
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeysIt,
                                         class ValuesIt,
                                         class CompareOp>
@@ -449,7 +449,7 @@ stable_sort_by_key(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static void par(execution_policy<Derived>& policy,
                         KeysIt                     keys_first,
                         KeysIt                     keys_last,
@@ -460,7 +460,7 @@ stable_sort_by_key(execution_policy<Derived>& policy,
                 policy, keys_first, keys_last, values, compare_op);
         }
 
-        __device__
+        THRUST_DEVICE
         static void seq(execution_policy<Derived>& policy,
             KeysIt                     keys_first,
             KeysIt                     keys_last,
@@ -479,7 +479,7 @@ stable_sort_by_key(execution_policy<Derived>& policy,
     #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeysIt,
                                         class ValuesIt,
                                         class CompareOp>

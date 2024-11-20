@@ -225,7 +225,7 @@ namespace __merge
 //-------------------------
 // Thrust API entry points
 //-------------------------
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeysIt1,
                                         class KeysIt2,
                                         class ResultIt,
@@ -243,7 +243,7 @@ merge(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static ResultIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static ResultIt par(execution_policy<Derived>& policy,
                                      KeysIt1                    keys1_first,
                                      KeysIt1                    keys1_last,
                                      KeysIt2                    keys2_first,
@@ -254,7 +254,7 @@ merge(execution_policy<Derived>& policy,
             return __merge::merge(
                 policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
         }
-        __device__ static ResultIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static ResultIt seq(execution_policy<Derived>& policy,
                                        KeysIt1                    keys1_first,
                                        KeysIt1                    keys1_last,
                                        KeysIt2                    keys2_first,
@@ -278,7 +278,7 @@ merge(execution_policy<Derived>& policy,
   #endif
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeysIt1,
                                         class KeysIt2,
                                         class ItemsIt1,
@@ -301,7 +301,7 @@ merge_by_key(execution_policy<Derived>& policy,
   // struct workaround is required for HIP-clang
   struct workaround
   {
-        __host__
+        THRUST_HOST
         static pair<KeysOutputIt, ItemsOutputIt> par(execution_policy<Derived>& policy,
                             KeysIt1                    keys1_first,
                             KeysIt1                    keys1_last,
@@ -324,7 +324,7 @@ merge_by_key(execution_policy<Derived>& policy,
                                   items_result,
                                   compare_op);
         }
-        __device__
+        THRUST_DEVICE
         static pair<KeysOutputIt, ItemsOutputIt> seq(execution_policy<Derived>& policy,
                             KeysIt1                    keys1_first,
                             KeysIt1                    keys1_last,
@@ -359,7 +359,7 @@ merge_by_key(execution_policy<Derived>& policy,
 
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeysIt1,
                                         class KeysIt2,
                                         class ResultIt>

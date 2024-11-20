@@ -36,14 +36,14 @@
 THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy, typename InputIt, typename OutputIt>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIt copy(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
               InputIt                                                     first,
               InputIt                                                     last,
               OutputIt                                                    result);
 
 template <class DerivedPolicy, class InputIt, class Size, class OutputIt>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIt copy_n(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
                 InputIt                                                     first,
                 Size                                                        n,
@@ -91,7 +91,7 @@ namespace hip_rocprim
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 // D->D copy requires HIP compiler
 
-__thrust_exec_check_disable__ template <class System, class InputIterator, class OutputIterator>
+THRUST_EXEC_CHECK_DISABLE template <class System, class InputIterator, class OutputIterator>
 OutputIterator THRUST_HIP_FUNCTION
 copy(execution_policy<System>& system,
      InputIterator             first,
@@ -101,14 +101,14 @@ copy(execution_policy<System>& system,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIterator par(execution_policy<System>& system,
+        THRUST_HOST static OutputIterator par(execution_policy<System>& system,
                                            InputIterator             first,
                                            InputIterator             last,
                                            OutputIterator            result)
         {
             return __copy::device_to_device(system, first, last, result);
         }
-        __device__ static OutputIterator seq(execution_policy<System>& system,
+        THRUST_DEVICE static OutputIterator seq(execution_policy<System>& system,
                                              InputIterator             first,
                                              InputIterator             last,
                                              OutputIterator            result)
@@ -124,7 +124,7 @@ copy(execution_policy<System>& system,
 #endif
 } // end copy()
 
-__thrust_exec_check_disable__ template <class System,
+THRUST_EXEC_CHECK_DISABLE template <class System,
                                         class InputIterator,
                                         class Size,
                                         class OutputIterator>
@@ -137,12 +137,12 @@ copy_n(execution_policy<System>& system,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIterator
+        THRUST_HOST static OutputIterator
         par(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result)
         {
             return __copy::device_to_device(system, first, first + n, result);
         }
-        __device__ static OutputIterator
+        THRUST_DEVICE static OutputIterator
         seq(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result)
         {
             return thrust::copy_n(cvt_to_seq(derived_cast(system)), first, n, result);

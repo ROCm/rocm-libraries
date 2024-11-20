@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ template<typename RealType>
 {
   protected:
     template<typename UniformRandomNumberGenerator>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     RealType sample(UniformRandomNumberGenerator &urng, const RealType mean, const RealType stddev)
     {
       using uint_type = typename UniformRandomNumberGenerator::result_type;
@@ -77,7 +77,7 @@ template<typename RealType>
     }
 
     // no-op
-    __host__ __device__
+    THRUST_HOST_DEVICE
     void reset() {}
 };
 
@@ -102,7 +102,7 @@ template<typename RealType>
 
     // note that we promise to call this member function with the same mean and stddev
     template<typename UniformRandomNumberGenerator>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     RealType sample(UniformRandomNumberGenerator &urng, const RealType mean, const RealType stddev)
     {
       // implementation from Boost

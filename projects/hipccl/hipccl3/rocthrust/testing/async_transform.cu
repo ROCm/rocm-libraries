@@ -13,7 +13,7 @@
 template <typename T>
 struct divide_by_2
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   T operator()(T x) const
   {
     return x / 2;
@@ -43,7 +43,7 @@ struct divide_by_2
       typename ForwardIt, typename Sentinel, typename OutputIt                \
     , typename UnaryOperation                                                 \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last, OutputIt&& output                   \
     , UnaryOperation&& op                                                     \
@@ -73,7 +73,7 @@ struct divide_by_2
       typename ForwardIt, typename Sentinel, typename OutputIt                \
     , typename UnaryOperation                                                 \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last, OutputIt&& output                   \
     , UnaryOperation&& op                                                     \
@@ -166,7 +166,7 @@ struct test_async_transform_unary
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -288,7 +288,7 @@ struct test_async_transform_unary_inplace
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -398,7 +398,7 @@ struct test_async_transform_unary_counting_iterator
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()()
     {
       constexpr std::size_t n = 15 * sizeof(T);
@@ -475,7 +475,7 @@ struct test_async_transform_using
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0(unittest::random_integers<T>(n));

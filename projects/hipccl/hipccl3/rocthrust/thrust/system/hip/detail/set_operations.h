@@ -981,7 +981,7 @@ namespace __set_operations
 
         status = __parallel_for::parallel_for(
             number_of_blocks + 1,
-            [=] __device__(Size idx) mutable {
+            [=] THRUST_DEVICE(Size idx) mutable {
                 Size partition_at = min<Size>(idx * items_per_block, num_keys1 + num_keys2);
                 partitions[idx]   = balanced_path(
                     keys1, keys2, num_keys1, num_keys2, partition_at, 4ll, compare_op);

@@ -322,7 +322,7 @@ namespace __scan_by_key
 //   Inclusive scan
 //---------------------------
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeyInputIt,
                                         class ValInputIt,
                                         class ValOutputIt,
@@ -340,7 +340,7 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static ValOutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static ValOutputIt par(execution_policy<Derived>& policy,
                                         KeyInputIt                 key_first,
                                         KeyInputIt                 key_last,
                                         ValInputIt                 value_first,
@@ -352,7 +352,7 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
                 policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
         }
 
-        __device__ static ValOutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static ValOutputIt seq(execution_policy<Derived>& policy,
                                           KeyInputIt                 key_first,
                                           KeyInputIt                 key_last,
                                           ValInputIt                 value_first,
@@ -422,7 +422,7 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
 //   Exclusive scan
 //---------------------------
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeyInputIt,
                                         class ValInputIt,
                                         class ValOutputIt,
@@ -443,7 +443,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static ValOutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static ValOutputIt par(execution_policy<Derived>& policy,
                                         KeyInputIt                 key_first,
                                         KeyInputIt                 key_last,
                                         ValInputIt                 value_first,
@@ -456,7 +456,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
                 policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
         }
 
-        __device__ static ValOutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static ValOutputIt seq(execution_policy<Derived>& policy,
                                           KeyInputIt                 key_first,
                                           KeyInputIt                 key_last,
                                           ValInputIt                 value_first,

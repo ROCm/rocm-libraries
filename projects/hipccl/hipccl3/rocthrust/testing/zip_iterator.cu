@@ -90,6 +90,7 @@ template<typename T>
   }
 };
 SimpleUnitTest<TestZipIteratorManipulation, type_list<int> > TestZipIteratorManipulationInstance;
+static_assert(std::is_trivially_copy_constructible<thrust::zip_iterator<thrust::tuple<int*, int*>>>::value, "");
 
 template <typename T>
   struct TestZipIteratorReference
@@ -224,7 +225,7 @@ template <typename T>
 
     //ASSERT_EQUAL(true, (detail::is_convertible<zip_iterator_system_type3, thrust::experimental::space::any>::value) );
 
-    
+
 #if 0
     // test host/any
     typedef tuple<Iterator1, Iterator5>                IteratorTuple4;
@@ -297,10 +298,9 @@ DECLARE_VECTOR_UNITTEST(TestZipIteratorCopy);
 
 struct SumTwoTuple
 {
-  template<typename Tuple>
-  __host__ __device__
-  typename thrust::detail::remove_reference<typename thrust::tuple_element<0,Tuple>::type>::type
-    operator()(Tuple x) const
+  template <typename Tuple>
+  THRUST_HOST_DEVICE typename thrust::detail::remove_reference<typename thrust::tuple_element<0, Tuple>::type>::type
+  operator()(Tuple x) const
   {
     return thrust::get<0>(x) + thrust::get<1>(x);
   }
@@ -308,10 +308,9 @@ struct SumTwoTuple
 
 struct SumThreeTuple
 {
-  template<typename Tuple>
-  __host__ __device__
-  typename thrust::detail::remove_reference<typename thrust::tuple_element<0,Tuple>::type>::type
-    operator()(Tuple x) const
+  template <typename Tuple>
+  THRUST_HOST_DEVICE typename thrust::detail::remove_reference<typename thrust::tuple_element<0, Tuple>::type>::type
+  operator()(Tuple x) const
   {
     return thrust::get<0>(x) + thrust::get<1>(x) + thrust::get<2>(x);
   }
@@ -346,8 +345,8 @@ struct TestZipIteratorTransform
                d_result.begin(),
                SumTwoTuple());
     ASSERT_EQUAL(h_result, d_result);
-    
-    
+
+
     // Tuples with 3 elements
     transform( make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin(), h_data2.begin())),
                make_zip_iterator(make_tuple(h_data0.end(),   h_data1.end(),   h_data2.end())),

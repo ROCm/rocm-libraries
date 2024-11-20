@@ -42,12 +42,13 @@ struct basic
     template <typename T, typename Policy = thrust::detail::device_t>
     float64_t run(thrust::device_vector<T>& input,
                   thrust::device_vector<T>& output,
-                  const std::size_t         elements)
+                  const std::size_t         elements,
+                  Policy                    policy)
     {
         bench_utils::gpu_timer d_timer;
 
         d_timer.start(0);
-        thrust::lower_bound(Policy {},
+        thrust::lower_bound(policy,
                             input.begin(),
                             input.begin() + elements,
                             input.begin() + elements,
@@ -79,9 +80,12 @@ void run_benchmark(benchmark::State& state,
     thrust::device_vector<T> output(needles);
     thrust::sort(input.begin(), input.begin() + elements);
 
+    bench_utils::caching_allocator_t alloc {};
+    thrust::detail::device_t         policy {};
+
     for(auto _ : state)
     {
-        float64_t duration = benchmark.template run<T>(input, output, elements);
+        float64_t duration = benchmark.template run<T>(input, output, elements, policy(alloc));
         state.SetIterationTime(duration);
         gpu_times.push_back(duration);
     }
@@ -154,7 +158,7 @@ int main(int argc, char* argv[])
     }
 
     // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks(new bench_utils::CustomReporter);
+    benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
 
     // Finish
     benchmark::Shutdown();

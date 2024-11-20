@@ -40,7 +40,7 @@ THRUST_NAMESPACE_BEGIN
  *         memory.
  */
 template <typename T, typename... Args>
-__host__
+THRUST_HOST
 auto device_make_unique(Args&&... args)
   THRUST_TRAILING_RETURN(decltype(
     uninitialized_allocate_unique<T>(device_allocator<T>{})

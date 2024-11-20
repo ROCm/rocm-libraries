@@ -7,6 +7,8 @@
 #include <thrust/copy.h>
 #include <iostream>
 
+#include "include/host_device.h"
+
 // this example illustrates how to make repeated access to a range of values
 // examples:
 //   repeated_range([0, 1, 2, 3], 1) -> [0, 1, 2, 3] 

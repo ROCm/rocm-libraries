@@ -48,11 +48,11 @@ namespace __tabulate {
     Iterator items;
     TabulateOp op;
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     functor(Iterator items_, TabulateOp op_)
         : items(items_), op(op_) {}
 
-    void __device__ operator()(Size idx)
+    void THRUST_DEVICE operator()(Size idx)
     {
       items[idx] = op(idx);
     }

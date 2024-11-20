@@ -57,7 +57,7 @@ template <typename DerivedPolicy,
           typename InputIterator,
           typename T,
           typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 T reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
          InputIterator                                               first,
          InputIterator                                               last,
@@ -146,7 +146,7 @@ T reduce_n(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static T par(execution_policy<Derived>& policy,
+        THRUST_HOST static T par(execution_policy<Derived>& policy,
                               InputIt                    first,
                               Size                       num_items,
                               T                          init,
@@ -154,7 +154,7 @@ T reduce_n(execution_policy<Derived>& policy,
         {
             return __reduce::reduce(policy, first, num_items, init, binary_op);
         }
-        __device__ static T seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static T seq(execution_policy<Derived>& policy,
                                 InputIt                    first,
                                 Size                       num_items,
                                 T                          init,
