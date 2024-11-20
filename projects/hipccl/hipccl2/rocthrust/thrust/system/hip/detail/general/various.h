@@ -32,18 +32,18 @@ template <typename T,
           typename U,
           std::enable_if_t<thrust::detail::is_integral<T>::value && std::is_unsigned<U>::value, int>
           = 0>
-__host__ __device__ inline constexpr auto ceiling_div(const T a, const U b)
+THRUST_HOST_DEVICE inline constexpr auto ceiling_div(const T a, const U b)
 {
     return a / b + (a % b > 0 ? 1 : 0);
 }
 
-__host__ __device__ inline size_t align_size(size_t size, size_t alignment = 256)
+THRUST_HOST_DEVICE inline size_t align_size(size_t size, size_t alignment = 256)
 {
     return ceiling_div(size, alignment) * alignment;
 }
 
 template <class Tuple, class Function, size_t... Indices>
-__host__ __device__ inline void
+THRUST_HOST_DEVICE inline void
 apply_to_each_in_tuple_impl(Tuple&& t, Function&& f, thrust::index_sequence<Indices...>)
 {
     int swallow[]
@@ -52,7 +52,7 @@ apply_to_each_in_tuple_impl(Tuple&& t, Function&& f, thrust::index_sequence<Indi
 }
 
 template <class Tuple, class Function>
-__host__ __device__ inline auto apply_to_each_in_tuple(Tuple&& t, Function&& f)
+THRUST_HOST_DEVICE inline auto apply_to_each_in_tuple(Tuple&& t, Function&& f)
     -> void_t<tuple_size<std::remove_reference_t<Tuple>>>
 {
     static constexpr size_t size = tuple_size<std::remove_reference_t<Tuple>>::value;

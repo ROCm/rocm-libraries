@@ -67,18 +67,18 @@ struct assert_sequence_iterator
     unexpected_value = nullptr;
   }
 
-  __host__ __device__ assert_sequence_iterator operator+(difference_type i) const
+  THRUST_HOST_DEVICE assert_sequence_iterator operator+(difference_type i) const
   {
     return clone(expected + i);
   }
 
-  __host__ __device__ reference operator[](difference_type i) const
+  THRUST_HOST_DEVICE reference operator[](difference_type i) const
   {
     return clone(expected + i);
   }
 
   // Some weirdness, this iterator acts like its own reference
-  __device__ assert_sequence_iterator operator=(value_type val)
+  THRUST_DEVICE assert_sequence_iterator operator=(value_type val)
   {
     if (val != expected)
     {
@@ -95,7 +95,7 @@ struct assert_sequence_iterator
   }
 
 private:
-  __host__ __device__ assert_sequence_iterator
+  THRUST_HOST_DEVICE assert_sequence_iterator
   clone(value_type new_expected) const
   {
     return {new_expected, max, found_max, unexpected_value};

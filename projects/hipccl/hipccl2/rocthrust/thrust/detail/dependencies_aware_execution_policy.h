@@ -34,7 +34,7 @@ template<template<typename> class ExecutionPolicyCRTPBase>
 struct dependencies_aware_execution_policy
 {
     template<typename ...Dependencies>
-    __host__
+    THRUST_HOST
     thrust::detail::execute_with_dependencies<
         ExecutionPolicyCRTPBase,
         Dependencies...
@@ -45,7 +45,7 @@ struct dependencies_aware_execution_policy
     }
 
     template<typename ...Dependencies>
-    __host__
+    THRUST_HOST
     thrust::detail::execute_with_dependencies<
         ExecutionPolicyCRTPBase,
         Dependencies...
@@ -55,7 +55,7 @@ struct dependencies_aware_execution_policy
         return { capture_as_dependency(dependencies) };
     }
     template<typename ...Dependencies>
-    __host__
+    THRUST_HOST
     thrust::detail::execute_with_dependencies<
         ExecutionPolicyCRTPBase,
         Dependencies...
@@ -66,7 +66,7 @@ struct dependencies_aware_execution_policy
     }
 
     template<typename ...Dependencies>
-    __host__
+    THRUST_HOST
     thrust::detail::execute_with_dependencies<
         ExecutionPolicyCRTPBase,
         Dependencies...
@@ -77,7 +77,7 @@ struct dependencies_aware_execution_policy
     }
 
     template<typename ...Dependencies>
-    __host__
+    THRUST_HOST
     thrust::detail::execute_with_dependencies<
         ExecutionPolicyCRTPBase,
         Dependencies...
@@ -87,7 +87,7 @@ struct dependencies_aware_execution_policy
         return { capture_as_dependency(dependencies) };
     }
     template<typename ...Dependencies>
-    __host__
+    THRUST_HOST
     thrust::detail::execute_with_dependencies<
         ExecutionPolicyCRTPBase,
         Dependencies...

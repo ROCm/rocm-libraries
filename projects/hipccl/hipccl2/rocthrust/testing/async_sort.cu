@@ -24,7 +24,7 @@ enum wait_policy
 template <typename T>
 struct custom_greater
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool operator()(T rhs, T lhs) const
   {
     return lhs > rhs;
@@ -38,7 +38,7 @@ struct custom_greater
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     static void sync(                                                         \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -51,7 +51,7 @@ struct custom_greater
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     static auto async(                                                        \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -79,7 +79,7 @@ DEFINE_SORT_INVOKER(
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     static void sync(                                                         \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -92,7 +92,7 @@ DEFINE_SORT_INVOKER(
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     static auto async(                                                        \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -138,7 +138,7 @@ struct test_async_sort
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0_data(unittest::random_integers<T>(n));

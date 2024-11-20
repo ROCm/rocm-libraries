@@ -26,7 +26,7 @@ template <typename T>
 struct unique_eager_future;
 
 template <typename... Events>
-__host__
+THRUST_HOST
 unique_eager_event when_all(Events&&... evs);
 
 }} // namespace system::hip
@@ -49,14 +49,14 @@ using thrust::system::hip::when_all;
 } // namespace hip
 
 template <typename DerivedPolicy>
-__host__
+THRUST_HOST
 thrust::hip::unique_eager_event
 unique_eager_event_type(
   thrust::hip::execution_policy<DerivedPolicy> const&
 ) noexcept;
 
 template <typename T, typename DerivedPolicy>
-__host__
+THRUST_HOST
 thrust::hip::unique_eager_future<T>
 unique_eager_future_type(
   thrust::hip::execution_policy<DerivedPolicy> const&

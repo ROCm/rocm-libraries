@@ -49,7 +49,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceSimple);
 
 
 template<typename ForwardIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace(my_system &system,
              ForwardIterator, ForwardIterator, const T &,
              const T &)
@@ -74,7 +74,7 @@ DECLARE_UNITTEST(TestReplaceDispatchExplicit);
 
 
 template<typename ForwardIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace(my_tag,
              ForwardIterator first, ForwardIterator, const T &,
              const T &)
@@ -143,7 +143,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceCopySimple);
 
 
 template<typename InputIterator, typename OutputIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy(my_system &system,
                             InputIterator, InputIterator,
                             OutputIterator result,
@@ -172,7 +172,7 @@ DECLARE_UNITTEST(TestReplaceCopyDispatchExplicit);
 
 
 template<typename InputIterator, typename OutputIterator, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy(my_tag,
                             InputIterator, InputIterator,
                             OutputIterator result,
@@ -246,7 +246,7 @@ DECLARE_VARIABLE_UNITTEST(TestReplaceCopyToDiscardIterator);
 template <typename T>
 struct less_than_five
 {
-  __host__ __device__ bool operator()(const T &val) const {return val < 5;}
+  THRUST_HOST_DEVICE bool operator()(const T &val) const {return val < 5;}
 };
 
 template <class Vector>
@@ -276,7 +276,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceIfSimple);
 
 
 template<typename ForwardIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace_if(my_system &system,
                 ForwardIterator, ForwardIterator,
                 Predicate,
@@ -302,7 +302,7 @@ DECLARE_UNITTEST(TestReplaceIfDispatchExplicit);
 
 
 template<typename ForwardIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace_if(my_tag,
                 ForwardIterator first, ForwardIterator,
                 Predicate,
@@ -359,7 +359,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceIfStencilSimple);
 
 
 template<typename ForwardIterator, typename InputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace_if(my_system &system,
                 ForwardIterator, ForwardIterator,
                 InputIterator,
@@ -387,7 +387,7 @@ DECLARE_UNITTEST(TestReplaceIfStencilDispatchExplicit);
 
 
 template<typename ForwardIterator, typename InputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 void replace_if(my_tag,
                 ForwardIterator first, ForwardIterator,
                 InputIterator,
@@ -472,7 +472,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceCopyIfSimple);
 
 
 template<typename InputIterator, typename OutputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy_if(my_system &system,
                                InputIterator, InputIterator,
                                OutputIterator result,
@@ -501,7 +501,7 @@ DECLARE_UNITTEST(TestReplaceCopyIfDispatchExplicit);
 
 
 template<typename InputIterator, typename OutputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy_if(my_tag,
                                InputIterator, InputIterator,
                                OutputIterator result,
@@ -563,7 +563,7 @@ DECLARE_VECTOR_UNITTEST(TestReplaceCopyIfStencilSimple);
 
 
 template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy_if(my_system &system,
                                InputIterator1, InputIterator1,
                                InputIterator2,
@@ -595,7 +595,7 @@ DECLARE_UNITTEST(TestReplaceCopyIfStencilDispatchExplicit);
 
 
 template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate, typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator replace_copy_if(my_tag,
                                InputIterator1, InputIterator1,
                                InputIterator2,

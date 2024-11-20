@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@
 template<typename T>
   struct max_functor
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   T operator()(T rhs, T lhs) const
   {
     return thrust::max(rhs,lhs);
@@ -549,7 +549,7 @@ struct plus_mod3
 
     plus_mod3(T * table) : table(table) {}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     T operator()(T a, T b)
     {
         return table[(int) (a + b)];
@@ -598,7 +598,7 @@ struct const_ref_plus_mod3
 
     const_ref_plus_mod3(T * table) : table(table) {}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     const T& operator()(T a, T b)
     {
         return table[(int) (a + b)];
@@ -645,14 +645,14 @@ struct only_set_when_expected_it
     long long expected;
     bool * flag;
 
-    __host__ __device__ only_set_when_expected_it operator++() const { return *this; }
-    __host__ __device__ only_set_when_expected_it operator*() const { return *this; }
+    THRUST_HOST_DEVICE only_set_when_expected_it operator++() const { return *this; }
+    THRUST_HOST_DEVICE only_set_when_expected_it operator*() const { return *this; }
     template<typename Difference>
-    __host__ __device__ only_set_when_expected_it operator+(Difference) const { return *this; }
+    THRUST_HOST_DEVICE only_set_when_expected_it operator+(Difference) const { return *this; }
     template<typename Index>
-    __host__ __device__ only_set_when_expected_it operator[](Index) const { return *this; }
+    THRUST_HOST_DEVICE only_set_when_expected_it operator[](Index) const { return *this; }
 
-    __device__
+    THRUST_DEVICE
     void operator=(long long value) const
     {
         if (value == expected)
@@ -733,9 +733,9 @@ DECLARE_UNITTEST(TestExclusiveScanWithBigIndexes);
 
 struct Int {
     int i{};
-    __host__ __device__ explicit Int(int num) : i(num) {}
-    __host__ __device__ Int() : i{} {}
-    __host__ __device__ Int operator+(Int const& o) const { return Int{this->i + o.i}; }
+    THRUST_HOST_DEVICE explicit Int(int num) : i(num) {}
+    THRUST_HOST_DEVICE Int() : i{} {}
+    THRUST_HOST_DEVICE Int operator+(Int const& o) const { return Int{this->i + o.i}; }
 };
 
 void TestInclusiveScanWithUserDefinedType()

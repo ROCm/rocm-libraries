@@ -46,10 +46,10 @@ namespace sequential
 {
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename ForwardIterator1,
          typename ForwardIterator2>
-__host__ __device__
+THRUST_HOST_DEVICE
 void iter_swap(ForwardIterator1 iter1, ForwardIterator2 iter2)
 {
   // XXX this isn't correct because it doesn't use thrust::swap
@@ -63,11 +63,11 @@ void iter_swap(ForwardIterator1 iter1, ForwardIterator2 iter2)
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator partition(sequential::execution_policy<DerivedPolicy> &,
                             ForwardIterator first,
                             ForwardIterator last,
@@ -104,12 +104,12 @@ __host__ __device__
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator partition(sequential::execution_policy<DerivedPolicy> &,
                             ForwardIterator first,
                             ForwardIterator last,
@@ -155,11 +155,11 @@ __host__ __device__
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator stable_partition(sequential::execution_policy<DerivedPolicy> &exec,
                                    ForwardIterator first,
                                    ForwardIterator last,
@@ -207,12 +207,12 @@ __host__ __device__
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   ForwardIterator stable_partition(sequential::execution_policy<DerivedPolicy> &exec,
                                    ForwardIterator first,
                                    ForwardIterator last,
@@ -258,13 +258,13 @@ __host__ __device__
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     stable_partition_copy(sequential::execution_policy<DerivedPolicy> &,
                           InputIterator first,
@@ -297,14 +297,14 @@ __host__ __device__
 }
 
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template<typename DerivedPolicy,
          typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     stable_partition_copy(sequential::execution_policy<DerivedPolicy> &,
                           InputIterator1 first,

@@ -4,6 +4,8 @@
 #include <thrust/fill.h>
 #include <iostream>
 
+#include "include/host_device.h"
+
 // This example illustrates how to use the raw_reference_cast to convert
 // system-specific reference wrappers into native references.
 //

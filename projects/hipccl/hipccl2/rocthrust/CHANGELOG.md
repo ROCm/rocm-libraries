@@ -3,16 +3,18 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## (Unreleased) rocThrust 3.2.0 for ROCm 6.4
+## (Unreleased) rocThrust 3.3.0 for ROCm 6.4
 
 ### Added
 * Added extended tests to `rtest.py`. These tests are extra tests that did not fit the criteria of smoke and regression tests. These tests will take much longer to run relative to smoke and regression tests. Use `python rtest.py [--emulation|-e|--test|-t]=extended` to run these tests.
 * Added regression tests to `rtest.py`. These tests recreate scenarios that have caused hardware problems in past emulation environments. Use `python rtest.py [--emulation|-e|--test|-t]=regression` to run these tests.
 * Added smoke test options, which runs a subset of the unit tests and ensures that less than 2gb of VRAM will be used. Use `python rtest.py [--emulation|-e|--test|-t]=smoke` to run these tests.
 * Added `--emulation` option for `rtest.py`
+* Merged changes from upstream CCCL/thrust 2.4.0
 
 ### Changed
 * `--test|-t` is no longer a required flag for `rtest.py`. Instead, the user can use either `--emulation|-e` or `--test|-t`, but not both.
+* Split the contents of HIPSTDPAR's forwarding header into several implementation headers.
 
 ## (Unreleased) rocThrust 3.2.0 for ROCm 6.3
 
@@ -38,6 +40,7 @@ Documentation for rocThrust available at
 
 * Merged changes from upstream CCCL/thrust 2.2.0
   * Updated the contents of `system/hip` and `test` with the upstream changes to `system/cuda` and `testing`
+* Added HIPSTDPAR library as part of rocThrust.
 
 ### Changes
 

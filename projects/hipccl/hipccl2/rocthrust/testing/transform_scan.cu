@@ -29,7 +29,7 @@ template<typename InputIterator,
          typename OutputIterator,
          typename UnaryFunction,
          typename AssociativeOperator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform_inclusive_scan(my_system &system,
                                         InputIterator,
                                         InputIterator,
@@ -62,7 +62,7 @@ template<typename InputIterator,
          typename OutputIterator,
          typename UnaryFunction,
          typename AssociativeOperator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform_inclusive_scan(my_tag,
                                         InputIterator,
                                         InputIterator,
@@ -94,7 +94,7 @@ template<typename InputIterator,
          typename UnaryFunction,
          typename T,
          typename AssociativeOperator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform_exclusive_scan(my_system &system,
                                         InputIterator,
                                         InputIterator,
@@ -130,7 +130,7 @@ template<typename InputIterator,
          typename UnaryFunction,
          typename T,
          typename AssociativeOperator>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform_exclusive_scan(my_tag,
                                         InputIterator,
                                         InputIterator,
@@ -231,7 +231,7 @@ struct Record {
 };
 
 struct negate {
-    __host__ __device__ int operator()(Record const& record) const
+    THRUST_HOST_DEVICE int operator()(Record const& record) const
     {
         return - record.number;
     }

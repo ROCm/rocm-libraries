@@ -26,8 +26,7 @@ THRUST_STATIC_ASSERT((thrust::is_operator_plus_function_object<
 #endif
 
 template <typename T>
-__host__
-void test_is_operator_less_function_object()
+THRUST_HOST void test_is_operator_less_function_object()
 {
   THRUST_STATIC_ASSERT((thrust::is_operator_less_function_object<
     thrust::less<T>
@@ -68,8 +67,7 @@ void test_is_operator_less_function_object()
 DECLARE_GENERIC_UNITTEST(test_is_operator_less_function_object);
 
 template <typename T>
-__host__
-void test_is_operator_greater_function_object()
+THRUST_HOST void test_is_operator_greater_function_object()
 {
   THRUST_STATIC_ASSERT((!thrust::is_operator_greater_function_object<
     thrust::less<T>
@@ -110,8 +108,7 @@ void test_is_operator_greater_function_object()
 DECLARE_GENERIC_UNITTEST(test_is_operator_greater_function_object);
 
 template <typename T>
-__host__
-void test_is_operator_less_or_greater_function_object()
+THRUST_HOST void test_is_operator_less_or_greater_function_object()
 {
   THRUST_STATIC_ASSERT((thrust::is_operator_less_or_greater_function_object<
     thrust::less<T>
@@ -152,8 +149,7 @@ void test_is_operator_less_or_greater_function_object()
 DECLARE_GENERIC_UNITTEST(test_is_operator_less_or_greater_function_object);
 
 template <typename T>
-__host__
-void test_is_operator_plus_function_object()
+THRUST_HOST void test_is_operator_plus_function_object()
 {
   THRUST_STATIC_ASSERT((thrust::is_operator_plus_function_object<
     thrust::plus<T>

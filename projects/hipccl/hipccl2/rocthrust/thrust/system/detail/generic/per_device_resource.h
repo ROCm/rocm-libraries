@@ -32,7 +32,7 @@ namespace generic
 
 
 template<typename MR, typename DerivedPolicy>
-__host__
+THRUST_HOST
 MR * get_per_device_resource(thrust::detail::execution_policy_base<DerivedPolicy>&)
 {
     return mr::get_global_resource<MR>();

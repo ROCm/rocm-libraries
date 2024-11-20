@@ -43,7 +43,7 @@ DECLARE_VECTOR_UNITTEST(TestAllOf);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool all_of(my_system &system, InputIterator, InputIterator, Predicate)
 {
     system.validate_dispatch();
@@ -63,7 +63,7 @@ DECLARE_UNITTEST(TestAllOfDispatchExplicit);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool all_of(my_tag, InputIterator first, InputIterator, Predicate)
 {
     *first = 13;
@@ -105,7 +105,7 @@ DECLARE_VECTOR_UNITTEST(TestAnyOf);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool any_of(my_system &system, InputIterator, InputIterator, Predicate)
 {
     system.validate_dispatch();
@@ -125,7 +125,7 @@ DECLARE_UNITTEST(TestAnyOfDispatchExplicit);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool any_of(my_tag, InputIterator first, InputIterator, Predicate)
 {
     *first = 13;
@@ -167,7 +167,7 @@ DECLARE_VECTOR_UNITTEST(TestNoneOf);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool none_of(my_system &system, InputIterator, InputIterator, Predicate)
 {
     system.validate_dispatch();
@@ -187,7 +187,7 @@ DECLARE_UNITTEST(TestNoneOfDispatchExplicit);
 
 
 template <class InputIterator, class Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool none_of(my_tag, InputIterator first, InputIterator, Predicate)
 {
     *first = 13;

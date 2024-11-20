@@ -251,7 +251,7 @@ lower_bound(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
                                      HaystackIt                 first,
                                      HaystackIt                 last,
                                      NeedlesIt                  values_first,
@@ -263,7 +263,7 @@ lower_bound(execution_policy<Derived>& policy,
                 policy, first, last, values_first, values_last, result, compare_op);
         }
 
-        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
                                        HaystackIt                 first,
                                        HaystackIt                 last,
                                        NeedlesIt                  values_first,
@@ -318,7 +318,7 @@ upper_bound(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
                                      HaystackIt                 first,
                                      HaystackIt                 last,
                                      NeedlesIt                  values_first,
@@ -330,7 +330,7 @@ upper_bound(execution_policy<Derived>& policy,
                 policy, first, last, values_first, values_last, result, compare_op);
         }
 
-        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
                                        HaystackIt                 first,
                                        HaystackIt                 last,
                                        NeedlesIt                  values_first,
@@ -383,7 +383,7 @@ binary_search(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIt par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIt par(execution_policy<Derived>& policy,
                                      HaystackIt                 first,
                                      HaystackIt                 last,
                                      NeedlesIt                  values_first,
@@ -395,7 +395,7 @@ binary_search(execution_policy<Derived>& policy,
                 policy, first, last, values_first, values_last, result, compare_op);
         }
 
-        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIt seq(execution_policy<Derived>& policy,
                                        HaystackIt                 first,
                                        HaystackIt                 last,
                                        NeedlesIt                  values_first,
@@ -456,7 +456,7 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static HaystackIt par(execution_policy<Derived>& policy,
                               HaystackIt                 first,
                               HaystackIt                 last,
@@ -500,7 +500,7 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
             return first + h_result;
         }
 
-        __device__
+        THRUST_DEVICE
         static HaystackIt seq(execution_policy<Derived>& policy,
                             HaystackIt                 first,
                             HaystackIt                 last,
@@ -542,7 +542,7 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static HaystackIt par(execution_policy<Derived>& policy,
                               HaystackIt                 first,
                               HaystackIt                 last,
@@ -587,7 +587,7 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
           return first + h_result;
         }
 
-        __device__
+        THRUST_DEVICE
         static HaystackIt seq(execution_policy<Derived>& policy,
                             HaystackIt                 first,
                             HaystackIt                 last,
@@ -627,7 +627,7 @@ bool binary_search(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static bool par(execution_policy<Derived>& policy,
                               HaystackIt                 first,
                               HaystackIt                 last,
@@ -671,7 +671,7 @@ bool binary_search(execution_policy<Derived>& policy,
           return h_result != 0;
         }
 
-        __device__
+        THRUST_DEVICE
         static bool seq(execution_policy<Derived>& policy,
                             HaystackIt                 first,
                             HaystackIt                 last,

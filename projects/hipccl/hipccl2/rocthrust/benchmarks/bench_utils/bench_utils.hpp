@@ -29,6 +29,8 @@
 #include "custom_reporter.hpp"
 #include "generation_utils.hpp"
 
+#include <thrust/execution_policy.h>
+
 // HIP/CUDA
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 #include <hip/hip_runtime.h>
@@ -51,6 +53,7 @@
 #include <string>
 
 #include <cmath>
+#include <cstddef>
 #include <numeric>
 
 namespace bench_utils
@@ -633,6 +636,68 @@ inline const char* get_seed_message()
     return "seed for input generation, either an unsigned integer value for determinisic results "
            "or 'random' for different inputs for each repetition";
 }
+
+struct caching_allocator_t
+{
+    using value_type = char;
+
+    caching_allocator_t() = default;
+    ~caching_allocator_t()
+    {
+        free_all();
+    }
+
+    char* allocate(std::ptrdiff_t num_bytes)
+    {
+        value_type* result {};
+        auto        free_block = free_blocks.find(num_bytes);
+        if(free_block != free_blocks.end())
+        {
+            result = free_block->second;
+            free_blocks.erase(free_block);
+        }
+        else
+        {
+            HIP_CHECK(hipMalloc(&result, num_bytes));
+        }
+
+        allocated_blocks.emplace(result, num_bytes);
+        return result;
+    }
+
+    void deallocate(value_type* ptr, size_t)
+    {
+        auto iter = allocated_blocks.find(ptr);
+        if(iter == allocated_blocks.end())
+        {
+            throw std::runtime_error("Memory was not allocated by this allocator");
+        }
+
+        std::ptrdiff_t num_bytes = iter->second;
+        allocated_blocks.erase(iter);
+        free_blocks.emplace(num_bytes, ptr);
+    }
+
+private:
+    using FreeBlocksType      = std::multimap<std::ptrdiff_t, value_type*>;
+    using AllocatedBlocksType = std::map<value_type*, std::ptrdiff_t>;
+
+    FreeBlocksType      free_blocks;
+    AllocatedBlocksType allocated_blocks;
+
+    void free_all()
+    {
+        for(auto free_block : free_blocks)
+        {
+            HIP_CHECK(hipFree(free_block.second));
+        }
+
+        for(auto allocated_block : allocated_blocks)
+        {
+            HIP_CHECK(hipFree(allocated_block.first));
+        }
+    }
+};
 
 } // namespace bench_utils
 

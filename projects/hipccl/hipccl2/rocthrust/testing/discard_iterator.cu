@@ -11,21 +11,23 @@ void TestDiscardIteratorIncrement(void)
   lhs++;
 
   ASSERT_EQUAL(1, lhs - rhs);
-  
+
   lhs++;
   lhs++;
-  
+
   ASSERT_EQUAL(3, lhs - rhs);
 
   lhs += 5;
-  
+
   ASSERT_EQUAL(8, lhs - rhs);
 
   lhs -= 10;
-  
+
   ASSERT_EQUAL(-2, lhs - rhs);
 }
 DECLARE_UNITTEST(TestDiscardIteratorIncrement);
+static_assert(std::is_trivially_copy_constructible<thrust::discard_iterator<>>::value, "");
+static_assert(std::is_trivially_copyable<thrust::discard_iterator<>>::value, "");
 
 void TestDiscardIteratorComparison(void)
 {
@@ -36,15 +38,15 @@ void TestDiscardIteratorComparison(void)
   ASSERT_EQUAL(true, iter1 == iter2);
 
   iter1++;
-  
+
   ASSERT_EQUAL(1, iter1 - iter2);
   ASSERT_EQUAL(false, iter1 == iter2);
-  
+
   iter2++;
 
   ASSERT_EQUAL(0, iter1 - iter2);
   ASSERT_EQUAL(true, iter1 == iter2);
-  
+
   iter1 += 100;
   iter2 += 100;
 
@@ -82,7 +84,7 @@ void TestZippedDiscardIterator(void)
   {
     ;
   }
-  
+
   ASSERT_EQUAL(10, thrust::get<0>(z_iter1_first.get_iterator_tuple()) - thrust::make_discard_iterator());
 
   typedef tuple<int *, discard_iterator<> > IteratorTuple2;

@@ -34,16 +34,16 @@ namespace zip_detail {
 // Add workaround for decltype(auto) on C++11-only compilers:
 #if THRUST_CPP_DIALECT >= 2014
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename Function, typename Tuple, std::size_t... Is>
-__host__ __device__
+THRUST_HOST_DEVICE
 decltype(auto) apply_impl(Function&& func, Tuple&& args, index_sequence<Is...>)
 {
   return func(thrust::get<Is>(THRUST_FWD(args))...);
 }
 
 template <typename Function, typename Tuple>
-__host__ __device__
+THRUST_HOST_DEVICE
 decltype(auto) apply(Function&& func, Tuple&& args)
 {
   constexpr auto tuple_size = thrust::tuple_size<typename std::decay<Tuple>::type>::value;
@@ -52,14 +52,14 @@ decltype(auto) apply(Function&& func, Tuple&& args)
 
 #else // THRUST_CPP_DIALECT
 
-__thrust_exec_check_disable__
+THRUST_EXEC_CHECK_DISABLE
 template <typename Function, typename Tuple, std::size_t... Is>
-__host__ __device__
+THRUST_HOST_DEVICE
 auto apply_impl(Function&& func, Tuple&& args, index_sequence<Is...>)
 THRUST_DECLTYPE_RETURNS(func(thrust::get<Is>(THRUST_FWD(args))...))
 
 template <typename Function, typename Tuple>
-__host__ __device__
+THRUST_HOST_DEVICE
 auto apply(Function&& func, Tuple&& args)
 THRUST_DECLTYPE_RETURNS(
     apply_impl(
@@ -154,7 +154,7 @@ class zip_function
 {
   public:
     /*! Constructs a \p zip_function with the provided function object \p func. */
-    __host__ __device__
+    THRUST_HOST_DEVICE
     zip_function(Function func) : func(std::move(func)) {}
 
     /*! Applies the N-ary function object to elements of the tuple \p args. */
@@ -162,7 +162,7 @@ class zip_function
 #if THRUST_CPP_DIALECT >= 2014
 
     template <typename Tuple>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     decltype(auto) operator()(Tuple&& args) const
     {
         return detail::zip_detail::apply(func, THRUST_FWD(args));
@@ -173,7 +173,7 @@ class zip_function
     // Can't just use THRUST_DECLTYPE_RETURNS here since we need to use
     // std::declval for the signature components:
     template <typename Tuple>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     auto operator()(Tuple&& args) const
     noexcept(noexcept(detail::zip_detail::apply(std::declval<Function>(), THRUST_FWD(args))))
     THRUST_TRAILING_RETURN(decltype(detail::zip_detail::apply(std::declval<Function>(), THRUST_FWD(args))))
@@ -195,7 +195,7 @@ class zip_function
  *  \see zip_function
  */
 template <typename Function>
-__host__ __device__
+THRUST_HOST_DEVICE
 zip_function<typename std::decay<Function>::type>
 make_zip_function(Function&& fun)
 {

@@ -34,6 +34,7 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -44,6 +45,92 @@
 
 namespace bench_utils
 {
+
+template <class DstType, class SrcType>
+bool IsType(const SrcType* src)
+{
+    // Check if the src can be casted to the DstType
+    return dynamic_cast<const DstType*>(src) != nullptr;
+}
+
+static std::string FormatString(const char* msg, va_list args)
+{
+    // we might need a second shot at this, so pre-emptivly make a copy
+    va_list args_cp;
+    va_copy(args_cp, args);
+
+    std::size_t size = 256;
+    char        local_buff[256];
+    auto        ret = vsnprintf(local_buff, size, msg, args_cp);
+
+    if(ret <= 0)
+    {
+        return {};
+    }
+    else if(static_cast<size_t>(ret) < size)
+    {
+        return local_buff;
+    }
+
+    // we did not provide a long enough buffer on our first attempt.
+    size = static_cast<size_t>(ret) + 1; // + 1 for the null byte
+    std::unique_ptr<char[]> buff(new char[size]);
+    ret = vsnprintf(buff.get(), size, msg, args);
+    return buff.get();
+}
+
+static std::string FormatString(const char* msg, ...)
+{
+    va_list args;
+    va_start(args, msg);
+    auto tmp = FormatString(msg, args);
+    va_end(args);
+    return tmp;
+}
+
+std::string get_complexity(const benchmark::BigO& complexity)
+{
+    switch(complexity)
+    {
+    case benchmark::oN:
+        return "N";
+    case benchmark::oNSquared:
+        return "N^2";
+    case benchmark::oNCubed:
+        return "N^3";
+    case benchmark::oLogN:
+        return "lgN";
+    case benchmark::oNLogN:
+        return "NlgN";
+    case benchmark::o1:
+        return "(1)";
+    default:
+        return "f(N)";
+    }
+}
+
+template <class Run>
+double calculate_bw_utils(const Run& result)
+{
+    // Calculates bandwith utilization in %
+    std::map<std::string, std::string>* global_context
+                        = benchmark::internal::GetGlobalContext();
+    if(global_context != nullptr)
+    {
+        for(const auto& keyval : *global_context)
+        {
+            if(keyval.first == "hdp_peak_global_mem_bus_bandwidth")
+            {
+                const double global_mem_bw  = result.counters.at("bytes_per_second").value;
+                const double peak_global_bw = std::stod(keyval.second);
+                const double bw_util = 100. * global_mem_bw / peak_global_bw;
+                return bw_util;
+            }
+        }
+    }
+    return -1;
+}
+
 /// \brief Custom Google Benchmark reporter for formatting the benchmarks' report matching Thrust's.
 ///
 /// This reporter is a ConsoleReporter that outputs:
@@ -60,7 +147,7 @@ namespace bench_utils
 /// repeated \p repetitions times to measure the stability of results. In this case, the mean,
 /// median, standard deviation (stddev) and coefficient of variation (cv) of the above-described
 /// metrics are also reported after all the \p repetitions have ben run.
-class CustomReporter : public benchmark::ConsoleReporter
+class CustomConsoleReporter : public benchmark::ConsoleReporter
 {
 private:
     enum LogColor
@@ -94,62 +181,6 @@ private:
         default: // COLOR_DEFAULT
             return "\033[0m";
         }
-    }
-
-    std::string get_complexity(const benchmark::BigO& complexity)
-    {
-        switch(complexity)
-        {
-        case benchmark::oN:
-            return "N";
-        case benchmark::oNSquared:
-            return "N^2";
-        case benchmark::oNCubed:
-            return "N^3";
-        case benchmark::oLogN:
-            return "lgN";
-        case benchmark::oNLogN:
-            return "NlgN";
-        case benchmark::o1:
-            return "(1)";
-        default:
-            return "f(N)";
-        }
-    }
-
-    static std::string FormatString(const char* msg, va_list args)
-    {
-        // we might need a second shot at this, so pre-emptivly make a copy
-        va_list args_cp;
-        va_copy(args_cp, args);
-
-        std::size_t size = 256;
-        char        local_buff[256];
-        auto        ret = vsnprintf(local_buff, size, msg, args_cp);
-
-        if(ret <= 0)
-        {
-            return {};
-        }
-        else if(ret < 0)
-            if(static_cast<size_t>(ret) < size)
-            {
-                return local_buff;
-            }
-        // we did not provide a long enough buffer on our first attempt.
-        size = static_cast<size_t>(ret) + 1; // + 1 for the null byte
-        std::unique_ptr<char[]> buff(new char[size]);
-        ret = vsnprintf(buff.get(), size, msg, args);
-        return buff.get();
-    }
-
-    static std::string FormatString(const char* msg, ...)
-    {
-        va_list args;
-        va_start(args, msg);
-        auto tmp = FormatString(msg, args);
-        va_end(args);
-        return tmp;
     }
 
     void PrintColoredString(std::ostream& os, std::string color, std::string str, ...)
@@ -319,23 +350,14 @@ public:
                                    unit);
 
                 // Print BW util
-                std::map<std::string, std::string>* global_context
-                    = benchmark::internal::GetGlobalContext();
-                if(global_context != nullptr)
+                s                    = FormatString("%.2f", c.second.value);
+                const double bw_util = calculate_bw_utils(result);
+                if (bw_util >= 0)
                 {
-                    s = FormatString("%.2f", c.second.value);
-                    for(const auto& keyval : *global_context)
-                    {
-                        if(keyval.first == "hdp_peak_global_mem_bus_bandwidth")
-                        {
-                            const double global_mem_bw  = std::stod(s);
-                            const double peak_global_bw = std::stod(keyval.second);
-                            s        = FormatString("%.2f", 100. * global_mem_bw / peak_global_bw);
-                            unit     = "%";
-                            cNameLen = std::max(std::string::size_type(12), s.length());
-                        }
-                    }
-                }
+                    s        = FormatString("%.2f", bw_util);
+                    unit     = "%";
+                    cNameLen = std::max(std::string::size_type(12), s.length());
+                } 
             }
             else if(c.first == "gpu_noise")
             {
@@ -409,5 +431,428 @@ public:
         }
     }
 };
+
+class CustomJSONReporter : public benchmark::JSONReporter
+{
+    private:
+    bool first_report_ = true;
+
+    std::string StrEscape(const std::string& s)
+    {
+        std::string tmp;
+        tmp.reserve(s.size());
+        for (char c : s)
+        {
+            switch (c) {
+            case '\b':
+                tmp += "\\b";
+                break;
+            case '\f':
+                tmp += "\\f";
+                break;
+            case '\n':
+                tmp += "\\n";
+                break;
+            case '\r':
+                tmp += "\\r";
+                break;
+            case '\t':
+                tmp += "\\t";
+                break;
+            case '\\':
+                tmp += "\\\\";
+                break;
+            case '"':
+                tmp += "\\\"";
+                break;
+            default:
+                tmp += c;
+                break;
+            }
+        }
+        return tmp;
+    }
+
+    std::string FormatKV(std::string const& key, std::string const& value)
+    {
+        return FormatString("\"%s\": \"%s\"", StrEscape(key).c_str(),
+                            StrEscape(value).c_str());
+    }
+
+    std::string FormatKV(std::string const& key, const char* value)
+    {
+        return FormatString("\"%s\": \"%s\"", StrEscape(key).c_str(),
+                            StrEscape(value).c_str());
+    }
+
+    std::string FormatKV(std::string const& key, bool value)
+    {
+        return FormatString("\"%s\": %s", StrEscape(key).c_str(),
+                            value ? "true" : "false");
+    }
+
+    std::string FormatKV(std::string const& key, int64_t value)
+    {
+        std::stringstream ss;
+        ss << '"' << StrEscape(key) << "\": " << value;
+        return ss.str();
+    }
+
+    std::string FormatKV(std::string const& key, double value)
+    {
+        std::stringstream ss;
+        ss << '"' << StrEscape(key) << "\": ";
+
+        if (std::isnan(value))
+        {
+            ss << (value < 0 ? "-" : "") << "NaN";
+        }
+        else if (std::isinf(value))
+        {
+            ss << (value < 0 ? "-" : "") << "Infinity";
+        }
+        else
+        {
+            const auto max_digits10 =
+                std::numeric_limits<decltype(value)>::max_digits10;
+            const auto max_fractional_digits10 = max_digits10 - 1;
+            ss << std::scientific << std::setprecision(max_fractional_digits10)
+                << value;
+        }
+        return ss.str();
+    }
+
+    public:
+    void ReportRuns(std::vector<Run> const& reports)
+    {
+        if (reports.empty())
+        {
+            return;
+        }
+        std::string indent(4, ' ');
+        std::ostream& out = GetOutputStream();
+        if (!first_report_)
+        {
+            out << ",\n";
+        }
+        first_report_ = false;
+
+        for (auto it = reports.begin(); it != reports.end(); ++it)
+        {
+            out << indent << "{\n";
+            PrintRunData(*it);
+            out << indent << '}';
+            auto it_cp = it;
+            if (++it_cp != reports.end())
+            {
+                out << ",\n";
+            }
+        }
+    }
+
+    void PrintRunData(Run const& run)
+    {
+        std::string indent(6, ' ');
+        std::ostream& out = GetOutputStream();
+
+        auto output_format = [this, &out, &indent](const std::string& label,
+                                                auto val, bool start_endl = true)
+        {
+            if (start_endl)
+            {
+                out << ",\n";
+            }
+            out << indent << FormatKV(label, val);
+        };
+
+        output_format("name", run.benchmark_name(), false);
+        output_format("family_index", run.family_index);
+        output_format("per_family_instance_index", run.per_family_instance_index);
+        output_format("run_name", run.run_name.str());
+        output_format("run_type", [&run]() -> const char* {
+            switch (run.run_type) {
+            case BenchmarkReporter::Run::RT_Iteration:
+                return "iteration";
+            case BenchmarkReporter::Run::RT_Aggregate:
+                return "aggregate";
+            }
+            BENCHMARK_UNREACHABLE();
+        }());
+        output_format("repetitions", run.repetitions);
+        if (run.run_type != BenchmarkReporter::Run::RT_Aggregate)
+        {
+            output_format("repetition_index", run.repetition_index);
+        }
+        output_format("threads", run.threads);
+        if (run.run_type == BenchmarkReporter::Run::RT_Aggregate) {
+            output_format("aggregate_name", run.aggregate_name);
+            output_format("aggregate_unit", [&run]() -> const char* {
+                switch (run.aggregate_unit)
+                {
+                    case benchmark::StatisticUnit::kTime:
+                        return "time";
+                    case benchmark::StatisticUnit::kPercentage:
+                        return "percentage";
+                }
+                BENCHMARK_UNREACHABLE();
+            }());
+        }
+        if (benchmark::internal::SkippedWithError == run.skipped)
+        {
+            output_format("error_occurred", true);
+            output_format("error_message", run.skip_message);
+        }
+        else if (benchmark::internal::SkippedWithMessage == run.skipped)
+        {
+            output_format("skipped", true);
+            output_format("skip_message", run.skip_message);
+        }
+        if (!run.report_big_o && !run.report_rms)
+        {
+            output_format("iterations", run.iterations);
+            if (run.run_type != Run::RT_Aggregate ||
+                run.aggregate_unit == benchmark::StatisticUnit::kTime)
+            {
+                output_format("gpu_time", run.GetAdjustedRealTime());
+                output_format("cpu_time", run.GetAdjustedCPUTime());
+            } else
+            {
+                assert(run.aggregate_unit == benchmark::StatisticUnit::kPercentage);
+                output_format("gpu_time", run.real_accumulated_time);
+                output_format("cpu_time", run.cpu_accumulated_time);
+            }
+            output_format("time_unit", GetTimeUnitString(run.time_unit));
+        }
+        else if (run.report_big_o)
+        {
+            output_format("cpu_coefficient", run.GetAdjustedCPUTime());
+            output_format("gpu_coefficient", run.GetAdjustedRealTime());
+            output_format("big_o", get_complexity(run.complexity));
+            output_format("time_unit", GetTimeUnitString(run.time_unit));
+        }
+        else if (run.report_rms)
+        {
+            output_format("rms", run.GetAdjustedCPUTime());
+        }
+
+        for (auto& c : run.counters)
+        {
+            if(c.first == "items_per_second")
+            {
+                // Report same name as console reporter
+                output_format("elements_per_second", c.second);
+            }
+            else if (c.first == "bytes_per_second")
+            {
+                // Report same name as console reporter
+                output_format("global_mem_bw", c.second);
+                const double util_bw = calculate_bw_utils(run);
+                if (util_bw >= 0)
+                {
+                    output_format("util_bw", util_bw);
+                }
+            }
+            else
+            {
+                output_format(c.first, c.second);
+            }
+        }
+
+        if (run.memory_result)
+        {
+            const benchmark::MemoryManager::Result memory_result = *run.memory_result;
+            output_format("allocs_per_iter", run.allocs_per_iter);
+            output_format("max_bytes_used", memory_result.max_bytes_used);
+
+            if (memory_result.total_allocated_bytes != benchmark::MemoryManager::TombstoneValue)
+            {
+                output_format("total_allocated_bytes",
+                                memory_result.total_allocated_bytes);
+            }
+
+            if (memory_result.net_heap_growth != benchmark::MemoryManager::TombstoneValue)
+            {
+                output_format("net_heap_growth", memory_result.net_heap_growth);
+            }
+        }
+
+        if (!run.report_label.empty())
+        {
+            output_format("label", run.report_label);
+        }
+        out << '\n';
+    }
+};
+
+BENCHMARK_DISABLE_DEPRECATED_WARNING
+
+class CustomCSVReporter : public benchmark::CSVReporter
+{
+    private:
+    bool printed_header_ = false;
+
+    std::vector<std::string> elements = {
+                                        "name",
+                                        "iterations",
+                                        "gpu_time",
+                                        "cpu_time",
+                                        "time_unit",
+                                        "global_mem_bw",
+                                        "util_bw",
+                                        "elements_per_second",
+                                        "gpu_noise",
+                                        "label",
+                                        "error_occurred",
+                                        "error_message"};
+
+    std::string CsvEscape(const std::string& s)
+    {
+        std::string tmp;
+        tmp.reserve(s.size() + 2);
+        for (char c : s) {
+            switch (c)
+            {
+                case '"':
+                    tmp += "\"\"";
+                    break;
+                default:
+                    tmp += c;
+                    break;
+            }
+        }
+        return '"' + tmp + '"';
+    }
+
+    public:
+    void PrintHeader(const Run& /*run*/)
+    {
+        std::string str = "";
+        bool first = true;
+        for (auto element : elements)
+        {
+            if (first)
+            {
+                first = false;
+            }
+            else
+            {
+                str += ",";
+            }
+            str += element;
+        }
+        GetOutputStream() << str << "\n";
+    }
+
+    void PrintRunData(const Run& result)
+    {
+        // Report benchmark name
+        auto& sout = GetOutputStream();
+
+        if (result.skipped)
+        {
+            sout << std::string(elements.size()-3, ',');
+            sout << std::boolalpha << (benchmark::internal::SkippedWithError == result.skipped) << ",";
+            sout << CsvEscape(result.skip_message) << "\n";
+            return;
+        }
+
+        sout << CsvEscape(result.benchmark_name()) << ",";
+
+        if(!result.report_big_o && !result.report_rms)
+        {
+            sout << result.iterations;
+        }
+        sout << ",";
+
+        sout << result.GetAdjustedRealTime() << ",";
+        sout << result.GetAdjustedCPUTime() << ",";
+
+        if (result.report_big_o)
+        {
+            sout << get_complexity(result.complexity);
+        }
+        else if (!result.report_rms)
+        {
+            sout << benchmark::GetTimeUnitString(result.time_unit);
+        }
+        sout << ",";
+
+        if (result.counters.find("bytes_per_second") != result.counters.end())
+        {
+            sout << result.counters.at("bytes_per_second");
+        }
+        sout << ",";
+
+        if (result.counters.find("bytes_per_second") != result.counters.end())
+        {
+            const double bw_util = calculate_bw_utils(result);
+            if (bw_util >= 0)
+            {
+                sout << bw_util;
+            }   
+        }
+        sout << ",";
+
+        if (result.counters.find("items_per_second") != result.counters.end())
+        {
+            sout << result.counters.at("items_per_second");
+        }
+        sout << ",";
+
+        if (result.counters.find("gpu_noise") != result.counters.end())
+        {
+            sout << result.counters.at("gpu_noise");
+        }
+        sout << ",";
+
+        if (!result.report_label.empty())
+        {
+            sout << CsvEscape(result.report_label);
+        }
+
+        sout << ",,\n";
+    }
+    
+    void ReportRuns(const std::vector<Run>& reports)
+    {
+        for(const auto& run : reports)
+        {
+            // Print the header if none was printed yet
+            bool print_header = !printed_header_;
+            if(print_header)
+            {
+                printed_header_ = true;
+                PrintHeader(run);
+            }
+            PrintRunData(run);
+        }
+    }
+};
+
+benchmark::BenchmarkReporter* ChooseCustomReporter()
+{
+    // benchmark::BenchmarkReporter is polymorphic as it has a virtual
+    // function which allows us to use dynamic_cast to detect the derived type.
+    typedef benchmark::BenchmarkReporter* PtrType;
+    PtrType default_display_reporter = benchmark::CreateDefaultDisplayReporter();
+
+    if (IsType<benchmark::CSVReporter>(default_display_reporter))
+    {
+        return PtrType(new CustomCSVReporter);
+    }
+    else if (IsType<benchmark::JSONReporter>(default_display_reporter))
+    {
+        return PtrType(new CustomJSONReporter);
+    }
+    else if (IsType<benchmark::ConsoleReporter>(default_display_reporter))
+    {
+        return PtrType(new CustomConsoleReporter);
+    }
+
+    return nullptr;
+}
+
+BENCHMARK_RESTORE_DEPRECATED_WARNING
+
 } // namespace bench_utils
 #endif // ROCTHRUST_BENCHMARKS_BENCH_UTILS_CUSTOM_REPORTER_HPP_

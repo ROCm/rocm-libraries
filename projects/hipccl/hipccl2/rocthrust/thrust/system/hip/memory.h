@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- * Modifications Copyright© 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ namespace hip_rocprim
  *  \see hip::free
  *  \see std::malloc
  */
-inline __host__ __device__ pointer<void> malloc(std::size_t n);
+inline THRUST_HOST_DEVICE pointer<void> malloc(std::size_t n);
 
 /*! Allocates a typed area of memory available to Thrust's <tt>hip</tt> system.
  *  \param n Number of elements to allocate.
@@ -55,7 +55,7 @@ inline __host__ __device__ pointer<void> malloc(std::size_t n);
  *  \see std::malloc
  */
 template <typename T>
-inline __host__ __device__ pointer<T> malloc(std::size_t n);
+inline THRUST_HOST_DEVICE pointer<T> malloc(std::size_t n);
 
 /*! Deallocates an area of memory previously allocated by <tt>hip::malloc</tt>.
  *  \param ptr A <tt>hip::pointer<void></tt> pointing to the beginning of an area
@@ -63,7 +63,7 @@ inline __host__ __device__ pointer<T> malloc(std::size_t n);
  *  \see hip::malloc
  *  \see std::free
  */
-inline __host__ __device__ void free(pointer<void> ptr);
+inline THRUST_HOST_DEVICE void free(pointer<void> ptr);
 
 /*! \p hip::allocator is the default allocator used by the \p hip system's
  *  containers such as <tt>hip::vector</tt> if no user-specified allocator is

@@ -45,8 +45,8 @@ namespace hip_rocprim
         hipStream_t stream;
 
     public:
-        __thrust_exec_check_disable__
-        __host__ __device__ execute_on_stream_base(hipStream_t stream_ = default_stream())
+        THRUST_EXEC_CHECK_DISABLE
+        THRUST_HOST_DEVICE execute_on_stream_base(hipStream_t stream_ = default_stream())
             : stream(stream_)
         {
         }
@@ -61,7 +61,7 @@ namespace hip_rocprim
         }
 
     private:
-        friend hipStream_t __host__ __device__
+        friend hipStream_t THRUST_HOST_DEVICE
         get_stream(const execute_on_stream_base& exec)
         {
             return exec.stream;
@@ -72,9 +72,9 @@ namespace hip_rocprim
     {
         typedef execute_on_stream_base<execute_on_stream> base_t;
 
-        __host__ __device__ execute_on_stream()
+        THRUST_HOST_DEVICE execute_on_stream()
             : base_t() {};
-        __host__ __device__ execute_on_stream(hipStream_t stream)
+        THRUST_HOST_DEVICE execute_on_stream(hipStream_t stream)
             : base_t(stream) {};
     };
 
@@ -85,13 +85,13 @@ namespace hip_rocprim
         typedef execute_on_stream_base<Derived> base_t;
 
     public:
-        __host__ __device__ execute_on_stream_nosync_base()
+        THRUST_HOST_DEVICE execute_on_stream_nosync_base()
             : base_t() {};
-        __host__ __device__ execute_on_stream_nosync_base(hipStream_t stream)
+        THRUST_HOST_DEVICE execute_on_stream_nosync_base(hipStream_t stream)
             : base_t(stream) {};
 
     private:
-        friend __host__ __device__
+        friend THRUST_HOST_DEVICE
         bool
         must_perform_optional_stream_synchronization(const execute_on_stream_nosync_base &)
         {
@@ -103,9 +103,9 @@ namespace hip_rocprim
     {
         typedef execute_on_stream_nosync_base<execute_on_stream_nosync> base_t;
 
-        __host__ __device__
+        THRUST_HOST_DEVICE
         execute_on_stream_nosync() : base_t(){};
-        __host__ __device__ execute_on_stream_nosync(hipStream_t stream)
+        THRUST_HOST_DEVICE execute_on_stream_nosync(hipStream_t stream)
             : base_t(stream) {};
     };
 
@@ -115,7 +115,7 @@ namespace hip_rocprim
     {
         typedef execution_policy<par_t> base_t;
 
-        __device__ __host__
+        THRUST_DEVICE THRUST_HOST
         constexpr par_t() : base_t()
         {
         }
@@ -137,7 +137,7 @@ namespace hip_rocprim
     {
         typedef execution_policy<par_nosync_t> base_t;
 
-        __host__ __device__
+        THRUST_HOST_DEVICE
         constexpr par_nosync_t() : base_t() {}
 
         typedef execute_on_stream_nosync stream_attachment_type;
@@ -152,7 +152,7 @@ namespace hip_rocprim
     private:
         //this function is defined to allow non-blocking calls on the default_stream() with thrust::cuda::par_nosync
         //without explicitly using thrust::cuda::par_nosync.on(default_stream())
-        friend __host__ __device__  bool
+        friend THRUST_HOST_DEVICE  bool
         must_perform_optional_stream_synchronization(const par_nosync_t &)
         {
             return false;
@@ -166,13 +166,13 @@ namespace hip_rocprim
         typedef execute_on_stream_base<Derived> base_t;
 
     public:
-        __host__ __device__ execute_on_stream_deterministic_base()
+        THRUST_HOST_DEVICE execute_on_stream_deterministic_base()
             : base_t() {};
-        __host__ __device__ execute_on_stream_deterministic_base(hipStream_t stream)
+        THRUST_HOST_DEVICE execute_on_stream_deterministic_base(hipStream_t stream)
             : base_t(stream) {};
 
     private:
-        friend __host__ __device__ integral_constant<bool, false>
+        friend THRUST_HOST_DEVICE integral_constant<bool, false>
         allows_nondeterminism(const execute_on_stream_deterministic_base&)
         {
             return {};
@@ -184,9 +184,9 @@ namespace hip_rocprim
     {
         typedef execute_on_stream_deterministic_base<execute_on_stream_deterministic> base_t;
 
-        __host__ __device__ execute_on_stream_deterministic()
+        THRUST_HOST_DEVICE execute_on_stream_deterministic()
             : base_t() {};
-        __host__ __device__ execute_on_stream_deterministic(hipStream_t stream)
+        THRUST_HOST_DEVICE execute_on_stream_deterministic(hipStream_t stream)
             : base_t(stream) {};
     };
 
@@ -197,7 +197,7 @@ namespace hip_rocprim
     {
         typedef execution_policy<par_det_t> base_t;
 
-        __host__ __device__ constexpr par_det_t()
+        THRUST_HOST_DEVICE constexpr par_det_t()
             : base_t()
         {
         }
@@ -211,7 +211,7 @@ namespace hip_rocprim
         }
 
     private:
-        friend __host__ __device__ integral_constant<bool, false>
+        friend THRUST_HOST_DEVICE integral_constant<bool, false>
                                    allows_nondeterminism(const par_det_t&)
         {
             return {};
@@ -225,13 +225,13 @@ namespace hip_rocprim
         typedef execute_on_stream_nosync_base<Derived> base_t;
 
     public:
-        __host__ __device__ execute_on_stream_nosync_deterministic_base()
+        THRUST_HOST_DEVICE execute_on_stream_nosync_deterministic_base()
             : base_t() {};
-        __host__ __device__ execute_on_stream_nosync_deterministic_base(hipStream_t stream)
+        THRUST_HOST_DEVICE execute_on_stream_nosync_deterministic_base(hipStream_t stream)
             : base_t(stream) {};
 
     private:
-        friend __host__ __device__ integral_constant<bool, false>
+        friend THRUST_HOST_DEVICE integral_constant<bool, false>
         allows_nondeterminism(const execute_on_stream_nosync_deterministic_base&)
         {
             return {};
@@ -244,9 +244,9 @@ namespace hip_rocprim
         typedef execute_on_stream_nosync_deterministic_base<execute_on_stream_nosync_deterministic>
             base_t;
 
-        __host__ __device__ execute_on_stream_nosync_deterministic()
+        THRUST_HOST_DEVICE execute_on_stream_nosync_deterministic()
             : base_t() {};
-        __host__ __device__ execute_on_stream_nosync_deterministic(hipStream_t stream)
+        THRUST_HOST_DEVICE execute_on_stream_nosync_deterministic(hipStream_t stream)
             : base_t(stream) {};
     };
 
@@ -258,7 +258,7 @@ namespace hip_rocprim
     {
         typedef execution_policy<par_det_nosync_t> base_t;
 
-        __host__ __device__ constexpr par_det_nosync_t()
+        THRUST_HOST_DEVICE constexpr par_det_nosync_t()
             : base_t()
         {
         }
@@ -272,7 +272,7 @@ namespace hip_rocprim
         }
 
     private:
-        friend __host__ __device__ integral_constant<bool, false>
+        friend THRUST_HOST_DEVICE integral_constant<bool, false>
                                    allows_nondeterminism(const par_det_nosync_t&)
         {
             return {};

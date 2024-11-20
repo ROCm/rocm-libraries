@@ -57,7 +57,7 @@ namespace cuda_cub
 namespace detail
 {
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <typename Derived,
           typename KeysInIt,
           typename ValuesInIt,
@@ -65,7 +65,7 @@ template <typename Derived,
           typename EqualityOpT,
           typename ScanOpT,
           typename SizeT>
-__host__ __device__
+_CCCL_HOST_DEVICE
 ValuesOutIt inclusive_scan_by_key_n(
   thrust::cuda_cub::execution_policy<Derived>& policy,
   KeysInIt keys,
@@ -168,7 +168,7 @@ ValuesOutIt inclusive_scan_by_key_n(
   return result + num_items;
 }
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <typename Derived,
           typename KeysInIt,
           typename ValuesInIt,
@@ -177,7 +177,7 @@ template <typename Derived,
           typename EqualityOpT,
           typename ScanOpT,
           typename SizeT>
-__host__ __device__
+_CCCL_HOST_DEVICE
 ValuesOutIt exclusive_scan_by_key_n(
   thrust::cuda_cub::execution_policy<Derived>& policy,
   KeysInIt keys,
@@ -292,14 +292,14 @@ ValuesOutIt exclusive_scan_by_key_n(
 //   Inclusive scan
 //---------------------------
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeyInputIt,
           class ValInputIt,
           class ValOutputIt,
           class BinaryPred,
           class ScanOp>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 inclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -334,7 +334,7 @@ template <class Derived,
           class ValInputIt,
           class ValOutputIt,
           class BinaryPred>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 inclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -355,7 +355,7 @@ template <class Derived,
           class KeyInputIt,
           class ValInputIt,
           class ValOutputIt>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 inclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -375,7 +375,7 @@ inclusive_scan_by_key(execution_policy<Derived> &policy,
 //   Exclusive scan
 //---------------------------
 
-__thrust_exec_check_disable__
+_CCCL_EXEC_CHECK_DISABLE
 template <class Derived,
           class KeyInputIt,
           class ValInputIt,
@@ -383,7 +383,7 @@ template <class Derived,
           class Init,
           class BinaryPred,
           class ScanOp>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 exclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -421,7 +421,7 @@ template <class Derived,
           class ValOutputIt,
           class Init,
           class BinaryPred>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 exclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -445,7 +445,7 @@ template <class Derived,
           class ValInputIt,
           class ValOutputIt,
           class Init>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 exclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -467,7 +467,7 @@ template <class Derived,
           class KeyInputIt,
           class ValInputIt,
           class ValOutputIt>
-ValOutputIt __host__ __device__
+ValOutputIt _CCCL_HOST_DEVICE
 exclusive_scan_by_key(execution_policy<Derived> &policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,

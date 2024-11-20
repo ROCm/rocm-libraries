@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -348,14 +348,14 @@ struct TypeWithNonTrivialAssigment
 {
   int x, y, z;
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   TypeWithNonTrivialAssigment() : x(0), y(0), z(0) {}
 
 #if THRUST_CPP_DIALECT >= 2011
   TypeWithNonTrivialAssigment(const TypeWithNonTrivialAssigment &) = default;
 #endif
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   TypeWithNonTrivialAssigment& operator=(const TypeWithNonTrivialAssigment& t)
   {
     x = t.x;
@@ -364,7 +364,7 @@ struct TypeWithNonTrivialAssigment
     return *this;
   }
 
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool operator==(const TypeWithNonTrivialAssigment& t) const
   {
     return x == t.x && y == t.y && z == t.z;

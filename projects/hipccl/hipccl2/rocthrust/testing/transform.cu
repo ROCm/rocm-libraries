@@ -57,7 +57,7 @@ DECLARE_VECTOR_UNITTEST(TestTransformUnarySimple);
 template<typename InputIterator,
          typename OutputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform(my_system &system, InputIterator, InputIterator, OutputIterator result, UnaryFunction)
 {
     system.validate_dispatch();
@@ -83,7 +83,7 @@ DECLARE_UNITTEST(TestTransformUnaryDispatchExplicit);
 template<typename InputIterator,
          typename OutputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform(my_tag, InputIterator, InputIterator, OutputIterator result, UnaryFunction)
 {
     *result = 13;
@@ -135,7 +135,7 @@ template<typename InputIterator,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_system &system,
                              InputIterator,
                              InputIterator,
@@ -168,7 +168,7 @@ template<typename InputIterator,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_tag,
                              InputIterator,
                              InputIterator,
@@ -230,7 +230,7 @@ template<typename InputIterator1,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_system &system,
                              InputIterator1,
                              InputIterator1,
@@ -264,7 +264,7 @@ template<typename InputIterator1,
          typename ForwardIterator,
          typename UnaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_tag,
                              InputIterator1,
                              InputIterator1,
@@ -322,7 +322,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform(my_system &system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, UnaryFunction)
 {
     system.validate_dispatch();
@@ -350,7 +350,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename UnaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator transform(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, UnaryFunction)
 {
     *result = 13;
@@ -415,7 +415,7 @@ template<typename InputIterator1,
          typename ForwardIterator,
          typename BinaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_system &system,
                              InputIterator1,
                              InputIterator1,
@@ -454,7 +454,7 @@ template<typename InputIterator1,
          typename ForwardIterator,
          typename BinaryFunction,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator transform_if(my_tag,
                              InputIterator1,
                              InputIterator1,
@@ -527,7 +527,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformUnaryToDiscardIterator);
 struct repeat2
 {
   template<typename T>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<T,T> operator()(T x)
   {
     return thrust::make_pair(x,x);
@@ -575,7 +575,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformUnaryToDiscardIteratorZipped);
 struct is_positive
 {
   template<typename T>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   bool operator()(T &x)
   {
     return x > 0;
@@ -870,7 +870,7 @@ struct plus_mod3
 
     plus_mod3(T * table) : table(table) {}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     T operator()(T a, T b)
     {
         return table[(int) (a + b)];

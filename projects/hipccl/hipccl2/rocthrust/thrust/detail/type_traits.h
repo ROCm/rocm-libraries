@@ -64,11 +64,11 @@ template<typename T, T v>
 
     integral_constant& operator=(integral_constant const&) = default;
 
-    constexpr __host__ __device__
+    constexpr THRUST_HOST_DEVICE
     integral_constant(std::integral_constant<T, v>) noexcept {}
 
-    constexpr __host__ __device__ operator value_type() const noexcept { return value; }
-    constexpr __host__ __device__ value_type operator()() const noexcept { return value; }
+    constexpr THRUST_HOST_DEVICE operator value_type() const noexcept { return value; }
+    constexpr THRUST_HOST_DEVICE value_type operator()() const noexcept { return value; }
   };
 
 /// typedef for true_type
@@ -515,6 +515,8 @@ template<typename T1, typename T2, typename T = void>
     : enable_if< is_convertible<T1,T2>::value, T >
 {};
 
+template<typename T1, typename T2, typename T = void>
+using enable_if_convertible_t = typename enable_if_convertible<T1, T2, T>::type;
 
 template<typename T1, typename T2, typename T = void>
   struct disable_if_convertible
@@ -526,7 +528,6 @@ template<typename T1, typename T2, typename Result = void>
   struct enable_if_different
     : enable_if<is_different<T1,T2>::value, Result>
 {};
-
 
 template<typename T>
   struct is_numeric

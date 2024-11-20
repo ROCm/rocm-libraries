@@ -6,6 +6,8 @@
 #include <iterator>
 #include <algorithm>
 
+#include "include/host_device.h"
+
 // This example illustrates how to implement the SAXPY
 // operation (Y[i] = a * X[i] + Y[i]) using Thrust. 
 // The saxpy_slow function demonstrates the most

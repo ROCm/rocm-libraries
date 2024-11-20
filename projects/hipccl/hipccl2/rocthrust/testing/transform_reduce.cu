@@ -27,7 +27,7 @@ template<typename InputIterator,
          typename UnaryFunction, 
          typename OutputType,
          typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputType transform_reduce(my_system &system,
                             InputIterator,
                             InputIterator,
@@ -59,7 +59,7 @@ template<typename InputIterator,
          typename UnaryFunction, 
          typename OutputType,
          typename BinaryFunction>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputType transform_reduce(my_tag,
                             InputIterator first,
                             InputIterator,

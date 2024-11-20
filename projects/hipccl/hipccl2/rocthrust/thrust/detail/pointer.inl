@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@
 THRUST_NAMESPACE_BEGIN
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   pointer<Element,Tag,Reference,Derived>
     ::pointer()
       : super_t(static_cast<Element*>(nullptr))
@@ -33,7 +33,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   pointer<Element,Tag,Reference,Derived>
     ::pointer(std::nullptr_t)
       : super_t(static_cast<Element*>(nullptr))
@@ -42,7 +42,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
   template<typename OtherElement>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     pointer<Element,Tag,Reference,Derived>
       ::pointer(OtherElement *other)
         : super_t(other)
@@ -50,7 +50,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 // Fixes hipcc linkage error
 template<typename Element, typename Tag, typename Reference, typename Derived>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   pointer<Element,Tag,Reference,Derived>
     ::pointer(Element* ptr)
       : super_t(ptr)
@@ -58,7 +58,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
   template<typename OtherPointer>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     pointer<Element,Tag,Reference,Derived>
       ::pointer(const OtherPointer &other,
                 typename thrust::detail::enable_if_pointer_is_convertible<
@@ -71,7 +71,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
   template<typename OtherPointer>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     pointer<Element,Tag,Reference,Derived>
       ::pointer(const OtherPointer &other,
                 typename thrust::detail::enable_if_void_pointer_is_system_convertible<
@@ -83,7 +83,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename pointer<Element,Tag,Reference,Derived>::derived_type &
     pointer<Element,Tag,Reference,Derived>
       ::operator=(decltype(nullptr))
@@ -95,7 +95,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
   template<typename OtherPointer>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     typename thrust::detail::enable_if_pointer_is_convertible<
       OtherPointer,
       pointer<Element,Tag,Reference,Derived>,
@@ -114,7 +114,7 @@ namespace detail
 // Implementation for dereference() when Reference is Element&,
 // e.g. cuda's managed_memory_pointer
 template <typename Reference, typename Derived>
-__host__ __device__
+THRUST_HOST_DEVICE
 Reference pointer_dereference_impl(const Derived& ptr,
                                    thrust::detail::true_type /* is_cpp_ref */)
 {
@@ -123,7 +123,7 @@ Reference pointer_dereference_impl(const Derived& ptr,
 
 // Implementation for pointers with proxy references:
 template <typename Reference, typename Derived>
-__host__ __device__
+THRUST_HOST_DEVICE
 Reference pointer_dereference_impl(const Derived& ptr,
                                    thrust::detail::false_type /* is_cpp_ref */)
 {
@@ -134,7 +134,7 @@ Reference pointer_dereference_impl(const Derived& ptr,
 
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   typename pointer<Element,Tag,Reference,Derived>::super_t::reference
   pointer<Element,Tag,Reference,Derived>
     ::dereference() const
@@ -151,7 +151,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   Element *pointer<Element,Tag,Reference,Derived>
     ::get() const
 {
@@ -160,7 +160,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   Element *pointer<Element,Tag,Reference,Derived>
     ::operator->() const
 {
@@ -169,7 +169,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   pointer<Element,Tag,Reference,Derived>
     ::operator bool() const
 {
@@ -179,7 +179,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
 template<typename Element, typename Tag, typename Reference, typename Derived,
          typename charT, typename traits>
-__host__
+THRUST_HOST
 std::basic_ostream<charT, traits> &
 operator<<(std::basic_ostream<charT, traits> &os,
            const pointer<Element, Tag, Reference, Derived> &p) {
@@ -189,28 +189,28 @@ operator<<(std::basic_ostream<charT, traits> &os,
 // NOTE: These are needed so that Thrust smart pointers work with
 // `std::unique_ptr`.
 template <typename Element, typename Tag, typename Reference, typename Derived>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(std::nullptr_t, pointer<Element, Tag, Reference, Derived> p)
 {
   return nullptr == p.get();
 }
 
 template <typename Element, typename Tag, typename Reference, typename Derived>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator==(pointer<Element, Tag, Reference, Derived> p, std::nullptr_t)
 {
   return nullptr == p.get();
 }
 
 template <typename Element, typename Tag, typename Reference, typename Derived>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(std::nullptr_t, pointer<Element, Tag, Reference, Derived> p)
 {
   return !(nullptr == p);
 }
 
 template <typename Element, typename Tag, typename Reference, typename Derived>
-__host__ __device__
+THRUST_HOST_DEVICE
 bool operator!=(pointer<Element, Tag, Reference, Derived> p, std::nullptr_t)
 {
   return !(nullptr == p);

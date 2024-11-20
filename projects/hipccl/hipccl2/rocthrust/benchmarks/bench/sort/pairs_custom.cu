@@ -38,14 +38,14 @@
 
 struct pairs_custom
 {
-    template <typename KeyT, typename ValueT, typename Policy = thrust::detail::device_t>
-    float64_t run(thrust::device_vector<KeyT>& keys, thrust::device_vector<ValueT>& vals)
+    template <typename KeyT, typename ValueT, typename Policy>
+    float64_t
+    run(thrust::device_vector<KeyT>& keys, thrust::device_vector<ValueT>& vals, Policy policy)
     {
-        bench_utils::gpu_timer d_timer;
+        bench_utils::gpu_timer           d_timer;
 
         d_timer.start(0);
-        thrust::sort_by_key(
-            Policy {}, keys.begin(), keys.end(), vals.begin(), bench_utils::less_t {});
+        thrust::sort_by_key(policy, keys.begin(), keys.end(), vals.begin(), bench_utils::less_t {});
         d_timer.stop(0);
 
         return d_timer.get_duration();
@@ -69,9 +69,12 @@ void run_benchmark(benchmark::State& state,
     thrust::device_vector<KeyT>   keys = bench_utils::generate(elements, seed_type, entropy);
     thrust::device_vector<ValueT> vals = bench_utils::generate(elements, seed_type);
 
+    bench_utils::caching_allocator_t alloc {};
+    thrust::detail::device_t         policy {};
+
     for(auto _ : state)
     {
-        float64_t duration = benchmark.template run<KeyT, ValueT>(keys, vals);
+        float64_t duration = benchmark.template run<KeyT, ValueT>(keys, vals, policy(alloc));
         state.SetIterationTime(duration);
         gpu_times.push_back(duration);
     }
@@ -158,7 +161,7 @@ int main(int argc, char* argv[])
     }
 
     // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks(new bench_utils::CustomReporter);
+    benchmark::RunSpecifiedBenchmarks(bench_utils::ChooseCustomReporter());
 
     // Finish
     benchmark::Shutdown();

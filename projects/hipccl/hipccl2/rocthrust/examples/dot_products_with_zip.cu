@@ -5,6 +5,7 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/random.h>
 
+#include "include/host_device.h"
 
 // This example shows how thrust::zip_iterator can be used to create a
 // 'virtual' array of structures.  In this case the structure is a 3d

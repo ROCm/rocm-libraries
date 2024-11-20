@@ -8,6 +8,8 @@
 #include <iostream>
 #include <iomanip>
 
+#include "include/host_device.h"
+
 // This example computes a summed area table using segmented scan
 // http://en.wikipedia.org/wiki/Summed_area_table
 

@@ -51,7 +51,7 @@ template <typename DerivedPolicy,
           typename InputIterator,
           typename OutputIterator,
           typename BinaryFunction>
-__host__ __device__ OutputIterator
+THRUST_HOST_DEVICE OutputIterator
 adjacent_difference(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
                     InputIterator                                               first,
                     InputIterator                                               last,
@@ -204,7 +204,7 @@ adjacent_difference(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__
+        THRUST_HOST
         static void par(execution_policy<Derived>& policy,
                         InputIt                    first,
                         InputIt                    last,
@@ -214,7 +214,7 @@ adjacent_difference(execution_policy<Derived>& policy,
             result = __adjacent_difference::adjacent_difference(
                 policy, first, last, result, binary_op);
         }
-        __device__
+        THRUST_DEVICE
         static void seq(execution_policy<Derived>& policy,
                         InputIt                    first,
                         InputIt                    last,

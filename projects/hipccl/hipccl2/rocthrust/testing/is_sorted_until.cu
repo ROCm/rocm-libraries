@@ -115,7 +115,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestIsSortedUntil);
 
 
 template<typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator is_sorted_until(my_system &system, ForwardIterator first, ForwardIterator)
 {
     system.validate_dispatch();
@@ -135,7 +135,7 @@ DECLARE_UNITTEST(TestIsSortedUntilExplicit);
 
 
 template<typename ForwardIterator>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator is_sorted_until(my_tag, ForwardIterator first, ForwardIterator)
 {
     *first = 13;

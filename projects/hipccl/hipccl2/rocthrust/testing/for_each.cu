@@ -31,7 +31,7 @@ class mark_present_for_each
 {
     public:
         T * ptr;
-        __host__ __device__ void operator()(T x){ ptr[(int) x] = 1; }
+        THRUST_HOST_DEVICE void operator()(T x){ ptr[(int) x] = 1; }
 };
 
 template <class Vector>
@@ -62,7 +62,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestForEachSimple);
 
 
 template<typename InputIterator, typename Function>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator for_each(my_system &system, InputIterator first, InputIterator, Function)
 {
     system.validate_dispatch();
@@ -82,7 +82,7 @@ DECLARE_UNITTEST(TestForEachDispatchExplicit);
 
 
 template<typename InputIterator, typename Function>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator for_each(my_tag, InputIterator first, InputIterator, Function)
 {
     *first = 13;
@@ -130,7 +130,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestForEachNSimple);
 
 
 template<typename InputIterator, typename Size, typename Function>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator for_each_n(my_system &system, InputIterator first, Size, Function)
 {
     system.validate_dispatch();
@@ -150,7 +150,7 @@ DECLARE_UNITTEST(TestForEachNDispatchExplicit);
 
 
 template<typename InputIterator, typename Size, typename Function>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator for_each_n(my_tag, InputIterator first, Size, Function)
 {
     *first = 13;
@@ -285,7 +285,7 @@ struct SetFixedVectorToConstant
 
     SetFixedVectorToConstant(T scalar) : exemplar(scalar) {}
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     void operator()(FixedVector<T,N>& t)
     {
         t = exemplar;
@@ -381,7 +381,7 @@ struct only_set_when_expected
     unsigned long long expected;
     bool * flag;
 
-    __device__
+    THRUST_DEVICE
     void operator()(unsigned long long x)
     {
         if (x == expected)

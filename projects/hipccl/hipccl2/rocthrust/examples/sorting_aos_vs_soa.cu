@@ -4,6 +4,7 @@
 #include <thrust/random.h>
 #include <assert.h>
 
+#include "include/host_device.h"
 #include "include/timer.h"
 
 // This examples compares sorting performance using Array of Structures (AoS)

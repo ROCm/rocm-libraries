@@ -80,6 +80,7 @@ endif()
 # Disable -Werror
 option(DISABLE_WERROR "Disable building with Werror" ON)
 option(BUILD_TEST "Build tests" OFF)
+option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
@@ -143,14 +144,14 @@ if(BUILD_TEST OR BUILD_BENCHMARKS)
 endif()
 
 # Tests
-if(BUILD_TEST)
+if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_client_component(tests)
   if (ENABLE_UPSTREAM_TESTS)
     enable_testing()
   endif()
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
-  if (NOT WIN32)
+  if (NOT WIN32 AND BUILD_TEST)
     add_subdirectory(testing)
   endif()
   enable_testing()

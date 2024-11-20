@@ -16,7 +16,7 @@
 template <typename T>
 struct custom_plus
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   T operator()(T lhs, T rhs) const
   {
     return lhs + rhs;
@@ -45,7 +45,7 @@ struct custom_plus
     template <                                                                \
       typename ForwardIt, typename Sentinel, typename OutputIt                \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last, OutputIt&& output                   \
     )                                                                         \
@@ -73,7 +73,7 @@ struct custom_plus
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -370,7 +370,7 @@ struct test_async_reduce_into
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0(unittest::random_integers<T>(n));

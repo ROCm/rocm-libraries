@@ -52,7 +52,7 @@ template <typename DerivedPolicy,
           typename InputIterator,
           typename OutputIterator,
           typename Predicate>
-OutputIterator __host__ __device__
+OutputIterator THRUST_HOST_DEVICE
 copy_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
         InputIterator                                               first,
         InputIterator                                               last,
@@ -64,7 +64,7 @@ template <typename DerivedPolicy,
           typename InputIterator2,
           typename OutputIterator,
           typename Predicate>
-OutputIterator __host__ __device__
+OutputIterator THRUST_HOST_DEVICE
 copy_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
         InputIterator1                                              first,
         InputIterator1                                              last,
@@ -228,7 +228,7 @@ copy_if(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIterator par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIterator par(execution_policy<Derived>& policy,
                                            InputIterator              first,
                                            InputIterator              last,
                                            OutputIterator             result,
@@ -236,7 +236,7 @@ copy_if(execution_policy<Derived>& policy,
         {
             return __copy_if::copy_if(policy, first, last, result, pred);
         }
-        __device__ static OutputIterator seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIterator seq(execution_policy<Derived>& policy,
                                              InputIterator              first,
                                              InputIterator              last,
                                              OutputIterator             result,
@@ -273,7 +273,7 @@ copy_if(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static OutputIterator par(execution_policy<Derived>& policy,
+        THRUST_HOST static OutputIterator par(execution_policy<Derived>& policy,
                                            InputIterator              first,
                                            InputIterator              last,
                                            StencilIterator            stencil,
@@ -282,7 +282,7 @@ copy_if(execution_policy<Derived>& policy,
         {
             return __copy_if::copy_if(policy, first, last, stencil, result, pred);
         }
-        __device__ static OutputIterator seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static OutputIterator seq(execution_policy<Derived>& policy,
                                              InputIterator              first,
                                              InputIterator              last,
                                              StencilIterator            stencil,

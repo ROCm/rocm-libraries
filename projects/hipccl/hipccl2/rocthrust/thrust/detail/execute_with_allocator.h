@@ -35,7 +35,7 @@ template <
   , typename Allocator
   , template <typename> class BaseSystem
 >
-__host__
+THRUST_HOST
 thrust::pair<T*, std::ptrdiff_t>
 get_temporary_buffer(
     thrust::detail::execute_with_allocator<Allocator, BaseSystem>& system
@@ -63,7 +63,7 @@ template <
   , typename Allocator
   , template <typename> class BaseSystem
 >
-__host__
+THRUST_HOST
 void
 return_temporary_buffer(
     thrust::detail::execute_with_allocator<Allocator, BaseSystem>& system
@@ -92,7 +92,7 @@ template <
     typename Allocator,
     typename ...Dependencies
 >
-__host__
+THRUST_HOST
 thrust::pair<T*, std::ptrdiff_t>
 get_temporary_buffer(
     thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>& system,
@@ -121,7 +121,7 @@ template <
     typename Allocator,
     typename ...Dependencies
 >
-__host__
+THRUST_HOST
 void
 return_temporary_buffer(
     thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>& system,

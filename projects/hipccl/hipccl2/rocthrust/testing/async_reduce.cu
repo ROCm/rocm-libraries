@@ -15,7 +15,7 @@
 template <typename T>
 struct custom_plus
 {
-  __host__ __device__
+  THRUST_HOST_DEVICE
   T operator()(T lhs, T rhs) const
   {
     return lhs + rhs;
@@ -44,7 +44,7 @@ struct custom_plus
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -72,7 +72,7 @@ struct custom_plus
     template <                                                                \
       typename ForwardIt, typename Sentinel                                   \
     >                                                                         \
-    __host__                                                                  \
+    THRUST_HOST                                                                  \
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last                                      \
     )                                                                         \
@@ -349,7 +349,7 @@ struct test_async_reduce
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()(std::size_t n)
     {
       thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -603,7 +603,7 @@ struct test_async_reduce_counting_iterator
   template <typename T>
   struct tester
   {
-    __host__
+    THRUST_HOST
     void operator()()
     {
       constexpr std::size_t n = 15 * sizeof(T);
@@ -727,7 +727,7 @@ DECLARE_GENERIC_UNITTEST_WITH_TYPES_AND_NAME(
 template <typename T>
 struct test_async_reduce_using
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -772,7 +772,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_async_reduce_after
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -840,7 +840,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_async_reduce_on_then_after
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -915,7 +915,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_async_reduce_allocator_on_then_after
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0(unittest::random_integers<T>(n));
@@ -1001,7 +1001,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_async_reduce_caching
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     constexpr std::int64_t m = 32;
@@ -1051,7 +1051,7 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 template <typename T>
 struct test_async_copy_then_reduce
 {
-  __host__
+  THRUST_HOST
   void operator()(std::size_t n)
   {
     thrust::host_vector<T>   h0a(unittest::random_integers<T>(n));

@@ -42,16 +42,17 @@
 
 struct basic
 {
-    template <typename T, typename OpT, typename Policy = thrust::detail::device_t>
+    template <typename T, typename OpT, typename Policy>
     float64_t run(thrust::device_vector<T>& input,
                   thrust::device_vector<T>& output,
                   const std::size_t         elements_in_A,
-                  const OpT                 op)
+                  const OpT                 op,
+                  Policy                    policy)
     {
         bench_utils::gpu_timer d_timer;
 
         d_timer.start(0);
-        op(Policy {},
+        op(policy,
            input.cbegin(),
            input.cbegin() + elements_in_A,
            input.cbegin() + elements_in_A,
@@ -96,9 +97,13 @@ void run_benchmark(benchmark::State& state,
                                                            input.cend(),
                                                            output.begin()));
 
+    bench_utils::caching_allocator_t alloc {};
+    thrust::detail::device_t         policy {};
+
     for(auto _ : state)
     {
-        float64_t duration = benchmark.template run<T, OpT>(input, output, elements_in_A, op);
+        float64_t duration
+            = benchmark.template run<T, OpT>(input, output, elements_in_A, op, policy(alloc));
         state.SetIterationTime(duration);
         gpu_times.push_back(duration);
     }

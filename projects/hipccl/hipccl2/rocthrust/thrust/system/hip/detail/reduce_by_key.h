@@ -58,7 +58,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate>
-__host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
+THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2>
 reduce_by_key(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
               InputIterator1                                              keys_first,
               InputIterator1                                              keys_last,
@@ -222,7 +222,7 @@ namespace __reduce_by_key
                                                          debug_sync),
                                     "reduce_by_key failed on 2nd step");
 
-        size_type num_runs_out = hip_rocprim::get_value(policy, d_num_runs_out);
+        const auto num_runs_out = hip_rocprim::get_value(policy, d_num_runs_out);
 
         return thrust::make_pair(keys_output + num_runs_out, values_output + num_runs_out);
     }
@@ -233,7 +233,7 @@ namespace __reduce_by_key
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeyInputIt,
                                         class ValInputIt,
                                         class KeyOutputIt,
@@ -254,7 +254,7 @@ reduce_by_key(execution_policy<Derived>& policy,
     // struct workaround is required for HIP-clang
     struct workaround
     {
-        __host__ static pair<KeyOutputIt, ValOutputIt> par(execution_policy<Derived>& policy,
+        THRUST_HOST static pair<KeyOutputIt, ValOutputIt> par(execution_policy<Derived>& policy,
                                                            KeyInputIt                 keys_first,
                                                            KeyInputIt                 keys_last,
                                                            ValInputIt                 values_first,
@@ -272,7 +272,7 @@ reduce_by_key(execution_policy<Derived>& policy,
                                                   binary_pred,
                                                   binary_op);
         }
-        __device__ static pair<KeyOutputIt, ValOutputIt> seq(execution_policy<Derived>& policy,
+        THRUST_DEVICE static pair<KeyOutputIt, ValOutputIt> seq(execution_policy<Derived>& policy,
                                                              KeyInputIt                 keys_first,
                                                              KeyInputIt                 keys_last,
                                                              ValInputIt  values_first,
@@ -299,7 +299,7 @@ reduce_by_key(execution_policy<Derived>& policy,
 
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeyInputIt,
                                         class ValInputIt,
                                         class KeyOutputIt,
@@ -328,7 +328,7 @@ reduce_by_key(execution_policy<Derived>& policy,
                                       plus<value_type>());
 }
 
-__thrust_exec_check_disable__ template <class Derived,
+THRUST_EXEC_CHECK_DISABLE template <class Derived,
                                         class KeyInputIt,
                                         class ValInputIt,
                                         class KeyOutputIt,

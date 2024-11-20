@@ -1,6 +1,6 @@
 /*
  *  Copyright 2020-2021 NVIDIA Corporation
- *  Modifications Copyright© 2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ template <typename InputFunction, typename OutputFunction, typename Iterator>
   using Value = invoke_result_t<InputFunction, iterator_value_type>;
 
   public:
-    __host__ __device__
+    THRUST_HOST_DEVICE
     transform_input_output_iterator_proxy(const Iterator& io, InputFunction input_function, OutputFunction output_function)
       : io(io), input_function(input_function), output_function(output_function)
     {
@@ -47,24 +47,24 @@ template <typename InputFunction, typename OutputFunction, typename Iterator>
 
     transform_input_output_iterator_proxy(const transform_input_output_iterator_proxy&) = default;
 
-    __thrust_exec_check_disable__
-    __host__ __device__
+    THRUST_EXEC_CHECK_DISABLE
+    THRUST_HOST_DEVICE
     operator Value const() const
     {
       return input_function(*io);
     }
 
-    __thrust_exec_check_disable__
+    THRUST_EXEC_CHECK_DISABLE
     template <typename T>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     transform_input_output_iterator_proxy operator=(const T& x)
     {
       *io = output_function(x);
       return *this;
     }
 
-    __thrust_exec_check_disable__
-    __host__ __device__
+    THRUST_EXEC_CHECK_DISABLE
+    THRUST_HOST_DEVICE
     transform_input_output_iterator_proxy operator=(const transform_input_output_iterator_proxy& x)
     {
       *io = output_function(x);

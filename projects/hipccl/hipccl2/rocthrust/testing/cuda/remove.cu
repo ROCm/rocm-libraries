@@ -57,8 +57,10 @@ template<typename T>
 struct is_even
   : thrust::unary_function<T,bool>
 {
-  __host__ __device__
-  bool operator()(T x) { return (static_cast<unsigned int>(x) & 1) == 0; }
+  THRUST_HOST_DEVICE bool operator()(T x)
+  {
+    return (static_cast<unsigned int>(x) & 1) == 0;
+  }
 };
 
 
@@ -66,8 +68,10 @@ template<typename T>
 struct is_true
   : thrust::unary_function<T,bool>
 {
-  __host__ __device__
-  bool operator()(T x) { return x ? true : false; }
+  THRUST_HOST_DEVICE bool operator()(T x)
+  {
+    return x ? true : false;
+  }
 };
 
 

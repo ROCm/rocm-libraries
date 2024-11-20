@@ -3,6 +3,8 @@
 #include <thrust/scan.h>
 #include <iostream>
 
+#include "include/host_device.h"
+
 // BinaryPredicate for the head flag segment representation
 // equivalent to thrust::not2(thrust::project2nd<int,int>()));
 template <typename HeadFlagType>

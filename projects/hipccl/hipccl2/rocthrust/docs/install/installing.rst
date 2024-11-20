@@ -98,7 +98,8 @@ For a more elaborate installation process, rocThrust can be built manually using
 The following configuration options are available, in addition to the built-in CMake options:
 
 * ``DISABLE_WERROR`` disables passing ``-Werror`` to the compiler during the build. ``ON`` by default.
-* ``BUILD_TEST`` controls whether to build the rocThrust tests. ``OFF`` by default.
+* ``BUILD_TEST`` controls whether to build the rocThrust and hipstdpar tests. ``OFF`` by default.
+* ``BUILD_HIPSTDPAR_TEST`` controls whether to build the hipstdpar tests. Enabling this option is only necessary when BUILD_TEST is OFF. ``OFF`` by default.
 * ``BUILD_BENCHMARK`` controls whether to build the rocThrust benchmarks. ``OFF`` by default.
 * ``BUILD_EXAMPLES`` controls whether to build rocThrust examples. ``OFF`` by default.
 * ``DOWNLOAD_ROCPRIM`` controls whether to force downloading rocPRIM, regardless of whether rocPRIM is currently installed. Defaults to ``OFF``.

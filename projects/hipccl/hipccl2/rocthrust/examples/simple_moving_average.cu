@@ -7,6 +7,8 @@
 #include <iostream>
 #include <iomanip>
 
+#include "include/host_device.h"
+
 // Efficiently computes the simple moving average (SMA) [1] of a data series
 // using a parallel prefix-sum or "scan" operation.
 //

@@ -110,7 +110,7 @@ struct only_set_when_both_expected
     long long expected;
     bool * flag;
 
-    __device__
+    THRUST_DEVICE
     long long operator()(long long x, long long y)
     {
         if (x == expected && y == expected)

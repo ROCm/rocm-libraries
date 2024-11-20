@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved. 
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ namespace complex{
 using thrust::complex;
 
 /* round down to 18 = 54/3 bits */
-__host__ __device__ inline
+THRUST_HOST_DEVICE inline
 double trim(double x){
   uint32_t hi;
   get_high_word(hi, x);
@@ -67,7 +67,7 @@ double trim(double x){
   return x;
 }
 
-__host__ __device__ inline
+THRUST_HOST_DEVICE inline
 complex<double> clog(const complex<double>& z){
 
   // Adapted from FreeBSDs msun
@@ -191,19 +191,19 @@ complex<double> clog(const complex<double>& z){
 } // namespace detail
 
 template <typename ValueType>
-__host__ __device__
+THRUST_HOST_DEVICE
 inline complex<ValueType> log(const complex<ValueType>& z){
   return complex<ValueType>(log(thrust::abs(z)),thrust::arg(z));
 }
 
 template <>
-__host__ __device__
+THRUST_HOST_DEVICE
 inline complex<double> log(const complex<double>& z){
   return detail::complex::clog(z);
 }
 
 template <typename ValueType>
-__host__ __device__
+THRUST_HOST_DEVICE
 inline complex<ValueType> log10(const complex<ValueType>& z){
   // Using the explicit literal prevents compile time warnings in
   // devices that don't support doubles

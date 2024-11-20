@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved. 
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ THRUST_NAMESPACE_BEGIN
 namespace detail{
 namespace complex{
 
-__host__ __device__ inline
+THRUST_HOST_DEVICE inline
 float frexp_expf(float x, int *expt){
   const uint32_t k = 235;                 /* constant for reduction */
   const float kln2 =  162.88958740F;       /* k * ln2 */
@@ -75,7 +75,7 @@ float frexp_expf(float x, int *expt){
   return (exp_x);
 }
 
-__host__ __device__ inline
+THRUST_HOST_DEVICE inline
 complex<float>
 ldexp_cexpf(complex<float> z, int expt)
 {
@@ -96,7 +96,7 @@ ldexp_cexpf(complex<float> z, int expt)
 			 sin(y) * exp_x * scale1 * scale2));
 }
 
-__host__ __device__ inline
+THRUST_HOST_DEVICE inline
 complex<float> cexpf(const complex<float>& z){
   float x, y, exp_x;
   uint32_t hx, hy;
@@ -156,7 +156,7 @@ complex<float> cexpf(const complex<float>& z){
 } // namespace detail
 
 template <>
-__host__ __device__
+THRUST_HOST_DEVICE
 inline complex<float> exp(const complex<float>& z){
   return detail::complex::cexpf(z);
 }    

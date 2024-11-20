@@ -32,7 +32,7 @@
 template<typename T>
 struct is_even
 {
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(T x) const { return ((int) x % 2) == 0; }
 };
 
@@ -1034,7 +1034,7 @@ VariableUnitTest<TestStablePartitionCopyStencilToDiscardIterator, PartitionTypes
 struct is_ordered
 {
     template <typename Tuple>
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(const Tuple& t) const
     {
         return thrust::get<0>(t) <= thrust::get<1>(t);
@@ -1200,7 +1200,7 @@ DECLARE_VECTOR_UNITTEST(TestStablePartitionStencilZipIterator);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator partition(my_system &system,
                           ForwardIterator first,
                           ForwardIterator,
@@ -1228,7 +1228,7 @@ DECLARE_UNITTEST(TestPartitionDispatchExplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator partition(my_system &system,
                           ForwardIterator first,
                           ForwardIterator,
@@ -1257,7 +1257,7 @@ DECLARE_UNITTEST(TestPartitionStencilDispatchExplicit);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator partition(my_tag,
                           ForwardIterator first,
                           ForwardIterator,
@@ -1283,7 +1283,7 @@ DECLARE_UNITTEST(TestPartitionDispatchImplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator partition(my_tag,
                           ForwardIterator first,
                           ForwardIterator,
@@ -1311,7 +1311,7 @@ template<typename InputIterator,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     partition_copy(my_system &system,
                    InputIterator,
@@ -1346,7 +1346,7 @@ template<typename InputIterator1,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     partition_copy(my_system &system,
                    InputIterator1,
@@ -1382,7 +1382,7 @@ template<typename InputIterator,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     partition_copy(my_tag,
                    InputIterator first,
@@ -1415,7 +1415,7 @@ template<typename InputIterator1,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     partition_copy(my_tag,
                    InputIterator1 first,
@@ -1447,7 +1447,7 @@ DECLARE_UNITTEST(TestPartitionCopyStencilDispatchImplicit);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator stable_partition(my_system &system,
                                  ForwardIterator first,
                                  ForwardIterator,
@@ -1475,7 +1475,7 @@ DECLARE_UNITTEST(TestStablePartitionDispatchExplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator stable_partition(my_system &system,
                                  ForwardIterator first,
                                  ForwardIterator,
@@ -1504,7 +1504,7 @@ DECLARE_UNITTEST(TestStablePartitionStencilDispatchExplicit);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator stable_partition(my_tag,
                                  ForwardIterator first,
                                  ForwardIterator,
@@ -1530,7 +1530,7 @@ DECLARE_UNITTEST(TestStablePartitionDispatchImplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator stable_partition(my_tag,
                                  ForwardIterator first,
                                  ForwardIterator,
@@ -1559,7 +1559,7 @@ template<typename InputIterator,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     stable_partition_copy(my_system &system,
                           InputIterator,
@@ -1594,7 +1594,7 @@ template<typename InputIterator1,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     stable_partition_copy(my_system &system,
                           InputIterator1,
@@ -1630,7 +1630,7 @@ template<typename InputIterator,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     stable_partition_copy(my_tag,
                           InputIterator first,
@@ -1663,7 +1663,7 @@ template<typename InputIterator1,
          typename OutputIterator1,
          typename OutputIterator2,
          typename Predicate>
-  __host__ __device__
+  THRUST_HOST_DEVICE
   thrust::pair<OutputIterator1,OutputIterator2>
     stable_partition_copy(my_tag,
                           InputIterator1 first,

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ template<typename T>
 struct is_even
   : thrust::unary_function<T,bool>
 {
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(T x) { return (static_cast<unsigned int>(x) & 1) == 0; }
 };
 
@@ -37,7 +37,7 @@ template<typename T>
 struct is_true
   : thrust::unary_function<T,bool>
 {
-    __host__ __device__
+    THRUST_HOST_DEVICE
     bool operator()(T x) { return x ? true : false; }
 };
 
@@ -68,7 +68,7 @@ DECLARE_VECTOR_UNITTEST(TestRemoveSimple);
 
 template<typename ForwardIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove(my_system &system,
                        ForwardIterator first,
                        ForwardIterator,
@@ -92,7 +92,7 @@ DECLARE_UNITTEST(TestRemoveDispatchExplicit);
 
 template<typename ForwardIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove(my_tag,
                        ForwardIterator first,
                        ForwardIterator,
@@ -146,7 +146,7 @@ DECLARE_VECTOR_UNITTEST(TestRemoveCopySimple);
 template<typename InputIterator,
          typename OutputIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator remove_copy(my_system &system,
                            InputIterator,
                            InputIterator,
@@ -176,7 +176,7 @@ DECLARE_UNITTEST(TestRemoveCopyDispatchExplicit);
 template<typename InputIterator,
          typename OutputIterator,
          typename T>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator remove_copy(my_tag,
                            InputIterator,
                            InputIterator,
@@ -228,7 +228,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestRemoveIfSimple);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove_if(my_system &system,
                           ForwardIterator first,
                           ForwardIterator,
@@ -252,7 +252,7 @@ DECLARE_UNITTEST(TestRemoveIfDispatchExplicit);
 
 template<typename ForwardIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove_if(my_tag,
                           ForwardIterator first,
                           ForwardIterator,
@@ -311,7 +311,7 @@ DECLARE_VECTOR_UNITTEST(TestRemoveIfStencilSimple);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove_if(my_system &system,
                           ForwardIterator first,
                           ForwardIterator,
@@ -341,7 +341,7 @@ DECLARE_UNITTEST(TestRemoveIfStencilDispatchExplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 ForwardIterator remove_if(my_tag,
                           ForwardIterator first,
                           ForwardIterator,
@@ -397,7 +397,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestRemoveCopyIfSimple);
 template<typename InputIterator,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator remove_copy_if(my_system &system,
                              InputIterator first,
                              InputIterator,
@@ -427,7 +427,7 @@ DECLARE_UNITTEST(TestRemoveCopyIfDispatchExplicit);
 template<typename InputIterator,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 InputIterator remove_copy_if(my_tag,
                              InputIterator first,
                              InputIterator,
@@ -492,7 +492,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator remove_copy_if(my_system &system,
                               InputIterator1,
                               InputIterator1,
@@ -525,7 +525,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename Predicate>
-__host__ __device__
+THRUST_HOST_DEVICE
 OutputIterator remove_copy_if(my_tag,
                               InputIterator1,
                               InputIterator1,

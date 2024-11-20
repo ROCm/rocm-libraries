@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ template<typename BaseAllocator>
     typedef BaseAllocator super_t;
 
   public:
-    inline __host__ __device__
+    inline THRUST_HOST_DEVICE
     no_throw_allocator(const BaseAllocator &other = BaseAllocator())
       : super_t(other)
     {}
@@ -43,7 +43,7 @@ template<typename BaseAllocator>
       typedef no_throw_allocator<typename super_t::template rebind<U>::other> other;
     }; // end rebind
 
-    __host__ __device__
+    THRUST_HOST_DEVICE
     void deallocate(typename super_t::pointer p, typename super_t::size_type n)
     {
       NV_IF_TARGET(NV_IS_HOST, (
@@ -60,10 +60,10 @@ template<typename BaseAllocator>
       ));
     } // end deallocate()
 
-    inline __host__ __device__
+    inline THRUST_HOST_DEVICE
     bool operator==(no_throw_allocator const &other) { return super_t::operator==(other); }
 
-    inline __host__ __device__
+    inline THRUST_HOST_DEVICE
     bool operator!=(no_throw_allocator const &other) { return super_t::operator!=(other); }
 }; // end no_throw_allocator
 

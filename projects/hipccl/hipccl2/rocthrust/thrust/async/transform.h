@@ -48,7 +48,7 @@ template <
 , typename ForwardIt, typename Sentinel, typename OutputIt
 , typename UnaryOperation
 >
-__host__
+THRUST_HOST
 event<DerivedPolicy>
 async_transform(
   thrust::execution_policy<DerivedPolicy>&
@@ -76,7 +76,7 @@ struct transform_fn final
   , typename ForwardIt, typename Sentinel, typename OutputIt
   , typename UnaryOperation
   >
-  __host__
+  THRUST_HOST
   static auto
   call(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
@@ -98,7 +98,7 @@ struct transform_fn final
     typename ForwardIt, typename Sentinel, typename OutputIt
   , typename UnaryOperation
   >
-  __host__
+  THRUST_HOST
   static auto call(
     ForwardIt&& first, Sentinel&& last
   , OutputIt&& output
@@ -117,7 +117,7 @@ struct transform_fn final
   )
 
   template <typename... Args>
-  THRUST_NODISCARD __host__
+  THRUST_NODISCARD THRUST_HOST
   auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)
