@@ -187,9 +187,9 @@ void Test()
     Key *d_in       = NULL;
     Key *d_out      = NULL;
     clock_t *d_elapsed  = NULL;
-    HipcubDebug(cudaMalloc((void**)&d_in,          sizeof(Key) * TILE_SIZE * g_grid_size));
-    HipcubDebug(cudaMalloc((void**)&d_out,         sizeof(Key) * TILE_SIZE * g_grid_size));
-    HipcubDebug(cudaMalloc((void**)&d_elapsed,     sizeof(clock_t) * g_grid_size));
+    HIP_CHECK(cudaMalloc((void**)&d_in, sizeof(Key) * TILE_SIZE * g_grid_size));
+    HIP_CHECK(cudaMalloc((void**)&d_out, sizeof(Key) * TILE_SIZE * g_grid_size));
+    HIP_CHECK(cudaMalloc((void**)&d_elapsed, sizeof(clock_t) * g_grid_size));
 
     // Display input problem data
     if (g_verbose)
@@ -202,10 +202,12 @@ void Test()
 
     // Kernel props
     int max_sm_occupancy;
-    HipcubDebug(MaxSmOccupancy(max_sm_occupancy, BlockSortKernel<Key, BLOCK_THREADS, ITEMS_PER_THREAD>, BLOCK_THREADS));
+    HIP_CHECK(MaxSmOccupancy(max_sm_occupancy,
+                             BlockSortKernel<Key, BLOCK_THREADS, ITEMS_PER_THREAD>,
+                             BLOCK_THREADS));
 
     // Copy problem to device
-    HipcubDebug(hipMemcpy(d_in, h_in, sizeof(Key) * TILE_SIZE * g_grid_size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_in, h_in, sizeof(Key) * TILE_SIZE * g_grid_size, hipMemcpyHostToDevice));
 
     printf("BlockRadixSort %d items (%d timing iterations, %d blocks, %d threads, %d items per thread, %d SM occupancy):\n",
         TILE_SIZE * g_grid_size, g_timing_iterations, g_grid_size, BLOCK_THREADS, ITEMS_PER_THREAD, max_sm_occupancy);
@@ -218,8 +220,8 @@ void Test()
         d_elapsed);
 
     // Check for kernel errors and STDIO from the kernel, if any
-    HipcubDebug(cudaPeekAtLastError());
-    HipcubDebug(cudaDeviceSynchronize());
+    HIP_CHECK(cudaPeekAtLastError());
+    HIP_CHECK(cudaDeviceSynchronize());
 
     // Check results
     printf("\tOutput items: ");
@@ -247,7 +249,8 @@ void Test()
         elapsed_millis += timer.ElapsedMillis();
 
         // Copy clocks from device
-        HipcubDebug(hipMemcpy(h_elapsed, d_elapsed, sizeof(clock_t) * g_grid_size, hipMemcpyDeviceToHost));
+        HIP_CHECK(
+            hipMemcpy(h_elapsed, d_elapsed, sizeof(clock_t) * g_grid_size, hipMemcpyDeviceToHost));
         for (int j = 0; j < g_grid_size; j++)
         {
             elapsed_clocks += h_elapsed[j];
@@ -255,7 +258,7 @@ void Test()
     }
 
     // Check for kernel errors and STDIO from the kernel, if any
-    HipcubDebug(cudaDeviceSynchronize());
+    HIP_CHECK(cudaDeviceSynchronize());
 
     // Display timing results
     float avg_millis            = elapsed_millis / g_timing_iterations;
@@ -273,9 +276,12 @@ void Test()
     if (h_in) delete[] h_in;
     if (h_reference) delete[] h_reference;
     if (h_elapsed) delete[] h_elapsed;
-    if (d_in) HipcubDebug(cudaFree(d_in));
-    if (d_out) HipcubDebug(cudaFree(d_out));
-    if (d_elapsed) HipcubDebug(cudaFree(d_elapsed));
+    if(d_in)
+        HIP_CHECK(cudaFree(d_in));
+    if(d_out)
+        HIP_CHECK(cudaFree(d_out));
+    if(d_elapsed)
+        HIP_CHECK(cudaFree(d_elapsed));
 }
 
 
@@ -304,7 +310,7 @@ int main(int argc, char** argv)
     }
 
     // Initialize device
-    HipcubDebug(args.DeviceInit());
+    HIP_CHECK(args.DeviceInit());
     fflush(stdout);
 
     // Run tests

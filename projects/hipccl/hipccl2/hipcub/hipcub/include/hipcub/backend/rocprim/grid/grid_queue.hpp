@@ -116,63 +116,53 @@ public:
         OffsetT fill_size,
         hipStream_t stream = 0)
     {
-        hipError_t result = hipErrorUnknown;
         (void)stream;
         d_counters[FILL] = fill_size;
         d_counters[DRAIN] = 0;
-        result = hipSuccess;
-        return result;
+        return hipSuccess;
     }
 
-    HIPCUB_HOST hipError_t FillAndResetDrain(
-        OffsetT fill_size,
-        hipStream_t stream = 0)
+    HIPCUB_HOST
+    hipError_t FillAndResetDrain(OffsetT fill_size, hipStream_t stream = 0)
     {
-        hipError_t result = hipErrorUnknown;
         OffsetT counters[2];
         counters[FILL] = fill_size;
         counters[DRAIN] = 0;
-        result          = HipcubDebug(hipMemcpyAsync(d_counters,
-                                            counters,
-                                            sizeof(OffsetT) * 2,
-                                            hipMemcpyHostToDevice,
-                                            stream));
-        return result;
+        return HipcubDebug(hipMemcpyAsync(d_counters,
+                                          counters,
+                                          sizeof(OffsetT) * 2,
+                                          hipMemcpyHostToDevice,
+                                          stream));
     }
 
     /// This operation resets the drain so that it may advance to meet the existing fill-size.  To be called by the host or by a kernel prior to that which will be draining.
     HIPCUB_DEVICE hipError_t ResetDrain(hipStream_t stream = 0)
     {
-        hipError_t result = hipErrorUnknown;
         (void)stream;
         d_counters[DRAIN] = 0;
-        result = hipSuccess;
-        return result;
+
+        return hipSuccess;
     }
 
-    HIPCUB_HOST hipError_t ResetDrain(hipStream_t stream = 0)
+    HIPCUB_HOST
+    hipError_t ResetDrain(hipStream_t stream = 0)
     {
-        hipError_t result = hipErrorUnknown;
-        result = HipcubDebug(hipMemsetAsync(d_counters + DRAIN, 0, sizeof(OffsetT), stream));
-        return result;
+        return HipcubDebug(hipMemsetAsync(d_counters + DRAIN, 0, sizeof(OffsetT), stream));
     }
 
 
     /// This operation resets the fill counter.  To be called by the host or by a kernel prior to that which will be filling.
     HIPCUB_DEVICE hipError_t ResetFill(hipStream_t stream = 0)
     {
-        hipError_t result = hipErrorUnknown;
         (void)stream;
         d_counters[FILL] = 0;
-        result = hipSuccess;
-        return result;
+        return hipSuccess;
     }
 
-    HIPCUB_HOST hipError_t ResetFill(hipStream_t stream = 0)
+    HIPCUB_HOST
+    hipError_t ResetFill(hipStream_t stream = 0)
     {
-        hipError_t result = hipErrorUnknown;
-        result = HipcubDebug(hipMemsetAsync(d_counters + FILL, 0, sizeof(OffsetT), stream));
-        return result;
+        return HipcubDebug(hipMemsetAsync(d_counters + FILL, 0, sizeof(OffsetT), stream));
     }
 
 
@@ -181,24 +171,20 @@ public:
         OffsetT &fill_size,
         hipStream_t stream = 0)
     {
-        hipError_t result = hipErrorUnknown;
         (void)stream;
         fill_size = d_counters[FILL];
-        result = hipSuccess;
-        return result;
+
+        return hipSuccess;
     }
 
-    HIPCUB_HOST hipError_t FillSize(
-        OffsetT &fill_size,
-        hipStream_t stream = 0)
+    HIPCUB_HOST
+    hipError_t FillSize(OffsetT& fill_size, hipStream_t stream = 0)
     {
-        hipError_t result = hipErrorUnknown;
-        result            = HipcubDebug(hipMemcpyAsync(&fill_size,
-                                            d_counters + FILL,
-                                            sizeof(OffsetT),
-                                            hipMemcpyDeviceToHost,
-                                            stream));
-        return result;
+        return HipcubDebug(hipMemcpyAsync(&fill_size,
+                                          d_counters + FILL,
+                                          sizeof(OffsetT),
+                                          hipMemcpyDeviceToHost,
+                                          stream));
     }
 
 

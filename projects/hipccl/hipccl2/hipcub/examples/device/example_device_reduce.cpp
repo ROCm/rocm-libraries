@@ -124,7 +124,7 @@ int main(int argc, char** argv)
     }
 
     // Initialize device
-    HipcubDebug(args.DeviceInit());
+    HIP_CHECK(args.DeviceInit());
 
     printf("hipcub::DeviceReduce::Sum() %d items (%d-byte elements)\n",
         num_items, (int) sizeof(int));
@@ -140,23 +140,25 @@ int main(int argc, char** argv)
 
     // Allocate problem device arrays
     int *d_in = NULL;
-    HipcubDebug(g_allocator.DeviceAllocate((void**)&d_in, sizeof(int) * num_items));
+    HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_in, sizeof(int) * num_items));
 
     // Initialize device input
-    HipcubDebug(hipMemcpy(d_in, h_in, sizeof(int) * num_items, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_in, h_in, sizeof(int) * num_items, hipMemcpyHostToDevice));
 
     // Allocate device output array
     int *d_out = NULL;
-    HipcubDebug(g_allocator.DeviceAllocate((void**)&d_out, sizeof(int) * 1));
+    HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_out, sizeof(int) * 1));
 
     // Request and allocate temporary storage
     void            *d_temp_storage = NULL;
     size_t          temp_storage_bytes = 0;
-    HipcubDebug(hipcub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
-    HipcubDebug(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
+    HIP_CHECK(
+        hipcub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
+    HIP_CHECK(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
     // Run
-    HipcubDebug(hipcub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
+    HIP_CHECK(
+        hipcub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
 
     // Check for correctness (and display results, if specified)
     int compare = CompareDeviceResults(&h_reference, d_out, 1, g_verbose, g_verbose);
@@ -164,10 +166,14 @@ int main(int argc, char** argv)
     AssertEquals(0, compare);
 
     // Cleanup
-    if (h_in) delete[] h_in;
-    if (d_in) HipcubDebug(g_allocator.DeviceFree(d_in));
-    if (d_out) HipcubDebug(g_allocator.DeviceFree(d_out));
-    if (d_temp_storage) HipcubDebug(g_allocator.DeviceFree(d_temp_storage));
+    if(h_in)
+        delete[] h_in;
+    if(d_in)
+        HIP_CHECK(g_allocator.DeviceFree(d_in));
+    if(d_out)
+        HIP_CHECK(g_allocator.DeviceFree(d_out));
+    if(d_temp_storage)
+        HIP_CHECK(g_allocator.DeviceFree(d_temp_storage));
 
     printf("\n\n");
 

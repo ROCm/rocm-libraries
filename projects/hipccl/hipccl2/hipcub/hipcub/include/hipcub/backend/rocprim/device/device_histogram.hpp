@@ -39,6 +39,68 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
+namespace detail
+{
+template<typename IntArithmeticT, typename LevelT, typename CommonT>
+    HIPCUB_HOST_DEVICE
+HIPCUB_FORCEINLINE bool may_overflow(LevelT /* lower_level */,
+                                     LevelT /* upper_level */,
+                                     CommonT /* num_bins */,
+                                     ::std::false_type /* is_integral */)
+{
+    return false;
+}
+
+// Returns true if the bin computation for a given combination of range (max_level - min_level)
+// and number of bins may overflow.
+template<typename IntArithmeticT, typename LevelT, typename CommonT>
+    HIPCUB_HOST_DEVICE
+HIPCUB_FORCEINLINE bool may_overflow(LevelT  lower_level,
+                                     LevelT  upper_level,
+                                     CommonT num_bins,
+                                     ::std::true_type /* is_integral */)
+{
+    return static_cast<IntArithmeticT>(upper_level - lower_level)
+           > (::std::numeric_limits<IntArithmeticT>::max() / static_cast<IntArithmeticT>(num_bins));
+}
+
+template<class SampleT, class CommonT>
+struct int_arithmetic_t
+{
+    using type = ::std::conditional_t<
+        sizeof(SampleT) + sizeof(CommonT) <= sizeof(uint32_t),
+        uint32_t,
+#if HIPCUB_IS_INT128_ENABLED
+        ::std::conditional_t<(::std::is_same<CommonT, __int128_t>::value
+                              || ::std::is_same<CommonT, __uint128_t>::value),
+                             CommonT,
+                             uint64_t>
+#else
+        uint64_t
+#endif
+        >;
+};
+
+// If potential overflow is detected, returns hipErrorInvalidValue, otherwise hipSuccess.
+template<typename SampleIteratorT, typename LevelT>
+HIPCUB_HOST_DEVICE
+HIPCUB_FORCEINLINE hipError_t check_overflow(LevelT lower_level, LevelT upper_level, int num_levels)
+{
+    using sample_type      = typename std::iterator_traits<SampleIteratorT>::value_type;
+    using common_type      = typename std::common_type<LevelT, sample_type>::type;
+    using int_arithmetic_t = typename int_arithmetic_t<sample_type, common_type>::type;
+
+    if(may_overflow<int_arithmetic_t>(lower_level,
+                                      upper_level,
+                                      static_cast<common_type>(num_levels - 1),
+                                      ::std::is_integral<common_type>{}))
+    {
+        return hipErrorInvalidValue;
+    }
+    return hipSuccess;
+}
+} // namespace detail
+
 struct DeviceHistogram
 {
     template<typename SampleIteratorT, typename CounterT, typename LevelT, typename OffsetT>
@@ -52,6 +114,11 @@ struct DeviceHistogram
                                                             OffsetT         num_samples,
                                                             hipStream_t     stream = 0)
     {
+        if(detail::check_overflow<SampleIteratorT>(lower_level, upper_level, num_levels)
+           != hipSuccess)
+        {
+            return hipErrorInvalidValue;
+        }
         return ::rocprim::histogram_even(d_temp_storage,
                                          temp_storage_bytes,
                                          d_samples,
@@ -165,6 +232,13 @@ struct DeviceHistogram
         unsigned int levels[NUM_ACTIVE_CHANNELS];
         for(unsigned int channel = 0; channel < NUM_ACTIVE_CHANNELS; channel++)
         {
+            if(detail::check_overflow<SampleIteratorT>(lower_level[channel],
+                                                       upper_level[channel],
+                                                       num_levels[channel])
+               != hipSuccess)
+            {
+                return hipErrorInvalidValue;
+            }
             levels[channel] = num_levels[channel];
         }
         return ::rocprim::multi_histogram_even<NUM_CHANNELS, NUM_ACTIVE_CHANNELS>(

@@ -94,6 +94,7 @@ END_HIPCUB_NAMESPACE
 #define HIPCUB_HOST __host__
 #define HIPCUB_DEVICE __device__
 #define HIPCUB_HOST_DEVICE __host__ __device__
+#define HIPCUB_FORCEINLINE __forceinline__
 #define HIPCUB_SHARED_MEMORY __shared__
 
 // Helper macros to disable warnings in clang

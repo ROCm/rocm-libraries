@@ -5,16 +5,18 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ## (Unreleased) hipCUB-x.x.x for ROCm 6.4.0
 
 ### Added
-* Added extended tests to `rtest.py`. These tests are extra tests that did not fit the criteria of smoke and regression tests. These tests will take much longer to run relative to smoke and regression tests. Use `python rtest.py [--emulation|-e|--test|-t]=extended` to run these tests.
 * Added regression tests to `rtest.py`. These tests recreate scenarios that have caused hardware problems in past emulation environments. Use `python rtest.py [--emulation|-e|--test|-t]=regression` to run these tests.
 * Added `ForEach`, `ForEachN`, `ForEachCopy`, `ForEachCopyN` and `Bulk` functions to have parity with CUB.
 * Added the `hipcub::CubVector` type for CUB parity.
 * Added `--emulation` option for `rtest.py`
   * Unit tests can be run with `[--emulation|-e|--test|-t]=<test_name>`
+* Added `DeviceSelect::FlaggedIf` and its inplace overload.
 
 ### Changed
 * Changed the subset of tests that are run for smoke tests such that the smoke test will complete with faster run-time and to never exceed 2GB of vram usage. Use `python rtest.py [--emulation|-e|--test|-t]=smoke` to run these tests.
 * The `rtest.py` options have changed. `rtest.py` is now run with at least either `--test|-t` or `--emulation|-e`, but not both options.
+* The NVIDIA backend now requires CUB, Thrust and libcu++ 2.5.0. If it is not found it will be downloaded from the NVIDIA CCCL repository.
+* Changed the C++ version from 14 to 17. C++14 will be deprecated in the next major release.
 
 ## hipCUB-3.3.0 for ROCm 6.3.0
 

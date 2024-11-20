@@ -178,12 +178,12 @@ void run_benchmark(benchmark::State& state, const std::size_t size, const hipStr
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-    hipFree(d_input);
+    HIP_CHECK(hipFree(d_input));
     if(copy)
     {
-        hipFree(d_output);
+        HIP_CHECK(hipFree(d_output));
     }
-    hipFree(d_temp_storage);
+    HIP_CHECK(hipFree(d_temp_storage));
 }
 
 } // namespace

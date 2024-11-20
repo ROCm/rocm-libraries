@@ -167,7 +167,9 @@ void Test()
 
     // Kernel props
     int max_sm_occupancy;
-    HipcubDebug(MaxSmOccupancy(max_sm_occupancy, BlockSumKernel<BLOCK_THREADS, ITEMS_PER_THREAD, ALGORITHM>, BLOCK_THREADS));
+    HIP_CHECK(MaxSmOccupancy(max_sm_occupancy,
+                             BlockSumKernel<BLOCK_THREADS, ITEMS_PER_THREAD, ALGORITHM>,
+                             BLOCK_THREADS));
 
     // Copy problem to device
     hipMemcpy(d_in, h_in, sizeof(int) * TILE_SIZE, hipMemcpyHostToDevice);
@@ -211,14 +213,14 @@ void Test()
 
         // Copy clocks from device
         clock_t clocks;
-        HipcubDebug(hipMemcpy(&clocks, d_elapsed, sizeof(clock_t), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(&clocks, d_elapsed, sizeof(clock_t), hipMemcpyDeviceToHost));
         elapsed_clocks += clocks;
 
     }
 
     // Check for kernel errors and STDIO from the kernel, if any
-    HipcubDebug(cudaPeekAtLastError());
-    HipcubDebug(cudaDeviceSynchronize());
+    HIP_CHECK(cudaPeekAtLastError());
+    HIP_CHECK(cudaDeviceSynchronize());
 
     // Display timing results
     float avg_millis            = elapsed_millis / g_timing_iterations;
@@ -264,7 +266,7 @@ int main(int argc, char** argv)
     }
 
     // Initialize device
-    HipcubDebug(args.DeviceInit());
+    HIP_CHECK(args.DeviceInit());
 
     // Run tests
     Test<1024, 1, BLOCK_REDUCE_RAKING>();

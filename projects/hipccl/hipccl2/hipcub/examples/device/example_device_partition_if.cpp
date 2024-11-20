@@ -174,7 +174,7 @@ int main(int argc, char** argv)
     }
 
     // Initialize device
-    HipcubDebug(args.DeviceInit());
+    HIP_CHECK(args.DeviceInit());
 
     // Allocate host arrays
     int *h_in        = new int[num_items];
@@ -199,25 +199,37 @@ int main(int argc, char** argv)
 
     // Allocate problem device arrays
     int *d_in = NULL;
-    HipcubDebug(g_allocator.DeviceAllocate((void**)&d_in, sizeof(int) * num_items));
+    HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_in, sizeof(int) * num_items));
 
     // Initialize device input
-    HipcubDebug(hipMemcpy(d_in, h_in, sizeof(int) * num_items, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_in, h_in, sizeof(int) * num_items, hipMemcpyHostToDevice));
 
     // Allocate device output array and num selected
     int     *d_out            = NULL;
     int     *d_num_selected_out   = NULL;
-    HipcubDebug(g_allocator.DeviceAllocate((void**)&d_out, sizeof(int) * num_items));
-    HipcubDebug(g_allocator.DeviceAllocate((void**)&d_num_selected_out, sizeof(int)));
+    HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_out, sizeof(int) * num_items));
+    HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_num_selected_out, sizeof(int)));
 
     // Allocate temporary storage
     void            *d_temp_storage = NULL;
     size_t          temp_storage_bytes = 0;
-    HipcubDebug(hipcub::DevicePartition::If(d_temp_storage, temp_storage_bytes, d_in, d_out, d_num_selected_out, num_items, select_op));
-    HipcubDebug(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
+    HIP_CHECK(hipcub::DevicePartition::If(d_temp_storage,
+                                          temp_storage_bytes,
+                                          d_in,
+                                          d_out,
+                                          d_num_selected_out,
+                                          num_items,
+                                          select_op));
+    HIP_CHECK(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
     // Run
-    HipcubDebug(hipcub::DevicePartition::If(d_temp_storage, temp_storage_bytes, d_in, d_out, d_num_selected_out, num_items, select_op));
+    HIP_CHECK(hipcub::DevicePartition::If(d_temp_storage,
+                                          temp_storage_bytes,
+                                          d_in,
+                                          d_out,
+                                          d_num_selected_out,
+                                          num_items,
+                                          select_op));
 
     // Check for correctness (and display results, if specified)
     int compare = CompareDeviceResults(h_reference, d_out, num_items, true, g_verbose);
@@ -227,12 +239,18 @@ int main(int argc, char** argv)
     AssertEquals(0, compare);
 
     // Cleanup
-    if (h_in) delete[] h_in;
-    if (h_reference) delete[] h_reference;
-    if (d_in) HipcubDebug(g_allocator.DeviceFree(d_in));
-    if (d_out) HipcubDebug(g_allocator.DeviceFree(d_out));
-    if (d_num_selected_out) HipcubDebug(g_allocator.DeviceFree(d_num_selected_out));
-    if (d_temp_storage) HipcubDebug(g_allocator.DeviceFree(d_temp_storage));
+    if(h_in)
+        delete[] h_in;
+    if(h_reference)
+        delete[] h_reference;
+    if(d_in)
+        HIP_CHECK(g_allocator.DeviceFree(d_in));
+    if(d_out)
+        HIP_CHECK(g_allocator.DeviceFree(d_out));
+    if(d_num_selected_out)
+        HIP_CHECK(g_allocator.DeviceFree(d_num_selected_out));
+    if(d_temp_storage)
+        HIP_CHECK(g_allocator.DeviceFree(d_temp_storage));
 
     printf("\n\n");
 

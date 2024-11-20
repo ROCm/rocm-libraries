@@ -188,12 +188,12 @@ void run_benchmark(benchmark::State& state,
     state.SetBytesProcessed(state.iterations() * batch_size * (num_nonzeroes + size) * sizeof(T));
     state.SetItemsProcessed(state.iterations() * batch_size * (num_nonzeroes + size));
 
-    hipFree(d_temp_storage);
-    hipFree(d_vector_y);
-    hipFree(d_vector_x);
-    hipFree(d_column_indices);
-    hipFree(d_row_offsets);
-    hipFree(d_values);
+    HIP_CHECK(hipFree(d_temp_storage));
+    HIP_CHECK(hipFree(d_vector_y));
+    HIP_CHECK(hipFree(d_vector_x));
+    HIP_CHECK(hipFree(d_column_indices));
+    HIP_CHECK(hipFree(d_row_offsets));
+    HIP_CHECK(hipFree(d_values));
     HIP_CHECK(hipDeviceSynchronize());
 }
 

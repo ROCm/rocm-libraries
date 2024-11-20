@@ -229,7 +229,7 @@ int main(int argc, char** argv)
     }
 
     // Initialize device
-    HipcubDebug(args.DeviceInit());
+    HIP_CHECK(args.DeviceInit());
 
     // Allocate host arrays (problem and reference solution)
 
@@ -259,30 +259,51 @@ int main(int argc, char** argv)
         // Allocate and initialize device arrays for sorting
         DoubleBuffer<Key>       d_keys;
         DoubleBuffer<Value>     d_values;
-        HipcubDebug(g_allocator.DeviceAllocate((void**)&d_keys.d_buffers[0], sizeof(Key) * num_items));
-        HipcubDebug(g_allocator.DeviceAllocate((void**)&d_keys.d_buffers[1], sizeof(Key) * num_items));
-        HipcubDebug(g_allocator.DeviceAllocate((void**)&d_values.d_buffers[0], sizeof(Value) * num_items));
-        HipcubDebug(g_allocator.DeviceAllocate((void**)&d_values.d_buffers[1], sizeof(Value) * num_items));
+        HIP_CHECK(
+            g_allocator.DeviceAllocate((void**)&d_keys.d_buffers[0], sizeof(Key) * num_items));
+        HIP_CHECK(
+            g_allocator.DeviceAllocate((void**)&d_keys.d_buffers[1], sizeof(Key) * num_items));
+        HIP_CHECK(
+            g_allocator.DeviceAllocate((void**)&d_values.d_buffers[0], sizeof(Value) * num_items));
+        HIP_CHECK(
+            g_allocator.DeviceAllocate((void**)&d_values.d_buffers[1], sizeof(Value) * num_items));
 
-        HipcubDebug(hipMemcpy(d_keys.d_buffers[d_keys.selector], h_keys, sizeof(float) * num_items, hipMemcpyHostToDevice));
-        HipcubDebug(hipMemcpy(d_values.d_buffers[d_values.selector], h_values, sizeof(int) * num_items, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_keys.d_buffers[d_keys.selector],
+                            h_keys,
+                            sizeof(float) * num_items,
+                            hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(d_values.d_buffers[d_values.selector],
+                            h_values,
+                            sizeof(int) * num_items,
+                            hipMemcpyHostToDevice));
 
         // Start timer
         gpu_timer.Start();
 
         // Allocate temporary storage for sorting
         size_t  temp_storage_bytes  = 0;
-        void    *d_temp_storage     = NULL;
-        HipcubDebug(hipcub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
-        HipcubDebug(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
+        void*   d_temp_storage      = NULL;
+        HIP_CHECK(hipcub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                                     temp_storage_bytes,
+                                                     d_keys,
+                                                     d_values,
+                                                     num_items));
+        HIP_CHECK(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
         // Do the sort
-        HipcubDebug(hipcub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
+        HIP_CHECK(hipcub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                                     temp_storage_bytes,
+                                                     d_keys,
+                                                     d_values,
+                                                     num_items));
 
         // Free unused buffers and sorting temporary storage
-        if (d_keys.d_buffers[d_keys.selector ^ 1]) HipcubDebug(g_allocator.DeviceFree(d_keys.d_buffers[d_keys.selector ^ 1]));
-        if (d_values.d_buffers[d_values.selector ^ 1]) HipcubDebug(g_allocator.DeviceFree(d_values.d_buffers[d_values.selector ^ 1]));
-        if (d_temp_storage) HipcubDebug(g_allocator.DeviceFree(d_temp_storage));
+        if(d_keys.d_buffers[d_keys.selector ^ 1])
+            HIP_CHECK(g_allocator.DeviceFree(d_keys.d_buffers[d_keys.selector ^ 1]));
+        if(d_values.d_buffers[d_values.selector ^ 1])
+            HIP_CHECK(g_allocator.DeviceFree(d_values.d_buffers[d_values.selector ^ 1]));
+        if(d_temp_storage)
+            HIP_CHECK(g_allocator.DeviceFree(d_temp_storage));
 
         // Start timer
         gpu_rle_timer.Start();
@@ -291,34 +312,33 @@ int main(int argc, char** argv)
         int     *d_offests_out   = NULL;
         int     *d_lengths_out   = NULL;
         int     *d_num_runs      = NULL;
-        HipcubDebug(g_allocator.DeviceAllocate((void**)&d_offests_out, sizeof(int) * num_items));
-        HipcubDebug(g_allocator.DeviceAllocate((void**)&d_lengths_out, sizeof(int) * num_items));
-        HipcubDebug(g_allocator.DeviceAllocate((void**)&d_num_runs, sizeof(int) * 1));
+        HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_offests_out, sizeof(int) * num_items));
+        HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_lengths_out, sizeof(int) * num_items));
+        HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_num_runs, sizeof(int) * 1));
 
         // Allocate temporary storage for isolating non-trivial runs
         d_temp_storage = NULL;
-        HipcubDebug(hipcub::DeviceRunLengthEncode::NonTrivialRuns(
-            d_temp_storage,
-            temp_storage_bytes,
-            d_keys.d_buffers[d_keys.selector],
-            d_offests_out,
-            d_lengths_out,
-            d_num_runs,
-            num_items));
-        HipcubDebug(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
+        HIP_CHECK(hipcub::DeviceRunLengthEncode::NonTrivialRuns(d_temp_storage,
+                                                                temp_storage_bytes,
+                                                                d_keys.d_buffers[d_keys.selector],
+                                                                d_offests_out,
+                                                                d_lengths_out,
+                                                                d_num_runs,
+                                                                num_items));
+        HIP_CHECK(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
         // Do the isolation
-        HipcubDebug(hipcub::DeviceRunLengthEncode::NonTrivialRuns(
-            d_temp_storage,
-            temp_storage_bytes,
-            d_keys.d_buffers[d_keys.selector],
-            d_offests_out,
-            d_lengths_out,
-            d_num_runs,
-            num_items));
+        HIP_CHECK(hipcub::DeviceRunLengthEncode::NonTrivialRuns(d_temp_storage,
+                                                                temp_storage_bytes,
+                                                                d_keys.d_buffers[d_keys.selector],
+                                                                d_offests_out,
+                                                                d_lengths_out,
+                                                                d_num_runs,
+                                                                num_items));
 
         // Free keys buffer
-        if (d_keys.d_buffers[d_keys.selector]) HipcubDebug(g_allocator.DeviceFree(d_keys.d_buffers[d_keys.selector]));
+        if(d_keys.d_buffers[d_keys.selector])
+            HIP_CHECK(g_allocator.DeviceFree(d_keys.d_buffers[d_keys.selector]));
 
         //
         // Hypothetically do stuff with the original key-indices corresponding to non-trivial runs of identical keys
@@ -354,11 +374,16 @@ int main(int argc, char** argv)
 
         // GPU cleanup
 
-        if (d_values.d_buffers[d_values.selector]) HipcubDebug(g_allocator.DeviceFree(d_values.d_buffers[d_values.selector]));
-        if (d_offests_out) HipcubDebug(g_allocator.DeviceFree(d_offests_out));
-        if (d_lengths_out) HipcubDebug(g_allocator.DeviceFree(d_lengths_out));
-        if (d_num_runs) HipcubDebug(g_allocator.DeviceFree(d_num_runs));
-        if (d_temp_storage) HipcubDebug(g_allocator.DeviceFree(d_temp_storage));
+        if(d_values.d_buffers[d_values.selector])
+            HIP_CHECK(g_allocator.DeviceFree(d_values.d_buffers[d_values.selector]));
+        if(d_offests_out)
+            HIP_CHECK(g_allocator.DeviceFree(d_offests_out));
+        if(d_lengths_out)
+            HIP_CHECK(g_allocator.DeviceFree(d_lengths_out));
+        if(d_num_runs)
+            HIP_CHECK(g_allocator.DeviceFree(d_num_runs));
+        if(d_temp_storage)
+            HIP_CHECK(g_allocator.DeviceFree(d_temp_storage));
     }
 
     // Host cleanup

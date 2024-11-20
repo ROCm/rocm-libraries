@@ -30,8 +30,8 @@
 
 hipcub::CachingDeviceAllocator g_allocator;
 
-static constexpr float alpha = 1.0f;
-static constexpr float beta = 0.0f;
+static constexpr float alpha_const = 1.0f;
+static constexpr float beta_const  = 0.0f;
 
 // Params for tests
 template<class Type,
@@ -172,7 +172,7 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
         vector_y_in[row] = 1.0;
 
     // Compute reference answer
-    SpmvGold(csr_matrix, vector_x, vector_y_in, vector_y_out, alpha, beta);
+    SpmvGold(csr_matrix, vector_x, vector_y_in, vector_y_out, alpha_const, beta_const);
 
     // Allocate and initialize GPU problem
     hipcub::DeviceSpmv::SpmvParams<T, OffsetType> params;
@@ -186,8 +186,8 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
     params.num_rows     = csr_matrix.num_rows;
     params.num_cols     = csr_matrix.num_cols;
     params.num_nonzeros = csr_matrix.num_nonzeros;
-    params.alpha        = alpha;
-    params.beta         = beta;
+    params.alpha        = alpha_const;
+    params.beta         = beta_const;
 
     HIP_CHECK(hipMemcpy(params.d_values,            csr_matrix.values,         sizeof(T) * csr_matrix.num_nonzeros, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(params.d_row_end_offsets,   csr_matrix.row_offsets,    sizeof(OffsetType) * (csr_matrix.num_rows + 1), hipMemcpyHostToDevice));

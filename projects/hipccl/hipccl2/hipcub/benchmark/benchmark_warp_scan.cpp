@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,7 +45,9 @@ __global__ __launch_bounds__(BlockSize) void kernel(const T* input, T* output, c
 struct inclusive_scan
 {
     template<class T, unsigned int WarpSize, unsigned int Trials>
-    __device__ static void run(const T* input, T* output, const T init)
+    __device__
+    static auto run(const T* input, T* output, const T init)
+        -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
     {
         (void)init;
 
@@ -63,12 +65,20 @@ struct inclusive_scan
 
         output[i] = value;
     }
+
+    template<class T, unsigned int WarpSize, unsigned int Trials>
+    __device__
+    static auto run(const T* /*input*/, T* /*output*/, const T /*init*/)
+        -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
+    {}
 };
 
 struct exclusive_scan
 {
     template<class T, unsigned int WarpSize, unsigned int Trials>
-    __device__ static void run(const T* input, T* output, const T init)
+    __device__
+    static auto run(const T* input, T* output, const T init)
+        -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
     {
         const unsigned int i     = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
         auto               value = input[i];
@@ -84,12 +94,19 @@ struct exclusive_scan
 
         output[i] = value;
     }
+    template<class T, unsigned int WarpSize, unsigned int Trials>
+        __device__
+    static auto run(const T* /*input*/, T* /*output*/, const T /*init*/)
+        -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
+    {}
 };
 
 struct broadcast
 {
     template<class T, unsigned int WarpSize, unsigned int Trials>
-    __device__ static void run(const T* input, T* output, const T init)
+    __device__
+    static auto run(const T* input, T* output, const T init)
+        -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
     {
         (void)init;
 
@@ -106,6 +123,12 @@ struct broadcast
 
         output[i] = value;
     }
+
+    template<class T, unsigned int WarpSize, unsigned int Trials>
+    __device__
+    static auto run(const T* /*input*/, T* /*output*/, const T /*init*/)
+        -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
+    {}
 };
 
 template<class Benchmark,
