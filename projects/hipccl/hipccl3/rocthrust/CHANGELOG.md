@@ -3,15 +3,10 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## (Unreleased) rocThrust 3.x.x for ROCm 6.x
-
-### Changes
-
-* Changed the C++ version from 14 to 17. C++14 will be deprecated in the next major release.
-
-## (Unreleased) rocThrust 3.3.0 for ROCm 6.4
+## rocThrust 3.3.0 for ROCm 6.4
 
 ### Added
+
 * Added extended tests to `rtest.py`. These tests are extra tests that did not fit the criteria of smoke and regression tests. These tests will take much longer to run relative to smoke and regression tests. Use `python rtest.py [--emulation|-e|--test|-t]=extended` to run these tests.
 * Added regression tests to `rtest.py`. These tests recreate scenarios that have caused hardware problems in past emulation environments. Use `python rtest.py [--emulation|-e|--test|-t]=regression` to run these tests.
 * Added smoke test options, which runs a subset of the unit tests and ensures that less than 2gb of VRAM will be used. Use `python rtest.py [--emulation|-e|--test|-t]=smoke` to run these tests.
@@ -24,11 +19,13 @@ Documentation for rocThrust available at
 * Updated HIPSTDPAR's `adjacent_find` to use rocPRIM's implementation
 
 ### Changed
+
+* Changed the C++ version from 14 to 17. C++14 will be deprecated in the next major release.
 * `--test|-t` is no longer a required flag for `rtest.py`. Instead, the user can use either `--emulation|-e` or `--test|-t`, but not both.
 * Split the contents of HIPSTDPAR's forwarding header into several implementation headers.
 * Fixed `copy_if` to work with large data types (512 bytes)
 
-## (Unreleased) rocThrust 3.2.0 for ROCm 6.3
+## rocThrust 3.2.0 for ROCm 6.3
 
 ### Added
 
@@ -36,17 +33,19 @@ Documentation for rocThrust available at
   * Only the NVIDIA backend uses `tuple` and `pair` types from libcu++, other backends continue to
     use the original Thrust implementations and hence do not require libcu++ (CCCL) as a dependency.
 * Added the `thrust::hip::par_det` execution policy to enable bitwise reproducibility on algorithms that are not bitwise reproducible by default.
-* Fix tests failing when compiling with `-D_GLIBCXX_ASSERTIONS=ON`.
 
 ### Changed
 
+* Updated the default value for the `-a` argument from `rmake.py` to `gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201`.
 * Enabled the upstream (thrust) test suite for execution by default. It can still be disabled by CMake option `-DENABLE_UPSTREAM_TESTS=OFF`.
 
 ### Resolved issues
 
+* Fixed an issue in `rmake.py` where the list storing cmake options would contain individual characters instead of a full string of options.
 * Fixed the HIP backend not passing `TestCopyIfNonTrivial` from the upstream (thrust) test suite.
+* Fixed tests failing when compiled with `-D_GLIBCXX_ASSERTIONS=ON`.
 
-## (Unreleased) rocThrust 3.1.0 for ROCm 6.2
+## rocThrust 3.1.0 for ROCm 6.2
 
 ### Additions
 

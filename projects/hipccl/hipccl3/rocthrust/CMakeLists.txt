@@ -59,11 +59,11 @@ if(GPU_TARGETS STREQUAL "all")
   if(BUILD_ADDRESS_SANITIZER)
     # ASAN builds require xnack
     rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-      TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx940:xnack+;gfx941:xnack+;gfx942:xnack+"
+      TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+"
     )
   else()
     rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx940;gfx941;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
     )
   endif()
   set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
