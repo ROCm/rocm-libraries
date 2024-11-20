@@ -85,10 +85,13 @@ struct device_reduce_benchmark : public config_autotune_interface
     static constexpr unsigned int warmup_size = 5;
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(T);
+
         BinaryFunction reduce_op{};
         const auto     random_range = limit_random_range<T>(0, 1000);
         std::vector<T> input

@@ -295,10 +295,10 @@ class BenchmarksOfArchitecture:
             empty_fallback = FallbackCase(None, EMPTY_TYPENAME, 0, 0, False)
 
             # If a type is optional, also generate the fallbacks where the type is empty.
-            fallback_entries_0: List[FallbackCase] = self.fallback_entries
+            fallback_entries_0: List[FallbackCase] = self.fallback_entries.copy()
             if config_selection_types[0].is_optional:
                 fallback_entries_0.append(empty_fallback)
-            fallback_entries_1: List[FallbackCase] = self.fallback_entries
+            fallback_entries_1: List[FallbackCase] = self.fallback_entries.copy()
             if config_selection_types[1].is_optional:
                 fallback_entries_1.append(empty_fallback)
 
@@ -523,6 +523,14 @@ class AlgorithmDeviceAdjacentDifferenceInplace(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceAdjacentFind(Algorithm):
+    algorithm_name = "device_adjacent_find"
+    cpp_configuration_template_name = "adjacent_find_config_template"
+    config_selection_params = [
+        SelectionType(name="input_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 class AlgorithmDeviceSegmentedRadixSort(Algorithm):
     algorithm_name = "device_segmented_radix_sort"
     cpp_configuration_template_name = "segmented_radix_sort_config_template"
@@ -596,6 +604,15 @@ class AlgorithmDeviceSelectPredicate(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceSelectPredicatedFlag(Algorithm):
+    algorithm_name = "device_select_predicated_flag"
+    cpp_configuration_template_name = "select_predicated_flag_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="flag_type", is_optional=False, select_on_size_only=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 class AlgorithmDeviceSelectUnique(Algorithm):
     algorithm_name = "device_select_unique"
     cpp_configuration_template_name = "select_unique_config_template"
@@ -627,6 +644,15 @@ class AlgorithmDeviceFindFirstOf(Algorithm):
     cpp_configuration_template_name = "find_first_of_config_template"
     config_selection_params = [
         SelectionType(name="value_type", is_optional=False, select_on_size_only=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDeviceMerge(Algorithm):
+    algorithm_name = "device_merge"
+    cpp_configuration_template_name = "merge_config_template"
+    config_selection_params = [
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
+        SelectionType(name="value_type", is_optional=True, select_on_size_only=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
@@ -663,6 +689,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDeviceAdjacentDifference(fallback_entries)
     elif algorithm_name == 'device_adjacent_difference_inplace':
         return AlgorithmDeviceAdjacentDifferenceInplace(fallback_entries)
+    elif algorithm_name == 'device_adjacent_find':
+        return AlgorithmDeviceAdjacentFind(fallback_entries)
     elif algorithm_name == 'device_segmented_radix_sort':
         return AlgorithmDeviceSegmentedRadixSort(fallback_entries)
     elif algorithm_name == 'device_transform':
@@ -681,6 +709,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDeviceSelectFlag(fallback_entries)
     elif algorithm_name == 'device_select_predicate':
         return AlgorithmDeviceSelectPredicate(fallback_entries)
+    elif algorithm_name == 'device_select_predicated_flag':
+        return AlgorithmDeviceSelectPredicatedFlag(fallback_entries)
     elif algorithm_name == 'device_select_unique':
         return AlgorithmDeviceSelectUnique(fallback_entries)
     elif algorithm_name == 'device_select_unique_by_key':
@@ -689,6 +719,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDeviceReduceByKey(fallback_entries)
     elif algorithm_name == 'device_find_first_of':
         return AlgorithmDeviceFindFirstOf(fallback_entries)
+    elif algorithm_name == 'device_merge':
+        return AlgorithmDeviceMerge(fallback_entries)
     else:
         raise(NotSupportedError(f'Algorithm "{algorithm_name}" is not supported (yet)'))
 
@@ -806,6 +838,7 @@ def main():
     parser.add_argument("-p", "--out_basedir", type=str, help="Base dir for the output files, for each algorithm a new file will be created in this directory", required=True)
     parser.add_argument("-c", "--fallback_configuration", type=argparse.FileType('r'), default=os.path.join(current_dir, "fallback_config.json"), help="Configuration for fallbacks for not tested datatypes")
     args = parser.parse_args()
+    #import pdb; pdb.set_trace()
 
     benchmark_manager = BenchmarkDataManager(args.fallback_configuration)
 

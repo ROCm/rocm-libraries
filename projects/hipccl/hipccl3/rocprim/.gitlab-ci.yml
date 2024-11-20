@@ -114,6 +114,7 @@ copyright-date:
       -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
       -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CXX_STANDARD=14
       -S $CI_PROJECT_DIR
       -B $BUILD_DIR
     - cmake
@@ -182,6 +183,7 @@ build:cmake-minimum-apt:
       -D BUILD_EXAMPLE=ON
       -D GPU_TARGETS=$GPU_TARGETS
       -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
+      -D CMAKE_CXX_STANDARD="$BUILD_VERSION"
       -S $CI_PROJECT_DIR
       -B $BUILD_DIR
     - cmake --build $BUILD_DIR
@@ -210,6 +212,7 @@ build:cmake-latest:
     matrix:
       - BUILD_TYPE: Release
         BUILD_TARGET: [BENCHMARK, TEST]
+        BUILD_VERSION: [14, 17]
 
 build:cmake-minimum:
   needs: []
@@ -220,6 +223,7 @@ build:cmake-minimum:
     matrix:
       - BUILD_TYPE: [Debug, Release]
         BUILD_TARGET: [BENCHMARK, TEST]
+        BUILD_VERSION: 14
 
 build:package:
   stage: build
@@ -236,6 +240,7 @@ build:package:
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_STANDARD=14
       -B $PACKAGE_DIR
       -S $CI_PROJECT_DIR
     - cd $PACKAGE_DIR
@@ -268,6 +273,7 @@ build:windows:
       -D CMAKE_CXX_COMPILER:PATH="${env:HIP_PATH}\bin\clang++.exe"
       -D CMAKE_PREFIX_PATH:PATH="${env:HIP_PATH}"
       -D CMAKE_BUILD_TYPE="$BUILD_TYPE"
+      -D CMAKE_CXX_STANDARD=14
     - cmake --build "$CI_PROJECT_DIR/build"
   artifacts:
     paths:
@@ -314,6 +320,7 @@ autotune:build:
       -D GPU_TARGETS=$GPU_TARGETS
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
       -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CXX_STANDARD=14
     - cmake --build . --target $BENCHMARK_TARGETS
     - 'rm -rf $BUILD_DIR/benchmark/benchmark*.parallel'
     # The autotune benchmarks get very large, above GitLabs upload limit. Fortunately they compress well.
@@ -339,6 +346,7 @@ test:
         matrix:
           - BUILD_TYPE: Release
             BUILD_TARGET: TEST
+            BUILD_VERSION: 14
   script:
     - cd $BUILD_DIR
     - cmake
@@ -395,6 +403,7 @@ test-windows-release:
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
       -D GPU_TARGETS=$GPU_TARGETS
+      -D CMAKE_CXX_STANDARD=14
       -S "$CI_PROJECT_DIR/test/extra"
       -B "$CI_PROJECT_DIR/package_test"
     - cmake --build "$CI_PROJECT_DIR/package_test"
@@ -416,6 +425,7 @@ test:install:
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_STANDARD=14
       -B build
       -S $CI_PROJECT_DIR
     - $SUDO_CMD cmake --build build --target install
@@ -458,6 +468,7 @@ benchmark:
         matrix:
           - BUILD_TYPE: Release
             BUILD_TARGET: BENCHMARK
+            BUILD_VERSION: 14
   extends:
     - .cmake-minimum
     - .gpus:rocm

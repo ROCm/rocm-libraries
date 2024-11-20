@@ -26,6 +26,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
@@ -159,24 +160,9 @@ ROCPRIM_KERNEL
         std::cout << name << "(" << size << ")"; \
         auto error = hipStreamSynchronize(stream); \
         if(error != hipSuccess) return error; \
-        auto end = std::chrono::high_resolution_clock::now(); \
+        auto end = std::chrono::steady_clock::now(); \
         auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
         std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
-    }
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto _error = hipGetLastError(); \
-        if(_error != hipSuccess) return _error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto __error = hipStreamSynchronize(stream); \
-            if(__error != hipSuccess) return __error; \
-            auto _end = std::chrono::high_resolution_clock::now(); \
-            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
-        } \
     }
 
 template<lookback_scan_determinism Determinism,
@@ -250,7 +236,7 @@ inline auto scan_impl(void*               temporary_storage,
     }
 
     // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
 
     if( number_of_blocks == 0u )
         return hipSuccess;
@@ -292,7 +278,7 @@ inline auto scan_impl(void*               temporary_storage,
             }
         };
 
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+        if(debug_synchronous) start = std::chrono::steady_clock::now();
 
         size_t number_of_launch = (size + limited_size - 1)/limited_size;
         for (size_t i = 0, offset = 0; i < number_of_launch; i++, offset+=limited_size )
@@ -323,9 +309,9 @@ inline auto scan_impl(void*               temporary_storage,
                 });
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
                                                         number_of_blocks,
-                                                        start)
+                                                        start);
 
-            if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+            if(debug_synchronous) start = std::chrono::steady_clock::now();
             grid_size = number_of_blocks;
 
             if(debug_synchronous)
@@ -361,7 +347,7 @@ inline auto scan_impl(void*               temporary_storage,
                                                                            i != size_t(0),
                                                                            number_of_launch > 1);
                 });
-            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel", current_size, start)
+            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel", current_size, start);
 
             // Swap the last_elements
             if(number_of_launch > 1)
@@ -384,7 +370,7 @@ inline auto scan_impl(void*               temporary_storage,
             std::cout << "block_size " << block_size << '\n';
             std::cout << "number of blocks " << number_of_blocks << '\n';
             std::cout << "items_per_block " << items_per_block << '\n';
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::steady_clock::now();
         }
 
         single_scan_kernel<Exclusive, // flag for exclusive scan operation
@@ -400,7 +386,7 @@ inline auto scan_impl(void*               temporary_storage,
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 #undef ROCPRIM_DETAIL_HIP_SYNC
 
 } // end of detail namespace

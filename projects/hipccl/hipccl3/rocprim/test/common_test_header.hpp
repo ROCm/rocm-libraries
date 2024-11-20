@@ -42,9 +42,6 @@
 // HIP API
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
-#ifndef __HIP_CPU_RT__
-#include <hip/hip_ext.h>
-#endif
 
 // GoogleTest-compatible HIP_CHECK macro. FAIL is called to log the Google Test trace.
 // The lambda is invoked immediately as assertions that generate a fatal failure can
@@ -61,6 +58,22 @@
             }                                                                               \
         }
 #endif
+
+#define HIP_CHECK_MEMORY(condition)                                                         \
+    {                                                                                       \
+        hipError_t error = condition;                                                       \
+        if(error == hipErrorOutOfMemory)                                                    \
+        {                                                                                   \
+            std::cout << "Out of memory. Skipping size = " << size << std::endl;            \
+            break;                                                                          \
+        }                                                                                   \
+        if(error != hipSuccess)                                                             \
+        {                                                                                   \
+            std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
+                      << std::endl;                                                         \
+            exit(error);                                                                    \
+        }                                                                                   \
+    }
 
 #if(defined(__GNUC__) || defined(__clang__)) && (defined(__GLIBCXX__) || defined(_LIBCPP_VERSION))
     #define ROCPRIM_HAS_INT128_SUPPORT 1

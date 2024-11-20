@@ -112,7 +112,7 @@ public:
 
     ROCPRIM_HOST_DEVICE inline reference operator*() const
     {
-        return *ptr_;
+        return reference{*ptr_};
     }
 
     ROCPRIM_HOST_DEVICE inline reference operator[](difference_type n) const

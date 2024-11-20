@@ -217,11 +217,11 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected_selected, expected_selected.size()));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
 
-            hipFree(d_input);
-            hipFree(d_flags);
-            hipFree(d_output);
-            hipFree(d_selected_count_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_flags));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_selected_count_output));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if(TestFixture::use_graphs)
             {
@@ -235,6 +235,20 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
         HIP_CHECK(hipStreamDestroy(stream));
     }
 }
+
+template<class T>
+struct select_op_t
+{
+    __host__ __device__
+    auto operator()(const T& value) -> bool
+    {
+        if(value == T(50))
+        {
+            return true;
+        }
+        return false;
+    }
+};
 
 TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
 {
@@ -254,11 +268,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    auto select_op = [] __host__ __device__ (const T& value) -> bool
-    {
-        if(value == T(50)) return true;
-        return false;
-    };
+    auto select_op = select_op_t<T>{};
 
     U * d_output;
     unsigned int * d_selected_count_output;
@@ -328,9 +338,9 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
     );
     ASSERT_EQ(selected_count_output, 0);
 
-    hipFree(d_output);
-    hipFree(d_selected_count_output);
-    hipFree(d_temp_storage);
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_selected_count_output));
+    HIP_CHECK(hipFree(d_temp_storage));
 
     if (TestFixture::use_graphs)
     {
@@ -358,11 +368,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    auto select_op = [] __host__ __device__ (const T& value) -> bool
-    {
-        if(value == T(50)) return true;
-        return false;
-    };
+    auto select_op = select_op_t<T>{};
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -474,10 +480,10 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected_selected, expected_selected.size()));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
 
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_selected_count_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_selected_count_output));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if(TestFixture::use_graphs)
             {
@@ -511,12 +517,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    auto select_op = [] __host__ __device__(const T& value) -> bool
-    {
-        if(value == T(50))
-            return true;
-        return false;
-    };
+    auto select_op = select_op_t<T>{};
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -636,11 +637,11 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateTwoWay)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_eq(rejected, expected_rejected, expected_rejected.size()));
 
-            hipFree(d_input);
-            hipFree(d_selected);
-            hipFree(d_rejected);
-            hipFree(d_selected_count_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_selected));
+            HIP_CHECK(hipFree(d_rejected));
+            HIP_CHECK(hipFree(d_selected_count_output));
+            HIP_CHECK(hipFree(d_temp_storage));
 
             if(TestFixture::use_graphs)
             {
@@ -848,12 +849,12 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
 
                 ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
-                hipFree(d_input);
-                hipFree(d_first_output);
-                hipFree(d_second_output);
-                hipFree(d_unselected_output);
-                hipFree(d_selected_counts);
-                hipFree(d_temp_storage);
+                HIP_CHECK(hipFree(d_input));
+                HIP_CHECK(hipFree(d_first_output));
+                HIP_CHECK(hipFree(d_second_output));
+                HIP_CHECK(hipFree(d_unselected_output));
+                HIP_CHECK(hipFree(d_selected_counts));
+                HIP_CHECK(hipFree(d_temp_storage));
 
                 if(TestFixture::use_graphs)
                 {
@@ -1480,6 +1481,20 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
     }
 }
 
+template<class T>
+struct select_data_op_t
+{
+    __host__ __device__
+    auto operator()(const T& value) -> bool
+    {
+        if(value.data[0] == 128)
+        {
+            return true;
+        }
+        return false;
+    }
+};
+
 // This test checks to make sure that the block size is reduced correctly
 // when our data size and type are set in a way that we will exceed the shared
 // memory limit. Since the block size calculation is done at compile time,
@@ -1518,12 +1533,7 @@ TEST(RocprimDevicePartitionBlockSizeTests, BlockSize)
     const bool debug_synchronous = false;
     const hipStream_t stream = 0; // default stream
 
-    auto select_op = [] __host__ __device__ (const T& value) -> bool
-    {
-        // The data values are in [0, 255]. Partition on the midpoint.
-        if(value.data[0] == 128) return true;
-        return false;
-    };
+    auto select_op = select_data_op_t<T>{};
 
     // Use some power of two and off-by-one-from-power-of-two data sizes.
     const std::vector<size_t> sizes = {256, 257, 511, 512, 1024, 1025};
@@ -1629,10 +1639,10 @@ TEST(RocprimDevicePartitionBlockSizeTests, BlockSize)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected_selected, expected_selected.size()));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
 
-            hipFree(d_input);
-            hipFree(d_output);
-            hipFree(d_selected_count_output);
-            hipFree(d_temp_storage);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
+            HIP_CHECK(hipFree(d_selected_count_output));
+            HIP_CHECK(hipFree(d_temp_storage));
         }
     }
 }

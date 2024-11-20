@@ -58,6 +58,30 @@ namespace detail
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned int atomic_wrapinc(unsigned int* address, unsigned int value)
+    {
+        return ::atomicInc(address, value);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned int atomic_max(unsigned int* address, unsigned int value)
+    {
+        return ::atomicMax(address, value);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned long atomic_max(unsigned long* address, unsigned long value)
+    {
+        return ::atomicMax(address, value);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned long long atomic_max(unsigned long long* address, unsigned long long value)
+    {
+        return ::atomicMax(address, value);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     unsigned int atomic_min(unsigned int* address, unsigned int value)
     {
         return ::atomicMin(address, value);
@@ -76,13 +100,27 @@ namespace detail
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int atomic_wrapinc(unsigned int* address, unsigned int value)
+    unsigned int atomic_cas(unsigned int* address, unsigned int compare, unsigned int value)
     {
-        return ::atomicInc(address, value);
+        return ::atomicCAS(address, compare, value);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int atomic_exch(unsigned int * address, unsigned int value)
+    unsigned long atomic_cas(unsigned long* address, unsigned long compare, unsigned long value)
+    {
+        return ::atomicCAS(address, compare, value);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned long long atomic_cas(unsigned long long* address,
+                                  unsigned long long  compare,
+                                  unsigned long long  value)
+    {
+        return ::atomicCAS(address, compare, value);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned int atomic_exch(unsigned int* address, unsigned int value)
     {
         return ::atomicExch(address, value);
     }
@@ -118,7 +156,8 @@ namespace detail
         return __hip_atomic_load(address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_store(unsigned char* address, unsigned char value)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void atomic_store(unsigned char* address, unsigned char value)
     {
         __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
     }

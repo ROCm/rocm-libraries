@@ -21,8 +21,8 @@
 #include <chrono>
 #include <thread>
 
+#include "../rocprim/test_utils_device_ptr.hpp"
 #include "common_test_header.hpp"
-
 // required rocprim headers
 #include <rocprim/intrinsics/atomic.hpp>
 
@@ -50,18 +50,14 @@ void test_kernel(unsigned int* flags)
 __host__
 bool test_func(int block_count, int thread_count)
 {
-    unsigned int*             d_flags;
-    std::vector<unsigned int> h_vec(block_count);
-    HIP_CHECK(hipMalloc(&d_flags, block_count * sizeof(unsigned int)));
-    test_kernel<<<block_count, thread_count>>>(d_flags);
+    test_utils::device_ptr<unsigned int> d_flags(block_count);
+
+    test_kernel<<<block_count, thread_count>>>(d_flags.get());
 
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipMemcpy(h_vec.data(),
-                        d_flags,
-                        block_count * sizeof(unsigned int),
-                        hipMemcpyDeviceToHost));
-    HIP_CHECK(hipFree(d_flags));
+
+    auto h_vec = d_flags.load();
     for(const auto i : h_vec)
     {
         if(i != 1)

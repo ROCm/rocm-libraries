@@ -252,10 +252,10 @@ TEST(RocprimZipIteratorTests, Transform)
                                 expected,
                                 std::max(test_utils::precision<U>, test_utils::precision<T1> * 2));
 
-        hipFree(d_input1);
-        hipFree(d_input2);
-        hipFree(d_input3);
-        hipFree(d_output);
+        HIP_CHECK(hipFree(d_input1));
+        HIP_CHECK(hipFree(d_input2));
+        HIP_CHECK(hipFree(d_input3));
+        HIP_CHECK(hipFree(d_output));
     }
 
 }
@@ -441,12 +441,12 @@ TEST(RocprimZipIteratorTests, TransformReduce)
                                 (std::max(test_utils::precision<T2>, test_utils::precision<U2>)
                                  + test_utils::precision<T2>)*size);
 
-        hipFree(d_input1);
-        hipFree(d_input2);
-        hipFree(d_input3);
-        hipFree(d_output1);
-        hipFree(d_output2);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_input1));
+        HIP_CHECK(hipFree(d_input2));
+        HIP_CHECK(hipFree(d_input3));
+        HIP_CHECK(hipFree(d_output1));
+        HIP_CHECK(hipFree(d_output2));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
 }

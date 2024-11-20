@@ -142,8 +142,8 @@ struct is_default_or_has_tag<default_config, Tag>
 /// \param [in] stream - [optional] HIP stream object. Default is `0` (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel launch is
 /// forced in order to check for errors.
-/// \return `hipSuccess` (`0)` after a successful search; otherwise a HIP runtime error of
-/// type `hipError_t.`
+/// \return `hipSuccess` (0) after a successful search; otherwise a HIP runtime error of
+/// type `hipError_t`.
 ///
 /// \par Example
 /// \parblock

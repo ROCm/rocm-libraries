@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/various.hpp"
 #include "config_types.hpp"
 
@@ -210,21 +211,6 @@ ROCPRIM_KERNEL __launch_bounds__(
                                               begin_bit,
                                               end_bit);
 }
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto _error = hipGetLastError(); \
-        if(_error != hipSuccess) return _error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto __error = hipStreamSynchronize(stream); \
-            if(__error != hipSuccess) return __error; \
-            auto _end = std::chrono::high_resolution_clock::now(); \
-            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
 
 struct Partitioner
 {
@@ -505,8 +491,8 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         }
         if(large_segment_count > 0)
         {
-            std::chrono::high_resolution_clock::time_point start;
-            if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+            std::chrono::steady_clock::time_point start;
+            if(debug_synchronous) start = std::chrono::steady_clock::now();
             hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_large_kernel<config, Descending>),
                                dim3(large_segment_count),
                                dim3(params.kernel_config.block_size),
@@ -527,15 +513,15 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
                                end_bit);
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:large_segments",
                                                         large_segment_count,
-                                                        start)
+                                                        start);
         }
         if(three_way_partitioning && medium_segment_count > 0)
         {
             const auto medium_segment_grid_size
                 = ::rocprim::detail::ceiling_div(medium_segment_count, medium_segments_per_block);
-            std::chrono::high_resolution_clock::time_point start;
+            std::chrono::steady_clock::time_point start;
             if(debug_synchronous)
-                start = std::chrono::high_resolution_clock::now();
+                start = std::chrono::steady_clock::now();
             hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_medium_kernel<config, Descending>),
                                dim3(medium_segment_grid_size),
                                dim3(params.warp_sort_config.block_size_medium),
@@ -556,14 +542,14 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
                                end_bit);
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:medium_segments",
                                                         medium_segment_count,
-                                                        start)
+                                                        start);
         }
         if(small_segment_count > 0)
         {
             const auto small_segment_grid_size = ::rocprim::detail::ceiling_div(small_segment_count,
                                                                                 small_segments_per_block);
-            std::chrono::high_resolution_clock::time_point start;
-            if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+            std::chrono::steady_clock::time_point start;
+            if(debug_synchronous) start = std::chrono::steady_clock::now();
             hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_small_kernel<config, Descending>),
                                dim3(small_segment_grid_size),
                                dim3(params.warp_sort_config.block_size_small),
@@ -584,13 +570,13 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
                                end_bit);
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:small_segments",
                                                         small_segment_count,
-                                                        start)
+                                                        start);
         }
     }
     else
     {
-        std::chrono::high_resolution_clock::time_point start;
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+        std::chrono::steady_clock::time_point start;
+        if(debug_synchronous) start = std::chrono::steady_clock::now();
         hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_sort_kernel<config, Descending>),
                            dim3(segments),
                            dim3(params.kernel_config.block_size),
@@ -608,12 +594,12 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
                            iterations,
                            begin_bit,
                            end_bit);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort", segments, start)
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort", segments, start);
     }
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 
 } // end namespace detail
 

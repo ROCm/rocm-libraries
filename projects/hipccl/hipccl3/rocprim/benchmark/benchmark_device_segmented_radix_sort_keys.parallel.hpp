@@ -235,10 +235,13 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(Key);
+
         constexpr std::array<size_t, 8>
             segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
         constexpr std::array<size_t, 4> segment_lengths{30, 256, 3000, 300000};

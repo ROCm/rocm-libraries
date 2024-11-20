@@ -227,10 +227,12 @@ using radix_key_fundamental = typename has_bit_key_type<radix_key_codec_base<T>>
 
 static_assert(radix_key_fundamental<int>::value, "'int' should be fundamental");
 static_assert(!radix_key_fundamental<int*>::value, "'int*' should not be fundamental");
-static_assert(radix_key_fundamental<__int128_t>::value, "'__int128_t' should be fundamental");
-static_assert(radix_key_fundamental<__uint128_t>::value, "'__uint128_t' should be fundamental");
-static_assert(!radix_key_fundamental<__int128_t*>::value,
-              "'__int128_t*' should not be fundamental");
+static_assert(radix_key_fundamental<rocprim::int128_t>::value,
+              "'rocprim::int128_t' should be fundamental");
+static_assert(radix_key_fundamental<rocprim::uint128_t>::value,
+              "'rocprim::uint128_t' should be fundamental");
+static_assert(!radix_key_fundamental<rocprim::int128_t*>::value,
+              "'rocprim::int128_t*' should not be fundamental");
 
 } // namespace detail
 

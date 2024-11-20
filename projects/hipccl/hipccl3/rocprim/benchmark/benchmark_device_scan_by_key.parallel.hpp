@@ -162,10 +162,13 @@ struct device_scan_by_key_benchmark : public config_autotune_interface
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(Value);
+
         constexpr bool debug = false;
 
         const std::vector<Key> keys

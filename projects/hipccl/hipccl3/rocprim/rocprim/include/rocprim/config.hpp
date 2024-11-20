@@ -182,7 +182,6 @@
 #endif
 
 /// \brief Clang predefined macro for device code on AMD GPU targets, either 32 or 64.
-///   For HIP-CPU with macro is not predefined, and rocPRIM defines it as 64.
 ///   It is undefined behavior to use this macro in host code when compiling with Clang.
 #ifndef __AMDGCN_WAVEFRONT_SIZE
     #define __AMDGCN_WAVEFRONT_SIZE 64

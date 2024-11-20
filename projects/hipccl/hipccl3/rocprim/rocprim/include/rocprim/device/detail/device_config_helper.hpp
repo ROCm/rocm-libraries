@@ -1093,6 +1093,14 @@ struct find_first_of_config_params
     kernel_config_params kernel_config{};
 };
 
+struct adjacent_find_config_tag
+{};
+
+struct adjacent_find_config_params
+{
+    kernel_config_params kernel_config;
+};
+
 } // namespace detail
 
 /// \brief Configuration of device-level find_first_of
@@ -1111,6 +1119,24 @@ struct find_first_of_config : public detail::find_first_of_config_params
 #endif
 };
 
+/// \brief Configuration of device-level adjacent_find
+///
+/// \tparam BlockSize number of threads in a block.
+/// \tparam ItemsPerThread number of items processed by each thread.
+template<unsigned int BlockSize, unsigned int ItemsPerThread>
+struct adjacent_find_config : public detail::adjacent_find_config_params
+{
+    /// \brief Identifies the algorithm associated to the config.
+    using tag = detail::adjacent_find_config_tag;
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+    constexpr adjacent_find_config()
+        : detail::adjacent_find_config_params{
+            {BlockSize, ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT}
+    }
+    {}
+#endif // DOXYGEN_DOCUMENTATION_BUILD
+};
+
 namespace detail
 {
 
@@ -1121,6 +1147,134 @@ struct default_find_first_of_config_base
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     using type = find_first_of_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+};
+
+template<typename InputT>
+struct default_adjacent_find_config_base
+{
+    static constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(InputT), sizeof(int));
+
+    using type
+        = adjacent_find_config<limit_block_size<1024U, sizeof(InputT), ROCPRIM_WARP_SIZE_64>::value,
+                               ::rocprim::max(1u, 16u / item_scale)>;
+};
+
+} // namespace detail
+
+namespace detail
+{
+
+struct search_config_params
+{
+    unsigned int         max_shared_key_bytes;
+    kernel_config_params kernel_config;
+};
+
+} // namespace detail
+
+/// \brief Configuration of device-level find_end
+///
+/// \tparam BlockSize number of threads in a block.
+/// \tparam ItemsPerThread number of items processed by each thread.
+/// \tparam MaxSharedKeyBytes maximum number of bytes for which a shared key is used.
+template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int MaxSharedKeyBytes>
+struct search_config : public detail::search_config_params
+{
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    constexpr search_config()
+        : detail::search_config_params{
+            MaxSharedKeyBytes, {BlockSize, ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT}
+    }
+    {}
+#endif
+};
+
+namespace detail
+{
+struct search_n_config_params
+{
+    size_t               threshold;
+    kernel_config_params kernel_config;
+};
+} // namespace detail
+
+/// \brief Configuration of device-level search_n
+///
+/// \tparam BlockSize number of threads in a block.
+/// \tparam ItemsPerThread number of items processed by each thread.
+template<unsigned int BlockSize, unsigned int ItemsPerThread>
+struct search_n_config : public detail::search_n_config_params
+{
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+    constexpr search_n_config()
+        : detail::search_n_config_params{
+            6, {BlockSize, ItemsPerThread, 0}
+    }
+    {}
+#endif
+};
+
+namespace detail
+{
+
+struct merge_config_params
+{
+    kernel_config_params kernel_config;
+};
+
+} // namespace detail
+
+/**
+ * \brief Configuration of device-level merge operation.
+ * 
+ * \tparam BlockSize number of threads in a block.
+ * \tparam ItemsPerThread number of items processed by each thread per tile. 
+ */
+template<unsigned int BlockSize, unsigned int ItemsPerThread>
+struct merge_config : public detail::merge_config_params
+{
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    /// Number of threads in a block.
+    static constexpr unsigned int block_size = BlockSize;
+    /// Number of items processed by each thread per tile.
+    static constexpr unsigned int items_per_thread = ItemsPerThread;
+
+    constexpr merge_config()
+        : detail::merge_config_params{
+            {BlockSize, ItemsPerThread}
+    } {};
+
+#endif
+};
+
+namespace detail
+{
+
+template<class Key, class Value>
+struct default_merge_config_base
+{
+    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
+        ::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+
+    using type = merge_config<limit_block_size<256u,
+                                               rocprim::max(sizeof(Key), sizeof(Value)),
+                                               ROCPRIM_WARP_SIZE_64>::value,
+                              ::rocprim::max(1u, 10u / item_scale)>;
+};
+
+template<class Key>
+struct default_merge_config_base<Key, empty_type>
+{
+    static constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
+
+    using type
+        = select_type<select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
+                      select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
+                      select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
+                      merge_config<limit_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
+                                   ::rocprim::max(1u, 10u / item_scale)>>;
 };
 
 } // namespace detail

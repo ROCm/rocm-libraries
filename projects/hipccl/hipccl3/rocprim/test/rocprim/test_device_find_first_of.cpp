@@ -224,9 +224,11 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
                                     hipMemcpyHostToDevice));
 
                 const auto input_it
-                    = test_utils::wrap_in_indirect_iterator<use_indirect_iterator>(d_input);
+                    = test_utils::wrap_in_indirect_iterator<use_indirect_iterator, const type>(
+                        d_input);
                 const auto keys_it
-                    = test_utils::wrap_in_indirect_iterator<use_indirect_iterator>(d_keys);
+                    = test_utils::wrap_in_indirect_iterator<use_indirect_iterator, const key_type>(
+                        d_keys);
 
                 // compare function
                 compare_function compare_op;

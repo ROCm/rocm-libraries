@@ -41,7 +41,7 @@
 #include <cstddef>
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 #endif
 
 #define CREATE_BENCHMARK_IPT(K, V, BS, IPT)                                                        \
@@ -80,7 +80,7 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -91,7 +91,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
+    const size_t bytes   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -102,7 +102,7 @@ int main(int argc, char* argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
 // If we are NOT config tuning run a selection of benchmarks
@@ -123,7 +123,7 @@ int main(int argc, char* argv[])
 #endif
 
     std::vector<benchmark::internal::Benchmark*> benchmarks = {};
-    config_autotune_register::register_benchmark_subset(benchmarks, 0, 1, size, seed, stream);
+    config_autotune_register::register_benchmark_subset(benchmarks, 0, 1, bytes, seed, stream);
 
     // Use manual timing
     for(auto& b : benchmarks)

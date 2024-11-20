@@ -61,12 +61,14 @@ struct device_nth_element_benchmark : public config_autotune_interface
     static constexpr unsigned int warmup_size = 5;
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
         using key_type = Key;
 
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(key_type);
         size_t nth = 10;
 
         if(!small_n)

@@ -218,19 +218,12 @@ TYPED_TEST(RocprimDeviceNthelementTests, NthelementKey)
             SCOPED_TRACE(testing::Message() << "with nth_element = " << nth_element);
 
             // Generate data
-            std::vector<key_type> input;
-            if(rocprim::is_floating_point<key_type>::value)
-            {
-                input = test_utils::get_random_data<key_type>(size, -1000, 1000, seed_value);
-            }
-            else
-            {
-                input = test_utils::get_random_data<key_type>(
-                    size,
-                    test_utils::numeric_limits<key_type>::min(),
-                    test_utils::numeric_limits<key_type>::max(),
-                    seed_value);
-            }
+            std::vector<key_type> input = test_utils::get_random_data<key_type>(
+                size,
+                test_utils::generate_limits<key_type>::min(),
+                test_utils::generate_limits<key_type>::max(),
+                seed_value);
+
             std::vector<key_type> output(size);
 
             key_type* d_input;

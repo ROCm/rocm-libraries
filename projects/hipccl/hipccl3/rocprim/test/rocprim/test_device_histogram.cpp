@@ -65,13 +65,14 @@ inline auto get_random_samples(size_t size, U min, U max, int seed_value) ->
 {
     const long long min1 = static_cast<long long>(min);
     const long long max1 = static_cast<long long>(max);
-    const long long d = max1 - min1;
+    const long long d    = max1 - min1;
     return test_utils::get_random_data<T>(
         size,
-        static_cast<T>(std::max(min1 - d / 10, static_cast<long long>(std::numeric_limits<T>::lowest()))),
-        static_cast<T>(std::min(max1 + d / 10, static_cast<long long>(std::numeric_limits<T>::max()))),
-        seed_value
-    );
+        static_cast<T>(std::max(min1 - d / 10,
+                                static_cast<long long>(test_utils::numeric_limits<T>::lowest()))),
+        static_cast<T>(
+            std::min(max1 + d / 10, static_cast<long long>(test_utils::numeric_limits<T>::max()))),
+        seed_value);
 }
 
 template<class T, class U>
@@ -80,13 +81,14 @@ inline auto get_random_samples(size_t size, U min, U max, int seed_value) ->
 {
     const double min1 = static_cast<double>(min);
     const double max1 = static_cast<double>(max);
-    const double d = max1 - min1;
+    const double d    = max1 - min1;
     return test_utils::get_random_data<T>(
         size,
-        static_cast<T>(std::max(min1 - d / 10, static_cast<double>(std::numeric_limits<T>::lowest()))),
-        static_cast<T>(std::min(max1 + d / 10, static_cast<double>(std::numeric_limits<T>::max()))),
-        seed_value
-    );
+        static_cast<T>(
+            std::max(min1 - d / 10, static_cast<double>(test_utils::numeric_limits<T>::lowest()))),
+        static_cast<T>(
+            std::min(max1 + d / 10, static_cast<double>(test_utils::numeric_limits<T>::max()))),
+        seed_value);
 }
 
 // Does nothing, used for testing iterators (not raw pointers) as samples input

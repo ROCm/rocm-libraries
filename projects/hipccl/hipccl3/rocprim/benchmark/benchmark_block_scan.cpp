@@ -42,7 +42,7 @@
 #include <cstdlib>
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 #endif
 
 namespace rp = rocprim;
@@ -145,8 +145,10 @@ template<
     unsigned int ItemsPerThread,
     unsigned int Trials = 100
 >
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
+void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
 {
+    // Calculate the number of elements N
+    size_t N = bytes / sizeof(T);
     // Make sure size is a multiple of BlockSize
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
@@ -211,7 +213,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
             .c_str(),                                                                       \
         run_benchmark<Benchmark, T, BS, IPT>,                                               \
         stream,                                                                             \
-        size)
+        bytes)
 
 #define BENCHMARK_TYPE(type, block) \
     CREATE_BENCHMARK(type, block, 1), \
@@ -227,7 +229,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string& method_name,
                     const std::string& algorithm_name,
                     hipStream_t stream,
-                    size_t size)
+                    size_t bytes)
 {
     using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
@@ -275,7 +277,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -285,7 +287,7 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
+    const size_t bytes = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
 
@@ -294,29 +296,29 @@ int main(int argc, char *argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
     // inclusive_scan using_warp_scan
     using inclusive_scan_uws_t = inclusive_scan<rocprim::block_scan_algorithm::using_warp_scan>;
     add_benchmarks<inclusive_scan_uws_t>(
-        benchmarks, "inclusive_scan", "using_warp_scan", stream, size
+        benchmarks, "inclusive_scan", "using_warp_scan", stream, bytes
     );
     // exclusive_scan using_warp_scan
     using exclusive_scan_uws_t = exclusive_scan<rocprim::block_scan_algorithm::using_warp_scan>;
     add_benchmarks<exclusive_scan_uws_t>(
-        benchmarks, "exclusive_scan", "using_warp_scan", stream, size
+        benchmarks, "exclusive_scan", "using_warp_scan", stream, bytes
     );
     // inclusive_scan reduce then scan
     using inclusive_scan_rts_t = inclusive_scan<rocprim::block_scan_algorithm::reduce_then_scan>;
     add_benchmarks<inclusive_scan_rts_t>(
-        benchmarks, "inclusive_scan", "reduce_then_scan", stream, size
+        benchmarks, "inclusive_scan", "reduce_then_scan", stream, bytes
     );
     // exclusive_scan reduce then scan
     using exclusive_scan_rts_t = exclusive_scan<rocprim::block_scan_algorithm::reduce_then_scan>;
     add_benchmarks<exclusive_scan_rts_t>(
-        benchmarks, "exclusive_scan", "reduce_then_scan", stream, size
+        benchmarks, "exclusive_scan", "reduce_then_scan", stream, bytes
     );
 
     // Use manual timing

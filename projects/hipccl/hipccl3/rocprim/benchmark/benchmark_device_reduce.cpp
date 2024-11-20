@@ -35,20 +35,20 @@
 
 #include <cstddef>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 #endif
 
 #define CREATE_BENCHMARK(T, REDUCE_OP)                                \
     {                                                                 \
         const device_reduce_benchmark<T, REDUCE_OP> instance;         \
-        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance); \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
     }
 
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
+    const size_t bytes = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -81,7 +81,7 @@ int main(int argc, char *argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
@@ -92,7 +92,7 @@ int main(int argc, char *argv[])
     config_autotune_register::register_benchmark_subset(benchmarks,
                                                         parallel_instance,
                                                         parallel_instances,
-                                                        size,
+                                                        bytes,
                                                         seed,
                                                         stream);
 #else

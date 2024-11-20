@@ -196,8 +196,8 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, test_utils::precision<U>));
 
-            hipFree(d_input);
-            hipFree(d_output);
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_output));
 
             if (TestFixture::use_graphs)
             {
@@ -319,10 +319,10 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, test_utils::precision<U>));
 
-            hipFree(d_input1);
-            hipFree(d_input2);
-            hipFree(d_output);
-            
+            HIP_CHECK(hipFree(d_input1));
+            HIP_CHECK(hipFree(d_input2));
+            HIP_CHECK(hipFree(d_output));
+
             if (TestFixture::use_graphs)
             {
                  gHelper.cleanupGraphHelper();
@@ -331,6 +331,28 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
         }
     }
 }
+
+template<class T>
+struct flag_expected_op_t
+{
+    bool* d_flag;
+    T     expected;
+    T     expected_above_limit;
+
+    __device__
+    auto  operator()(const T& value) -> int
+    {
+        if(value == expected)
+        {
+            d_flag[0] = true;
+        }
+        if(value == expected_above_limit)
+        {
+            d_flag[1] = true;
+        }
+        return 0;
+    }
+};
 
 template<bool UseGraphs = false>
 void testLargeIndices()
@@ -378,17 +400,8 @@ void testLargeIndices()
             SCOPED_TRACE(testing::Message() << "expected = " << expected);
             SCOPED_TRACE(testing::Message() << "expected_above_limit = " << expected_above_limit);
 
-            const auto flag_expected = [=] __device__ (T value) -> int {
-                if(value == expected)
-                {
-                    d_flag[0] = true;
-                }
-                if(value == expected_above_limit)
-                {
-                    d_flag[1] = true;
-                }
-                return 0;
-            };
+            const auto flag_expected
+                = flag_expected_op_t<T>{d_flag, expected, expected_above_limit};
 
             test_utils::GraphHelper gHelper;
             if(UseGraphs)

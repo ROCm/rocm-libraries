@@ -39,8 +39,8 @@
 #include <cstdio>
 #include <cstdlib>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
 namespace rp = rocprim;
@@ -90,8 +90,11 @@ template<
     bool Inclusive = true,
     unsigned int Trials = 100
 >
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
 {
+    // Calculate the number of elements 
+    size_t size = bytes / sizeof(T);
+
     // Make sure size is a multiple of BlockSize
     size = BlockSize * ((size + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
@@ -165,7 +168,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
             .c_str(),                                                                  \
         run_benchmark<T, BS, WS, INCLUSIVE>,                                           \
         stream,                                                                        \
-        size)
+        bytes)
 
 #define BENCHMARK_TYPE(type) \
     CREATE_BENCHMARK(type, 64, 64, Inclusive), \
@@ -180,7 +183,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 template<bool Inclusive>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t                                   stream,
-                    size_t                                        size)
+                    size_t                                        bytes)
 {
     using custom_double2 = custom_type<double, double>;
     using custom_int_double = custom_type<int, double>;
@@ -202,7 +205,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -212,7 +215,7 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
+    const size_t bytes = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
 
@@ -221,12 +224,12 @@ int main(int argc, char *argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<true>(benchmarks, stream, size); //inclusive
-    add_benchmarks<false>(benchmarks, stream, size); //exclusive
+    add_benchmarks<true>(benchmarks, stream, bytes); //inclusive
+    add_benchmarks<false>(benchmarks, stream, bytes); //exclusive
 
     // Use manual timing
     for(auto& b : benchmarks)

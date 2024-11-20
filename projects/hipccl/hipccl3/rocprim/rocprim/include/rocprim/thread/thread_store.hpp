@@ -103,8 +103,6 @@ ROCPRIM_DEVICE __forceinline__ void AsmThreadStore(void * ptr, T val)
     ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_store_dwordx2, v, wait_inst, wait_cmd); \
     ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_store_dwordx2, v, wait_inst, wait_cmd);
 
-// [HIP-CPU] MSVC: erronous inline assembly specification (Triggers error C2059: syntax error: 'volatile')
-#ifndef __HIP_CPU_RT__
 #if defined(__gfx940__) || defined(__gfx941__)
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_wb, "sc0 sc1", "s_waitcnt", ""); // TODO: gfx942 validation
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg, "sc0 sc1", "s_waitcnt", "");
@@ -128,7 +126,6 @@ ROCPRIM_ASM_THREAD_STORE_GROUP(store_volatile, "glc", "s_waitcnt", "vmcnt");
 #endif
 // TODO find correct modifiers to match these
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_cs, "", "s_waitcnt", "");
-#endif // __HIP_CPU_RT__
 
 #endif
 
@@ -159,11 +156,7 @@ template<cache_store_modifier MODIFIER = store_default, typename T>
 [[deprecated("Use a dereference instead.")]] ROCPRIM_DEVICE ROCPRIM_INLINE void thread_store(T* ptr,
                                                                                              T  val)
 {
-#ifndef __HIP_CPU_RT__
     detail::AsmThreadStore<MODIFIER, T>(ptr, val);
-#else
-    std::memcpy(ptr, &val, sizeof(T));
-#endif
 }
 
 /// @}

@@ -14,6 +14,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added `--emulation` option added for `rtest.py`
   * Unit tests can be run with `[--emulation|-e|--test|-t]=<test_name>`
 * Added tuned configurations for segmented radix sort for gfx942 to improve performance on this architecture.
+* Added a parallel device-level function, `rocprim::adjacent_find`, similar to the C++ Standard Library `std::adjacent_find` algorithm.
+* Added configuration autotuning to device adjacent find (`rocprim::adjacent_find`) for improved performance on selected architectures.
+* Added rocprim::numeric_limits which is an extension of `std::numeric_limits`, which includes support for 128-bit integers.
+* Added rocprim::int128_t and rocprim::uint128_t which are the __int128_t and __uint128_t types.
+* Added the parallel `search` and `find_end` device functions similar to `std::search` and `std::find_end`, these functions search for the first and last occurrence of the sequence respectively.
+* Added a parallel device-level function, `rocprim::search_n`, similar to the C++ Standard Library `std::search_n` algorithm.
+* Added new constructors and a `base` function, and added `constexpr` specifier to all functions in `rocprim::reverse_iterator` to improve parity with the C++17 `std::reverse_iterator`.
 
 ### Changed
 
@@ -21,6 +28,9 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * The `rtest.py` options have changed. `rtest.py` is now run with at least either `--test|-t` or `--emulation|-e`, but not both options.
 * Changed the internal algorithm of block radix sort to use rank match to improve performance of various radix sort related algorithms.
 * Disabled padding in various cases where higher occupancy resulted in better performance despite more bank conflicts.
+
+* Removed HIP-CPU support. HIP-CPU support was experimental and broken.
+* Changed the C++ version from 14 to 17. C++14 will be deprecated in the next major release.
 
 ### Resolved issues
 
@@ -30,6 +40,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Fixed compilation issue when `rocprim::radix_key_codec<...>` is specialized with a 128-bit integer.
 
 ### Upcoming changes
+* Using the initialisation constructor of `rocprim::reverse_iterator` will throw a deprecation warning. It will be marked as explicit in the next major release.
 
 ## rocPRIM 3.3.0 for ROCm 6.3.0
 

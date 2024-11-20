@@ -52,23 +52,10 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto last_in_warp_segment(Flag flag) ->
     // Make sure last item in logical warp is marked as a tail
     warp_flags |= lane_mask_type(1) << (WarpSize - 1U);
     // Calculate logical lane id of the last valid value in the segment
-#ifndef __HIP_CPU_RT__
-    #if ROCPRIM_WAVEFRONT_SIZE == 32
+#if ROCPRIM_WAVEFRONT_SIZE == 32
     return ::__ffs(warp_flags) - 1;
-    #else
+#else
     return ::__ffsll(warp_flags) - 1;
-    #endif
-#else
-#if _MSC_VER
-    // TODO: verify correctness
-    unsigned long tmp = 0;
-    _BitScanReverse64(&tmp, warp_flags);
-    return 1u << tmp;
-#elif __GNUC__
-    return __builtin_ctzl(warp_flags);
-#else
-    static_assert(false, "Look for GCC/Clang implementation");
-#endif
 #endif
 }
 

@@ -167,7 +167,7 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
 
         size_t            num_runs       = runs_per_thread * block_size;
         constexpr LengthT max_run_length = static_cast<LengthT>(
-            std::min(1000ll, static_cast<long long>(std::numeric_limits<LengthT>::max())));
+            std::min(1000ll, static_cast<long long>(test_utils::numeric_limits<LengthT>::max())));
 
         auto run_items = std::vector<ItemT>(num_runs);
         run_items[0] = test_utils::get_random_value<ItemT>(test_utils::numeric_limits<ItemT>::min(),
@@ -200,8 +200,8 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
 
         const auto empty_run_items
             = test_utils::get_random_data<ItemT>(num_trailing_empty_runs,
-                                                 std::numeric_limits<ItemT>::min(),
-                                                 std::numeric_limits<ItemT>::max(),
+                                                 test_utils::numeric_limits<ItemT>::min(),
+                                                 test_utils::numeric_limits<ItemT>::max(),
                                                  seed_value);
         run_items.insert(run_items.end(), empty_run_items.begin(), empty_run_items.end());
         run_lengths.insert(run_lengths.end(), num_trailing_empty_runs, static_cast<LengthT>(0));

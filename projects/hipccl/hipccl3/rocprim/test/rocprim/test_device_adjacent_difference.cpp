@@ -439,7 +439,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
 
                 ASSERT_NO_FATAL_FAILURE(run_and_verify(output_it, d_output));
 
-                hipFree(d_output);
+                HIP_CHECK(hipFree(d_output));
             }
 
             // if api_variant is not no_alias we should check the inplace function call
@@ -453,8 +453,8 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
                 HIP_CHECK(hipStreamDestroy(stream));
             }
 
-            hipFree(d_temp_storage);
-            hipFree(d_input);
+            HIP_CHECK(hipFree(d_temp_storage));
+            HIP_CHECK(hipFree(d_input));
         }
     }
 }
@@ -714,9 +714,9 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
             ASSERT_EQ(incorrect_flag, 0);
             ASSERT_EQ(counter, rocprim::detail::ceiling_div(size, sampling_rate));
 
-            hipFree(d_temp_storage);
-            hipFree(d_incorrect_flag);
-            hipFree(d_counter);
+            HIP_CHECK(hipFree(d_temp_storage));
+            HIP_CHECK(hipFree(d_incorrect_flag));
+            HIP_CHECK(hipFree(d_counter));
 
             if(TestFixture::use_graphs)
             {

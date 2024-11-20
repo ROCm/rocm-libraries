@@ -50,18 +50,11 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int masked_bit_count(lane_mask_type x, unsigned int add = 0)
 {
     int c;
-#ifndef __HIP_CPU_RT__
-    #if ROCPRIM_WAVEFRONT_SIZE == 32
+#if ROCPRIM_WAVEFRONT_SIZE == 32
     c = ::__builtin_amdgcn_mbcnt_lo(x, add);
-    #else
+#else
     c = ::__builtin_amdgcn_mbcnt_lo(static_cast<int>(x), add);
     c = ::__builtin_amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
-    #endif
-#else
-    using namespace hip::detail;
-    const auto                      tidx{id(Fiber::this_fiber()) % device_warp_size()};
-    std::bitset<device_warp_size()> bits{x >> (device_warp_size() - tidx)};
-    c = static_cast<unsigned int>(bits.count()) + add;
 #endif
     return c;
 }
@@ -72,37 +65,13 @@ namespace detail
 ROCPRIM_DEVICE ROCPRIM_INLINE
 int warp_any(int predicate)
 {
-#ifndef __HIP_CPU_RT__
     return ::__any(predicate);
-#else
-    using namespace hip::detail;
-    const auto tidx{id(Fiber::this_fiber()) % device_warp_size()};
-    auto&      lds{Tile::scratchpad<std::bitset<device_warp_size()>, 1>()[0]};
-
-    lds[tidx] = static_cast<bool>(predicate);
-
-    barrier(Tile::this_tile());
-
-    return lds.any();
-#endif
 }
 
 ROCPRIM_DEVICE ROCPRIM_INLINE
 int warp_all(int predicate)
 {
-#ifndef __HIP_CPU_RT__
     return ::__all(predicate);
-#else
-    using namespace hip::detail;
-    const auto tidx{id(Fiber::this_fiber()) % device_warp_size()};
-    auto&      lds{Tile::scratchpad<std::bitset<device_warp_size()>, 1>()[0]};
-
-    lds[tidx] = static_cast<bool>(predicate);
-
-    barrier(Tile::this_tile());
-
-    return lds.all();
-#endif
 }
 
 } // end detail namespace

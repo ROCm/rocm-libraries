@@ -227,12 +227,12 @@ struct device_adjacent_difference_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        hipFree(d_input);
+        HIP_CHECK(hipFree(d_input));
         if(!InPlace)
         {
-            hipFree(d_output);
+            HIP_CHECK(hipFree(d_output));
         }
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 };
 

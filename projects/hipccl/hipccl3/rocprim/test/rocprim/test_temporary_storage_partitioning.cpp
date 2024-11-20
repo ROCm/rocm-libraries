@@ -66,7 +66,7 @@ TEST(RocprimTemporaryStoragePartitioningTests, Basic)
     ASSERT_EQ(storage_size, size);
     ASSERT_EQ(test_allocation, temporary_storage);
 
-    hipFree(temporary_storage);
+    HIP_CHECK(hipFree(temporary_storage));
 }
 
 TEST(RocprimTemporaryStoragePartitioningTests, ZeroSizePartition)

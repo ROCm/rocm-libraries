@@ -45,7 +45,7 @@
 #include <cstdlib>
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 #endif
 
 namespace rp = rocprim;
@@ -228,10 +228,13 @@ template<class Benchmark,
          unsigned int ItemsPerThread,
          bool         WithTile,
          unsigned int Trials = 100>
-auto run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, hipStream_t stream)
+auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& seed, hipStream_t stream)
     -> std::enable_if_t<!std::is_same<Benchmark, subtract_left_partial>::value
                         && !std::is_same<Benchmark, subtract_right_partial>::value>
 {
+    // Calculate the number of elements N
+    size_t N = bytes / sizeof(T);
+    
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto num_blocks = (N + items_per_block - 1) / items_per_block;
     // Round up size to the next multiple of items_per_block
@@ -296,10 +299,13 @@ template<class Benchmark,
          unsigned int ItemsPerThread,
          bool         WithTile,
          unsigned int Trials = 100>
-auto run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, hipStream_t stream)
+auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& seed, hipStream_t stream)
     -> std::enable_if_t<std::is_same<Benchmark, subtract_left_partial>::value
                         || std::is_same<Benchmark, subtract_right_partial>::value>
 {
+    // Calculate the number of elements N
+    size_t N = bytes / sizeof(T);
+
     static constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto num_blocks = (N + items_per_block - 1) / items_per_block;
     // Round up size to the next multiple of items_per_block
@@ -383,7 +389,7 @@ auto run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, 
                                     ",with_tile:" #WITH_TILE "}}")                      \
             .c_str(),                                                                   \
         run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>,                                \
-        size,                                                                           \
+        bytes,                                                                           \
         seed,                                                                           \
         stream)
 
@@ -398,7 +404,7 @@ auto run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, 
 template<class Benchmark>
 void add_benchmarks(const std::string&                            name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    size_t                                        size,
+                    size_t                                        bytes,
                     const managed_seed&                           seed,
                     hipStream_t                                   stream)
 {
@@ -429,7 +435,7 @@ void add_benchmarks(const std::string&                            name,
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -440,7 +446,7 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
+    const size_t bytes = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -451,17 +457,17 @@ int main(int argc, char *argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<subtract_left>("subtract_left", benchmarks, size, seed, stream);
-    add_benchmarks<subtract_right>("subtract_right", benchmarks, size, seed, stream);
-    add_benchmarks<subtract_left_partial>("subtract_left_partial", benchmarks, size, seed, stream);
+    add_benchmarks<subtract_left>("subtract_left", benchmarks, bytes, seed, stream);
+    add_benchmarks<subtract_right>("subtract_right", benchmarks, bytes, seed, stream);
+    add_benchmarks<subtract_left_partial>("subtract_left_partial", benchmarks, bytes, seed, stream);
     add_benchmarks<subtract_right_partial>("subtract_right_partial",
                                            benchmarks,
-                                           size,
+                                           bytes,
                                            seed,
                                            stream);
 

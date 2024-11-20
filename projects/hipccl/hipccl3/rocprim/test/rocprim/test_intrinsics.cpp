@@ -372,7 +372,7 @@ void test_shuffle()
         }
     }
 
-    hipFree(d_data);
+    HIP_CHECK(hipFree(d_data));
 }
 
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
@@ -501,8 +501,8 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
                 ASSERT_EQ(output[j], expected[j]) << "where index = " << j;
             }
         }
-        hipFree(device_data);
-        hipFree(device_src_lanes);
+        HIP_CHECK(hipFree(device_data));
+        HIP_CHECK(hipFree(device_src_lanes));
     }
 }
 
@@ -555,7 +555,7 @@ TEST(RocprimIntrinsicsTests, LaneId)
         }
     }
 
-    hipFree(d_output);
+    HIP_CHECK(hipFree(d_output));
 }
 
 __global__ void masked_bit_count_kernel(unsigned int*             out,
@@ -669,8 +669,8 @@ TEST(RocprimIntrinsicsTests, MaskedBitCount)
         }
     }
 
-    hipFree(d_input);
-    hipFree(d_output);
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
 }
 
 enum class warp_any_all_test_type
@@ -795,8 +795,8 @@ void warp_any_all_test()
         }
     }
 
-    hipFree(d_input);
-    hipFree(d_output);
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
 }
 
 TEST(RocprimIntrinsicsTests, WarpAny)
@@ -949,9 +949,9 @@ TYPED_TEST(RocprimIntrinsicsTests, WarpPermute)
         }
     }
 
-    hipFree(d_input);
-    hipFree(d_output);
-    hipFree(d_indices);
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_indices));
 }
 
 template<unsigned int LabelBits>
@@ -1074,8 +1074,8 @@ TEST(RocprimIntrinsicsTests, MatchAny)
         }
     }
 
-    hipFree(d_input);
-    hipFree(d_output);
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
 }
 
 __global__ void
@@ -1172,8 +1172,8 @@ TEST(RocprimIntrinsicsTests, Ballot)
         }
     }
 
-    hipFree(d_input);
-    hipFree(d_output);
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
 }
 
 __global__ void group_elect_kernel(max_lane_mask_type* output,
@@ -1294,6 +1294,6 @@ TEST(RocprimIntrinsicsTests, GroupElect)
         }
     }
 
-    hipFree(d_input);
-    hipFree(d_output);
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
 }

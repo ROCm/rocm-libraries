@@ -53,6 +53,7 @@
 #include "rocprim/intrinsics.hpp"
 #include "rocprim/intrinsics/thread.hpp"
 
+#include "rocprim/common.hpp"
 #include "rocprim/config.hpp"
 
 #include <hip/hip_runtime.h>
@@ -1198,7 +1199,7 @@ ROCPRIM_INLINE static hipError_t batch_memcpy_func(void*              temporary_
     }
     if(debug_synchronous)
     {
-        hipStreamSynchronize(stream);
+        ROCPRIM_RETURN_ON_ERROR(hipStreamSynchronize(stream));
     }
 
     // Launch batch_memcpy_non_blev_kernel.
@@ -1216,7 +1217,7 @@ ROCPRIM_INLINE static hipError_t batch_memcpy_func(void*              temporary_
     }
     if(debug_synchronous)
     {
-        hipStreamSynchronize(stream);
+        ROCPRIM_RETURN_ON_ERROR(hipStreamSynchronize(stream));
     }
 
     // Launch batch_memcpy_blev_kernel.
@@ -1232,7 +1233,7 @@ ROCPRIM_INLINE static hipError_t batch_memcpy_func(void*              temporary_
     }
     if(debug_synchronous)
     {
-        hipStreamSynchronize(stream);
+        ROCPRIM_RETURN_ON_ERROR(hipStreamSynchronize(stream));
     }
 
     return hipSuccess;

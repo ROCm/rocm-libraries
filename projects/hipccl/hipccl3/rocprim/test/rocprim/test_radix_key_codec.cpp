@@ -427,8 +427,8 @@ TYPED_TEST(TypedRadixKeyCodecTest, EncodeDecodeExtract)
         const size_t     size = (1 << 20) + 123;
         std::vector<Key> input_keys
             = test_utils::get_random_data<Key>(size,
-                                               test_utils::numeric_limits<Key>::min(),
-                                               test_utils::numeric_limits<Key>::max(),
+                                               test_utils::generate_limits<Key>::min(),
+                                               test_utils::generate_limits<Key>::max(),
                                                seed_value);
 
         for(size_t i = 0; i < size; ++i)

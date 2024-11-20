@@ -490,7 +490,7 @@ void testLargeIndices()
                             hipMemcpyDeviceToHost));
 
         // Check if output values are as expected
-        const size_t unique_keys    = size_t(std::numeric_limits<key_type>::max()) + 1;
+        const size_t unique_keys    = size_t(test_utils::numeric_limits<key_type>::max()) + 1;
         const size_t segment_length = rocprim::detail::ceiling_div(size, unique_keys);
         const size_t full_segments  = size % unique_keys == 0 ? unique_keys : size % unique_keys;
         for(size_t i = 0; i < size; i += 4321)

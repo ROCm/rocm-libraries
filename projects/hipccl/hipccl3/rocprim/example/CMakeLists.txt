@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,25 +27,10 @@ function(add_rocprim_example EXAMPLE_SOURCE)
     PRIVATE
     rocprim_hip
   )
-  if(NOT USE_HIP_CPU)
-    target_link_libraries(${EXAMPLE_TARGET}
-      PRIVATE
-        rocprim_hip
-    )
-  else()
-    target_link_libraries(${TEST_EXAMPLE_TARGETTARGET}
-      PRIVATE
-        rocprim
-        Threads::Threads
-        hip_cpu_rt::hip_cpu_rt
-    )
-    if(STL_DEPENDS_ON_TBB)
-      target_link_libraries(${EXAMPLE_TARGET}
-        PRIVATE
-          TBB::tbb
-      )
-    endif()
-  endif()
+  target_link_libraries(${EXAMPLE_TARGET}
+    PRIVATE
+      rocprim_hip
+  )
   set_target_properties(${EXAMPLE_TARGET}
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/example"
@@ -63,7 +48,7 @@ function(add_rocprim_example EXAMPLE_SOURCE)
     foreach( file_i ${third_party_dlls})
       add_custom_command( TARGET ${EXAMPLE_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/example )
     endforeach( file_i )
-  endif()     
+  endif()
 endfunction()
 
 # ****************************************************************************

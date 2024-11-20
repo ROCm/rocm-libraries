@@ -27,6 +27,7 @@
 #include <utility>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 
@@ -48,25 +49,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-#ifndef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto _error = hipGetLastError(); \
-        if(_error != hipSuccess) return _error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto __error = hipStreamSynchronize(stream); \
-            if(__error != hipSuccess) return __error; \
-            auto _end = std::chrono::high_resolution_clock::now(); \
-            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
-
-#endif
 
 template<class Tuple, size_t Index>
 constexpr auto tuple_bit_size_impl()
@@ -177,13 +159,13 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
     if(error != hipSuccess)
         return error;
 
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
 
     if(debug_synchronous)
     {
         std::cout << "blocks " << blocks << '\n';
         std::cout << "full_blocks " << full_blocks << '\n';
-        start = std::chrono::high_resolution_clock::now();
+        start = std::chrono::steady_clock::now();
     }
 
     // Compute a histogram for each digit.
@@ -204,7 +186,7 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
     // Scan each histogram separately to get the final offsets.
     if(debug_synchronous)
     {
-        start = std::chrono::high_resolution_clock::now();
+        start = std::chrono::steady_clock::now();
     }
 
     hipLaunchKernelGGL(HIP_KERNEL_NAME(onesweep_scan_histograms_kernel<config>),
@@ -332,7 +314,7 @@ hipError_t radix_sort_onesweep_iteration(
         if(error != hipSuccess)
             return error;
 
-        std::chrono::high_resolution_clock::time_point start;
+        std::chrono::steady_clock::time_point start;
         if(debug_synchronous)
         {
             std::cout << "radix_bits " << params.radix_bits_per_place << '\n';
@@ -347,7 +329,7 @@ hipError_t radix_sort_onesweep_iteration(
             std::cout << "offset " << offset << '\n';
             std::cout << "blocks " << blocks << '\n';
             std::cout << "full_blocks " << full_blocks << '\n';
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::steady_clock::now();
         }
 
         if(from_input && to_output)
@@ -765,7 +747,7 @@ hipError_t
     }
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 
 } // end namespace detail
 

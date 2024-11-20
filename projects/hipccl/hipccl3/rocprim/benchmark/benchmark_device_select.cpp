@@ -43,33 +43,45 @@
 #include <cstdio>
 #include <cstdlib>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
+
+#define CREATE_SELECT_PREDICATED_FLAG_BENCHMARK(T, F, p)                                          \
+    {                                                                                             \
+        const device_select_predicated_flag_benchmark<T, F, rocprim::default_config, p> instance; \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);                            \
+    }
 
 #define CREATE_SELECT_FLAG_BENCHMARK(T, F, p)                                          \
     {                                                                                  \
         const device_select_flag_benchmark<T, rocprim::default_config, F, p> instance; \
-        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance);                  \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);                  \
     }
 
 #define CREATE_SELECT_PREDICATE_BENCHMARK(T, p)                                          \
     {                                                                                    \
         const device_select_predicate_benchmark<T, rocprim::default_config, p> instance; \
-        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance);                    \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);                    \
     }
 
 #define CREATE_UNIQUE_BENCHMARK(T, p)                                                 \
     {                                                                                 \
         const device_select_unique_benchmark<T, rocprim::default_config, p> instance; \
-        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance);                 \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);                 \
     }
 
 #define CREATE_UNIQUE_BY_KEY_BENCHMARK(K, V, p)                                                 \
     {                                                                                           \
         const device_select_unique_by_key_benchmark<K, V, rocprim::default_config, p> instance; \
-        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance);                           \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);                           \
     }
+
+#define BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(type, value)                          \
+    CREATE_SELECT_PREDICATED_FLAG_BENCHMARK(type, value, select_probability::p005); \
+    CREATE_SELECT_PREDICATED_FLAG_BENCHMARK(type, value, select_probability::p025); \
+    CREATE_SELECT_PREDICATED_FLAG_BENCHMARK(type, value, select_probability::p050); \
+    CREATE_SELECT_PREDICATED_FLAG_BENCHMARK(type, value, select_probability::p075)
 
 #define BENCHMARK_SELECT_FLAG_TYPE(type, value)                          \
     CREATE_SELECT_FLAG_BENCHMARK(type, value, select_probability::p005); \
@@ -98,7 +110,7 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -120,7 +132,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
+    const size_t bytes   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -131,7 +143,7 @@ int main(int argc, char* argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
@@ -142,7 +154,7 @@ int main(int argc, char* argv[])
     config_autotune_register::register_benchmark_subset(benchmarks,
                                                         parallel_instance,
                                                         parallel_instances,
-                                                        size,
+                                                        bytes,
                                                         seed,
                                                         stream);
 #else
@@ -164,6 +176,14 @@ int main(int argc, char* argv[])
     BENCHMARK_SELECT_PREDICATE_TYPE(int8_t);
     BENCHMARK_SELECT_PREDICATE_TYPE(rocprim::half);
     BENCHMARK_SELECT_PREDICATE_TYPE(custom_int_double);
+
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(int, unsigned char);
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(float, unsigned char);
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(double, unsigned char);
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(uint8_t, uint8_t);
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(int8_t, int8_t);
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(rocprim::half, int8_t);
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(custom_double2, unsigned char);
 
     BENCHMARK_UNIQUE_TYPE(int);
     BENCHMARK_UNIQUE_TYPE(float);

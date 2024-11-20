@@ -41,8 +41,8 @@
 #include <cstdio>
 #include <cstdlib>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 *4;
 #endif
 
 namespace rp = rocprim;
@@ -95,10 +95,13 @@ template<class Key,
          bool         SortByKey      = false,
          unsigned int Trials         = 100>
 void run_benchmark(benchmark::State&   state,
-                   size_t              size,
+                   size_t              bytes,
                    const managed_seed& seed,
                    hipStream_t         stream)
 {
+    // Calculate the number of elements 
+    size_t size = bytes / sizeof(Key);
+
     // Make sure size is a multiple of items_per_block
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     size = BlockSize * ((size + items_per_block - 1) / items_per_block);
@@ -205,7 +208,7 @@ void run_benchmark(benchmark::State&   state,
                                   + ",ws:" #WS ",cfg:{bs:" #BS ",ipt:" #IPT "}}")    \
             .c_str(),                                                                \
         run_benchmark<K, BS, WS, IPT>,                                               \
-        size,                                                                        \
+        bytes,                                                                        \
         seed,                                                                        \
         stream)
 
@@ -215,7 +218,7 @@ void run_benchmark(benchmark::State&   state,
                                                            ",cfg:{bs:" #BS ",ipt:" #IPT "}}") \
                                      .c_str(),                                                \
                                  run_benchmark<K, BS, WS, IPT, V, true>,                      \
-                                 size,                                                        \
+                                 bytes,                                                        \
                                  seed,                                                        \
                                  stream)
 
@@ -246,7 +249,7 @@ void run_benchmark(benchmark::State&   state,
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -257,7 +260,7 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
+    const size_t bytes = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -268,7 +271,7 @@ int main(int argc, char *argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     using custom_double2 = custom_type<double, double>;

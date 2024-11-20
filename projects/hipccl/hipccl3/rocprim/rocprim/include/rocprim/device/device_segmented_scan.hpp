@@ -26,6 +26,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/various.hpp"
 
 #include "../iterator/zip_iterator.hpp"
@@ -45,6 +46,31 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
+
+template<class InputIterator, class HeadFlagIterator, class ResultType, class FlagType>
+struct transform_op_t
+{
+    InputIterator    input;
+    HeadFlagIterator head_flags;
+    ResultType       initial_value_converted;
+    size_t           size;
+
+    ROCPRIM_DEVICE
+    auto             operator()(const size_t i) const
+    {
+        FlagType flag(false);
+        if(i + 1 < size)
+        {
+            flag = head_flags[i + 1];
+        }
+        ResultType value = initial_value_converted;
+        if(!flag)
+        {
+            value = input[i];
+        }
+        return rocprim::make_tuple(value, flag);
+    }
+};
 
 template<
     bool Exclusive,
@@ -70,21 +96,6 @@ void segmented_scan_kernel(InputIterator input,
         static_cast<ResultType>(initial_value), scan_op
     );
 }
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto _error = hipGetLastError(); \
-        if(_error != hipSuccess) return _error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto __error = hipStreamSynchronize(stream); \
-            if(__error != hipSuccess) return __error; \
-            auto _end = std::chrono::high_resolution_clock::now(); \
-            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
 
 template<
     bool Exclusive,
@@ -134,8 +145,8 @@ hipError_t segmented_scan_impl(void * temporary_storage,
     if( segments == 0u )
         return hipSuccess;
 
-    std::chrono::high_resolution_clock::time_point start;
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    std::chrono::steady_clock::time_point start;
+    if(debug_synchronous) start = std::chrono::steady_clock::now();
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(segmented_scan_kernel<Exclusive, config, result_type>),
         dim3(segments), dim3(block_size), 0, stream,
@@ -147,7 +158,7 @@ hipError_t segmented_scan_impl(void * temporary_storage,
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 
 } // end of detail namespace
 
@@ -601,39 +612,26 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
         detail::headflag_scan_op_wrapper<
             result_type, flag_type, BinaryFunction
         >;
+    using transform_op
+        = detail::transform_op_t<InputIterator, HeadFlagIterator, result_type, flag_type>;
 
     const result_type initial_value_converted = static_cast<result_type>(initial_value);
 
     // Flag the last item of each segment as the next segment's head, use initial_value as its value,
     // then run exclusive scan
     return exclusive_scan<Config>(
-        temporary_storage, storage_size,
+        temporary_storage,
+        storage_size,
         rocprim::make_transform_iterator(
             rocprim::make_counting_iterator<size_t>(0),
-            [input, head_flags, initial_value_converted, size]
-            ROCPRIM_DEVICE
-            (const size_t i)
-            {
-                flag_type flag(false);
-                if(i + 1 < size)
-                {
-                    flag = head_flags[i + 1];
-                }
-                result_type value = initial_value_converted;
-                if(!flag)
-                {
-                    value = input[i];
-                }
-                return rocprim::make_tuple(value, flag);
-            }
-        ),
+            transform_op{input, head_flags, initial_value_converted, size}),
         rocprim::make_zip_iterator(rocprim::make_tuple(output, rocprim::make_discard_iterator())),
-        rocprim::make_tuple(initial_value_converted, flag_type(true)), // init value is a head of the first segment
+        rocprim::make_tuple(initial_value_converted,
+                            flag_type(true)), // init value is a head of the first segment
         size,
         headflag_scan_op_wrapper_type(scan_op),
         stream,
-        debug_synchronous
-    );
+        debug_synchronous);
 }
 
 /// @}

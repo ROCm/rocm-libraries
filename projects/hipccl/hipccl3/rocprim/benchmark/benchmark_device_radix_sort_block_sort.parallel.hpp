@@ -74,12 +74,15 @@ struct device_radix_sort_block_sort_benchmark : public config_autotune_interface
     // keys benchmark
     template<typename val = Value>
     auto do_run(benchmark::State&   state,
-                size_t              size,
+                size_t              bytes,
                 const managed_seed& seed,
                 hipStream_t         stream) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         using key_type = Key;
+
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(key_type);
 
         // Generate data
         std::vector<key_type> keys_input
@@ -165,13 +168,16 @@ struct device_radix_sort_block_sort_benchmark : public config_autotune_interface
     // pairs benchmark
     template<typename val = Value>
     auto do_run(benchmark::State&   state,
-                size_t              size,
+                size_t              bytes,
                 const managed_seed& seed,
                 hipStream_t         stream) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         using key_type   = Key;
         using value_type = Value;
+
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(key_type);
 
         // Generate data
         std::vector<key_type> keys_input

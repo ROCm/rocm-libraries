@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -146,7 +146,6 @@ void block_load_direct_blocked(unsigned int flat_id,
     {
         items[item] = static_cast<T>(out_of_bounds);
     }
-    // TODO: Consider using std::fill for HIP-CPU, as uses memset() where appropriate
 
     block_load_direct_blocked(flat_id, block_input, items, valid);
 }

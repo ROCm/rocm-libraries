@@ -10,7 +10,7 @@
 #include <iostream>
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
 
@@ -63,7 +63,7 @@ static void BM_kernel_launch(benchmark::State& state)
         hipLaunchKernelGGL(empty_kernel, dim3(1), dim3(1), 0, stream);
         HIP_CHECK(hipGetLastError());
     }
-    hipStreamSynchronize(stream);
+    HIP_CHECK(hipStreamSynchronize(stream));
 }
 
 #define CREATE_BENCHMARK(ST, SK)                \
@@ -81,7 +81,7 @@ static void BM_kernel_launch(benchmark::State& state)
 int main(int argc, char** argv)
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", 100, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                     "name_format",

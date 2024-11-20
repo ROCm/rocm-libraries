@@ -91,12 +91,15 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
     // keys benchmark
     template<typename val = Value>
     auto do_run(benchmark::State&   state,
-                size_t              size,
+                size_t              bytes,
                 const managed_seed& seed,
                 hipStream_t         stream) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         using key_type = Key;
+
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(key_type);
 
         std::vector<key_type> keys_input
             = get_random_data<key_type>(size,
@@ -214,13 +217,16 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
     // pairs benchmark
     template<typename val = Value>
     auto do_run(benchmark::State&   state,
-                size_t              size,
+                size_t              bytes,
                 const managed_seed& seed,
                 hipStream_t         stream) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         using key_type   = Key;
         using value_type = Value;
+
+        // Calculate the number of elements 
+        size_t size = bytes / sizeof(key_type);
 
         std::vector<key_type> keys_input
             = get_random_data<key_type>(size,
@@ -443,11 +449,11 @@ struct device_radix_sort_onesweep_benchmark_generator
     #define CREATE_RADIX_SORT_BENCHMARK(...)                                  \
         {                                                                     \
             const device_radix_sort_onesweep_benchmark<__VA_ARGS__> instance; \
-            REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance);     \
+            REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);     \
         }
 
 inline void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                     size_t                                        size,
+                                     size_t                                        bytes,
                                      const managed_seed&                           seed,
                                      hipStream_t                                   stream)
 {
@@ -461,7 +467,7 @@ inline void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*
 }
 
 inline void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                      size_t                                        size,
+                                      size_t                                        bytes,
                                       const managed_seed&                           seed,
                                       hipStream_t                                   stream)
 {

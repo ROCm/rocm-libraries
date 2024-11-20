@@ -49,9 +49,10 @@ namespace detail
 
 enum class select_method
 {
-    flag      = 0,
-    predicate = 1,
-    unique    = 2
+    flag            = 0,
+    predicate       = 1,
+    predicated_flag = 2,
+    unique          = 3
 };
 
 enum class partition_subalgo
@@ -63,6 +64,7 @@ enum class partition_subalgo
     partition_three_way,
     select_flag,
     select_predicate,
+    select_predicated_flag,
     select_unique,
     select_unique_by_key
 };
@@ -110,6 +112,60 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto
                 is_selected,
                 storage.load_flags
             );
+    }
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+}
+
+template<select_method SelectMethod,
+         unsigned int  BlockSize,
+         class BlockLoadFlagsType,
+         class BlockDiscontinuityType,
+         class InputIterator,
+         class FlagIterator,
+         class ValueType,
+         unsigned int ItemsPerThread,
+         class UnaryPredicate,
+         class InequalityOp,
+         class StorageType>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto partition_block_load_flags(InputIterator /* block_predecessor */,
+                                FlagIterator block_flags,
+                                ValueType (& /* values */)[ItemsPerThread],
+                                bool (&is_selected)[ItemsPerThread],
+                                UnaryPredicate predicate,
+                                InequalityOp /* inequality_op */,
+                                StorageType& storage,
+                                const bool /* is_first_block */,
+                                const unsigned int block_thread_id,
+                                const bool         is_global_last_block,
+                                const unsigned int valid_in_global_last_block) ->
+    typename std::enable_if<SelectMethod == select_method::predicated_flag>::type
+{
+    using flag_type = typename std::iterator_traits<FlagIterator>::value_type;
+    flag_type flags[ItemsPerThread];
+
+    if(is_global_last_block) // last block
+    {
+        BlockLoadFlagsType().load(block_flags,
+                                  flags,
+                                  valid_in_global_last_block,
+                                  false,
+                                  storage.load_flags);
+        const auto offset = block_thread_id * ItemsPerThread;
+        ROCPRIM_UNROLL
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            is_selected[i] = ((offset + i) < valid_in_global_last_block) && predicate(flags[i]);
+        }
+    }
+    else
+    {
+        BlockLoadFlagsType().load(block_flags, flags, storage.load_flags);
+        ROCPRIM_UNROLL
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            is_selected[i] = predicate(flags[i]);
+        }
     }
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
 }
@@ -917,14 +973,18 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     using offset_type = typename OffsetLookbackScanState::value_type;
     using key_type = typename std::iterator_traits<KeyIterator>::value_type;
     using value_type = typename std::iterator_traits<ValueIterator>::value_type;
+    using flag_type =
+        typename std::conditional<SelectMethod == select_method::predicated_flag,
+                                  typename std::iterator_traits<FlagIterator>::value_type,
+                                  bool>::type;
 
     // Block primitives
     using block_load_key_type = ::rocprim::
         block_load<key_type, block_size, items_per_thread, params.key_block_load_method>;
     using block_load_value_type = ::rocprim::
         block_load<value_type, block_size, items_per_thread, params.value_block_load_method>;
-    using block_load_flag_type
-        = ::rocprim::block_load<bool, block_size, items_per_thread, params.flag_block_load_method>;
+    using block_load_flag_type = ::rocprim::
+        block_load<flag_type, block_size, items_per_thread, params.flag_block_load_method>;
     using block_scan_offset_type
         = ::rocprim::block_scan<offset_type, block_size, params.block_scan_method>;
     using block_discontinuity_key_type = ::rocprim::block_discontinuity<key_type, block_size>;

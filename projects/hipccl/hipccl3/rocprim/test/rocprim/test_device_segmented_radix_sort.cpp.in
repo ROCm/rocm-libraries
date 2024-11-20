@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,18 @@
 #elif ROCPRIM_TEST_SUITE_SLICE == 3
     TYPED_TEST_P(SUITE, SortPairsDoubleBuffer   ) { sort_pairs_double_buffer<TestFixture>(); } 
     REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairsDoubleBuffer);
+#elif HIPCUB_TEST_SUITE_SLICE == 4
+    TYPED_TEST_P(SUITE, SortKeysEmptyData       ) { sort_keys_empty_data<TestFixture>(); } 
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeysEmptyData);
+#elif HIPCUB_TEST_SUITE_SLICE == 5
+    TYPED_TEST_P(SUITE, SortKeysLargeSegments   ) { sort_keys_large_segments<TestFixture>(); } 
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeysLargeSegments);
+#elif HIPCUB_TEST_SUITE_SLICE == 6
+    TYPED_TEST_P(SUITE, SortKeysUnspecifiedRanges   ) { sort_keys_unspecified_ranges<TestFixture>(); } 
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeysUnspecifiedRanges);
+#elif HIPCUB_TEST_SUITE_SLICE == 7
+    TYPED_TEST_P(SUITE, SortPairsUnspecifiedRanges   ) { sort_pairs_unspecified_ranges<TestFixture>(); } 
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairsUnspecifiedRanges);
 #endif
 
 #if   ROCPRIM_TEST_TYPE_SLICE == 0
