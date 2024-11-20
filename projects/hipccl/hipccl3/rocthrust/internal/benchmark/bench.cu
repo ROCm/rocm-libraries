@@ -1,6 +1,6 @@
 /*
  *  Copyright 20011-2021 NVIDIA Corporation
- *  Modifications Copyright© 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -26,13 +26,9 @@
 #include <thrust/sort.h>
 #include <thrust/transform_reduce.h>
 
-#if THRUST_CPP_DIALECT >= 2011
-#include <thrust/random.h>
 #include <thrust/shuffle.h>
 
 #include <random>
-#endif
-
 #include <algorithm>
 #include <numeric>
 
@@ -83,15 +79,6 @@
 #define PP_STRINGIZE(expr)  PP_STRINGIZE_(expr)
 
 #define PP_CAT(a, b) a ## b
-
-// We don't use THRUST_NOEXCEPT because it's new, and we want this benchmark to
-// be backwards-compatible to older versions of Thrust.
-#if THRUST_CPP_DIALECT >= 2011
-  #define NOEXCEPT noexcept
-#else
-  #define NOEXCEPT throw()
-#endif
-
 ///////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
@@ -758,7 +745,6 @@ struct copy_trial_base : trial_base<TrialKind>
   }
 };
 
-#if THRUST_CPP_DIALECT >= 2011
 template <typename Container, typename TrialKind = regular_trial>
 struct shuffle_trial_base : trial_base<TrialKind>
 {
@@ -771,7 +757,6 @@ struct shuffle_trial_base : trial_base<TrialKind>
     randomize(input);
   }
 };
-#endif
 
 template <typename Container, typename TrialKind = regular_trial>
 struct partition_trial_base : trial_base<TrialKind>
@@ -1034,7 +1019,6 @@ struct copy_tester
   #endif
 };
 
-#if THRUST_CPP_DIALECT >= 2011
 template <typename T>
 struct shuffle_tester
 {
@@ -1063,7 +1047,6 @@ struct shuffle_tester
     }
   };
 };
-#endif
 
 template <typename T>
 struct partition_tester
@@ -1377,8 +1360,8 @@ std::vector<std::string> split(std::string const& str, std::string const& delim)
 
 struct command_line_option_error : std::exception
 {
-  virtual ~command_line_option_error() NOEXCEPT {}
-  virtual const char* what() const NOEXCEPT = 0;
+  virtual ~command_line_option_error() noexcept {}
+  virtual const char* what() const noexcept = 0;
 };
 
 struct only_one_option_allowed : command_line_option_error
@@ -1407,9 +1390,9 @@ struct only_one_option_allowed : command_line_option_error
     message += ".";
   }
 
-  virtual ~only_one_option_allowed() NOEXCEPT {}
+  virtual ~only_one_option_allowed() noexcept {}
 
-  virtual const char* what() const NOEXCEPT
+  virtual const char* what() const noexcept
   {
     return message.c_str();
   }
@@ -1430,9 +1413,9 @@ struct required_option_missing : command_line_option_error
     message += "` option is required.";
   }
 
-  virtual ~required_option_missing() NOEXCEPT {}
+  virtual ~required_option_missing() noexcept {}
 
-  virtual const char* what() const NOEXCEPT
+  virtual const char* what() const noexcept
   {
     return message.c_str();
   }

@@ -1,6 +1,7 @@
-#include <thrust/device_vector.h>
 #include <thrust/copy.h>
+#include <thrust/device_vector.h>
 #include <thrust/scan.h>
+
 #include <iostream>
 
 #include "include/host_device.h"

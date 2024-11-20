@@ -351,9 +351,7 @@ struct TypeWithNonTrivialAssigment
   THRUST_HOST_DEVICE
   TypeWithNonTrivialAssigment() : x(0), y(0), z(0) {}
 
-#if THRUST_CPP_DIALECT >= 2011
   TypeWithNonTrivialAssigment(const TypeWithNonTrivialAssigment &) = default;
-#endif
 
   THRUST_HOST_DEVICE
   TypeWithNonTrivialAssigment& operator=(const TypeWithNonTrivialAssigment& t)

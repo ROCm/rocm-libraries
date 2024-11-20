@@ -1,6 +1,6 @@
 #include <thrust/host_vector.h>
-#include <thrust/remove.h>
 #include <thrust/random.h>
+#include <thrust/remove.h>
 
 #include "include/host_device.h"
 

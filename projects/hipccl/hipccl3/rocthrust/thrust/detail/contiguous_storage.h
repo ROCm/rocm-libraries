@@ -20,6 +20,7 @@
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/config.h>
+#include <thrust/sequence_access.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -162,7 +163,6 @@ template<typename T, typename Alloc>
     THRUST_HOST_DEVICE
     void propagate_allocator(const contiguous_storage &other);
 
-#if THRUST_CPP_DIALECT >= 2011
     THRUST_HOST_DEVICE
     void propagate_allocator(contiguous_storage &other);
 
@@ -170,7 +170,6 @@ template<typename T, typename Alloc>
     // on move assignment
     THRUST_HOST_DEVICE
     contiguous_storage &operator=(contiguous_storage &&other);
-#endif // THRUST_CPP_DIALECT >= 2011
 
   private:
     // XXX we could inherit from this to take advantage of empty base class optimization
@@ -215,13 +214,11 @@ template<typename T, typename Alloc>
     THRUST_HOST_DEVICE
     void propagate_allocator_dispatch(false_type, const contiguous_storage &other);
 
-#if THRUST_CPP_DIALECT >= 2011
     THRUST_HOST_DEVICE
     void propagate_allocator_dispatch(true_type, contiguous_storage &other);
 
     THRUST_HOST_DEVICE
     void propagate_allocator_dispatch(false_type, contiguous_storage &other);
-#endif // THRUST_CPP_DIALECT >= 2011
 }; // end contiguous_storage
 
 } // end detail

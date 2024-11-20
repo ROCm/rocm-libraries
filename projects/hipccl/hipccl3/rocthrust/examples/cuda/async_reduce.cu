@@ -4,9 +4,7 @@
 #include <thrust/system/cuda/execution_policy.h>
 #include <cassert>
 
-#if THRUST_CPP_DIALECT >= 2011
 #include <future>
-#endif
 
 // This example demonstrates two ways to achieve algorithm invocations that are asynchronous with
 // the calling thread.
@@ -53,9 +51,7 @@ int main()
   // reset the result
   result[0] = 0;
 
-#if THRUST_CPP_DIALECT >= 2011
   // method 2: use std::async to create asynchrony
-
   // copy all the algorithm parameters
   auto begin        = data.begin();
   auto end          = data.end();
@@ -71,7 +67,6 @@ int main()
 
   // wait on the result and check that it is correct
   assert(future_result.get() == n);
-#endif
 
   return 0;
 }

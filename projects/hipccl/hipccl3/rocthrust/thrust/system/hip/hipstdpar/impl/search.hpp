@@ -29,9 +29,354 @@
 #include <thrust/logical.h>
 #include <thrust/mismatch.h>
 
+#include <rocprim/rocprim.hpp>
+
 #include <algorithm>
 #include <execution>
 #include <utility>
+
+// rocThrust is currently missing some API entries, forward calls to rocPRIM until they are added.
+namespace thrust
+{
+// BEGIN FIND_FIRST_OF
+template<class InputIt1, class InputIt2, class BinaryPred>
+InputIt1 THRUST_HIP_FUNCTION
+find_first_of(InputIt1 first, InputIt1 last,
+              InputIt2 s_first, InputIt2 s_last,
+              BinaryPred p)
+{
+    if (s_first == s_last)
+    {
+        return last;
+    }
+
+    thrust::device_system_tag dev_tag;
+    size_t* d_output;
+    d_output = thrust::malloc<size_t>(dev_tag, sizeof(*d_output)).get();
+
+    size_t size = last - first;
+    size_t s_size = s_last - s_first;
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    void*  d_temp_storage = nullptr;
+    // Get size of d_temp_storage
+    hipError_t error = ::rocprim::find_first_of(d_temp_storage,
+                                              temp_storage_size_bytes,
+                                              first,
+                                              s_first,
+                                              d_output,
+                                              size,
+                                              s_size,
+                                              p);
+
+    if (error != hipSuccess)
+    {
+        return last;
+    }
+
+    d_temp_storage = thrust::malloc(dev_tag, temp_storage_size_bytes).get();
+
+    error = ::rocprim::find_first_of(d_temp_storage,
+                                   temp_storage_size_bytes,
+                                   first,
+                                   s_first,
+                                   d_output,
+                                   size,
+                                   s_size,
+                                   p);
+
+    if (error != hipSuccess)
+    {
+        thrust::free(dev_tag, d_temp_storage);
+        thrust::free(dev_tag, d_output);
+        return last;
+    }
+
+    error = hipDeviceSynchronize();
+    if (error != hipSuccess)
+    {
+        thrust::free(dev_tag, d_temp_storage);
+        thrust::free(dev_tag, d_output);
+        return last;
+    }
+
+    size_t offset;
+    hipMemcpy(&offset, d_output, sizeof(offset), hipMemcpyDeviceToHost);
+
+    thrust::free(dev_tag, d_temp_storage);
+    thrust::free(dev_tag, d_output);
+
+    return first + offset;
+}
+// END FIND_FIRST_OF
+
+// BEGIN SEARCH
+template<class InputIt1, class InputIt2, class BinaryPred>
+InputIt1 THRUST_HIP_FUNCTION
+search(InputIt1 first, InputIt1 last,
+              InputIt2 s_first, InputIt2 s_last,
+              BinaryPred p)
+{
+    if (s_first == s_last)
+    {
+        return first;
+    }
+
+    thrust::device_system_tag dev_tag;
+    size_t* d_output;
+    d_output = thrust::malloc<size_t>(dev_tag, sizeof(*d_output)).get();
+
+    size_t size = last - first;
+    size_t s_size = s_last - s_first;
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    void*  d_temp_storage = nullptr;
+    // Get size of d_temp_storage
+    hipError_t error = ::rocprim::search(d_temp_storage,
+                                        temp_storage_size_bytes,
+                                        first,
+                                        s_first,
+                                        d_output,
+                                        size,
+                                        s_size,
+                                        p);
+
+    if (error != hipSuccess)
+    {
+        return last;
+    }
+
+    d_temp_storage = thrust::malloc(dev_tag, temp_storage_size_bytes).get();
+
+    error = ::rocprim::search(d_temp_storage,
+                            temp_storage_size_bytes,
+                            first,
+                            s_first,
+                            d_output,
+                            size,
+                            s_size,
+                            p);
+
+    if (error != hipSuccess)
+    {
+        thrust::free(dev_tag, d_temp_storage);
+        thrust::free(dev_tag, d_output);
+        return last;
+    }
+
+    error = hipDeviceSynchronize();
+    if (error != hipSuccess)
+    {
+        thrust::free(dev_tag, d_temp_storage);
+        thrust::free(dev_tag, d_output);
+        return last;
+    }
+
+    size_t offset;
+    hipMemcpy(&offset, d_output, sizeof(offset), hipMemcpyDeviceToHost);
+
+    thrust::free(dev_tag, d_temp_storage);
+    thrust::free(dev_tag, d_output);
+
+    return first + offset;
+}
+// END SEARCH
+
+// BEGIN SEARCH_N
+template <class InputIt, class BinaryPred>
+InputIt THRUST_HIP_FUNCTION search_n(
+  InputIt                                                   first,
+  InputIt                                                   last,
+  size_t                                                    count,
+  typename std::iterator_traits<InputIt>::value_type const& value,
+  BinaryPred                                                p)
+{
+  using input_type = typename std::iterator_traits<InputIt>::value_type;
+  thrust::device_system_tag                        dev_tag;
+  size_t*                                          d_output;
+  input_type*                                      d_value;
+  d_output = thrust::malloc<size_t>(dev_tag, sizeof(*d_output)).get();
+  d_value  = thrust::malloc<input_type>(dev_tag, sizeof(*d_value)).get();
+
+  hipMemcpy(d_value, &value, sizeof(*d_value), hipMemcpyHostToDevice);
+
+  size_t size = last - first;
+
+  // temp storage
+  size_t temp_storage_size_bytes;
+  void*  d_temp_storage = nullptr;
+  // Get size of d_temp_storage
+  hipError_t error =
+    ::rocprim::search_n(d_temp_storage, temp_storage_size_bytes, first, d_output, size, count, d_value, p);
+
+  if (error != hipSuccess)
+  {
+    return last;
+  }
+
+  d_temp_storage = thrust::malloc(dev_tag, temp_storage_size_bytes).get();
+
+  error = ::rocprim::search_n(d_temp_storage, temp_storage_size_bytes, first, d_output, size, count, d_value, p);
+
+  if (error != hipSuccess)
+  {
+    thrust::free(dev_tag, d_temp_storage);
+    thrust::free(dev_tag, d_output);
+    thrust::free(dev_tag, d_value);
+    return last;
+  }
+
+  error = hipDeviceSynchronize();
+  if (error != hipSuccess)
+  {
+    thrust::free(dev_tag, d_temp_storage);
+    thrust::free(dev_tag, d_output);
+    thrust::free(dev_tag, d_value);
+    return last;
+  }
+
+  size_t offset;
+  hipMemcpy(&offset, d_output, sizeof(offset), hipMemcpyDeviceToHost);
+
+  thrust::free(dev_tag, d_temp_storage);
+  thrust::free(dev_tag, d_output);
+  thrust::free(dev_tag, d_value);
+
+  return first + offset;
+}
+// END SEARCH_N
+
+// BEGIN FIND_END
+template<class InputIt1, class InputIt2, class BinaryPred>
+InputIt1 THRUST_HIP_FUNCTION
+find_end(InputIt1 first, InputIt1 last,
+              InputIt2 s_first, InputIt2 s_last,
+              BinaryPred p)
+{
+    if (s_first == s_last)
+    {
+        return last;
+    }
+
+    thrust::device_system_tag dev_tag;
+    size_t* d_output;
+    d_output = thrust::malloc<size_t>(dev_tag, sizeof(*d_output)).get();
+
+    size_t size = last - first;
+    size_t s_size = s_last - s_first;
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    void*  d_temp_storage = nullptr;
+    // Get size of d_temp_storage
+    hipError_t error = ::rocprim::find_end(d_temp_storage,
+                                        temp_storage_size_bytes,
+                                        first,
+                                        s_first,
+                                        d_output,
+                                        size,
+                                        s_size,
+                                        p);
+
+    if (error != hipSuccess)
+    {
+        return last;
+    }
+
+    d_temp_storage = thrust::malloc(dev_tag, temp_storage_size_bytes).get();
+
+    error = ::rocprim::find_end(d_temp_storage,
+                            temp_storage_size_bytes,
+                            first,
+                            s_first,
+                            d_output,
+                            size,
+                            s_size,
+                            p);
+
+    if (error != hipSuccess)
+    {
+        thrust::free(dev_tag, d_temp_storage);
+        thrust::free(dev_tag, d_output);
+        return last;
+    }
+
+    error = hipDeviceSynchronize();
+    if (error != hipSuccess)
+    {
+        thrust::free(dev_tag, d_temp_storage);
+        thrust::free(dev_tag, d_output);
+        return last;
+    }
+
+    size_t offset;
+    hipMemcpy(&offset, d_output, sizeof(offset), hipMemcpyDeviceToHost);
+
+    thrust::free(dev_tag, d_temp_storage);
+    thrust::free(dev_tag, d_output);
+
+    return first + offset;
+}
+// END FIND_END
+
+// BEGIN ADJACENT_FIND
+template <class InputIt, class BinaryPred>
+InputIt THRUST_HIP_FUNCTION adjacent_find(InputIt first, InputIt last, BinaryPred p)
+{
+  if (first == last)
+  {
+    return last;
+  }
+
+  thrust::device_system_tag dev_tag;
+  size_t*                   d_output;
+  d_output = thrust::malloc<size_t>(dev_tag, sizeof(*d_output)).get();
+
+  size_t size   = last - first;
+
+  // temp storage
+  size_t temp_storage_size_bytes;
+  void*  d_temp_storage = nullptr;
+  // Get size of d_temp_storage
+  hipError_t error =
+    ::rocprim::adjacent_find(d_temp_storage, temp_storage_size_bytes, first, d_output, size, p);
+
+  if (error != hipSuccess)
+  {
+    return last;
+  }
+
+  d_temp_storage = thrust::malloc(dev_tag, temp_storage_size_bytes).get();
+
+  error = ::rocprim::adjacent_find(d_temp_storage, temp_storage_size_bytes, first, d_output, size, p);
+
+  if (error != hipSuccess)
+  {
+    thrust::free(dev_tag, d_temp_storage);
+    thrust::free(dev_tag, d_output);
+    return last;
+  }
+
+  error = hipDeviceSynchronize();
+  if (error != hipSuccess)
+  {
+    thrust::free(dev_tag, d_temp_storage);
+    thrust::free(dev_tag, d_output);
+    return last;
+  }
+
+  size_t offset;
+  hipMemcpy(&offset, d_output, sizeof(offset), hipMemcpyDeviceToHost);
+
+  thrust::free(dev_tag, d_temp_storage);
+  thrust::free(dev_tag, d_output);
+
+  return first + offset;
+}
+// END ADJACENT_FIND
+}
 
 namespace std
 {
@@ -233,11 +578,119 @@ namespace std
     // END FIND_IF_NOT
 
     // BEGIN FIND_END
-    // TODO: UNIMPLEMENTED IN THRUST
+        template< class ForwardIt1,
+              class ForwardIt2,
+              enable_if_t<
+                ::hipstd::is_offloadable_iterator<ForwardIt1>() &&
+                ::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
+        inline
+        ForwardIt1 find_end(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last)
+    {
+        return ::thrust::find_end(first, last, s_first, s_last, thrust::equal_to<> {});
+    }
+
+    template< class ForwardIt1,
+              class ForwardIt2,
+              enable_if_t<
+                !::hipstd::is_offloadable_iterator<ForwardIt1>() ||
+                !::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
+        inline
+        ForwardIt1 find_end(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last )
+    {
+        return ::std::find_end(::std::execution::par, first, last, s_first, s_last);
+    }
+
+    template< class ForwardIt1,
+              class ForwardIt2,
+              class BinaryPred,
+              enable_if_t<
+                ::hipstd::is_offloadable_iterator<ForwardIt1>() &&
+                ::hipstd::is_offloadable_iterator<ForwardIt2>() &&
+                ::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
+        inline
+        ForwardIt1 find_end(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
+    {
+        return ::thrust::find_end(first, last, s_first, s_last, p);
+    }
+
+    template< class ForwardIt1,
+              class ForwardIt2,
+              class BinaryPred,
+              enable_if_t<
+                !::hipstd::is_offloadable_iterator<ForwardIt1>() ||
+                !::hipstd::is_offloadable_iterator<ForwardIt2>() ||
+                !::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
+        inline
+        ForwardIt1 find_end(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
+    {
+        return ::std::find_end(::std::execution::par, first, last, s_first, s_last, p);
+    }
     // END FIND_END
 
     // BEGIN FIND_FIRST_OF
-    // TODO: UNIMPLEMENTED IN THRUST
+    template< class ForwardIt1,
+              class ForwardIt2,
+              enable_if_t<
+                ::hipstd::is_offloadable_iterator<ForwardIt1>() &&
+                ::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
+        inline
+        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last)
+    {
+        return ::thrust::find_first_of(first, last, s_first, s_last, thrust::equal_to<> {});
+    }
+
+    template< class ForwardIt1,
+              class ForwardIt2,
+              enable_if_t<
+                !::hipstd::is_offloadable_iterator<ForwardIt1>() ||
+                !::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
+        inline
+        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last )
+    {
+        return ::std::find_first_of(::std::execution::par, first, last, s_first, s_last);
+    }
+
+    template< class ForwardIt1,
+              class ForwardIt2,
+              class BinaryPred,
+              enable_if_t<
+                ::hipstd::is_offloadable_iterator<ForwardIt1>() &&
+                ::hipstd::is_offloadable_iterator<ForwardIt2>() &&
+                ::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
+        inline
+        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
+    {
+        return ::thrust::find_first_of(first, last, s_first, s_last, p);
+    }
+
+    template< class ForwardIt1,
+              class ForwardIt2,
+              class BinaryPred,
+              enable_if_t<
+                !::hipstd::is_offloadable_iterator<ForwardIt1>() ||
+                !::hipstd::is_offloadable_iterator<ForwardIt2>() ||
+                !::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
+        inline
+        ForwardIt1 find_first_of(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
+    {
+        return ::std::find_first_of(::std::execution::par, first, last, s_first, s_last, p);
+    }
     // END FIND_FIRST_OF
 
     // BEGIN ADJACENT_FIND
@@ -247,12 +700,7 @@ namespace std
     inline
     I adjacent_find(execution::parallel_unsequenced_policy, I f, I l)
     {
-        if (f == l) return l;
-
-        const auto r = ::thrust::mismatch(
-            ::thrust::device, f + 1, l, f, not_equal_to<>{});
-
-        return (r.first == l) ? l : r.second;
+      return ::thrust::adjacent_find(f, l, thrust::equal_to<> {});
     }
 
     template<
@@ -277,12 +725,7 @@ namespace std
     inline
     I adjacent_find(execution::parallel_unsequenced_policy, I f, I l, P p)
     {
-        if (f == l) return l;
-
-        const auto r = ::thrust::mismatch(
-            ::thrust::device, f + 1, l, f, not_fn(::std::move(p)));
-
-        return (r.first == l) ? l : r.second;
+      return ::thrust::adjacent_find(f, l, p);
     }
 
     template<
@@ -673,11 +1116,115 @@ namespace std
     // END EQUAL
 
     // BEGIN SEARCH
-    // TODO: UNIMPLEMENTED IN THRUST
+    template< class ForwardIt1,
+              class ForwardIt2,
+              enable_if_t<
+                ::hipstd::is_offloadable_iterator<ForwardIt1>() &&
+                ::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
+        inline
+        ForwardIt1 search(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last)
+    {
+        return ::thrust::search(first, last, s_first, s_last, thrust::equal_to<> {});
+    }
+
+    template< class ForwardIt1,
+              class ForwardIt2,
+              enable_if_t<
+                !::hipstd::is_offloadable_iterator<ForwardIt1>() ||
+                !::hipstd::is_offloadable_iterator<ForwardIt2>()>* = nullptr>
+        inline
+        ForwardIt1 search(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last )
+    {
+        return ::std::search(::std::execution::par, first, last, s_first, s_last);
+    }
+
+    template< class ForwardIt1,
+              class ForwardIt2,
+              class BinaryPred,
+              enable_if_t<
+                ::hipstd::is_offloadable_iterator<ForwardIt1>() &&
+                ::hipstd::is_offloadable_iterator<ForwardIt2>() &&
+                ::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
+        inline
+        ForwardIt1 search(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
+    {
+        return ::thrust::search(first, last, s_first, s_last, p);
+    }
+
+    template< class ForwardIt1,
+              class ForwardIt2,
+              class BinaryPred,
+              enable_if_t<
+                !::hipstd::is_offloadable_iterator<ForwardIt1>() ||
+                !::hipstd::is_offloadable_iterator<ForwardIt2>() ||
+                !::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
+        inline
+        ForwardIt1 search(execution::parallel_unsequenced_policy, 
+                                 ForwardIt1 first, ForwardIt1 last,
+                                 ForwardIt2 s_first, ForwardIt2 s_last, BinaryPred p)
+    {
+        return ::std::search(::std::execution::par, first, last, s_first, s_last, p);
+    }
     // END SEARCH
 
     // BEGIN SEARCH_N
-    // TODO: UNIMPLEMENTED IN THRUST
+    template <class ForwardIt, enable_if_t<::hipstd::is_offloadable_iterator<ForwardIt>()>* = nullptr>
+    inline ForwardIt search_n(
+      execution::parallel_unsequenced_policy,
+      ForwardIt                                                   first,
+      ForwardIt                                                   last,
+      size_t                                                      count,
+      typename std::iterator_traits<ForwardIt>::value_type const& value)
+    {
+      return ::thrust::search_n(first, last, count, value, thrust::equal_to<>{});
+    }
+
+    template <class ForwardIt, enable_if_t<!::hipstd::is_offloadable_iterator<ForwardIt>()>* = nullptr>
+    inline ForwardIt search_n(
+      execution::parallel_unsequenced_policy,
+      ForwardIt                                                   first,
+      ForwardIt                                                   last,
+      size_t                                                      count,
+      typename std::iterator_traits<ForwardIt>::value_type const& value)
+    {
+      return ::std::search_n(::std::execution::par, first, last, count, value);
+    }
+
+    template <class ForwardIt,
+              class BinaryPred,
+              enable_if_t<::hipstd::is_offloadable_iterator<ForwardIt>()
+                          && ::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
+    inline ForwardIt search_n(
+      execution::parallel_unsequenced_policy,
+      ForwardIt                                                   first,
+      ForwardIt                                                   last,
+      size_t                                                      count,
+      typename std::iterator_traits<ForwardIt>::value_type const& value,
+      BinaryPred                                                  p)
+    {
+      return ::thrust::search_n(first, last, count, value, p);
+    }
+
+    template <class ForwardIt,
+              class BinaryPred,
+              enable_if_t<!::hipstd::is_offloadable_iterator<ForwardIt>()
+                          || !::hipstd::is_offloadable_callable<BinaryPred>()>* = nullptr>
+    inline ForwardIt search_n(
+      execution::parallel_unsequenced_policy,
+      ForwardIt                                                   first,
+      ForwardIt                                                   last,
+      size_t                                                      count,
+      typename std::iterator_traits<ForwardIt>::value_type const& value,
+      BinaryPred                                                  p)
+    {
+      return ::std::search_n(::std::execution::par, first, last, count, value, p);
+    }
     // END SEARCH_N
 }
 #else // __HIPSTDPAR__

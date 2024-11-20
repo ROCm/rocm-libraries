@@ -17,6 +17,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#include <thrust/detail/temporary_array.h>
+#include <thrust/distance.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/omp/detail/reduce.h>
 #include <thrust/system/omp/detail/default_decomposition.h>

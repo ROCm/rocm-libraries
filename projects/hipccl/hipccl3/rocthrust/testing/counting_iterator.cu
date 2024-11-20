@@ -5,8 +5,38 @@
 #include <thrust/distance.h>
 #include <thrust/detail/cstdint.h>
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#include <cuda/std/iterator>
+#include <cuda/std/type_traits>
+#elif defined(__has_include)
+#if __has_include(<cuda/std/iterator>)
+#include <cuda/std/iterator>
+#endif // __has_include(<cuda/std/iterator>)
+#if __has_include(<cuda/std/type_traits>)
+#include <cuda/std/type_traits>
+#endif // __has_include(<cuda/std/type_traits>)
+#endif // THRUST_DEVICE_SYSTEM
 
 THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+// ensure that we properly support thrust::counting_iterator from cuda::std
+void test_iterator_traits()
+{
+  typedef cuda::std::iterator_traits<thrust::counting_iterator<int>> It;
+  using category = thrust::detail::iterator_category_with_system_and_traversal<std::random_access_iterator_tag,
+                                                                               thrust::any_system_tag,
+                                                                               thrust::random_access_traversal_tag>;
+
+  static_assert(cuda::std::is_same<It::difference_type, ptrdiff_t>::value, "");
+  static_assert(cuda::std::is_same<It::value_type, int>::value, "");
+  static_assert(cuda::std::is_same<It::pointer, void>::value, "");
+  static_assert(cuda::std::is_same<It::reference, signed int>::value, "");
+  static_assert(cuda::std::is_same<It::iterator_category, category>::value, "");
+
+  static_assert(cuda::std::__is_cpp17_random_access_iterator<thrust::counting_iterator<int>>::value, "");
+}
+#endif
 
 template <typename T>
 void TestCountingDefaultConstructor(void)

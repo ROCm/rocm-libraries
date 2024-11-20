@@ -3,6 +3,12 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## (Unreleased) rocThrust 3.x.x for ROCm 6.x
+
+### Changes
+
+* Changed the C++ version from 14 to 17. C++14 will be deprecated in the next major release.
+
 ## (Unreleased) rocThrust 3.3.0 for ROCm 6.4
 
 ### Added
@@ -11,10 +17,16 @@ Documentation for rocThrust available at
 * Added smoke test options, which runs a subset of the unit tests and ensures that less than 2gb of VRAM will be used. Use `python rtest.py [--emulation|-e|--test|-t]=smoke` to run these tests.
 * Added `--emulation` option for `rtest.py`
 * Merged changes from upstream CCCL/thrust 2.4.0
+* Merged changes from upstream CCCL/thrust 2.5.0
+* Added `find_first_of` to HIPSTDPAR
+* Added `search` and `find_end` to HIPSTDPAR
+* Added `search_n` to HIPSTDPAR
+* Updated HIPSTDPAR's `adjacent_find` to use rocPRIM's implementation
 
 ### Changed
 * `--test|-t` is no longer a required flag for `rtest.py`. Instead, the user can use either `--emulation|-e` or `--test|-t`, but not both.
 * Split the contents of HIPSTDPAR's forwarding header into several implementation headers.
+* Fixed `copy_if` to work with large data types (512 bytes)
 
 ## (Unreleased) rocThrust 3.2.0 for ROCm 6.3
 

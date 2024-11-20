@@ -63,10 +63,10 @@ struct TestComplexSizeAndAlignment
   void operator()()
   {
     THRUST_STATIC_ASSERT(sizeof(thrust::complex<T>) == sizeof(T) * 2);
-    THRUST_STATIC_ASSERT(THRUST_ALIGNOF(thrust::complex<T>) == THRUST_ALIGNOF(T) * 2);
+    THRUST_STATIC_ASSERT(alignof(thrust::complex<T>) == alignof(T) * 2);
 
     THRUST_STATIC_ASSERT(sizeof(thrust::complex<T const>) == sizeof(T) * 2);
-    THRUST_STATIC_ASSERT(THRUST_ALIGNOF(thrust::complex<T const>) == THRUST_ALIGNOF(T) * 2);
+    THRUST_STATIC_ASSERT(alignof(thrust::complex<T const>) == alignof(T) * 2);
   }
 };
 SimpleUnitTest<TestComplexSizeAndAlignment, FloatingPointTypes> TestComplexSizeAndAlignmentInstance;
@@ -651,7 +651,6 @@ struct TestComplexTrigonometricFunctions
     static_assert(std::is_same<thrust::complex<T>, decltype(thrust::sinh(a))>::value, "");
     static_assert(std::is_same<thrust::complex<T>, decltype(thrust::tanh(a))>::value, "");
 
-#if THRUST_CPP_DIALECT >= 2011
 
     ASSERT_ALMOST_EQUAL(thrust::acos(a), std::acos(c));
     ASSERT_ALMOST_EQUAL(thrust::asin(a), std::asin(c));
@@ -667,7 +666,6 @@ struct TestComplexTrigonometricFunctions
     static_assert(std::is_same<thrust::complex<T>, decltype(thrust::asinh(a))>::value, "");
     static_assert(std::is_same<thrust::complex<T>, decltype(thrust::atanh(a))>::value, "");
 
-#endif
   }
 };
 SimpleUnitTest<TestComplexTrigonometricFunctions, FloatingPointTypes>
@@ -690,7 +688,6 @@ struct TestComplexStreamOperators
 };
 SimpleUnitTest<TestComplexStreamOperators, FloatingPointTypes> TestComplexStreamOperatorsInstance;
 
-#if THRUST_CPP_DIALECT >= 2011
 template <typename T>
 struct TestComplexStdComplexDeviceInterop
 {
@@ -711,8 +708,8 @@ struct TestComplexStdComplexDeviceInterop
     ASSERT_ALMOST_EQUAL(vec[2].imag(), thrust::complex<T>(device_vec[2]).imag());
   }
 };
-SimpleUnitTest<TestComplexStdComplexDeviceInterop, FloatingPointTypes> TestComplexStdComplexDeviceInteropInstance;
-#endif
+SimpleUnitTest<TestComplexStdComplexDeviceInterop, FloatingPointTypes>
+  TestComplexStdComplexDeviceInteropInstance;
 
 template <typename T>
 struct TestComplexExplicitConstruction
@@ -730,4 +727,5 @@ struct TestComplexExplicitConstruction
     (void) result;
   }
 };
-SimpleUnitTest<TestComplexExplicitConstruction, FloatingPointTypes> TestComplexExplicitConstructionInstance;
+SimpleUnitTest<TestComplexExplicitConstruction, FloatingPointTypes>
+  TestComplexExplicitConstructionInstance;

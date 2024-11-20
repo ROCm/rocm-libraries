@@ -729,7 +729,6 @@ void TestExclusiveScanWithBigIndexes()
 
 DECLARE_UNITTEST(TestExclusiveScanWithBigIndexes);
 
-#if THRUST_CPP_DIALECT >= 2011
 
 struct Int {
     int i{};
@@ -752,4 +751,3 @@ void TestInclusiveScanWithUserDefinedType()
 }
 DECLARE_UNITTEST(TestInclusiveScanWithUserDefinedType);
 
-#endif // c++11

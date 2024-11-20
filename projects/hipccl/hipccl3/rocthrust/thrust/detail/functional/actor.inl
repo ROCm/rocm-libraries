@@ -41,18 +41,9 @@ namespace detail
 namespace functional
 {
 
-template<typename Eval>
-  THRUST_HOST_DEVICE
-  constexpr actor<Eval>
-    ::actor()
-      : eval_type()
-{}
-
-template<typename Eval>
-  THRUST_HOST_DEVICE
-  actor<Eval>
-    ::actor(const Eval &base)
-      : eval_type(base)
+template <typename Eval>
+THRUST_HOST_DEVICE actor<Eval>::actor(const Eval& base)
+    : eval_type(base)
 {}
 
 // actor::operator() needs to construct a tuple of references to its

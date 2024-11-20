@@ -76,12 +76,31 @@ namespace hip_rocprim
 {
 namespace __copy_if
 {
+    template <unsigned int ItemsPerThread, typename InputIt, typename BoolIt, typename IntIt, typename OutputIt>
+    __global__ void copy_if_kernel(InputIt first, BoolIt flagsFirst, IntIt posFirst, const size_t size, OutputIt output)
+    {
+        const size_t baseIdx = (blockIdx.x * blockDim.x + threadIdx.x) * ItemsPerThread;
+
+        for (size_t i = 0; i < ItemsPerThread; ++i)
+        {
+            const size_t index = baseIdx + i;
+            if (index < size)
+            {
+                if (flagsFirst[index])
+                {
+                    output[posFirst[index] - 1] = first[index];
+                }
+            }
+        }
+    }
+
     template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
-    THRUST_HIP_RUNTIME_FUNCTION OutputIt
+    THRUST_HIP_RUNTIME_FUNCTION auto
     copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
+    -> std::enable_if_t<sizeof(typename std::iterator_traits<InputIt>::value_type) < 512, OutputIt>
     {
         using namespace thrust::system::hip_rocprim::temp_storage;
-        typedef typename iterator_traits<InputIt>::difference_type size_type;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
 
         size_type   num_items          = thrust::distance(first, last);
         size_t      temp_storage_bytes = 0;
@@ -135,6 +154,41 @@ namespace __copy_if
         size_type num_selected = get_value(policy, d_num_selected_out);
 
         return output + num_selected;
+    }
+
+    template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
+    THRUST_HIP_RUNTIME_FUNCTION auto
+    copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
+    -> std::enable_if_t<!(sizeof(typename std::iterator_traits<InputIt>::value_type) < 512), OutputIt>
+    {
+        using namespace thrust::system::hip_rocprim::temp_storage;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
+
+        size_type   num_items  = thrust::distance(first, last);
+        hipStream_t stream     = hip_rocprim::stream(policy);
+        bool        debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
+
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> flags(policy, num_items);
+
+        hip_rocprim::throw_on_error(rocprim::transform(first,
+                                                       flags.begin(),
+                                                       num_items,
+                                                       [predicate] __host__ __device__ (auto const & val){ return predicate(val) ? 1 : 0; },
+                                                       stream,
+                                                       debug_sync),
+                                    "copy_if failed on transform");
+
+        thrust::detail::temporary_array<thrust::detail::uint32_t, Derived> pos(policy, num_items);
+
+        thrust::inclusive_scan(policy, flags.begin(), flags.end(), pos.begin());
+
+        constexpr static size_t items_per_thread = 16;
+        constexpr static size_t threads_per_block = 256;
+        const size_t block_size = std::ceil(static_cast<float>(num_items) / 16 / threads_per_block);
+
+        copy_if_kernel<items_per_thread><<<block_size, threads_per_block>>>(first, flags.begin(), pos.begin(), num_items, output);
+
+        return output + pos[num_items-1];
     }
 
     template <typename Derived, typename InputIt, typename StencilIt, typename OutputIt, typename Predicate>

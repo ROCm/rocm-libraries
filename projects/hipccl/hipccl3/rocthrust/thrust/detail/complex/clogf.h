@@ -58,8 +58,8 @@ namespace complex{
 using thrust::complex;
 
 /* round down to 8 = 24/3 bits */
-THRUST_HOST_DEVICE inline
-float trim(float x){
+THRUST_HOST_DEVICE inline float trim(float x)
+{
   uint32_t hx;
   get_float_word(hx, x);
   hx &= 0xffff0000;
@@ -68,10 +68,8 @@ float trim(float x){
   return ret;
 }
 
-
-THRUST_HOST_DEVICE inline
-complex<float> clogf(const complex<float>& z){
-
+THRUST_HOST_DEVICE inline complex<float> clogf(const complex<float>& z)
+{
   // Adapted from FreeBSDs msun
   float x, y;
   float ax, ay;
@@ -192,8 +190,8 @@ complex<float> clogf(const complex<float>& z){
 } // namespace detail
 
 template <>
-THRUST_HOST_DEVICE
-inline complex<float> log(const complex<float>& z){
+THRUST_HOST_DEVICE inline complex<float> log(const complex<float>& z)
+{
   return detail::complex::clogf(z);
 }
 

@@ -59,8 +59,7 @@ template<typename Eval>
 {
   typedef Eval eval_type;
 
-  THRUST_HOST_DEVICE
-  constexpr actor();
+  constexpr actor() = default;
 
   THRUST_HOST_DEVICE
   actor(const Eval &base);

@@ -59,10 +59,10 @@ THRUST_NAMESPACE_BEGIN
 namespace detail{
 namespace complex{
 
-THRUST_HOST_DEVICE inline
-float frexp_expf(float x, int *expt){
-  const uint32_t k = 235;                 /* constant for reduction */
-  const float kln2 =  162.88958740F;       /* k * ln2 */
+THRUST_HOST_DEVICE inline float frexp_expf(float x, int* expt)
+{
+  const uint32_t k = 235; /* constant for reduction */
+  const float kln2 = 162.88958740F; /* k * ln2 */
 
   // should this be a double instead?
   float exp_x;
@@ -75,9 +75,7 @@ float frexp_expf(float x, int *expt){
   return (exp_x);
 }
 
-THRUST_HOST_DEVICE inline
-complex<float>
-ldexp_cexpf(complex<float> z, int expt)
+THRUST_HOST_DEVICE inline complex<float> ldexp_cexpf(complex<float> z, int expt)
 {
   float x, y, exp_x, scale1, scale2;
   int ex_expt, half_expt;
@@ -96,8 +94,8 @@ ldexp_cexpf(complex<float> z, int expt)
 			 sin(y) * exp_x * scale1 * scale2));
 }
 
-THRUST_HOST_DEVICE inline
-complex<float> cexpf(const complex<float>& z){
+THRUST_HOST_DEVICE inline complex<float> cexpf(const complex<float>& z)
+{
   float x, y, exp_x;
   uint32_t hx, hy;
 
@@ -156,8 +154,8 @@ complex<float> cexpf(const complex<float>& z){
 } // namespace detail
 
 template <>
-THRUST_HOST_DEVICE
-inline complex<float> exp(const complex<float>& z){
+THRUST_HOST_DEVICE inline complex<float> exp(const complex<float>& z)
+{
   return detail::complex::cexpf(z);
 }    
   

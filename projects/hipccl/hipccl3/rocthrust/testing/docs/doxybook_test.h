@@ -116,7 +116,7 @@ protected:
   /*! \brief \c test_protected_member_function is a function intended to
    *  exercise and test Doxybook rendering.
    */
-  _CCCL_DEVICE auto test_protected_member_function();
+  THRUST_DEVICE auto test_protected_member_function();
 };
 
 /*! \brief \c test_derived_class is a derived class intended to exercise and

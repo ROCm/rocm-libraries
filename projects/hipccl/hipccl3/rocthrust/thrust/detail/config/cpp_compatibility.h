@@ -41,6 +41,15 @@
 #  define THRUST_NODISCARD
 #endif
 
+// NVCC below 11.3 does not support nodiscard on friend operators
+// It always fails with clang
+#if (defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ <= 11 && __CUDACC_VER_MINOR__ < 3)) || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
+#  define THRUST_NODISCARD_FRIEND friend
+#else
+#  define THRUST_NODISCARD_FRIEND THRUST_NODISCARD friend
+#endif
+
+
 #if THRUST_CPP_DIALECT >= 2017 && __cpp_if_constexpr
 #  define THRUST_IF_CONSTEXPR if constexpr
 #else
@@ -55,25 +64,17 @@
 //#  if   THRUST_CPP_DIALECT >= 2017
 //#    define THRUST_INLINE_CONSTANT                 inline constexpr
 //#    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT inline constexpr
-#  if THRUST_CPP_DIALECT >= 2011
 #    define THRUST_INLINE_CONSTANT                 static const _CCCL_DEVICE
 #    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static constexpr
-#  else
-#    define THRUST_INLINE_CONSTANT                 static const _CCCL_DEVICE
-#    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static const
-#  endif
+
 #else
 // FIXME: Add this when NVCC supports inline variables.
 //#  if   THRUST_CPP_DIALECT >= 2017
 //#    define THRUST_INLINE_CONSTANT                 inline constexpr
 //#    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT inline constexpr
-#  if THRUST_CPP_DIALECT >= 2011
 #    define THRUST_INLINE_CONSTANT                 static constexpr
 #    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static constexpr
-#  else
-#    define THRUST_INLINE_CONSTANT                 static const
-#    define THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT static const
-#  endif
+
 #endif
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP

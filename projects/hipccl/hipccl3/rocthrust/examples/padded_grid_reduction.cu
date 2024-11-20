@@ -1,16 +1,17 @@
-#include <thrust/transform_reduce.h>
-#include <thrust/functional.h>
 #include <thrust/device_vector.h>
+#include <thrust/extrema.h>
+#include <thrust/functional.h>
 #include <thrust/host_vector.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/random.h>
-#include <thrust/extrema.h>
+#include <thrust/transform_reduce.h>
+
 #include <cmath>
 #include <iomanip>
-#include <float.h>
 
 #include "include/host_device.h"
+#include <float.h>
 
 // This example computes the minimum and maximum values
 // over a padded grid.  The padded values are not considered

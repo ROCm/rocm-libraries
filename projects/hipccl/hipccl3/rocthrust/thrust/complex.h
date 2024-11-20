@@ -31,7 +31,6 @@
 #include <type_traits>
 
 
-#if THRUST_CPP_DIALECT >= 2011
 #  define THRUST_STD_COMPLEX_REAL(z) \
     reinterpret_cast< \
       const typename thrust::detail::remove_reference<decltype(z)>::type::value_type (&)[2] \
@@ -39,11 +38,6 @@
 #  define THRUST_STD_COMPLEX_IMAG(z) \
     reinterpret_cast<const typename thrust::detail::remove_reference<decltype(z)>::type::value_type(&)[2]>(z)[1]
 #  define THRUST_STD_COMPLEX_DEVICE THRUST_DEVICE
-#else
-#  define THRUST_STD_COMPLEX_REAL(z) (z).real()
-#  define THRUST_STD_COMPLEX_IMAG(z) (z).imag()
-#  define THRUST_STD_COMPLEX_DEVICE
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -72,8 +66,7 @@ namespace detail
 template <typename T, std::size_t Align>
 struct complex_storage;
 
-#if THRUST_CPP_DIALECT >= 2011                                                    \
-  && (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC)                       \
+#if  (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC)                       \
   && (THRUST_GCC_VERSION >= 40800)
   // C++11 implementation, excluding GCC 4.7, which doesn't have `alignas`.
   template <typename T, std::size_t Align>
@@ -179,7 +172,6 @@ public:
   THRUST_HOST_DEVICE
   complex(const T& re, const T& im);
 
-#if THRUST_CPP_DIALECT >= 2011
   /*! Default construct a complex number.
    */
   complex() = default;
@@ -190,20 +182,6 @@ public:
    *  \param z The \p complex to copy from.
    */
   complex(const complex<T>& z) = default;
-#else
-  /*! Default construct a complex number.
-   */
-  THRUST_HOST_DEVICE
-  complex();
-
-  /*! This copy constructor copies from a \p complex with a type that is
-   *  convertible to this \p complex's \c value_type.
-   *
-   *  \param z The \p complex to copy from.
-   */
-  THRUST_HOST_DEVICE
-  complex(const complex<T>& z);
-#endif
 
   /*! This converting copy constructor copies from a \p complex with a type
    *  that is convertible to this \p complex's \c value_type.
@@ -243,22 +221,12 @@ public:
   THRUST_HOST_DEVICE
   complex& operator=(const T& re);
 
-#if THRUST_CPP_DIALECT >= 2011
   /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
    *  \p complex respectively.
    *
    *  \param z The \p complex to copy from.
    */
   complex& operator=(const complex<T>& z) = default;
-#else
-  /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
-   *  \p complex respectively.
-   *
-   *  \param z The \p complex to copy from.
-   */
-  THRUST_HOST_DEVICE
-  complex& operator=(const complex<T>& z);
-#endif
 
   /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
    *  \p complex respectively.
@@ -744,7 +712,7 @@ pow(const complex<T0>& x, const complex<T1>& y);
  *  \param x The base.
  *  \param y The exponent.
  */
-template <typename T0, typename T1, std::enable_if_t<std::is_arithmetic<T1>::value, int> = 0>
+template <typename T0, typename T1>
 THRUST_HOST_DEVICE
 complex<typename detail::promoted_numerical_type<T0, T1>::type>
 pow(const complex<T0>& x, const T1& y);
@@ -757,7 +725,7 @@ pow(const complex<T0>& x, const T1& y);
  *  \param x The base.
  *  \param y The exponent.
  */
-template <typename T0, typename T1, std::enable_if_t<std::is_arithmetic<T0>::value, int> = 0>
+template <typename T0, typename T1>
 THRUST_HOST_DEVICE
 complex<typename detail::promoted_numerical_type<T0, T1>::type>
 pow(const T0& x, const complex<T1>& y);

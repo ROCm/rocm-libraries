@@ -28,7 +28,11 @@
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #include <cuda/std/type_traits>
-#endif
+#elif defined(__has_include)
+#if __has_include(<cuda/std/type_traits>)
+#include <cuda/std/type_traits>
+#endif // __has_include(<cuda/std/type_traits>)
+#endif // THRUST_DEVICE_SYSTEM
 
 THRUST_NAMESPACE_BEGIN
 
