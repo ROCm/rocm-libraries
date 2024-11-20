@@ -1,8 +1,9 @@
 #include <thrust/device_vector.h>
+#include <thrust/extrema.h>
+#include <thrust/functional.h>
 #include <thrust/host_vector.h>
 #include <thrust/transform_reduce.h>
-#include <thrust/functional.h>
-#include <thrust/extrema.h>
+
 #include <cmath>
 #include <limits>
 #include <iostream>

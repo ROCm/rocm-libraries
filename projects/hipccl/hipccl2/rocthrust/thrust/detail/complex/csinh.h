@@ -59,8 +59,8 @@ namespace complex{
 
 using thrust::complex;
 
-THRUST_HOST_DEVICE inline
-complex<double> csinh(const complex<double>& z){
+THRUST_HOST_DEVICE inline complex<double> csinh(const complex<double>& z)
+{
   double x, y, h;
   uint32_t hx, hy, ix, iy, lx, ly;
   const double huge = 8.98846567431157953864652595395e+307; // 0x1p1023;
@@ -162,8 +162,8 @@ complex<double> csinh(const complex<double>& z){
   return (complex<double>((x * x) * (y - y), (x + x) * (y - y)));
 }
 
-THRUST_HOST_DEVICE inline
-complex<double> csin(complex<double> z){
+THRUST_HOST_DEVICE inline complex<double> csin(complex<double> z)
+{
   /* csin(z) = -I * csinh(I * z) */
   z = csinh(complex<double>(-z.imag(), z.real()));
   return (complex<double>(z.imag(), -z.real()));
@@ -174,8 +174,8 @@ complex<double> csin(complex<double> z){
 } // namespace detail
 
 template <typename ValueType>
-THRUST_HOST_DEVICE
-inline complex<ValueType> sin(const complex<ValueType>& z){
+THRUST_HOST_DEVICE inline complex<ValueType> sin(const complex<ValueType>& z)
+{
   const ValueType re = z.real();
   const ValueType im = z.imag();
   return complex<ValueType>(std::sin(re) * std::cosh(im), 
@@ -184,8 +184,8 @@ inline complex<ValueType> sin(const complex<ValueType>& z){
 
 
 template <typename ValueType>
-THRUST_HOST_DEVICE
-inline complex<ValueType> sinh(const complex<ValueType>& z){
+THRUST_HOST_DEVICE inline complex<ValueType> sinh(const complex<ValueType>& z)
+{
   const ValueType re = z.real();
   const ValueType im = z.imag();
   return complex<ValueType>(std::sinh(re) * std::cos(im), 
@@ -193,14 +193,14 @@ inline complex<ValueType> sinh(const complex<ValueType>& z){
 }
 
 template <>
-THRUST_HOST_DEVICE
-inline complex<double> sin(const complex<double>& z){
+THRUST_HOST_DEVICE inline complex<double> sin(const complex<double>& z)
+{
   return detail::complex::csin(z);
 }
 
 template <>
-THRUST_HOST_DEVICE
-inline complex<double> sinh(const complex<double>& z){
+THRUST_HOST_DEVICE inline complex<double> sinh(const complex<double>& z)
+{
   return detail::complex::csinh(z);
 }
 

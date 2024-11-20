@@ -17,8 +17,6 @@
 #include <thrust/detail/cpp11_required.h>
 #include <thrust/detail/type_traits.h>
 
-#if THRUST_CPP_DIALECT >= 2011
-
 #include <thrust/addressof.h>
 #include <thrust/swap.h>
 
@@ -795,8 +793,15 @@ struct nullopt_t {
 /// void foo (thrust::optional<int>);
 /// foo(thrust::nullopt); //pass an empty optional
 /// ```
-static constexpr nullopt_t nullopt{nullopt_t::do_not_use{},
-                                   nullopt_t::do_not_use{}};
+#ifdef __CUDA_ARCH__
+THRUST_DEVICE static _LIBCUDACXX_CONSTEXPR_GLOBAL
+#elif defined(__HIP_DEVICE_COMPILE__)
+THRUST_DEVICE static constexpr
+#else
+static constexpr
+#endif // __CUDA_ARCH__
+  nullopt_t nullopt{nullopt_t::do_not_use{}, nullopt_t::do_not_use{}};
+
 
 class bad_optional_access : public std::exception {
 public:
@@ -2868,5 +2873,4 @@ template <class T> struct hash<THRUST_NS_QUALIFIER::optional<T>> {
 };
 } // namespace std
 
-#endif // THRUST_CPP_DIALECT >= 2011
 

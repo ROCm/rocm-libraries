@@ -33,10 +33,22 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-
 #include <cuda/std/tuple>
 #include <cuda/std/type_traits>
 #include <cuda/std/utility>
+#elif defined(__has_include)
+#if __has_include(<cuda/std/tuple>)
+#include <cuda/std/tuple>
+#endif // __has_include(<cuda/std/tuple>)
+#if __has_include(<cuda/std/type_traits>)
+#include <cuda/std/type_traits>
+#endif // __has_include(<cuda/std/type_traits>)
+#if __has_include(<cuda/std/utility>)
+#include <cuda/std/utility>
+#endif // __has_include(<cuda/std/utility>)
+#endif // THRUST_DEVICE_SYSTEM
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 #include <tuple>
 
@@ -87,7 +99,7 @@ bool operator>(const null_type&, const null_type&) { return false; }
  *  \see tuple
  */
 template <size_t N, class T>
-using tuple_element = ::cuda::std::tuple_element<N, T>;
+using tuple_element = _CUDA_VSTD::tuple_element<N, T>;
 
 /*! This metafunction returns the number of elements
  *  of a \p tuple type of interest.
@@ -98,7 +110,11 @@ using tuple_element = ::cuda::std::tuple_element<N, T>;
  *  \see tuple
  */
 template <class T>
-using tuple_size = ::cuda::std::tuple_size<T>;
+using tuple_size = _CUDA_VSTD::tuple_size<T>;
+
+template <class>
+struct __is_tuple_of_iterator_references : _CUDA_VSTD::false_type
+{};
 
 /*! \brief \p tuple is a class template that can be instantiated with up to ten
  *  arguments. Each template argument specifies the type of element in the \p
@@ -139,12 +155,85 @@ using tuple_size = ::cuda::std::tuple_size<T>;
  *  \see tuple_size
  *  \see tie
  */
-template <class... T>
-using tuple = ::cuda::std::tuple<T...>;
+template <class... Ts>
+struct tuple : public _CUDA_VSTD::tuple<Ts...>
+{
+  using super_t = _CUDA_VSTD::tuple<Ts...>;
+  using super_t::super_t;
 
-using ::cuda::std::get;
-using ::cuda::std::make_tuple;
-using ::cuda::std::tie;
+  tuple() = default;
+
+  template <class _TupleOfIteratorReferences,
+            _CUDA_VSTD::__enable_if_t<__is_tuple_of_iterator_references<_TupleOfIteratorReferences>::value, int> = 0,
+            _CUDA_VSTD::__enable_if_t<(tuple_size<_TupleOfIteratorReferences>::value == sizeof...(Ts)), int>     = 0>
+  _CCCL_HOST_DEVICE tuple(_TupleOfIteratorReferences&& tup)
+      : tuple(_CUDA_VSTD::forward<_TupleOfIteratorReferences>(tup).template __to_tuple<Ts...>(
+        _CUDA_VSTD::__make_tuple_indices_t<sizeof...(Ts)>()))
+  {}
+
+  _CCCL_EXEC_CHECK_DISABLE
+  template <class TupleLike,
+            _CUDA_VSTD::__enable_if_t<_CUDA_VSTD::__tuple_assignable<TupleLike, super_t>::value, int> = 0>
+  _CCCL_HOST_DEVICE tuple& operator=(TupleLike&& other)
+  {
+    super_t::operator=(_CUDA_VSTD::forward<TupleLike>(other));
+    return *this;
+  }
+
+#if defined(_CCCL_COMPILER_MSVC_2017)
+  // MSVC2017 needs some help to convert tuples
+  template <class... Us,
+            _CUDA_VSTD::__enable_if_t<!_CUDA_VSTD::is_same<tuple<Us...>, tuple>::value, int> = 0,
+            _CUDA_VSTD::__enable_if_t<_CUDA_VSTD::__tuple_convertible<_CUDA_VSTD::tuple<Us...>, super_t>::value, int> = 0>
+  _CCCL_HOST_DEVICE constexpr operator tuple<Us...>()
+  {
+    return __to_tuple<Us...>(typename _CUDA_VSTD::__make_tuple_indices<sizeof...(Ts)>::type{});
+  }
+
+  template <class... Us, size_t... Id>
+  _CCCL_HOST_DEVICE constexpr tuple<Us...> __to_tuple(_CUDA_VSTD::__tuple_indices<Id...>) const
+  {
+    return tuple<Us...>{_CUDA_VSTD::get<Id>(*this)...};
+  }
+#endif // _CCCL_COMPILER_MSVC_2017
+};
+
+#if _CCCL_STD_VER >= 2017
+template <class... Ts>
+_CCCL_HOST_DEVICE tuple(Ts...) -> tuple<Ts...>;
+
+template <class T1, class T2>
+struct pair;
+
+template <class T1, class T2>
+_CCCL_HOST_DEVICE tuple(pair<T1, T2>) -> tuple<T1, T2>;
+#endif // _CCCL_STD_VER >= 2017
+
+template <class... Ts>
+inline _CCCL_HOST_DEVICE
+  _CUDA_VSTD::__enable_if_t<_CUDA_VSTD::__all<_CUDA_VSTD::__is_swappable<Ts>::value...>::value, void>
+  swap(tuple<Ts...>& __x,
+       tuple<Ts...>& __y) noexcept((_CUDA_VSTD::__all<_CUDA_VSTD::__is_nothrow_swappable<Ts>::value...>::value))
+{
+  __x.swap(__y);
+}
+
+template <class... Ts>
+inline _CCCL_HOST_DEVICE tuple<typename _CUDA_VSTD::__unwrap_ref_decay<Ts>::type...> make_tuple(Ts&&... __t)
+{
+  return tuple<typename _CUDA_VSTD::__unwrap_ref_decay<Ts>::type...>(_CUDA_VSTD::forward<Ts>(__t)...);
+}
+
+template <class... Ts>
+inline _CCCL_HOST_DEVICE tuple<Ts&...> tie(Ts&... ts) noexcept
+{
+  return tuple<Ts&...>(ts...);
+}
+
+using _CUDA_VSTD::get;
+
+/*! \endcond
+ */
 
 /*! \} // tuple
  */
@@ -156,37 +245,142 @@ THRUST_NAMESPACE_END
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
-template<>
-struct tuple_size<tuple<THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<>> {};
+template <class... Ts>
+struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : tuple_size<tuple<Ts...>>
+{};
 
-template<class T0>
-struct tuple_size<tuple<T0, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0>> {};
+template <size_t Id, class... Ts>
+struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : tuple_element<Id, tuple<Ts...>>
+{};
 
-template<class T0, class T1>
-struct tuple_size<tuple<T0, T1, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1>> {};
+template <class... Ts>
+struct __tuple_like_ext<THRUST_NS_QUALIFIER::tuple<Ts...>> : true_type
+{};
 
-template<class T0, class T1, class T2>
-struct tuple_size<tuple<T0, T1, T2, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2>> {};
+template <>
+struct tuple_size<tuple<THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<>>
+{};
 
-template<class T0, class T1, class T2, class T3>
-struct tuple_size<tuple<T0, T1, T2, T3, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3>> {};
+template <class T0>
+struct tuple_size<tuple<T0,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0>>
+{};
 
-template<class T0, class T1, class T2, class T3, class T4>
-struct tuple_size<tuple<T0, T1, T2, T3, T4, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4>> {};
+template <class T0, class T1>
+struct tuple_size<tuple<T0,
+                        T1,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1>>
+{};
 
-template<class T0, class T1, class T2, class T3, class T4, class T5>
-struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4, T5>> {};
+template <class T0, class T1, class T2>
+struct tuple_size<tuple<T0,
+                        T1,
+                        T2,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2>>
+{};
 
-template<class T0, class T1, class T2, class T3, class T4, class T5, class T6>
-struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6>> {};
+template <class T0, class T1, class T2, class T3>
+struct tuple_size<tuple<T0,
+                        T1,
+                        T2,
+                        T3,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3>>
+{};
 
-template<class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7>
-struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7>> {};
+template <class T0, class T1, class T2, class T3, class T4>
+struct tuple_size<tuple<T0,
+                        T1,
+                        T2,
+                        T3,
+                        T4,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4>>
+{};
 
-template<class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7, class T8>
-struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8>> {};
+template <class T0, class T1, class T2, class T3, class T4, class T5>
+struct tuple_size<tuple<T0,
+                        T1,
+                        T2,
+                        T3,
+                        T4,
+                        T5,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type,
+                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4, T5>>
+{};
+
+template <class T0, class T1, class T2, class T3, class T4, class T5, class T6>
+struct tuple_size<
+  tuple<T0, T1, T2, T3, T4, T5, T6, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>>
+    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6>>
+{};
+
+template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7>
+struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>>
+    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7>>
+{};
+
+template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7, class T8>
+struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER::null_type>>
+    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8>>
+{};
 
 _LIBCUDACXX_END_NAMESPACE_STD
+
+// This is a workaround for the fact that structured bindings require that the specializations of
+// `tuple_size` and `tuple_element` reside in namespace std (https://eel.is/c++draft/dcl.struct.bind#4).
+// See https://github.com/NVIDIA/libcudacxx/issues/316 for a short discussion
+#if _CCCL_STD_VER >= 2017
+namespace std
+{
+template <class... Ts>
+struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : tuple_size<tuple<Ts...>>
+{};
+
+template <size_t Id, class... Ts>
+struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : tuple_element<Id, tuple<Ts...>>
+{};
+} // namespace std
+#endif // _CCCL_STD_VER >= 2017
 
 #else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 
@@ -297,6 +491,41 @@ inline typename access_traits<
 get(const detail::cons<HT, TT>& t);
 
 
+#if THRUST_CPP_DIALECT >= 2017
+/*! Constructs a \p tuple from a variadic list of types \p Ts, allowing the \p tuple to deduce 
+ *  its type as \p tuple<Ts...> based on the types of the provided arguments.
+ *
+ *  \tparam Ts... The parameter pack of types that will determine the tuple's type.
+ *  \note This deduction guide enables automatic type deduction for variadic arguments 
+ *        when constructing a \p tuple.
+ *  \see tuple
+ */
+template <class... Ts>
+THRUST_HOST_DEVICE tuple(Ts...) -> tuple<Ts...>;
+
+/*! A \p pair is a structure template holding two elements of types \p T1 and \p T2.
+ *
+ *  \tparam T1 The type of the first element in the \p pair.
+ *  \tparam T2 The type of the second element in the \p pair.
+ *  \note \p pair is used to store two heterogeneous values and can be converted to a \p tuple.
+ *  \see tuple
+ */
+template <class T1, class T2>
+struct pair;
+
+/*! Constructs a \p tuple from a \p pair<T1,T2>, unpacking its elements to initialize
+ *  the tuple as \p tuple<T1,T2>.
+ *
+ *  \tparam T1 The type of the first element in the \p pair.
+ *  \tparam T2 The type of the second element in the \p pair.
+ *  \note This deduction guide allows a \p tuple to be created directly from a \p pair,
+ *        simplifying the type conversion.
+ *  \see pair
+ *  \see tuple
+ */
+template <class T1, class T2>
+THRUST_HOST_DEVICE tuple(pair<T1, T2>) -> tuple<T1, T2>;
+#endif
 
 /*! \brief \p tuple is a class template that can be instantiated with up to ten
  *  arguments. Each template argument specifies the type of element in the \p
@@ -732,5 +961,125 @@ bool operator>(const null_type&, const null_type&);
  */
 
 THRUST_NAMESPACE_END
+
+#if THRUST_CPP_DIALECT >= 2017
+namespace std
+{
+  template <class... Ts>
+  struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : tuple_size<tuple<Ts...>>
+  {};
+
+  template <size_t Id, class... Ts>
+  struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : tuple_element<Id, tuple<Ts...>>
+  {};
+
+  template <>
+  struct tuple_size<tuple<THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<>>
+  {};
+
+  template <class T0>
+  struct tuple_size<tuple<T0,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0>>
+  {};
+
+  template <class T0, class T1>
+  struct tuple_size<tuple<T0,
+                          T1,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1>>
+  {};
+
+  template <class T0, class T1, class T2>
+  struct tuple_size<tuple<T0,
+                          T1,
+                          T2,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2>>
+  {};
+
+  template <class T0, class T1, class T2, class T3>
+  struct tuple_size<tuple<T0,
+                          T1,
+                          T2,
+                          T3,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3>>
+  {};
+
+  template <class T0, class T1, class T2, class T3, class T4>
+  struct tuple_size<tuple<T0,
+                          T1,
+                          T2,
+                          T3,
+                          T4,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4>>
+  {};
+
+  template <class T0, class T1, class T2, class T3, class T4, class T5>
+  struct tuple_size<tuple<T0,
+                          T1,
+                          T2,
+                          T3,
+                          T4,
+                          T5,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type,
+                          THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4, T5>>
+  {};
+
+  template <class T0, class T1, class T2, class T3, class T4, class T5, class T6>
+  struct tuple_size<
+    tuple<T0, T1, T2, T3, T4, T5, T6, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>>
+      : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6>>
+  {};
+
+  template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7>
+  struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>>
+      : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7>>
+  {};
+
+  template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7, class T8>
+  struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER::null_type>>
+      : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8>>
+  {};
+} // namespace std
+#endif // THRUST_CPP_DIALECT >= 2017
 
 #endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA

@@ -59,17 +59,16 @@ namespace complex{
 using thrust::complex;
 
 /* round down to 18 = 54/3 bits */
-THRUST_HOST_DEVICE inline
-double trim(double x){
+THRUST_HOST_DEVICE inline double trim(double x)
+{
   uint32_t hi;
   get_high_word(hi, x);
   insert_words(x, hi &0xfffffff8, 0);
   return x;
 }
 
-THRUST_HOST_DEVICE inline
-complex<double> clog(const complex<double>& z){
-
+THRUST_HOST_DEVICE inline complex<double> clog(const complex<double>& z)
+{
   // Adapted from FreeBSDs msun
   double x, y;
   double ax, ay;
@@ -191,20 +190,20 @@ complex<double> clog(const complex<double>& z){
 } // namespace detail
 
 template <typename ValueType>
-THRUST_HOST_DEVICE
-inline complex<ValueType> log(const complex<ValueType>& z){
-  return complex<ValueType>(log(thrust::abs(z)),thrust::arg(z));
+THRUST_HOST_DEVICE inline complex<ValueType> log(const complex<ValueType>& z)
+{
+  return complex<ValueType>(std::log(thrust::abs(z)), thrust::arg(z));
 }
 
 template <>
-THRUST_HOST_DEVICE
-inline complex<double> log(const complex<double>& z){
+THRUST_HOST_DEVICE inline complex<double> log(const complex<double>& z)
+{
   return detail::complex::clog(z);
 }
 
 template <typename ValueType>
-THRUST_HOST_DEVICE
-inline complex<ValueType> log10(const complex<ValueType>& z){
+THRUST_HOST_DEVICE inline complex<ValueType> log10(const complex<ValueType>& z)
+{
   // Using the explicit literal prevents compile time warnings in
   // devices that don't support doubles
   return thrust::log(z)/ValueType(2.30258509299404568402);

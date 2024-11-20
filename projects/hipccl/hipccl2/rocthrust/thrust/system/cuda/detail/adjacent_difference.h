@@ -187,8 +187,8 @@ namespace __adjacent_difference {
     std::size_t storage_size = 0;
     cudaStream_t stream = cuda_cub::stream(policy);
 
-    using UnwrapInputIt = thrust::detail::try_unwrap_contiguous_iterator_return_t<InputIt>;
-    using UnwrapOutputIt = thrust::detail::try_unwrap_contiguous_iterator_return_t<OutputIt>;
+    using UnwrapInputIt  = thrust::try_unwrap_contiguous_iterator_t<InputIt>;
+    using UnwrapOutputIt = thrust::try_unwrap_contiguous_iterator_t<OutputIt>;
 
     using InputValueT = thrust::iterator_value_t<UnwrapInputIt>;
     using OutputValueT = thrust::iterator_value_t<UnwrapOutputIt>;
@@ -198,8 +198,8 @@ namespace __adjacent_difference {
       std::is_pointer<UnwrapOutputIt>::value &&
       std::is_same<InputValueT, OutputValueT>::value;
 
-    auto first_unwrap = thrust::detail::try_unwrap_contiguous_iterator(first);
-    auto result_unwrap = thrust::detail::try_unwrap_contiguous_iterator(result);
+    auto first_unwrap  = thrust::try_unwrap_contiguous_iterator(first);
+    auto result_unwrap = thrust::try_unwrap_contiguous_iterator(result);
 
     thrust::detail::integral_constant<bool, can_compare_iterators> comparable;
 

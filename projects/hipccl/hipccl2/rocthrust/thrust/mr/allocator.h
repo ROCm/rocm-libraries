@@ -124,7 +124,7 @@ public:
     THRUST_HOST
     pointer allocate(size_type n)
     {
-        return static_cast<pointer>(mem_res->do_allocate(n * sizeof(T), THRUST_ALIGNOF(T)));
+        return static_cast<pointer>(mem_res->do_allocate(n * sizeof(T), alignof(T)));
     }
 
     /*! Deallocates objects of type \p T.
@@ -135,7 +135,7 @@ public:
     THRUST_HOST
     void deallocate(pointer p, size_type n)
     {
-        return mem_res->do_deallocate(p, n * sizeof(T), THRUST_ALIGNOF(T));
+        return mem_res->do_deallocate(p, n * sizeof(T), alignof(T));
     }
 
     /*! Extracts the memory resource used by this allocator.
@@ -168,7 +168,6 @@ bool operator!=(const allocator<T, MR> & lhs, const allocator<T, MR> & rhs) noex
     return !(lhs == rhs);
 }
 
-#if THRUST_CPP_DIALECT >= 2011
 
 /*! An allocator whose memory resource we can dynamically configure at runtime.
  *
@@ -178,30 +177,7 @@ bool operator!=(const allocator<T, MR> & lhs, const allocator<T, MR> & rhs) noex
 template<typename T, typename Pointer>
 using polymorphic_allocator = allocator<T, polymorphic_adaptor_resource<Pointer> >;
 
-#else // C++11
 
-/*! An allocator whose behaviour depends on a memory resource that we can dynamically configure at runtime.
- *
- * \tparam T - the type that will be allocated by this allocator
- * \tparam Pointer - the pointer type that will be used to create the memory resource
- */
-template<typename T, typename Pointer>
-class polymorphic_allocator : public allocator<T, polymorphic_adaptor_resource<Pointer> >
-{
-    /// Use a regular allocator, created with a polymorphic_adaptor_resource memory resource,
-    /// an instance of which we can pass into the constructor.
-    /// The polymorphic_adaptor_resource can implement custom allocation behaviour.
-    typedef allocator<T, polymorphic_adaptor_resource<Pointer> > base;
-
-public:
-    /*! Initializes the base class with the parameter \p resource.
-     */
-    polymorphic_allocator(polymorphic_adaptor_resource<Pointer>  * resource) : base(resource)
-    {
-    }
-};
-
-#endif // C++11
 
 /*! A helper allocator class that uses global instances of a given upstream memory resource. Requires the memory resource
  *      to be default constructible.
@@ -248,10 +224,8 @@ public:
     stateless_resource_allocator(const stateless_resource_allocator<U, Upstream> & other)
         : base(other) {}
 
-#if THRUST_CPP_DIALECT >= 2011
     /*! Default copy assignment operator. */
     stateless_resource_allocator & operator=(const stateless_resource_allocator &) = default;
-#endif
 
     /*! Destructor. */
     THRUST_HOST_DEVICE

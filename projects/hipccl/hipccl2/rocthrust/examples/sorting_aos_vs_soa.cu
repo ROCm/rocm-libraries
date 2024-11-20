@@ -1,11 +1,11 @@
-#include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
-#include <thrust/sort.h>
+#include <thrust/host_vector.h>
 #include <thrust/random.h>
-#include <assert.h>
+#include <thrust/sort.h>
 
 #include "include/host_device.h"
 #include "include/timer.h"
+#include <assert.h>
 
 // This examples compares sorting performance using Array of Structures (AoS)
 // and Structure of Arrays (SoA) data layout.  Legacy applications will often

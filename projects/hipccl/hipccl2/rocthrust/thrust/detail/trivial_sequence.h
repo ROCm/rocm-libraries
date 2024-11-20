@@ -29,6 +29,7 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/temporary_array.h>
+#include <thrust/sequence_access.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -54,8 +55,18 @@ struct _trivial_sequence<Iterator, DerivedPolicy, thrust::detail::true_type>
     THRUST_HOST_DEVICE
     iterator_type begin() { return first; }
 
+    THRUST_HOST_DEVICE friend iterator_type begin(_trivial_sequence& sequence)
+    {
+      return sequence.first;
+    }
+
     THRUST_HOST_DEVICE
     iterator_type end()   { return last; }
+
+    THRUST_HOST_DEVICE friend iterator_type end(_trivial_sequence& sequence)
+    {
+      return sequence.first;
+    }
 };
 
 // non-trivial case
@@ -64,7 +75,7 @@ struct _trivial_sequence<Iterator, DerivedPolicy, thrust::detail::false_type>
 {
     typedef typename thrust::iterator_value<Iterator>::type iterator_value;
     typedef typename thrust::detail::temporary_array<iterator_value, DerivedPolicy>::iterator iterator_type;
-    
+
     thrust::detail::temporary_array<iterator_value, DerivedPolicy> buffer;
 
     THRUST_HOST_DEVICE
@@ -76,8 +87,18 @@ struct _trivial_sequence<Iterator, DerivedPolicy, thrust::detail::false_type>
     THRUST_HOST_DEVICE
     iterator_type begin() { return buffer.begin(); }
 
+    THRUST_HOST_DEVICE friend iterator_type begin(_trivial_sequence& sequence)
+    {
+      return sequence.begin();
+    }
+
     THRUST_HOST_DEVICE
     iterator_type end()   { return buffer.end(); }
+
+    THRUST_HOST_DEVICE friend iterator_type end(_trivial_sequence& sequence)
+    {
+      return sequence.end();
+    }
 };
 
 template <typename Iterator, typename DerivedPolicy>

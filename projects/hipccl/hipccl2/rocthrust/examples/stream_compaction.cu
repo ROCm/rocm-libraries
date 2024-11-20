@@ -1,8 +1,9 @@
-#include <thrust/device_vector.h>
-#include <thrust/sequence.h>
 #include <thrust/copy.h>
 #include <thrust/count.h>
+#include <thrust/device_vector.h>
 #include <thrust/remove.h>
+#include <thrust/sequence.h>
+
 #include <iostream>
 #include <iterator>
 #include <string>

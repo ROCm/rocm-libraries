@@ -17,6 +17,12 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/function.h>
+#include <thrust/detail/static_assert.h> // for depend_on_instantiation
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/system/omp/detail/pragma_omp.h>
 #include <thrust/system/omp/detail/reduce_intervals.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/function.h>

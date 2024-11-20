@@ -43,6 +43,9 @@ struct FixedVector
     FixedVector operator+(const FixedVector& bs) const
     {
         FixedVector output;
+        // Explicitely do not unroll loop, due to weird compiler bug introduced in ROCm 6.2.1.
+        // Upstream (ROCm/llvm-project) issue tracking this is #173.
+#pragma unroll 1
         for(unsigned int i = 0; i < N; i++)
             output.data[i] = data[i] + bs.data[i];
         return output;

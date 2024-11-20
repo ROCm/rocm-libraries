@@ -371,7 +371,13 @@ namespace detail
             rocrand_set_seed(gen, seed.get());
             rocrand_generate_uniform_double(gen, d_distribution, num_items);
 
-            hipDeviceSynchronize();
+            hipError_t error = hipDeviceSynchronize();
+            if(error != hipSuccess)
+            {
+                std::cout << "HIP error: " << hipGetErrorString(error) << " file: " << __FILE__
+                        << " line: " << __LINE__ << std::endl;
+                exit(error);
+            }   
 
             return d_distribution;
         }

@@ -135,10 +135,8 @@ namespace __adjacent_difference
         }
 
         // Check if iterators can be compared
-        using unwrap_input_iterator
-            = thrust::detail::try_unwrap_contiguous_iterator_return_t<InputIt>;
-        using unwrap_output_iterator
-            = thrust::detail::try_unwrap_contiguous_iterator_return_t<OutputIt>;
+        using unwrap_input_iterator  = thrust::try_unwrap_contiguous_iterator_t<InputIt>;
+        using unwrap_output_iterator = thrust::try_unwrap_contiguous_iterator_t<OutputIt>;
 
         using input_value_type  = thrust::iterator_value_t<unwrap_input_iterator>;
         using output_value_type = thrust::iterator_value_t<unwrap_output_iterator>;
@@ -149,8 +147,8 @@ namespace __adjacent_difference
               && std::is_same<input_value_type, output_value_type>::value;
 
         // Unwrap iterators to make them comparable
-        auto first_unwrap  = thrust::detail::try_unwrap_contiguous_iterator(first);
-        auto result_unwrap = thrust::detail::try_unwrap_contiguous_iterator(result);
+        auto first_unwrap  = thrust::try_unwrap_contiguous_iterator(first);
+        auto result_unwrap = thrust::try_unwrap_contiguous_iterator(result);
 
         thrust::detail::integral_constant<bool, can_compare_iterators> comparable;
 

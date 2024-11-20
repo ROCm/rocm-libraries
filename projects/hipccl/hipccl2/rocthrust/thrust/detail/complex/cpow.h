@@ -29,27 +29,22 @@
 THRUST_NAMESPACE_BEGIN
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE
-complex<typename detail::promoted_numerical_type<T0, T1>::type>
+THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 pow(const complex<T0>& x, const complex<T1>& y)
 {
   typedef typename detail::promoted_numerical_type<T0, T1>::type T;
   return exp(log(complex<T>(x)) * complex<T>(y));
 }
 
-template <typename T0, typename T1, std::enable_if_t<std::is_arithmetic<T1>::value, int>>
-THRUST_HOST_DEVICE
-complex<typename detail::promoted_numerical_type<T0, T1>::type>
-pow(const complex<T0>& x, const T1& y)
+template <typename T0, typename T1>
+THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> pow(const complex<T0>& x, const T1& y)
 {
   typedef typename detail::promoted_numerical_type<T0, T1>::type T;
   return exp(log(complex<T>(x)) * T(y));
 }
 
-template <typename T0, typename T1, std::enable_if_t<std::is_arithmetic<T0>::value, int>>
-THRUST_HOST_DEVICE
-complex<typename detail::promoted_numerical_type<T0, T1>::type>
-pow(const T0& x, const complex<T1>& y)
+template <typename T0, typename T1>
+THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> pow(const T0& x, const complex<T1>& y)
 {
   typedef typename detail::promoted_numerical_type<T0, T1>::type T;
   #ifdef __HIP_DEVICE_COMPILE__

@@ -87,35 +87,43 @@ inline THRUST_HOST_DEVICE double infinity<double>()
 #endif // HIP compiler
 
 #if defined _MSC_VER
-THRUST_HOST_DEVICE inline int isinf(float x){
+THRUST_HOST_DEVICE inline int isinf(float x)
+{
   return std::abs(x) == infinity<float>();
 }
 
-THRUST_HOST_DEVICE inline int isinf(double x){
+THRUST_HOST_DEVICE inline int isinf(double x)
+{
   return std::abs(x) == infinity<double>();
 }
 
-THRUST_HOST_DEVICE inline int isnan(float x){
+THRUST_HOST_DEVICE inline int isnan(float x)
+{
   return x != x;
 }
 
-THRUST_HOST_DEVICE inline int isnan(double x){
+THRUST_HOST_DEVICE inline int isnan(double x)
+{
   return x != x;
 }
 
-THRUST_HOST_DEVICE inline int signbit(float x){
-  return ((*((uint32_t *)&x)) & 0x80000000) != 0 ? 1 : 0;
+THRUST_HOST_DEVICE inline int signbit(float x)
+{
+  return ((*((uint32_t*) &x)) & 0x80000000) != 0 ? 1 : 0;
 }
 
-THRUST_HOST_DEVICE inline int signbit(double x){
-  return ((*((uint64_t *)&x)) & 0x8000000000000000) != 0ull ? 1 : 0;
+THRUST_HOST_DEVICE inline int signbit(double x)
+{
+  return ((*((uint64_t*) &x)) & 0x8000000000000000) != 0ull ? 1 : 0;
 }
 
-THRUST_HOST_DEVICE inline int isfinite(float x){
+THRUST_HOST_DEVICE inline int isfinite(float x)
+{
   return !isnan(x) && !isinf(x);
 }
 
-THRUST_HOST_DEVICE inline int isfinite(double x){
+THRUST_HOST_DEVICE inline int isfinite(double x)
+{
   return !isnan(x) && !isinf(x);
 }
 
@@ -155,19 +163,21 @@ using ::atanh;
 
 #if defined _MSC_VER
 
-THRUST_HOST_DEVICE inline double copysign(double x, double y){
-  uint32_t hx,hy;
-  get_high_word(hx,x);
-  get_high_word(hy,y);
-  set_high_word(x,(hx&0x7fffffff)|(hy&0x80000000));
+THRUST_HOST_DEVICE inline double copysign(double x, double y)
+{
+  uint32_t hx, hy;
+  get_high_word(hx, x);
+  get_high_word(hy, y);
+  set_high_word(x, (hx & 0x7fffffff) | (hy & 0x80000000));
   return x;
 }
 
-THRUST_HOST_DEVICE inline float copysignf(float x, float y){
-  uint32_t ix,iy;
-  get_float_word(ix,x);
-  get_float_word(iy,y);
-  set_float_word(x,(ix&0x7fffffff)|(iy&0x80000000));
+THRUST_HOST_DEVICE inline float copysignf(float x, float y)
+{
+  uint32_t ix, iy;
+  get_float_word(ix, x);
+  get_float_word(iy, y);
+  set_float_word(x, (ix & 0x7fffffff) | (iy & 0x80000000));
   return x;
 }
 

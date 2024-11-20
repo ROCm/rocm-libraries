@@ -22,6 +22,7 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/tuple.h>
 #include <thrust/functional.h>
+#include <thrust/sequence_access.h>
 
 
 THRUST_NAMESPACE_BEGIN
@@ -115,6 +116,8 @@ template<typename RandomAccessIterator,
     {
       return *(begin() + i);
     }
+
+    THRUST_SYNTHESIZE_SEQUENCE_ACCESS(head_flags_with_init, iterator);
 
   private:
     iterator m_begin, m_end;

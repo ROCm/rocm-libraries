@@ -99,8 +99,8 @@ namespace complex{
 
 using thrust::complex;
 
-THRUST_HOST_DEVICE inline
-complex<double> ctanh(const complex<double>& z){
+THRUST_HOST_DEVICE inline complex<double> ctanh(const complex<double>& z)
+{
   double x, y;
   double t, beta, s, rho, denom;
   uint32_t hx, ix, lx;
@@ -161,8 +161,8 @@ complex<double> ctanh(const complex<double>& z){
   return (complex<double>((beta * rho * s) / denom, t / denom));
 }
 
-THRUST_HOST_DEVICE inline
-complex<double> ctan(complex<double> z){
+THRUST_HOST_DEVICE inline complex<double> ctan(complex<double> z)
+{
   /* ctan(z) = -I * ctanh(I * z) */
   z = ctanh(complex<double>(-z.imag(), z.real()));
   return (complex<double>(z.imag(), -z.real()));
@@ -174,28 +174,28 @@ complex<double> ctan(complex<double> z){
 
 
 template <typename ValueType>
-THRUST_HOST_DEVICE
-inline complex<ValueType> tan(const complex<ValueType>& z){
-  return sin(z)/cos(z);
+THRUST_HOST_DEVICE inline complex<ValueType> tan(const complex<ValueType>& z)
+{
+  return sin(z) / cos(z);
 }
 
 template <typename ValueType>
-THRUST_HOST_DEVICE
-inline complex<ValueType> tanh(const complex<ValueType>& z){
+THRUST_HOST_DEVICE inline complex<ValueType> tanh(const complex<ValueType>& z)
+{
   // This implementation seems better than the simple sin/cos
   return (thrust::exp(ValueType(2)*z)-ValueType(1))/
     (thrust::exp(ValueType(2)*z)+ValueType(1));
 }
 
 template <>
-THRUST_HOST_DEVICE
-inline complex<double> tan(const complex<double>& z){
+THRUST_HOST_DEVICE inline complex<double> tan(const complex<double>& z)
+{
   return detail::complex::ctan(z);
 }
   
 template <>
-THRUST_HOST_DEVICE
-inline complex<double> tanh(const complex<double>& z){
+THRUST_HOST_DEVICE inline complex<double> tanh(const complex<double>& z)
+{
   return detail::complex::ctanh(z);
 }
   

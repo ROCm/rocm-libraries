@@ -106,10 +106,8 @@ template<typename T>
     THRUST_HOST_DEVICE
     inline device_malloc_allocator(device_malloc_allocator<U> const&) {}
 
-#if THRUST_CPP_DIALECT >= 2011
     /*! Default copy assignment operator. */
     device_malloc_allocator & operator=(const device_malloc_allocator &) = default;
-#endif
 
     /*! Returns the address of an allocated object.
      *  \return <tt>&r</tt>.

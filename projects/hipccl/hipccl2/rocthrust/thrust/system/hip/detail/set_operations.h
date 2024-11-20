@@ -859,21 +859,21 @@ namespace __set_operations
         }
     }
 
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start)                         \
-    {                                                                                          \
-        auto error = hipPeekAtLastError();                                                     \
-        if(error != hipSuccess)                                                                \
-            return error;                                                                      \
-        if(debug_synchronous)                                                                  \
-        {                                                                                      \
-            std::cout << name << "(" << size << ")";                                           \
-            auto error = hipStreamSynchronize(stream);                                         \
-            if(error != hipSuccess)                                                            \
-                return error;                                                                  \
-            auto end = std::chrono::high_resolution_clock::now();                              \
-            auto d   = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-            std::cout << " " << d.count() * 1000 << " ms" << '\n';                             \
-        }                                                                                      \
+#  define ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start)                        \
+    {                                                                                      \
+      auto error = hipPeekAtLastError();                                                   \
+      if (error != hipSuccess)                                                             \
+        return error;                                                                      \
+      if (debug_synchronous)                                                               \
+      {                                                                                    \
+        std::cout << name << "(" << size << ")";                                           \
+        auto error = hipStreamSynchronize(stream);                                         \
+        if (error != hipSuccess)                                                           \
+          return error;                                                                    \
+        auto end = std::chrono::high_resolution_clock::now();                              \
+        auto d   = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
+        std::cout << " " << d.count() * 1000 << " ms" << '\n';                             \
+      }                                                                                    \
     }
 
     template <bool HAS_VALUES,
@@ -968,16 +968,16 @@ namespace __set_operations
         if(debug_synchronous)
             start = std::chrono::high_resolution_clock::now();
         auto grid_size = (number_of_blocks + block_size - 1) / block_size;
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(rocprim::detail::init_lookback_scan_state_kernel),
-                           dim3(grid_size),
-                           dim3(block_size),
-                           0,
-                           stream,
-                           blocks_state,
-                           number_of_blocks,
-                           ordered_bid);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(
-            "init_lookback_scan_state_kernel", number_of_blocks, start)
+        hipLaunchKernelGGL(
+          HIP_KERNEL_NAME(rocprim::detail::init_lookback_scan_state_kernel),
+          dim3(grid_size),
+          dim3(block_size),
+          0,
+          stream,
+          blocks_state,
+          number_of_blocks,
+          ordered_bid);
+        ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel", number_of_blocks, start)
 
         status = __parallel_for::parallel_for(
             number_of_blocks + 1,
@@ -992,29 +992,30 @@ namespace __set_operations
 
         if(debug_synchronous)
             start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(lookback_set_op_kernel<config, HAS_VALUES>),
-                           dim3(number_of_blocks),
-                           dim3(block_size),
-                           0,
-                           stream,
-                           keys1,
-                           keys2,
-                           values1,
-                           values2,
-                           keys_output,
-                           values_output,
-                           compare_op,
-                           set_op,
-                           partitions,
-                           output_count,
-                           blocks_state,
-                           ordered_bid);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_set_op_kernel", keys_total, start)
+        hipLaunchKernelGGL(
+          HIP_KERNEL_NAME(lookback_set_op_kernel<config, HAS_VALUES>),
+          dim3(number_of_blocks),
+          dim3(block_size),
+          0,
+          stream,
+          keys1,
+          keys2,
+          values1,
+          values2,
+          keys_output,
+          values_output,
+          compare_op,
+          set_op,
+          partitions,
+          output_count,
+          blocks_state,
+          ordered_bid);
+        ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_set_op_kernel", keys_total, start)
 
         return status;
     }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+#undef ROCTHRUST_HIP_SYNC_AND_RETURN_ON_ERROR
 
     template <bool HAS_VALUES,
               typename Derived,

@@ -24,21 +24,25 @@
 #include <cmath>
 
 THRUST_NAMESPACE_BEGIN
-namespace detail{
-namespace complex{	 
-THRUST_HOST_DEVICE
-inline complex<float> cprojf(const complex<float>& z){
-  if(!isinf(z.real()) && !isinf(z.imag())){
+namespace detail
+{
+namespace complex
+{
+THRUST_HOST_DEVICE inline complex<float> cprojf(const complex<float>& z)
+{
+  if (!isinf(z.real()) && !isinf(z.imag()))
+  {
     return z;
   }else{
     // std::numeric_limits<T>::infinity() doesn't run on the GPU
     return complex<float>(infinity<float>(), copysignf(0.0, z.imag()));
   }
 }
-  
-THRUST_HOST_DEVICE
-inline complex<double> cproj(const complex<double>& z){
-  if(!isinf(z.real()) && !isinf(z.imag())){
+
+THRUST_HOST_DEVICE inline complex<double> cproj(const complex<double>& z)
+{
+  if (!isinf(z.real()) && !isinf(z.imag()))
+  {
     return z;
   }else{
     // std::numeric_limits<T>::infinity() doesn't run on the GPU
@@ -51,21 +55,21 @@ inline complex<double> cproj(const complex<double>& z){
 }
 
 template <typename T>
-THRUST_HOST_DEVICE
-inline thrust::complex<T> proj(const thrust::complex<T>& z){
+THRUST_HOST_DEVICE inline thrust::complex<T> proj(const thrust::complex<T>& z)
+{
   return detail::complex::cproj(z);
 }
   
 
 template <>
-THRUST_HOST_DEVICE
-inline thrust::complex<double> proj(const thrust::complex<double>& z){
+THRUST_HOST_DEVICE inline thrust::complex<double> proj(const thrust::complex<double>& z)
+{
   return detail::complex::cproj(z);
 }
   
 template <>
-THRUST_HOST_DEVICE
-inline thrust::complex<float> proj(const thrust::complex<float>& z){
+THRUST_HOST_DEVICE inline thrust::complex<float> proj(const thrust::complex<float>& z)
+{
   return detail::complex::cprojf(z);
 }
 

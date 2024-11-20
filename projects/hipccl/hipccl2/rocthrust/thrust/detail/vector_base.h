@@ -28,6 +28,7 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/config.h>
 #include <thrust/detail/contiguous_storage.h>
+#include <thrust/sequence_access.h>
 
 #include <initializer_list>
 #include <vector>
@@ -108,7 +109,6 @@ template<typename T, typename Alloc>
      */
     vector_base(const vector_base &v, const Alloc &alloc);
 
-  #if THRUST_CPP_DIALECT >= 2011
     /*! Move constructor moves from another vector_base.
      *  \param v The vector_base to move.
      */
@@ -118,7 +118,6 @@ template<typename T, typename Alloc>
     // iterators, which is necessary for the following constructor to be implemented
     // correctly
     // vector_base(vector_base &&v, const Alloc &alloc);
-  #endif
 
     /*! Copy assign operator copies from another vector_base.
      *  \param v The vector_base to copy.
@@ -487,6 +486,9 @@ template<typename T, typename Alloc>
      *  \return A copy of the alloctor used by this vector.
      */
     allocator_type get_allocator(void) const;
+
+    THRUST_SYNTHESIZE_SEQUENCE_ACCESS(vector_base, const_iterator);
+    THRUST_SYNTHESIZE_SEQUENCE_REVERSE_ACCESS(vector_base, const_reverse_iterator);
 
   protected:
     // Our storage

@@ -1,7 +1,7 @@
 #include <thrust/device_vector.h>
-#include <thrust/reduce.h>
 #include <thrust/functional.h>
 #include <thrust/inner_product.h>
+#include <thrust/reduce.h>
 
 #include <iostream>
 

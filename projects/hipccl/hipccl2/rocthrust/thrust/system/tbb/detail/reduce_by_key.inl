@@ -17,19 +17,23 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/tbb/detail/reduce_by_key.h>
-#include <thrust/iterator/reverse_iterator.h>
-#include <thrust/detail/seq.h>
-#include <thrust/system/tbb/detail/execution_policy.h>
-#include <thrust/system/tbb/detail/reduce_intervals.h>
+
 #include <thrust/detail/minmax.h>
-#include <thrust/detail/temporary_array.h>
 #include <thrust/detail/range/tail_flags.h>
-#include <tbb/blocked_range.h>
-#include <tbb/parallel_for.h>
+#include <thrust/detail/seq.h>
+#include <thrust/detail/temporary_array.h>
+#include <thrust/detail/type_traits/iterator/is_output_iterator.h>
+#include <thrust/iterator/reverse_iterator.h>
+#include <thrust/scan.h>
+#include <thrust/system/tbb/detail/execution_policy.h>
+#include <thrust/system/tbb/detail/reduce_by_key.h>
+#include <thrust/system/tbb/detail/reduce_intervals.h>
 
 #include <cassert>
 #include <thread>
+
+#include <tbb/blocked_range.h>
+#include <tbb/parallel_for.h>
 
 
 THRUST_NAMESPACE_BEGIN

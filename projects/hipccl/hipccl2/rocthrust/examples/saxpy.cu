@@ -1,10 +1,11 @@
-#include <thrust/transform.h>
 #include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
 #include <thrust/functional.h>
+#include <thrust/host_vector.h>
+#include <thrust/transform.h>
+
+#include <algorithm>
 #include <iostream>
 #include <iterator>
-#include <algorithm>
 
 #include "include/host_device.h"
 

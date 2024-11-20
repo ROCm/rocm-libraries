@@ -23,8 +23,6 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/cpp11_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011
-
 #include <mutex>
 
 #include <thrust/mr/pool.h>
@@ -110,4 +108,3 @@ private:
 } // end mr
 THRUST_NAMESPACE_END
 
-#endif // THRUST_CPP_DIALECT >= 2011

@@ -353,9 +353,7 @@ template <class HT, class TT>
   inline THRUST_HOST_DEVICE
   cons( const cons<HT2, TT2>& u ) : head(u.head), tail(u.tail) {}
 
-#if THRUST_CPP_DIALECT >= 2011
   cons(const cons &) = default;
-#endif
 
   THRUST_EXEC_CHECK_DISABLE
   template <class HT2, class TT2>
@@ -460,9 +458,7 @@ template <class HT>
   inline THRUST_HOST_DEVICE
   cons( const cons<HT2, null_type>& u ) : head(u.head) {}
 
-#if THRUST_CPP_DIALECT >= 2011
   cons(const cons &) = default;
-#endif
 
   THRUST_EXEC_CHECK_DISABLE
   template <class HT2>
