@@ -2,7 +2,7 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## (Unreleased) rocPRIM 3.4.0 for ROCm 6.4.0
+## rocPRIM 3.4.0 for ROCm 6.4.0
 
 ### Added
 
@@ -42,10 +42,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Upcoming changes
 * Using the initialisation constructor of `rocprim::reverse_iterator` will throw a deprecation warning. It will be marked as explicit in the next major release.
 
+* Using the initialisation constructor of rocprim::reverse_iterator will throw a deprecation warning. It will be marked as explicit in the next major release.
+
 ## rocPRIM 3.3.0 for ROCm 6.3.0
 
 ### Added
 
+* Changed the default value of `rmake.py -a` to `default_gpus`. This is equivalent to `gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201`.
 * The `--test smoke` option has been added to `rtest.py`. When `rtest.py` is called with this option it runs a subset of tests such that the total test time is 5 minutes. Use `python3 ./rtest.py --test smoke` or `python3 ./rtest.py -t smoke` to run the smoke test.
 * The `--seed` option has been added to `run_benchmarks.py`. The `--seed` option specifies a seed for the generation of random inputs. When the option is omitted, the default behavior is to use a random seed for each benchmark measurement.
 * Added configuration autotuning to device partition (`rocprim::partition`, `rocprim::partition_two_way`, and `rocprim::partition_three_way`), to device select (`rocprim::select`, `rocprim::unique`, and `rocprim::unique_by_key`), and to device reduce by key (`rocprim::reduce_by_key`) to improve performance on selected architectures.
@@ -67,6 +70,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+* Fixed an issue in `rmake.py` where the list storing cmake options would contain individual characters instead of a full string of options.
 * Resolved an issue in `rtest.py` where it crashed if the `build` folder was created without `release` or `debug` subdirectories.
 * Resolved an issue with `rtest.py` on Windows where passing an absolute path to `--install_dir` caused a `FileNotFound` error.
 * rocPRIM functions are no longer forcefully inlined on Windows. This significantly reduces the build
