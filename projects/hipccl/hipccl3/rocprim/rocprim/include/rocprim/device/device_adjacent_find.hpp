@@ -71,6 +71,28 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
     // Kernel launch config
     using config = wrapped_adjacent_find_config<Config, input_type>;
 
+    // Transform input
+    auto wrapped_equal_op = [op, size](const wrapped_input_type& a) -> index_type
+    {
+        if(op_result_type(op(::rocprim::get<0>(a), ::rocprim::get<1>(a))))
+        {
+            return ::rocprim::get<2>(a);
+        }
+        return size;
+    };
+
+    // Kernel wrapper
+    using counting_it_t  = rocprim::counting_iterator<index_type>;
+    using tuple_t        = rocprim::tuple<InputIterator, InputIterator, counting_it_t>;
+    using zip_it_t       = rocprim::zip_iterator<tuple_t>;
+    using transform_it_t = rocprim::transform_iterator<zip_it_t, decltype(wrapped_equal_op)>;
+
+    using adjacent_find_kernels = adjacent_find_impl_kernels<config,
+                                                             transform_it_t,
+                                                             index_type*,
+                                                             reduce_op_type,
+                                                             ordered_tile_id_type>;
+
     // Calculate required temporary storage
     ordered_tile_id_type::id_type* ordered_tile_id_storage;
     index_type*                    reduce_output = nullptr;
@@ -94,9 +116,11 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
         start = std::chrono::steady_clock::now();
     }
 
-    // Launch adjacent_find::init_adjacent_find
+    // Launch adjacent_find_impl_kernels::init_adjacent_find
     auto ordered_tile_id = ordered_tile_id_type::create(ordered_tile_id_storage);
-    adjacent_find::init_adjacent_find<<<1, 1, 0, stream>>>(reduce_output, ordered_tile_id, size);
+    adjacent_find_kernels::init_adjacent_find<<<1, 1, 0, stream>>>(reduce_output,
+                                                                   ordered_tile_id,
+                                                                   size);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(
         "rocprim::detail::adjacent_find::init_adjacent_find",
         size,
@@ -109,24 +133,11 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
         auto wrapped_input
             = ::rocprim::make_zip_iterator(::rocprim::make_tuple(input, input + 1, iota));
 
-        // Transform input
-        auto wrapped_equal_op = [op, size](const wrapped_input_type& a) -> index_type
-        {
-            if(op_result_type(op(::rocprim::get<0>(a), ::rocprim::get<1>(a))))
-            {
-                return ::rocprim::get<2>(a);
-            }
-            return size;
-        };
         auto transformed_input
             = ::rocprim::make_transform_iterator(wrapped_input, wrapped_equal_op);
 
-        auto adjacent_find_block_reduce_kernel
-            = adjacent_find::block_reduce_kernel<config,
-                                                 decltype(transformed_input),
-                                                 decltype(reduce_output),
-                                                 reduce_op_type,
-                                                 decltype(ordered_tile_id)>;
+        auto adjacent_find_block_reduce_kernel = adjacent_find_kernels::block_reduce_kernel;
+
         target_arch target_arch;
         ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
         const adjacent_find_config_params params     = dispatch_target_arch<config>(target_arch);
@@ -152,7 +163,7 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
             start = std::chrono::steady_clock::now();
         }
 
-        // Launch adjacent_find::block_reduce_kernel
+        // Launch adjacent_find_impl_kernels::block_reduce_kernel
         adjacent_find_block_reduce_kernel<<<min_grid_size, block_size, shared_mem_bytes, stream>>>(
             transformed_input,
             reduce_output,

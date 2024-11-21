@@ -43,225 +43,227 @@ inline void search_n_start_timer(std::chrono::steady_clock::time_point& start,
     }
 }
 
-template<class SizeType>
-ROCPRIM_KERNEL __launch_bounds__(1)
-void search_n_init_kernel(SizeType* __restrict__ output, const SizeType target)
-{
-    *output = target;
-}
-
-/// \brief Supports all forms of search_n operations,
-/// but the efficiency is insufficient when `items_per_block` is too large.
 template<class Config, class InputIterator, class BinaryPredicate>
-ROCPRIM_KERNEL
+struct search_n_impl_kernels
+{
+
+    template<class SizeType>
+    static ROCPRIM_KERNEL __launch_bounds__(1)
+    void search_n_init_kernel(SizeType* __restrict__ output, const SizeType target)
+    {
+        *output = target;
+    }
+
+    /// \brief Supports all forms of search_n operations,
+    /// but the efficiency is insufficient when `items_per_block` is too large.
+    static ROCPRIM_KERNEL
 #ifndef DOXYGEN_DOCUMENTATION_BUILD
 __launch_bounds__(device_params<Config>().kernel_config.block_size)
 #endif
-void search_n_normal_kernel(InputIterator input,
-                            size_t* __restrict__ output,
-                            const size_t                                                    size,
-                            const size_t                                                    count,
-                            const typename std::iterator_traits<InputIterator>::value_type* value,
-                            const BinaryPredicate binary_predicate)
-{
-    constexpr auto params           = device_params<Config>();
-    constexpr auto block_size       = params.kernel_config.block_size;
-    constexpr auto items_per_thread = params.kernel_config.items_per_thread;
-    constexpr auto items_per_block  = block_size * items_per_thread;
+        void search_n_normal_kernel(
+            InputIterator input,
+            size_t* __restrict__ output,
+            const size_t                                                    size,
+            const size_t                                                    count,
+            const typename std::iterator_traits<InputIterator>::value_type* value,
+            const BinaryPredicate                                           binary_predicate)
+    {
+        constexpr auto params           = device_params<Config>();
+        constexpr auto block_size       = params.kernel_config.block_size;
+        constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        constexpr auto items_per_block  = block_size * items_per_thread;
 
-    const size_t this_thread_start_idx
-        = (block_id<0>() * items_per_block) + (items_per_thread * block_thread_id<0>());
+        const size_t this_thread_start_idx
+            = (block_id<0>() * items_per_block) + (items_per_thread * block_thread_id<0>());
 
-    // TODO: This could cause load imbalance among threads
-    // So maybe there is a better way to do this
-    if(size < count + this_thread_start_idx)
-    { // not able to find a sequence equal to or longer than count
-        return;
+        // TODO: This could cause load imbalance among threads
+        // So maybe there is a better way to do this
+        if(size < count + this_thread_start_idx)
+        { // not able to find a sequence equal to or longer than count
+            return;
+        }
+
+        size_t remaining_count    = count;
+        size_t sequence_start_idx = this_thread_start_idx;
+
+        const size_t items_this_thread
+            = std::min<size_t>(size - this_thread_start_idx, items_per_thread);
+        for(size_t i = this_thread_start_idx;
+            sequence_start_idx - this_thread_start_idx < items_this_thread
+            && i + remaining_count <= size;
+            ++i)
+        {
+            if(binary_predicate(input[i], *value))
+            {
+                if(--remaining_count == 0)
+                {
+                    atomic_min(output, sequence_start_idx);
+                    return;
+                }
+            }
+            else
+            {
+                remaining_count    = count;
+                sequence_start_idx = i + 1;
+            }
+        }
     }
 
-    size_t remaining_count    = count;
-    size_t sequence_start_idx = this_thread_start_idx;
-
-    const size_t items_this_thread
-        = std::min<size_t>(size - this_thread_start_idx, items_per_thread);
-    for(size_t i = this_thread_start_idx;
-        sequence_start_idx - this_thread_start_idx < items_this_thread
-        && i + remaining_count <= size;
-        ++i)
+    static ROCPRIM_KERNEL
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+__launch_bounds__(device_params<Config>().kernel_config.block_size)
+#endif
+        void search_n_find_heads_kernel(
+            InputIterator                                                   input,
+            const size_t                                                    size,
+            const typename std::iterator_traits<InputIterator>::value_type* value,
+            const BinaryPredicate                                           binary_predicate,
+            size_t* __restrict__ unfiltered_heads,
+            const size_t group_size)
     {
-        if(binary_predicate(input[i], *value))
+        constexpr auto params           = device_params<Config>();
+        constexpr auto block_size       = params.kernel_config.block_size;
+        constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        constexpr auto items_per_block  = block_size * items_per_thread;
+
+        const size_t this_thread_start_idx
+            = (block_id<0>() * items_per_block) + (items_per_thread * block_thread_id<0>());
+        const size_t items_this_thread
+            = std::min<size_t>(this_thread_start_idx < size ? size - this_thread_start_idx : 0,
+                               items_per_thread);
+
+        for(size_t i = this_thread_start_idx; i < this_thread_start_idx + items_this_thread; i++)
         {
-            if(--remaining_count == 0)
+            if(binary_predicate(input[i], *value))
             {
-                atomic_min(output, sequence_start_idx);
+                if(i == 0)
+                { // is head // `size - i - 1` is the distance to the end
+                    atomic_min(&(unfiltered_heads[i / group_size]), size - i - 1);
+                }
+                else if(!binary_predicate(input[i - 1], *value))
+                { // is head
+                    atomic_min(&(unfiltered_heads[i / group_size]), size - i - 1);
+                }
+            }
+        }
+    }
+
+    static ROCPRIM_KERNEL
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+__launch_bounds__(device_params<Config>().kernel_config.block_size)
+#endif
+        void search_n_heads_filter_kernel(const size_t size,
+                                          const size_t count,
+                                          const size_t* __restrict__ heads,
+                                          const size_t heads_size,
+                                          size_t* __restrict__ filtered_heads,
+                                          size_t* __restrict__ filtered_heads_size)
+    {
+        constexpr auto params           = device_params<Config>();
+        constexpr auto block_size       = params.kernel_config.block_size;
+        constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        constexpr auto items_per_block  = block_size * items_per_thread;
+
+        const size_t this_thread_start_idx
+            = (block_id<0>() * items_per_block) + (block_thread_id<0>() * items_per_thread);
+        const size_t this_thread_end_idx
+            = std::min(items_per_thread + this_thread_start_idx, heads_size);
+        for(size_t i = this_thread_start_idx; i < this_thread_end_idx; ++i)
+        {
+            const auto cur_val = heads[i];
+            if(cur_val == (size_t)-1)
+            { // this is not a valid head
+                continue;
+            }
+            const size_t this_head = size - cur_val - 1;
+            if(i + 1 == heads_size)
+            { // head of last group
+                if(size - this_head < count)
+                { // cannot make it to count
+                    continue;
+                }
+            }
+            else if(i + 2 == heads_size)
+            { // the head before last head (last group might be incomplete so, the head before last head can be invalid)
+                const auto next_val = heads[i + 1];
+                if(((next_val != (size_t)-1) ? ((size - next_val - 1) - this_head - 1)
+                                             : (size - this_head))
+                   < count)
+                { // cannot make it to count
+                    continue;
+                }
+            }
+            else
+            { // other heads
+                const auto next_val = heads[i + 1];
+                if((next_val != (size_t)-1) && (((size - next_val - 1) - this_head - 1) < count))
+                { // if next head is invalid, the limit of this head should the next head, else it is possible to make the sequence to count
+                    continue;
+                }
+            }
+            filtered_heads[atomic_add(filtered_heads_size, 1)] = this_head;
+        }
+    }
+
+    static ROCPRIM_KERNEL
+#ifndef DOXYGEN_DOCUMENTATION_BUILD
+__launch_bounds__(device_params<Config>().kernel_config.block_size)
+#endif
+        void search_n_discard_heads_kernel(
+            InputIterator                                                   input,
+            const size_t                                                    size,
+            const size_t                                                    count,
+            const typename std::iterator_traits<InputIterator>::value_type* value,
+            const BinaryPredicate                                           binary_predicate,
+            size_t* __restrict__ heads,
+            size_t* num_heads)
+    {
+        constexpr auto params           = device_params<Config>();
+        constexpr auto block_size       = params.kernel_config.block_size;
+        constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        constexpr auto items_per_block  = block_size * items_per_thread;
+
+        const size_t heads_size = *num_heads;
+        if(heads_size == 0)
+        {
+            return; // should return
+        }
+
+        size_t num_blocks_needed = ceiling_div(heads_size * count /*group_size*/, items_per_block);
+        if(block_id<0>() >= num_blocks_needed)
+        {
+            return;
+        }
+
+        const size_t this_thread_start_idx
+            = (block_id<0>() * items_per_block) + (block_thread_id<0>() * items_per_thread);
+
+        for(size_t global_idx = this_thread_start_idx;
+            global_idx < this_thread_start_idx + items_per_block;
+            global_idx++)
+        {
+            const size_t g_id /*group id*/ = global_idx / count /*group_size*/;
+            if(g_id >= heads_size)
+            {
+                return;
+            }
+            const size_t check_head
+                = heads[g_id] + 1; // the `head` is already checked, so we check the next value here
+            const size_t check_count = count - 1;
+            const size_t idx         = check_head + (global_idx % count);
+
+            if((idx >= size) || (idx >= (check_head + check_count)))
+            {
+                return;
+            }
+            if(!binary_predicate(input[idx], *value))
+            {
+                heads[g_id] = size;
                 return;
             }
         }
-        else
-        {
-            remaining_count    = count;
-            sequence_start_idx = i + 1;
-        }
     }
-}
-
-template<class Config, class InputIterator, class BinaryPredicate>
-ROCPRIM_KERNEL
-#ifndef DOXYGEN_DOCUMENTATION_BUILD
-__launch_bounds__(device_params<Config>().kernel_config.block_size)
-#endif
-void search_n_find_heads_kernel(
-    InputIterator                                                   input,
-    const size_t                                                    size,
-    const typename std::iterator_traits<InputIterator>::value_type* value,
-    const BinaryPredicate                                           binary_predicate,
-    size_t* __restrict__ unfiltered_heads,
-    const size_t group_size)
-{
-    constexpr auto params           = device_params<Config>();
-    constexpr auto block_size       = params.kernel_config.block_size;
-    constexpr auto items_per_thread = params.kernel_config.items_per_thread;
-    constexpr auto items_per_block  = block_size * items_per_thread;
-
-    const size_t this_thread_start_idx
-        = (block_id<0>() * items_per_block) + (items_per_thread * block_thread_id<0>());
-    const size_t items_this_thread
-        = std::min<size_t>(this_thread_start_idx < size ? size - this_thread_start_idx : 0,
-                           items_per_thread);
-
-    for(size_t i = this_thread_start_idx; i < this_thread_start_idx + items_this_thread; i++)
-    {
-        if(binary_predicate(input[i], *value))
-        {
-            if(i == 0)
-            { // is head // `size - i - 1` is the distance to the end
-                atomic_min(&(unfiltered_heads[i / group_size]), size - i - 1);
-            }
-            else if(!binary_predicate(input[i - 1], *value))
-            { // is head
-                atomic_min(&(unfiltered_heads[i / group_size]), size - i - 1);
-            }
-        }
-    }
-}
-
-template<class Config>
-ROCPRIM_KERNEL
-#ifndef DOXYGEN_DOCUMENTATION_BUILD
-__launch_bounds__(device_params<Config>().kernel_config.block_size)
-#endif
-void search_n_heads_filter_kernel(const size_t size,
-                                  const size_t count,
-                                  const size_t* __restrict__ heads,
-                                  const size_t heads_size,
-                                  size_t* __restrict__ filtered_heads,
-                                  size_t* __restrict__ filtered_heads_size)
-{
-    constexpr auto params           = device_params<Config>();
-    constexpr auto block_size       = params.kernel_config.block_size;
-    constexpr auto items_per_thread = params.kernel_config.items_per_thread;
-    constexpr auto items_per_block  = block_size * items_per_thread;
-
-    const size_t this_thread_start_idx
-        = (block_id<0>() * items_per_block) + (block_thread_id<0>() * items_per_thread);
-    const size_t this_thread_end_idx
-        = std::min(items_per_thread + this_thread_start_idx, heads_size);
-    for(size_t i = this_thread_start_idx; i < this_thread_end_idx; ++i)
-    {
-        const auto cur_val = heads[i];
-        if(cur_val == (size_t)-1)
-        { // this is not a valid head
-            continue;
-        }
-        const size_t this_head = size - cur_val - 1;
-        if(i + 1 == heads_size)
-        { // head of last group
-            if(size - this_head < count)
-            { // cannot make it to count
-                continue;
-            }
-        }
-        else if(i + 2 == heads_size)
-        { // the head before last head (last group might be incomplete so, the head before last head can be invalid)
-            const auto next_val = heads[i + 1];
-            if(((next_val != (size_t)-1) ? ((size - next_val - 1) - this_head - 1)
-                                         : (size - this_head))
-               < count)
-            { // cannot make it to count
-                continue;
-            }
-        }
-        else
-        { // other heads
-            const auto next_val = heads[i + 1];
-            if((next_val != (size_t)-1) && (((size - next_val - 1) - this_head - 1) < count))
-            { // if next head is invalid, the limit of this head should the next head, else it is possible to make the sequence to count
-                continue;
-            }
-        }
-        filtered_heads[atomic_add(filtered_heads_size, 1)] = this_head;
-    }
-}
-
-template<class Config, class InputIterator, class BinaryPredicate>
-ROCPRIM_KERNEL
-#ifndef DOXYGEN_DOCUMENTATION_BUILD
-__launch_bounds__(device_params<Config>().kernel_config.block_size)
-#endif
-void search_n_discard_heads_kernel(
-    InputIterator                                                   input,
-    const size_t                                                    size,
-    const size_t                                                    count,
-    const typename std::iterator_traits<InputIterator>::value_type* value,
-    const BinaryPredicate                                           binary_predicate,
-    size_t* __restrict__ heads,
-    size_t* num_heads)
-{
-    constexpr auto params           = device_params<Config>();
-    constexpr auto block_size       = params.kernel_config.block_size;
-    constexpr auto items_per_thread = params.kernel_config.items_per_thread;
-    constexpr auto items_per_block  = block_size * items_per_thread;
-
-    const size_t heads_size = *num_heads;
-    if(heads_size == 0)
-    {
-        return; // should return
-    }
-
-    size_t num_blocks_needed = ceiling_div(heads_size * count /*group_size*/, items_per_block);
-    if(block_id<0>() >= num_blocks_needed)
-    {
-        return;
-    }
-
-    const size_t this_thread_start_idx
-        = (block_id<0>() * items_per_block) + (block_thread_id<0>() * items_per_thread);
-
-    for(size_t global_idx = this_thread_start_idx;
-        global_idx < this_thread_start_idx + items_per_block;
-        global_idx++)
-    {
-        const size_t g_id /*group id*/ = global_idx / count /*group_size*/;
-        if(g_id >= heads_size)
-        {
-            return;
-        }
-        const size_t check_head
-            = heads[g_id] + 1; // the `head` is already checked, so we check the next value here
-        const size_t check_count = count - 1;
-        const size_t idx         = check_head + (global_idx % count);
-
-        if((idx >= size) || (idx >= (check_head + check_count)))
-        {
-            return;
-        }
-        if(!binary_predicate(input[idx], *value))
-        {
-            heads[g_id] = size;
-            return;
-        }
-    }
-}
+};
 
 template<class Config, class InputIterator, class OutputIterator, class BinaryPredicate>
 ROCPRIM_INLINE
@@ -276,9 +278,10 @@ hipError_t search_n_impl(void*          temporary_storage,
                          const hipStream_t     stream,
                          const bool            debug_synchronous)
 {
-    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    using config      = wrapped_search_n_config<Config, input_type>;
+    using input_type       = typename std::iterator_traits<InputIterator>::value_type;
+    using output_type      = typename std::iterator_traits<OutputIterator>::value_type;
+    using config           = wrapped_search_n_config<Config, input_type>;
+    using search_n_kernels = search_n_impl_kernels<config, InputIterator, BinaryPredicate>;
 
     if(count > size)
     { // size must greater than or equal to count
@@ -309,7 +312,8 @@ hipError_t search_n_impl(void*          temporary_storage,
 
         // return end or begin
         search_n_start_timer(start, debug_synchronous);
-        search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output, count <= 0 ? 0 : size);
+        search_n_kernels::search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output,
+                                                                    count <= 0 ? 0 : size);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_init_kernel", 1, start);
         ROCPRIM_RETURN_ON_ERROR(
             transform(tmp_output, output, 1, identity<output_type>(), stream, debug_synchronous));
@@ -327,15 +331,16 @@ hipError_t search_n_impl(void*          temporary_storage,
 
         // do `normal_search_n`
         search_n_start_timer(start, debug_synchronous);
-        search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output, size);
+        search_n_kernels::search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output, size);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_init_kernel", 1, start);
         // TODO: There can be overlapping between threads, this probably can be optimized
-        search_n_normal_kernel<config><<<num_blocks, block_size, 0, stream>>>(input,
-                                                                              tmp_output,
-                                                                              size,
-                                                                              count,
-                                                                              value,
-                                                                              binary_predicate);
+        search_n_kernels::search_n_normal_kernel<<<num_blocks, block_size, 0, stream>>>(
+            input,
+            tmp_output,
+            size,
+            count,
+            value,
+            binary_predicate);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_normal_kernel", size, start);
         ROCPRIM_RETURN_ON_ERROR(
             transform(tmp_output, output, 1, identity<output_type>(), stream, debug_synchronous));
@@ -379,24 +384,25 @@ hipError_t search_n_impl(void*          temporary_storage,
             hipMemsetAsync(unfiltered_heads, -1, sizeof(size_t) * num_groups * 2, stream));
 
         // find the thread heads of each group
-        search_n_find_heads_kernel<config>
-            <<<num_blocks, block_size, 0, stream>>>(input,
-                                                    size,
-                                                    value,
-                                                    binary_predicate,
-                                                    unfiltered_heads,
-                                                    count /*group_size*/);
+        search_n_kernels::search_n_find_heads_kernel<<<num_blocks, block_size, 0, stream>>>(
+            input,
+            size,
+            value,
+            binary_predicate,
+            unfiltered_heads,
+            count /*group_size*/);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_find_heads_kernel", size, start);
 
         // filter heads
         // move valid heads into filtered_heads, and set the size of filtered_heads to tmp_output
-        search_n_heads_filter_kernel<config>
-            <<<num_blocks_for_heads_filter, block_size, 0, stream>>>(size,
-                                                                     count,
-                                                                     unfiltered_heads,
-                                                                     num_groups,
-                                                                     filtered_heads,
-                                                                     tmp_output);
+        search_n_kernels::
+            search_n_heads_filter_kernel<<<num_blocks_for_heads_filter, block_size, 0, stream>>>(
+                size,
+                count,
+                unfiltered_heads,
+                num_groups,
+                filtered_heads,
+                tmp_output);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_heads_filter_kernel",
                                                     num_groups,
                                                     start);
@@ -405,8 +411,8 @@ hipError_t search_n_impl(void*          temporary_storage,
         // max access time for each item is 1
         // TODO: num_blocks_for_discard_heads is actually graeter than the actural valid filtered_heads_size
         // so the actural num_blocks_for_discard_heads needed is smaller than the current value
-        search_n_discard_heads_kernel<config>
-            <<<num_blocks_for_discard_heads, block_size, 0, stream>>>(
+        search_n_kernels::
+            search_n_discard_heads_kernel<<<num_blocks_for_discard_heads, block_size, 0, stream>>>(
                 input,
                 size,
                 count,

@@ -54,15 +54,15 @@ struct find_first_of_impl_kernels
 #ifndef DOXYGEN_DOCUMENTATION_BUILD
     __launch_bounds__(device_params<Config>().kernel_config.block_size)
 #endif
-    void find_first_of_kernel(InputIterator1           input,
-                              InputIterator2           keys,
-                              size_t*                  output,
-                              size_t                   size,
-                              size_t                   keys_size,
-                              ordered_block_id<size_t> ordered_bid,
-                              BinaryFunction           compare_function)
-    {
-        constexpr find_first_of_config_params params = device_params<Config>();
+void find_first_of_kernel(InputIterator1           input,
+                          InputIterator2           keys,
+                          size_t*                  output,
+                          size_t                   size,
+                          size_t                   keys_size,
+                          ordered_block_id<size_t> ordered_bid,
+                          BinaryFunction           compare_function)
+{
+    constexpr find_first_of_config_params params = device_params<Config>();
 
         constexpr unsigned int block_size       = params.kernel_config.block_size;
         constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -107,42 +107,42 @@ struct find_first_of_impl_kernels
 
             unsigned int thread_first_index = identity;
 
-            if(block_offset + items_per_block <= size)
+        if(block_offset + items_per_block <= size)
+        {
+            type items[items_per_thread];
+            block_load_direct_striped<block_size>(thread_id, input + block_offset, items);
+            for(size_t key_index = 0; key_index < keys_size; ++key_index)
             {
-                type items[items_per_thread];
-                block_load_direct_striped<block_size>(thread_id, input + block_offset, items);
-                for(size_t key_index = 0; key_index < keys_size; ++key_index)
+                const key_type key = keys[key_index];
+                ROCPRIM_UNROLL
+                for(unsigned int i = 0; i < items_per_thread; ++i)
                 {
-                    const key_type key = keys[key_index];
-                    ROCPRIM_UNROLL
-                        for(unsigned int i = 0; i < items_per_thread; ++i)
-                        {
-                            if(compare_function(key, items[i]))
-                            {
-                                thread_first_index = min(thread_first_index, i);
-                            }
-                        }
+                    if(compare_function(key, items[i]))
+                    {
+                        thread_first_index = min(thread_first_index, i);
+                    }
                 }
             }
-            else
-            {
-                const unsigned int valid = size - block_offset;
+        }
+        else
+        {
+            const unsigned int valid = size - block_offset;
 
-                type items[items_per_thread];
-                block_load_direct_striped<block_size>(thread_id, input + block_offset, items, valid);
-                for(size_t key_index = 0; key_index < keys_size; ++key_index)
+            type items[items_per_thread];
+            block_load_direct_striped<block_size>(thread_id, input + block_offset, items, valid);
+            for(size_t key_index = 0; key_index < keys_size; ++key_index)
+            {
+                const key_type key = keys[key_index];
+                ROCPRIM_UNROLL
+                for(unsigned int i = 0; i < items_per_thread; ++i)
                 {
-                    const key_type key = keys[key_index];
-                    ROCPRIM_UNROLL
-                        for(unsigned int i = 0; i < items_per_thread; ++i)
-                        {
-                            if(i * block_size + thread_id < valid && compare_function(key, items[i]))
-                            {
-                                thread_first_index = min(thread_first_index, i);
-                            }
-                        }
+                    if(i * block_size + thread_id < valid && compare_function(key, items[i]))
+                    {
+                        thread_first_index = min(thread_first_index, i);
+                    }
                 }
             }
+        }
 
             if(thread_first_index != identity)
             {
