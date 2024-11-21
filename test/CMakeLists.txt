@@ -196,6 +196,7 @@ set(
   catch/ExpressionTest.cpp
   catch/ExpressionToStringTest.cpp
   catch/ExpressionTransformationTest.cpp
+  catch/ExpressionContainsSubExpressionTest.cpp
   catch/FastArithmeticTest.cpp
   catch/KernelArgumentsTest.cpp
   catch/KernelGraphConstraintsTest.cpp

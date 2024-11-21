@@ -150,9 +150,20 @@ namespace rocRoller
                 }
                 return std::visit(*this, *a, *b);
             }
+
+            bool call(Expression const& a, Expression const& b)
+            {
+                return std::visit(*this, a, b);
+            }
         };
 
         bool identical(ExpressionPtr const& a, ExpressionPtr const& b)
+        {
+            auto visitor = ExpressionIdenticalVisitor();
+            return visitor.call(a, b);
+        }
+
+        bool identical(Expression const& a, Expression const& b)
         {
             auto visitor = ExpressionIdenticalVisitor();
             return visitor.call(a, b);
@@ -635,6 +646,71 @@ namespace rocRoller
             ContainsInstantiateVisitor v{expr};
 
             return std::visit(v, *exprType);
+        }
+
+        struct ContainsSubExpressionVisitor
+        {
+            ContainsSubExpressionVisitor(Expression const& expr)
+                : subExpr(expr)
+            {
+            }
+
+            ContainsSubExpressionVisitor(ExpressionPtr const& exprPtr)
+                : subExpr(*exprPtr)
+            {
+            }
+
+            template <CUnary U>
+            bool operator()(U const& expr) const
+            {
+                return identical(expr, subExpr) || call(expr.arg);
+            }
+
+            template <CBinary U>
+            bool operator()(U const& expr) const
+            {
+                return identical(expr, subExpr) || call(expr.lhs) || call(expr.rhs);
+            }
+
+            template <CTernary U>
+            bool operator()(U const& expr) const
+            {
+                return identical(expr, subExpr) || call(expr.lhs) || call(expr.r1hs)
+                       || call(expr.r2hs);
+            }
+
+            template <CValue U>
+            bool operator()(U const& expr) const
+            {
+                return identical(expr, subExpr);
+            }
+
+            bool call(Expression const& expr) const
+            {
+                return std::visit(*this, expr);
+            }
+
+            bool call(ExpressionPtr const& expr) const
+            {
+                if(!expr)
+                    return false;
+
+                return call(*expr);
+            }
+
+            Expression const& subExpr;
+        };
+
+        bool containsSubExpression(ExpressionPtr const& expr, ExpressionPtr const& subExpr)
+        {
+            auto visitor = ContainsSubExpressionVisitor(subExpr);
+            return visitor.call(expr);
+        }
+
+        bool containsSubExpression(Expression const& expr, Expression const& subExpr)
+        {
+            auto visitor = ContainsSubExpressionVisitor(subExpr);
+            return visitor.call(expr);
         }
     }
 }
