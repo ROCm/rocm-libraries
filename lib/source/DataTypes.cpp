@@ -114,6 +114,8 @@ namespace rocRoller
             return "BFloat16x2";
         case DataType::Raw32:
             return "Raw32";
+        case DataType::UInt8x4:
+            return "UInt8x4";
         case DataType::UInt8:
             return "UInt8";
         case DataType::UInt16:
@@ -186,6 +188,8 @@ namespace rocRoller
             return "2xB";
         case DataType::Raw32:
             return "R";
+        case DataType::UInt8x4:
+            return "4xU8";
         case DataType::UInt8:
             return "U8";
         case DataType::UInt16:
@@ -507,6 +511,7 @@ namespace rocRoller
         registerTypeInfo<std::complex<float>>();
 
         registerTypeInfo<Int8x4>();
+        registerTypeInfo<UInt8x4>();
         registerTypeInfo<Raw32>();
 
         registerTypeInfo<int8_t>();

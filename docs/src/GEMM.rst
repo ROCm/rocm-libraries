@@ -7,7 +7,7 @@ library by default.
 
 To run the GEMM client from your build directory::
 
-    client/gemm --help
+    ./bin/client/gemm --help
 
 The GEMM client can do a few different things::
 
@@ -26,34 +26,34 @@ To generate a solution and validate it (which runs the solution on the
 local GPU and compares it to a reference solution computed on the CPU
 by OpenBLAS)::
 
-    client/gemm --mac_m=128 --mac_n=128 --m 4096 --n 4096 --k 32 generate validate
+    ./bin/client/gemm --mac_m=128 --mac_n=128 --m 4096 --n 4096 --k 32 generate validate
 
 Generating a solution
 ---------------------
 
 To generate a solution and save it::
 
-    client/gemm --mac_m=128 --mac_n=128 generate --save sgemm-current.yaml
+    ./bin/client/gemm --mac_m=128 --mac_n=128 generate --save sgemm-current.yaml
 
 The architecture can also be specified::
 
-    client/gemm --mac_m=128 --mac_n=128 --hgemm generate --arch gfx90a --save hgemm-gfx90a.yaml
+    ./bin/client/gemm --mac_m=128 --mac_n=128 --hgemm generate --arch gfx90a --save hgemm-gfx90a.yaml
 
 Generating a solution and validating it
 ---------------------------------------
 
 To generate a solution, run it once, and compare the result to OpenBLAS::
 
-    client/gemm --mac_m=128 --mac_n=128 generate validate --m 4096 --n 4096 --k 128
+    ./bin/client/gemm --mac_m=128 --mac_n=128 generate validate --m 4096 --n 4096 --k 128
 
 Generating a solution, modifying it, and validating it
 ------------------------------------------------------
 
 To hack assembly manually::
 
-    client/gemm --mac_m=128 --mac_n=128 generate --save my-sgemm.yaml
+    ./bin/client/gemm --mac_m=128 --mac_n=128 generate --save my-sgemm.yaml
     emacs my-sgemm.s
-    client/gemm --m 4096 --n 4096 --k 128 validate --load my-sgemm.yaml
+    ./bin/client/gemm --m 4096 --n 4096 --k 128 validate --load my-sgemm.yaml
 
 Note that in the _generate_ invocation, the problem size does not need
 to be specified.  Only _solution_ and and _type_ parameters are
@@ -67,4 +67,4 @@ Benchmarking
 
 To benchmark a solution::
 
-    client/gemm --mac_m=128 --mac_n=128 generate benchmark
+    ./bin/client/gemm --mac_m=128 --mac_n=128 generate benchmark

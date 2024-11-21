@@ -329,7 +329,8 @@ namespace llvm
          * Add serialization for small floating point types. Defer to built-in fp32 serialization with conversion.
          */
         template <typename T>
-        requires(rocRoller::CIsAnyOf<rocRoller::Half,
+        requires(rocRoller::CIsAnyOf<T,
+                                     rocRoller::Half,
                                      rocRoller::BFloat16,
                                      rocRoller::FP8,
                                      rocRoller::BF8,
