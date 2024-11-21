@@ -234,6 +234,16 @@ TEST_F(GPUArchitectureTest, Validate94xInstructions)
               true);
 }
 
+TEST_F(GPUArchitectureTest, Validate95xInstructions)
+{
+    // Verify permlane instructions exist
+    EXPECT_NO_THROW(GPUArchitectureLibrary::getInstance()->GetInstructionInfo(
+        {GPUArchitectureGFX::GFX950}, "v_permlane16_swap_b32"));
+
+    EXPECT_NO_THROW(GPUArchitectureLibrary::getInstance()->GetInstructionInfo(
+        {GPUArchitectureGFX::GFX950}, "v_permlane32_swap_b32"));
+}
+
 TEST_F(GPUArchitectureTest, MFMA)
 {
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(

@@ -620,7 +620,6 @@ set(
   test/unit/GPUInstructionInfoTest.cpp
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
-  test/unit/HazardObserverTest.cpp
   test/unit/HypergraphTest.cpp
   test/unit/InstructionTest.cpp
   test/unit/KernelGraphTest.cpp
@@ -731,6 +730,7 @@ set(
   test/catch/RandomNumberExpressionTest.cpp
   test/catch/SettingsTest.cpp
   test/catch/mxDataGeneratorTest.cpp
+  test/catch/HazardObserverTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})

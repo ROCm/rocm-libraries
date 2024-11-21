@@ -25,7 +25,7 @@ namespace rocRoller
 
             if(GPUInstructionInfo::isVPermlane(inst.getOpCode()))
             {
-                return checkRegister(inst.getSrcs()[0]).value_or(0);
+                return checkSrcs(inst).value_or(0);
             }
 
             return 0;

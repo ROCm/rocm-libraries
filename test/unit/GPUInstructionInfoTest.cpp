@@ -533,7 +533,7 @@ TEST_F(GPUInstructionInfoTest, LaneInstructions)
         EXPECT_CATEGORY_EQ(inst, isVPermlane, false);
     }
 
-    for(auto inst : {"v_permlane16_swap", "v_permlane32_swap"})
+    for(auto const& inst : {"v_permlane16_swap_b32", "v_permlane32_swap_b32"})
     {
         EXPECT_CATEGORY_EQ(inst, isVector, true);
         EXPECT_CATEGORY_EQ(inst, isVALU, true);
