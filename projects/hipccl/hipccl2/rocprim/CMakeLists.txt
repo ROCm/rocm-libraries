@@ -102,7 +102,7 @@ if(GPU_TARGETS STREQUAL "all")
   if(BUILD_ADDRESS_SANITIZER)
     # ASAN builds require xnack
     rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-      TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx940:xnack+;gfx941:xnack+;gfx942:xnack+"
+      TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+"
     )
   else()
     rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
@@ -137,7 +137,7 @@ if(BUILD_CODE_COVERAGE)
 endif()
 
 # Setup VERSION
-set(VERSION_STRING "3.3.0")
+set(VERSION_STRING "3.4.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Print configuration summary
