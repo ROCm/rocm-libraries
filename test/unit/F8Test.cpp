@@ -70,8 +70,6 @@ namespace rocRollerTest
             co_yield context->argLoader()->getValue("result", s_result);
             co_yield context->argLoader()->getValue("a", s_a);
 
-            const auto packedDType = static_cast<DataType>(static_cast<int>(F8Type) + 1);
-
             auto result_ptr
                 = Register::Value::Placeholder(context,
                                                Register::Type::Vector,
@@ -79,11 +77,9 @@ namespace rocRollerTest
                                                1,
                                                Register::AllocationOptions::FullyContiguous());
 
-            DataType packedDataType;
-            if(F8Type == DataType::BF8)
-                packedDataType = DataType::BF8x4;
-            else // F8Type == DataType::FP8
-                packedDataType = DataType::FP8x4;
+            auto unsegmented = DataTypeInfo::Get(F8Type).unsegmentedVariableType();
+            AssertFatal(unsegmented, "packed data type not found");
+            DataType packedDataType = unsegmented->dataType;
 
             auto a_ptr
                 = Register::Value::Placeholder(context,
