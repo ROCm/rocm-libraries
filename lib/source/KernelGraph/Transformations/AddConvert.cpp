@@ -139,25 +139,9 @@ namespace rocRoller
                             node, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
                         m_multiplyArgs[macATag].push_back({node, NaryArgument::LHS});
 
-                        if(op.scaleA == Operations::ScaleMode::Separate)
-                        {
-                            auto [macATag, macA] = graph.getDimension<MacroTile>(
-                                node,
-                                Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
-                            m_multiplyArgs[macATag].push_back({node, NaryArgument::LHS_SCALE});
-                        }
-
                         auto [macBTag, macB] = graph.getDimension<MacroTile>(
                             node, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
                         m_multiplyArgs[macBTag].push_back({node, NaryArgument::RHS});
-
-                        if(op.scaleB == Operations::ScaleMode::Separate)
-                        {
-                            auto [macBTag, macB] = graph.getDimension<MacroTile>(
-                                node,
-                                Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
-                            m_multiplyArgs[macBTag].push_back({node, NaryArgument::RHS_SCALE});
-                        }
                     },
                     [&](CIsAnyOf<LoadTiled, LoadLDSTile> auto op) {
                         m_loadMap[getTopSetCoordinate(graph, node)]

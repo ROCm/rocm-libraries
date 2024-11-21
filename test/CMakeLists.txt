@@ -44,6 +44,7 @@ target_include_directories(ComponentTest PUBLIC
                           )
 
 add_library(common_test_utilities OBJECT
+  common/CommonGraphs.cpp
   common/Utilities.cpp
   common/mxDataGen.cpp
 )
@@ -65,8 +66,8 @@ target_include_directories(common_test_utilities PUBLIC
 set(
   rocRollerTests_SOURCES
   unit/ContextFixture.cpp
-  unit/GenericContextFixture.cpp
   unit/GPUContextFixture.cpp
+  unit/GenericContextFixture.cpp
 
   unit/AddStreamKTest.cpp
   unit/AllocatingObserverTest.cpp
@@ -81,24 +82,27 @@ set(
   unit/CommonSubexpressionElimTest.cpp
   unit/ComponentTest.cpp
   unit/ControlGraphTest.cpp
+  unit/ConversionInstructions/Convert_F16_F32.cpp
+  unit/ConversionTest.cpp
   unit/CoordinateGraphTest.cpp
   unit/CopyGeneratorTest.cpp
+  unit/CostTest.cpp
   unit/DataTypesTest.cpp
   unit/DependencyTest.cpp
   unit/ErrorTest.cpp
+  unit/F6Test.cpp
+  unit/F8Test.cpp
+  unit/FP4Test.cpp
   unit/FastDivisionTest.cpp
   unit/LowerExponentialTest.cpp
   unit/FastMultiplicationTest.cpp
   unit/FileWritingObserverTest.cpp
+  unit/GEMMFusion.cpp
+  unit/GEMMTest.cpp
   unit/GPUArchitectureTest.cpp
   unit/GPUInstructionInfoTest.cpp
-  unit/GEMMTest.cpp
-  unit/GEMMFusion.cpp
   unit/GeneratorTest.cpp
   unit/HalfPrecisionTest.cpp
-  unit/ConversionTest.cpp
-  unit/F8Test.cpp
-  unit/HazardObserverTest.cpp
   unit/HypergraphTest.cpp
   unit/InstructionTest.cpp
   unit/KernelGraphTest.cpp
@@ -109,32 +113,33 @@ set(
   unit/KernelIndexTest.cpp
   unit/KernelOptionsTest.cpp
   unit/KernelTest.cpp
-  unit/LabelTest.cpp
   unit/LDSTest.cpp
+  unit/LabelTest.cpp
   unit/LockTest.cpp
-  unit/MemoryInstructionsTest.cpp
-  unit/MatrixMultiplyTest.cpp
-  unit/MetaObserverTest.cpp
+  unit/LowerExponentialTest.cpp
   unit/MFMAHazardObserverTest.cpp
   unit/MFMAUnitObserverTest.cpp
+  unit/MatrixMultiplyTest.cpp
+  unit/MemoryInstructionsTest.cpp
+  unit/MetaObserverTest.cpp
   unit/MixedArithmeticTest.cpp
-  unit/RandomTest.cpp
+  unit/OperationTagTest.cpp
   unit/RegisterAllocatorTest.cpp
+  unit/RandomTest.cpp
   unit/RegisterTest.cpp
   unit/RegisterLivenessObserverTest.cpp
-  unit/CostTest.cpp
   unit/SchedulerTest.cpp
   unit/ScopeTest.cpp
   unit/SourceMatcherTest.cpp
   unit/SupportedInstructionObserverTest.cpp
   unit/TileTransposeAdd.cpp
   unit/TimerTest.cpp
+  unit/TransposeLoadsTest.cpp
   unit/UtilsTest.cpp
   unit/VariantTest.cpp
   unit/VectorAddBenchmark.cpp
   unit/WaitCountObserverTest.cpp
   unit/WaitCountTest.cpp
-  unit/OperationTagTest.cpp
 )
 
 if (NOT ROCROLLER_TESTS_SKIP_GUIDEPOSTS)
@@ -200,6 +205,8 @@ set(
   catch/FastArithmeticTest.cpp
   catch/KernelArgumentsTest.cpp
   catch/KernelGraphConstraintsTest.cpp
+  catch/LargerLDSTest.cpp
+  catch/MultipleLDSAllocationTest.cpp
   catch/ScalarExpressionTest.cpp
   catch/TernaryExpressionTest.cpp
   catch/TestContextTest.cpp
@@ -207,6 +214,7 @@ set(
   catch/RandomNumberExpressionTest.cpp
   catch/SettingsTest.cpp
   catch/mxDataGeneratorTest.cpp
+  catch/HazardObserverTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})

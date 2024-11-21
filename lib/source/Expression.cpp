@@ -780,6 +780,12 @@ namespace rocRoller
                 return identical(expr, subExpr);
             }
 
+            bool operator()(ScaledMatrixMultiply const& expr) const
+            {
+                return identical(expr, subExpr) || call(expr.matA) || call(expr.matB)
+                       || call(expr.matC) || call(expr.scaleA) || call(expr.scaleB);
+            }
+
             bool call(Expression const& expr) const
             {
                 return std::visit(*this, expr);
