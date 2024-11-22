@@ -9,10 +9,10 @@
 #include <memory>
 #include <variant>
 
-#include "AssemblyKernelArgument_fwd.hpp"
-#include "InstructionValues/Register_fwd.hpp"
-#include "KernelGraph/CoordinateGraph/Dimension_fwd.hpp"
-#include "Operations/CommandArgument_fwd.hpp"
+#include <rocRoller/AssemblyKernelArgument_fwd.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension_fwd.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
 
 namespace rocRoller
 {

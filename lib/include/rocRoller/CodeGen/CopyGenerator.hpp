@@ -5,11 +5,11 @@
 
 #pragma once
 
-#include "Instruction.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
 
-#include "../Context_fwd.hpp"
-#include "../Utilities/Component.hpp"
-#include "../Utilities/Generator.hpp"
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {

@@ -1,5 +1,5 @@
-#include "GPUArchitecture/GPUArchitectureLibrary.hpp"
-#include "GPUArchitecture/GPUArchitecture.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_runtime.h>

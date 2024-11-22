@@ -11,9 +11,9 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 
-#include "Expression_fwd.hpp"
-#include "InstructionValues/Register_fwd.hpp"
-#include "Utilities/Utils.hpp"
+#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {

@@ -2,9 +2,9 @@
 
 #include "CommandArgument.hpp"
 
-#include "../Utilities/Error.hpp"
-#include "Expression.hpp"
-#include "Utilities/Utils.hpp"
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 #include <cstring>
 

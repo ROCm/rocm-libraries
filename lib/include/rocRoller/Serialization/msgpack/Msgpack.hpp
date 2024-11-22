@@ -1,9 +1,9 @@
 #pragma once
 
-#include <GPUArchitecture/GPUArchitecture.hpp>
-#include <GPUArchitecture/GPUArchitectureTarget.hpp>
-#include <GPUArchitecture/GPUCapability.hpp>
-#include <GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 
 #include <msgpack.hpp>
 

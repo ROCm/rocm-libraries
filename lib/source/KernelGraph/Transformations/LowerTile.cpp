@@ -1,6 +1,6 @@
 
-#include "CommandSolution_fwd.hpp"
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/CommandSolution_fwd.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>

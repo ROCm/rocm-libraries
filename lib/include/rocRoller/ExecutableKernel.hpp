@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Context_fwd.hpp"
+#include <rocRoller/Context_fwd.hpp>
 
-#include "GPUArchitecture/GPUArchitectureTarget.hpp"
-#include "KernelArguments.hpp"
-#include "Utilities/HIPTimer.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
+#include <rocRoller/KernelArguments.hpp>
+#include <rocRoller/Utilities/HIPTimer.hpp>
 
 namespace rocRoller
 {

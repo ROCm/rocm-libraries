@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include "AssemblyKernel.hpp"
-#include "Expression.hpp"
-#include "Utilities/Utils.hpp"
+#include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
-#include "Utilities/Logging.hpp"
+#include <rocRoller/Utilities/Logging.hpp>
 
 namespace rocRoller
 {

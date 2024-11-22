@@ -1,7 +1,7 @@
-#include "ScheduledInstructions.hpp"
-#include "Assemblers/Assembler.hpp"
-#include "AssemblyKernel.hpp"
-#include "Context.hpp"
+#include <rocRoller/Assemblers/Assembler.hpp>
+#include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/ScheduledInstructions.hpp>
 
 namespace rocRoller
 {

@@ -26,10 +26,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "InstructionValues/Register_fwd.hpp"
-#include "Operations/CommandArgument_fwd.hpp"
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
 
-#include "DataTypes/DataTypes.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
 
 namespace rocRoller
 {

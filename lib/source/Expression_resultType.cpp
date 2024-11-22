@@ -1,9 +1,9 @@
 
 #include <variant>
 
-#include "DataTypes/DataTypes.hpp"
-#include "InstructionValues/Register_fwd.hpp"
-#include "Utilities/Generator.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>

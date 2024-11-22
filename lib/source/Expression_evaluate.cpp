@@ -30,17 +30,17 @@
 #include <typeinfo>
 #include <variant>
 
-#include "Expression.hpp"
+#include <rocRoller/Expression.hpp>
 
-#include "AssemblyKernelArgument.hpp"
+#include <rocRoller/AssemblyKernelArgument.hpp>
 
-#include "CodeGen/Instruction.hpp"
-#include "InstructionValues/Register.hpp"
-#include "Operations/CommandArgument.hpp"
-#include "Utilities/Component.hpp"
-#include "Utilities/Random.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/Operations/CommandArgument.hpp>
+#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/Random.hpp>
 
-#include "libdivide.h"
+#include <libdivide.h>
 
 namespace rocRoller
 {

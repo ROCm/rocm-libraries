@@ -1,8 +1,8 @@
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
-#include "Expression.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 

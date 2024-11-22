@@ -2,11 +2,11 @@
 
 #include <memory>
 
-#include "AssemblyKernel.hpp"
-#include "ExecutableKernel_fwd.hpp"
-#include "KernelArguments.hpp"
-#include "Operations/Command_fwd.hpp"
-#include "Utilities/HIPTimer.hpp"
+#include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/ExecutableKernel_fwd.hpp>
+#include <rocRoller/KernelArguments.hpp>
+#include <rocRoller/Operations/Command_fwd.hpp>
+#include <rocRoller/Utilities/HIPTimer.hpp>
 
 namespace rocRoller
 {

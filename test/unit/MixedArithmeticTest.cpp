@@ -11,12 +11,12 @@
 #include <rocRoller/Utilities/Generator.hpp>
 #include <rocRoller/Utilities/HipUtils.hpp>
 
-#include "DataTypes/DataTypes.hpp"
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 #include <common/TestValues.hpp>
+#include <rocRoller/DataTypes/DataTypes.hpp>
 
 using namespace rocRoller;
 

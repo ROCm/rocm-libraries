@@ -214,7 +214,6 @@ target_link_options(rocroller PUBLIC ${EXTRA_LINK_OPTIONS})
 #target_compile_options(rocroller PUBLIC -fconcepts-diagnostics-depth=2)
 target_include_directories(rocroller PUBLIC
                            include
-                           include/rocRoller
                            )
 
 # Using SYSTEM include paths for third party libraries speeds up cppcheck a lot

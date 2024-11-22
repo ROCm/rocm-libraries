@@ -1,5 +1,6 @@
 #pragma once
-#include "CommandSolution_fwd.hpp"
+#include <rocRoller/CommandSolution_fwd.hpp>
+
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
