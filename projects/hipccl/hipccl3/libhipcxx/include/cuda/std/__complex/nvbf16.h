@@ -51,6 +51,7 @@ _CCCL_DIAG_POP
 
 #  include <cuda/std/__complex/vector_support.h>
 #  include <cuda/std/__cuda/cmath_nvbf16.h>
+#  include <cuda/std/__fwd/get.h>
 #  include <cuda/std/__type_traits/enable_if.h>
 #  include <cuda/std/__type_traits/integral_constant.h>
 #  include <cuda/std/__type_traits/is_constructible.h>
@@ -132,6 +133,9 @@ class _CCCL_TYPE_VISIBILITY_DEFAULT _CCCL_ALIGNAS(alignof(__hip_bfloat162)) comp
 
   template <class _Up>
   friend class complex;
+
+  template <class _Up>
+  friend struct __get_complex_impl;
 
 public:
   using value_type = __hip_bfloat16;
@@ -318,6 +322,34 @@ _LIBCUDACXX_HIDE_FROM_ABI complex<__hip_bfloat16> acos(const complex<__hip_bfloa
 {
   return complex<__hip_bfloat16>{_CUDA_VSTD::acos(complex<float>{__x})};
 }
+
+template <>
+struct __get_complex_impl<__nv_bfloat16>
+{
+  template <size_t _Index>
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr __nv_bfloat16& get(complex<__nv_bfloat16>& __z) noexcept
+  {
+    return (_Index == 0) ? __z.__repr_.x : __z.__repr_.y;
+  }
+
+  template <size_t _Index>
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr __nv_bfloat16&& get(complex<__nv_bfloat16>&& __z) noexcept
+  {
+    return _CUDA_VSTD::move((_Index == 0) ? __z.__repr_.x : __z.__repr_.y);
+  }
+
+  template <size_t _Index>
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr const __nv_bfloat16& get(const complex<__nv_bfloat16>& __z) noexcept
+  {
+    return (_Index == 0) ? __z.__repr_.x : __z.__repr_.y;
+  }
+
+  template <size_t _Index>
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr const __nv_bfloat16&& get(const complex<__nv_bfloat16>&& __z) noexcept
+  {
+    return _CUDA_VSTD::move((_Index == 0) ? __z.__repr_.x : __z.__repr_.y);
+  }
+};
 
 #  if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 template <class _CharT, class _Traits>
