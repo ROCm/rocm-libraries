@@ -178,7 +178,7 @@ class AutoBuilder:
         self.__parse_args__()
         cmake_command = self.__get_cmake_cmd__()
 
-        self.__rm_dir__(self.build_path)
+        self.__rm_dir__('build')
         self.__mk_dir__(self.build_path)
 
         curr_dir = os.path.abspath(os.curdir)
