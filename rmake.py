@@ -82,7 +82,7 @@ class AutoBuilder:
             full_path = os.path.join(self.lib_dir, dir_path)
 
         try:
-            os.mkdir(full_path)
+            os.makedirs(full_path)
         except FileExistsError:
             ...
 
@@ -154,9 +154,6 @@ class AutoBuilder:
         
         if self.args.build_bench:
           cmake_options.append(f'-DBUILD_BENCHMARK=ON')
-
-        if(self.args.build_clients or self.args.build_tests or self.args.build_bench):
-          cmake_options.append(f'-DBUILD_DIR={build_path}')
 
         if self.args.cmake_dargs:
             cmake_options += [f'-D{i}' for i in self.args.cmake_dargs]
