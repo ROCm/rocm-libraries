@@ -39,7 +39,7 @@ class AutoBuilder:
         
         for k in self.OS_info:
             print(f'\t {k}: {self.OS_info[k]}')
-        print(f'\n\n')
+        print()
         
 
         self.lib_dir = os.path.dirname(os.path.abspath(__file__)) 
@@ -62,6 +62,8 @@ class AutoBuilder:
                             help='Generate all client builds (default: False)')
         self.parser.add_argument('-t', '--tests', required=False, default=False, dest='build_tests', action='store_true',
                             help='Generate unit tests only (default: False)')
+        self.parser.add_argument('-b', '--benchmarks', required=False, default=False, dest='build_bench', action='store_true',
+                                 help='Generate benchmarks only (default: False)')
         self.parser.add_argument('-i', '--install', required=False, default=False, dest='install', action='store_true',
                             help='Install after build (default: False)')
         self.parser.add_argument(      '--cmake-darg', required=False, dest='cmake_dargs', action='append', default=[],
@@ -81,28 +83,32 @@ class AutoBuilder:
 
         try:
             os.mkdir(full_path)
-            print(f'{full_path} created')
         except FileExistsError:
-            print(f'{full_path} already exists ...')
+            ...
 
     def __rm_dir__(self, dir_path: str):
         if os.path.isabs(dir_path):
             full_path = dir_path
         else:
             full_path = os.path.join(self.lib_dir, dir_path)
-            print(f'{full_path} deleted')
         try:
             shutil.rmtree(full_path)
         except FileNotFoundError:
-            print(f'{full_path} does not exists ...')
-
+            ...
+    
     def __get_cmake_cmd__(self):
 
         m = ' Current Working Directory '
         print(f'{m:-^100}\n\t{self.lib_dir}')
+        print()
 
         cmake_exe = ''
-        cmake_options = [f'-DCMAKE_TOOLCHAIN_FILE={self.toolchain}']
+        cmake_options = [
+            f'--toolchain={self.toolchain}',
+            f'-DCPACK_SET_DESTDIR=OFF', 
+            f'-DCPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF',
+            f'-DGPU_TARGETS={self.args.gpu_architecture}'
+        ]
  
         if self.args.debug:
             build_path = os.path.join(self.args.build_dir, 'debug')
@@ -111,12 +117,9 @@ class AutoBuilder:
             build_path = os.path.join(self.args.build_dir, 'release')
             cmake_config = 'Release'
         
+        self.build_path = build_path
+        
         cmake_options.append(f"-DCMAKE_BUILD_TYPE={cmake_config}")
-
-        if self.args.deps_dir is None:
-            deps_dir = os.path.abspath(os.path.join(self.args.build_dir, 'deps'))
-        else:
-            deps_dir = self.args.deps_dir
 
         if self.OS_info['System'] == 'Linux':
             cmake_exe = shutil.which('cmake3')
@@ -135,20 +138,69 @@ class AutoBuilder:
             cmake_options.append(f'-DCMAKE_PREFIX_PATH:PATH={rocm_path},{rocm_path}')
 
 
+        if self.args.static_lib:
+           cmake_options.append( f'-DBUILD_SHARED_LIBS=OFF')
 
-    # if (OS_info["ID"] == 'windows'):
-    #     cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path[:-1]};{rocm_cmake_path[1:]}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
-    # else:
-    
+        if self.args.skip_ld_conf_entry:
+            cmake_options.append( f'-DROCM_DISABLE_LDCONFIG=ON' )
 
-        print(cmake_options)
+        if self.args.build_clients:
+            self.args.build_tests = True
+            self.args.build_bench = True
+            cmake_options.append(f'-DBUILD_EXAMPLE=ON')
+
+        if self.args.build_tests:
+          cmake_options.append(f'-DBUILD_TEST=ON')
+        
+        if self.args.build_bench:
+          cmake_options.append(f'-DBUILD_BENCHMARK=ON')
+
+        if(self.args.build_clients or self.args.build_tests or self.args.build_bench):
+          cmake_options.append(f'-DBUILD_DIR={build_path}')
+
+        if self.args.cmake_dargs:
+            cmake_options += [f'-D{i}' for i in self.args.cmake_dargs]
+        
+        command_str = cmake_exe
+
+        m = 'CMAKE Options'
+        print(f'{m:-^100}')
+        for op in cmake_options:
+            print(f'\t{op}')
+            command_str += f' {op}'
+        print()
+
+        command_str += f' {self.lib_dir}'
+        m = 'Final Command'
+        print(f'{m:-^100}')
+        print(command_str)
+        print()
+        return command_str
     
     def run(self):
         self.__parse_args__()
-        self.__get_cmake_cmd__()
-        
+        cmake_command = self.__get_cmake_cmd__()
 
+        self.__rm_dir__(self.build_path)
+        self.__mk_dir__(self.build_path)
 
+        curr_dir = os.path.abspath(os.curdir)
+        os.chdir(self.build_path)
+
+        os.system(cmake_command)
+
+        if self.OS_info['System'] == 'Linux':
+            if self.args.verbose:
+                v = 'VERBOSE=1'
+            else:
+                v = ''
+
+            os.system(f' make -j {self.OS_info["Num Processor"]} {v}')
+
+            if self.args.install:
+                os.system(f'make install')
+
+        os.chdir(curr_dir)
 
 # if (OS_info["ID"] == 'windows'):
 #         # we don't have ROCM on windows but have hip, ROCM can be downloaded if required
@@ -174,9 +226,6 @@ class AutoBuilder:
 #     if (OS_info["ID"] == 'windows'):
 #         cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path[:-1]};{rocm_cmake_path[1:]}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
 #     else:
-#         cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path[:-1]},{rocm_cmake_path[1:-1]}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
-    
-#     cmake_options.append( cmake_base_options )
 
 #     print( cmake_options )
 
@@ -186,40 +235,7 @@ class AutoBuilder:
 #     create_dir( os.path.join(build_path, "clients") )
 #     os.chdir( build_path )
 
-#     # packaging options
-#     cmake_pack_options = f"-DCPACK_SET_DESTDIR=OFF -DCPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF"
-#     cmake_options.append( cmake_pack_options )
 
-#     if args.static_lib:
-#         cmake_options.append( f"-DBUILD_SHARED_LIBS=OFF" )
-
-#     if args.skip_ld_conf_entry:
-#         cmake_options.append( f"-DROCM_DISABLE_LDCONFIG=ON" )
-
-#     if args.build_tests:
-#         cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_DIR={build_dir}" )
-
-#     if args.build_clients:
-#         cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_BENCHMARK=ON -DBUILD_EXAMPLE=ON -DBUILD_DIR={build_dir}" )
-
-#     cmake_options.append( f"-DAMDGPU_TARGETS={args.gpu_architecture}" )
-
-#     if args.cmake_dargs:
-#         for i in args.cmake_dargs:
-#           cmake_options.append( f"-D{i}" )
-
-#     cmake_options.append( f"{src_path}")
-
-# #   case "${ID}" in
-# #     centos|rhel)
-# #     cmake_options="${cmake_options} -DCMAKE_FIND_ROOT_PATH=/usr/lib64/llvm7.0/lib/cmake/"
-# #     ;;
-# #     windows)
-# #     cmake_options="${cmake_options} -DWIN32=ON -DROCM_PATH=${rocm_path} -DROCM_DIR:PATH=${rocm_path} -DCMAKE_PREFIX_PATH:PATH=${rocm_path}"
-# #     cmake_options="${cmake_options} --debug-trycompile -DCMAKE_MAKE_PROGRAM=nmake.exe -DCMAKE_TOOLCHAIN_FILE=toolchain-windows.cmake"
-# #     # -G '"NMake Makefiles JOM"'"
-# #     ;;
-# #   esac
 #     cmd_opts = " ".join(cmake_options)
 
 #     return cmake_executable, cmd_opts
