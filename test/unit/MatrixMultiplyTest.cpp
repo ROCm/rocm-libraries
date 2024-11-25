@@ -1031,12 +1031,6 @@ namespace MatrixMultiplyTest
         uint const        elementBits = DataTypeInfo::Get(typeAB).elementBits;
         std::string const trLoadMnemonic{transposeLoadMnemonic(elementBits)};
 
-        // TODO: enable non-TN F6 tests
-        if(elementBits == 6 && (transA != "T" || transB != "N"))
-        {
-            GTEST_SKIP();
-        }
-
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
         switch(typeAB)
@@ -1107,12 +1101,6 @@ namespace MatrixMultiplyTest
         uint        elementBits = DataTypeInfo::Get(typeAB).elementBits;
         std::string trLoadMnemonic{transposeLoadMnemonic(elementBits)};
 
-        // TODO: enable non-TN F6 tests
-        if(elementBits == 6 && (transA != "T" || transB != "N"))
-        {
-            GTEST_SKIP();
-        }
-
         // TODO: enable non-TN 16x16x128 tests
         if((transA != "T" || transB != "N") && MFMAK == 128)
         {
@@ -1179,17 +1167,10 @@ namespace MatrixMultiplyTest
         int wave_n = (MFMAK == 128) ? 16 : 32;
         int wave_k = MFMAK;
 
-        uint const elementBitsA = DataTypeInfo::Get(typeA).elementBits;
-        uint const elementBitsB = DataTypeInfo::Get(typeB).elementBits;
-        auto [transA, transB]   = transOp;
-        // TODO: enable non-TN F6 tests
-        if((elementBitsA == 6 || elementBitsB == 6) && (transA != "T" || transB != "N"))
-        {
-            GTEST_SKIP();
-        }
+        auto [transA, transB] = transOp;
 
         matrixMultiplyMacroTileMixed(
-            typeA, typeB, wave_m, wave_n, wave_k, 1, 1.e-5, true, "T", "N");
+            typeA, typeB, wave_m, wave_n, wave_k, 1, 1.e-5, true, transA, transB);
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
@@ -1236,12 +1217,6 @@ namespace MatrixMultiplyTest
 
         uint const        elementBits = DataTypeInfo::Get(typeAB).elementBits;
         std::string const trLoadMnemonic{transposeLoadMnemonic(elementBits)};
-
-        // TODO: enable non-TN F6 tests
-        if(elementBits == 6 && (!transA || transB))
-        {
-            GTEST_SKIP();
-        }
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
@@ -1381,14 +1356,7 @@ namespace MatrixMultiplyTest
         int waveN = (MFMAK == 128) ? 16 : 32;
         int waveK = MFMAK;
 
-        uint const elementBitsA = DataTypeInfo::Get(typeA).elementBits;
-        uint const elementBitsB = DataTypeInfo::Get(typeB).elementBits;
-        auto [transA, transB]   = transOp;
-        // TODO: enable non-TN F6 tests
-        if((elementBitsA == 6 || elementBitsB == 6) && (transA != "T" || transB != "N"))
-        {
-            GTEST_SKIP();
-        }
+        auto [transA, transB] = transOp;
 
         // TODO: enable non-TN 16x16x128 tests
         if((transA != "T" || transB != "N") && MFMAK == 128)

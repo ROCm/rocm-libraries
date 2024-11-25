@@ -265,11 +265,9 @@ namespace rocRoller
                 {
                     //iot::mapRequired(io, "bufOpts", op.bufOpts);
                 }
-                if constexpr(
-                    std::same_as<
-                        Op,
-                        KernelGraph::ControlGraph::
-                            LoadTiled> || std::same_as<Op, KernelGraph::ControlGraph::LoadLDSTile>)
+                if constexpr(CIsAnyOf<Op,
+                                      KernelGraph::ControlGraph::LoadTiled,
+                                      KernelGraph::ControlGraph::LoadLDSTile>)
                 {
                     iot::mapRequired(io, "isTransposedTile", op.isTransposedTile);
                 }

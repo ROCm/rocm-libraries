@@ -13,5 +13,14 @@ namespace rocRoller
    */
     uint bitsPerTransposeLoad(uint elementBits);
 
+    /**
+   * @brief Returns extra number of bytes required to fulfill 128b alignment requirement of 6-bit transpose loads.
+   * Zero is returned for 16, 8, and 4 bit datatypes.
+   *
+   *
+   * @param elementBits number of bits of variable type to load.
+   */
+    uint extraLDSBytesPerElementBlock(uint elementBits);
+
     std::string transposeLoadMnemonic(uint elementBits);
 } // rocRoller

@@ -16,7 +16,9 @@ F8F6F4TESTS=("*GPU_MatrixMultiplyMacroTileF8F6F4*"
 "*GPU_ScaledMatrixMultiplyMacroTileF8F6F4*"
 "*GPU_ScaledMatrixMultiplyMacroTileMixed*"
 "*GPU_MatrixMultiplyABF8F6F4*"
-"*GPU_*BasicGEMMF8F6F4*"
+"*GPU_BasicGEMMF8F6F4*"
+"*GPU_ScaledBasicGEMMF8F6F4*"
+"*GPU_ScaledMixedBasicGEMMF8F6F4*"
 )
 
 F8TESTS=()
@@ -27,12 +29,14 @@ F4TESTS=()
 
 SCALEDTESTS=("*GPU_ScaledMatrixMultiplyMacroTileF8F6F4*"
 "*GPU_ScaledMatrixMultiplyMacroTileMixed*"
-"*GPU_Scaled*BasicGEMM*"
+"*GPU_ScaledBasicGEMMF8F6F4*"
+"*GPU_ScaledMixedBasicGEMMF8F6F4*"
 )
 
 MIXEDTESTS=("*GPU_MatrixMultiplyMacroTileMixed*"
 "*GPU_ScaledMatrixMultiplyMacroTileMixed*"
-"*GPU_*Mixed*BasicGEMMM*"
+"*GPU_MixedBasicGEMMF8F6F4*"
+"*GPU_ScaledMixedBasicGEMMF8F6F4*"
 )
 
 TRANSPOSETESTS=(
@@ -72,8 +76,14 @@ RRPERF_F8TESTS=("f8gemm_16x16x128_f8f6f4_NN"
 "f8gemm_32x32x64_f8f6f4_TT"
 )
 
-RRPERF_F6TESTS=("f6gemm_16x16x128_f8f6f4"
-"f6gemm_32x32x64_f8f6f4"
+RRPERF_F6TESTS=("f6gemm_16x16x128_f8f6f4_NN"
+"f6gemm_16x16x128_f8f6f4_NT"
+"f6gemm_16x16x128_f8f6f4_TN"
+"f6gemm_16x16x128_f8f6f4_TT"
+"f6gemm_32x32x64_f8f6f4_NN"
+"f6gemm_32x32x64_f8f6f4_NT"
+"f6gemm_32x32x64_f8f6f4_TN"
+"f6gemm_32x32x64_f8f6f4_TT"
 )
 
 RRPERF_F4TESTS=("f4gemm_16x16x128_f8f6f4_NN"
@@ -152,6 +162,10 @@ case "${SUITE}" in
       done
       ;;
 esac
+
+# remove duplicates
+RRTESTS_LIST=($(echo "${RRTESTS_LIST[@]}" | tr " " "\n" | sort -u | tr "\n" " "))
+RRPERF_TESTS_LIST=($(echo "${RRPERF_TESTS_LIST[@]}" | tr " " "\n" | sort -u | tr "\n" " "))
 
 for testName in "${RRTESTS_LIST[@]}"; do
     $RRTESTS --gtest_filter="$testName"

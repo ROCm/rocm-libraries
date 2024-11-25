@@ -170,8 +170,9 @@ namespace rocRoller
                                             Register::ValuePtr             vgpr,
                                             Register::ValuePtr             offset,
                                             CoordinateGraph::Transformer&  coords,
-                                            BufferInstructionOptions       bufOpts = {},
-                                            bool isTransposedTile                  = false);
+                                            BufferInstructionOptions       bufOpts          = {},
+                                            bool                           isTransposedTile = false,
+                                            bool                           isPadded = false);
             template <MemoryInstructions::MemoryDirection Dir>
             Generator<Instruction> moveTileLiteralStrides(LoadStoreTileInfo& info);
             template <MemoryInstructions::MemoryDirection Dir>

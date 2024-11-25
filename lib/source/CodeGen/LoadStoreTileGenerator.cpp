@@ -1,8 +1,5 @@
 
-#include <iostream>
 #include <memory>
-#include <set>
-#include <variant>
 
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Buffer.hpp>
@@ -279,6 +276,15 @@ namespace rocRoller
                     target = *maybeParentLDS;
             }
 
+            bool needsPadding
+                = std::visit(rocRoller::overloaded{[&](User user) { return user.needsPadding; },
+                                                   [&](auto coord) { return false; }},
+                             std::get<Dimension>(m_graph->coordinates.getElement(target)));
+            bool ldsHoldsTransposedTile
+                = std::visit(rocRoller::overloaded{[&](LDS lds) { return lds.holdsTransposedTile; },
+                                                   [&](auto coord) { return false; }},
+                             std::get<Dimension>(m_graph->coordinates.getElement(target)));
+
             auto scope = m_context->getScopeManager();
 
             auto toBytes = [&](ExpressionPtr expr) -> ExpressionPtr {
@@ -323,9 +329,19 @@ namespace rocRoller
                 auto indexExpr
                     = ci.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
 
-                Log::debug("  Offset({}): {}", offset, toString(indexExpr));
+                uint          numBits = DataTypeInfo::Get(ci.valueType).elementBits;
+                ExpressionPtr paddingBytes{L(0u)};
+                if(numBits == 6 && ldsHoldsTransposedTile)
+                {
+                    uint elementsPerTrLoad = bitsPerTransposeLoad(numBits) / numBits;
+                    auto extraLdsBytes     = extraLDSBytesPerElementBlock(numBits);
+                    paddingBytes           = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
+                }
 
-                co_yield generate(offsetReg, toBytes(indexExpr));
+                Log::debug("  Offset({}): indexExpr: {}", offset, toString(indexExpr));
+                Log::debug("  Offset({}): paddingBytes: {}", offset, toString(paddingBytes));
+
+                co_yield generate(offsetReg, toBytes(indexExpr) + paddingBytes);
             }
             else
             {
@@ -351,6 +367,9 @@ namespace rocRoller
                 uint          elementBlockSize = 0;
                 ExpressionPtr elementBlockStride;
                 ExpressionPtr trLoadPairStride;
+                ExpressionPtr elementBlockStridePaddingBytes{L(0u)};
+                ExpressionPtr trLoadPairStridePaddingBytes{L(0u)};
+                ExpressionPtr indexExprPaddingBytes{L(0u)};
 
                 // For F16, F8, and F4 data types and either 16x16x(32|128) or
                 // 32x32x(16|64) MFMA instructions, each lane loads (MN * K)/64
@@ -364,38 +383,65 @@ namespace rocRoller
                 // loads are dwordx4, so the same code will be
                 // generated).
                 uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
-                if(numBits == 16 || numBits == 8 || numBits == 4)
+                if(numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4)
                 {
-                    // TODO: adjust bits per VGPR block for F6 case.
-                    elementBlockSize
-                        = /*number of loads*/ 2 * (/*bits per VGPR block*/ 64 / numBits);
+                    auto bitsPerTrLoad = bitsPerTransposeLoad(numBits);
+                    elementBlockSize   = /*number of loads*/ 2 * (bitsPerTrLoad / numBits);
+
+                    // Padding is added after every 16 elements, thus for F6 datatypes that will
+                    // be transpose loaded from LDS elementBlockSize is set to 16 instead of 32.
+                    if(numBits == 6 && (needsPadding || ldsHoldsTransposedTile))
+                        elementBlockSize = 16;
 
                     elementBlockStride
                         = ci.forward
                               ? coords.forwardStride(increment, L(elementBlockSize), {target})[0]
                               : coords.reverseStride(increment, L(elementBlockSize), {target})[0];
 
-                    uint elementsPerTrLoad = bitsPerTransposeLoad(numBits) / numBits;
+                    uint elementsPerTrLoad = bitsPerTrLoad / numBits;
                     trLoadPairStride
                         = ci.forward
                               ? coords.forwardStride(increment, L(elementsPerTrLoad), {target})[0]
                               : coords.reverseStride(increment, L(elementsPerTrLoad), {target})[0];
+
+                    if(numBits == 6 && ldsHoldsTransposedTile)
+                    {
+                        uint elementsPerTrLoad = bitsPerTransposeLoad(numBits) / numBits;
+                        auto extraLdsBytes     = extraLDSBytesPerElementBlock(numBits);
+                        elementBlockStridePaddingBytes
+                            = elementBlockStride / L(elementsPerTrLoad) * L(extraLdsBytes);
+                        trLoadPairStridePaddingBytes
+                            = trLoadPairStride / L(elementsPerTrLoad) * L(extraLdsBytes);
+                        indexExprPaddingBytes = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
+                    }
                 }
 
-                Log::debug("  Stride({}): {}", stride, toString(indexExpr));
-                Log::debug("  Stride({}): unitStride: {} vgprBlockSize: {}, trLoadPairStride: {}",
+                Log::debug("  Stride({}): indexExpr: {}", stride, toString(indexExpr));
+                Log::debug("  Stride({}): indexExprPaddingBytes: {}",
+                           stride,
+                           toString(indexExprPaddingBytes));
+                Log::debug("  Stride({}): unitStride: {} vgprBlockSize: {}",
                            stride,
                            unitStride,
-                           elementBlockSize,
-                           toString(trLoadPairStride));
+                           elementBlockSize);
+                Log::debug(
+                    "  Stride({}): elementBlockStride: {} elementBlockStridePaddingBytes: {}",
+                    stride,
+                    toString(elementBlockStride),
+                    toString(elementBlockStridePaddingBytes));
+                Log::debug("  Stride({}): trLoadPairStride:  {} "
+                           "trLoadPairStridePaddingBytes: {}",
+                           stride,
+                           toString(trLoadPairStride),
+                           toString(trLoadPairStridePaddingBytes));
 
                 tagger->addExpression(stride,
-                                      m_fastArith(toBytes(indexExpr)),
+                                      m_fastArith(toBytes(indexExpr) + indexExprPaddingBytes),
                                       {ci.strideType,
                                        unitStride,
                                        elementBlockSize,
-                                       toBytes(elementBlockStride),
-                                       toBytes(trLoadPairStride)});
+                                       toBytes(elementBlockStride) + elementBlockStridePaddingBytes,
+                                       toBytes(trLoadPairStride) + trLoadPairStridePaddingBytes});
                 scope->addRegister(stride);
             }
 
@@ -482,6 +528,11 @@ namespace rocRoller
                 // Unsegmented
                 auto elementsPerMove = bitsPerMove / unsegmentedDataType.elementBits;
 
+                auto elementBlockStride
+                    = (numVGPRBlocks > 1)
+                          ? getUnsignedInt(evaluate(info.colStrideAttributes.elementBlockStride))
+                          : 0;
+
                 Log::debug("  M {} N {} elementsPerMove {} bytesPerMove {} rowStride {} colStride "
                            "{} vgprBlockSize {} numVGPRBlocks {}",
                            info.m,
@@ -503,15 +554,12 @@ namespace rocRoller
                             info.kind,
                             info.rowOffsetReg,
                             info.data->element(Generated(iota(start, stop))),
-                            Register::Value::Literal(offsetValue),
+                            Register::Value::Literal(offsetValue + r * elementBlockStride),
                             bytesPerMove,
                             "",
                             false,
                             info.bufDesc,
                             info.bufOpts);
-                        if(numVGPRBlocks > 1)
-                            offsetValue += getUnsignedInt(
-                                evaluate(info.colStrideAttributes.elementBlockStride));
                     }
                     offsetValue += rowStride;
                 }
@@ -519,9 +567,11 @@ namespace rocRoller
             else if(info.isTransposedTile)
             {
                 const auto bitsPerTrLoad     = bitsPerTransposeLoad(info.elementBits);
+                const auto extraLDSBytes     = extraLDSBytesPerElementBlock(info.elementBits);
                 const auto bytesPerTrLoad    = bitsPerTrLoad / 8;
                 const auto elementsPerTrLoad = bitsPerTrLoad / info.elementBits;
                 const auto numVGPRsPerLoad   = bitsPerTrLoad / Register::bitsPerRegister;
+                const auto numVGPRBlocks     = numVGPRsPerLoad / unsegmentedDataType.registerCount;
                 const auto numTrLoads        = info.n / elementsPerTrLoad;
                 const auto elementBlockStride
                     = getUnsignedInt(evaluate(info.colStrideAttributes.elementBlockStride));
@@ -533,12 +583,14 @@ namespace rocRoller
                             "transpose load!");
                 AssertFatal(numTrLoads % 2 == 0, "Transpose loads must be executed in pairs!");
 
-                Log::debug("  M {} N {} elementsPerTrLoad {} bytesPerTrLoad {} elementBits {} "
+                Log::debug("  M {} N {} elementsPerTrLoad {} bytesPerTrLoad {} extraLDSBytes {} "
+                           "elementBits {} "
                            "rowStride {} colStride {} vgprPerLoad {} numTrLoads {}",
                            info.m,
                            info.n,
                            elementsPerTrLoad,
                            bytesPerTrLoad,
+                           extraLDSBytes,
                            info.elementBits,
                            rowStride,
                            colStride,
@@ -549,14 +601,13 @@ namespace rocRoller
                 {
                     for(uint64_t j = 0; j < numTrLoads; ++j)
                     {
-                        auto start = (i * numTrLoads + (j + 0)) * numVGPRsPerLoad;
-                        auto stop  = (i * numTrLoads + (j + 1)) * numVGPRsPerLoad;
+                        auto start = (i * numTrLoads + (j + 0)) * numVGPRBlocks;
+                        auto stop  = (i * numTrLoads + (j + 1)) * numVGPRBlocks;
                         co_yield m_context->mem()->transposeLoadLocal(
                             info.data->element(Generated(iota(start, stop))),
                             info.rowOffsetReg,
-                            // TODO: account for extra lds when elementBits == 6
                             offsetValue + (j % 2) * trLoadPairStride + (j / 2) * elementBlockStride,
-                            bytesPerTrLoad,
+                            bytesPerTrLoad + extraLDSBytes,
                             info.elementBits);
                     }
                     offsetValue += rowStride;
@@ -598,20 +649,53 @@ namespace rocRoller
             Log::debug("KernelGraph::LoadStoreTileGenerator::moveTileColStrideOne<{}>",
                        toString(Dir));
 
+            auto unsegmentedDataType = DataTypeInfo::Get(info.data->variableType().dataType);
+
+            auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
+
+            uint numVGPRBlocks = 1;
+            if(info.colStrideAttributes.elementBlockSize > 0
+               && info.n > info.colStrideAttributes.elementBlockSize)
+            {
+                AssertFatal(info.n % info.colStrideAttributes.elementBlockSize == 0);
+                numVGPRBlocks = info.n / info.colStrideAttributes.elementBlockSize;
+            }
+
+            // Segmented
+            auto bitsPerMove  = info.n * info.elementBits / numVGPRBlocks;
+            auto bytesPerMove = bitsPerMove / 8u;
+
+            // Unsegmented
+            auto elementsPerMove = bitsPerMove / unsegmentedDataType.elementBits;
+
+            Log::debug("  M {} N {} elementsPerMove {} bytesPerMove {} rowStride {} colStride "
+                       "{} vgprBlockSize {} numVGPRBlocks {}",
+                       info.m,
+                       info.n,
+                       elementsPerMove,
+                       bytesPerMove,
+                       toString(info.rowStrideReg->expression()),
+                       toString(info.colStrideReg->expression()),
+                       info.colStrideAttributes.elementBlockSize,
+                       numVGPRBlocks);
+
             for(uint64_t i = 0; i < info.m; ++i)
             {
-                auto start = (i * info.n) / info.packedAmount;
-                auto stop  = (i * info.n + info.n) / info.packedAmount;
-                co_yield m_context->mem()->moveData<Dir>(
-                    info.kind,
-                    info.rowOffsetReg->subset({0}),
-                    info.data->element(Generated(iota(start, stop))),
-                    info.offset,
-                    CeilDivide(info.elementBits * info.n, (size_t)8),
-                    "",
-                    false,
-                    info.bufDesc,
-                    info.bufOpts);
+                for(uint r = 0; r < numVGPRBlocks; ++r)
+                {
+                    auto start = (i * numVGPRBlocks + r) * elementsPerMove;
+                    auto stop  = (i * numVGPRBlocks + r + 1) * elementsPerMove;
+                    co_yield m_context->mem()->moveData<Dir>(
+                        info.kind,
+                        info.rowOffsetReg->subset({0}),
+                        info.data->element(Generated(iota(start, stop))),
+                        Register::Value::Literal(offsetValue + r * bytesPerMove),
+                        bytesPerMove,
+                        "",
+                        false,
+                        info.bufDesc,
+                        info.bufOpts);
+                }
 
                 if(i < info.m - 1)
                 {
@@ -697,7 +781,8 @@ namespace rocRoller
                                                                 Register::ValuePtr       offset,
                                                                 Transformer&             coords,
                                                                 BufferInstructionOptions bufOpts,
-                                                                bool isTransposedTile)
+                                                                bool isTransposedTile,
+                                                                bool isPadded)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::LoadStoreTileGenerator::moveTile<{}>({})", toString(Dir), tag);
@@ -750,19 +835,27 @@ namespace rocRoller
 
                 auto unsegmentedVariableType
                     = DataTypeInfo::Get(dataType).unsegmentedVariableType();
-                auto bitsPerRegister = 32u;
 
                 Register::ValuePtr tmpl;
-                if(unsegmentedVariableType && ((n * info.elementBits) % bitsPerRegister == 0)
+                if(unsegmentedVariableType
+                   && ((n * info.elementBits) % Register::bitsPerRegister == 0)
                    && (colStrideIsOne || (allStridesAreLiteral && info.isTransposedTile)))
                 {
+                    auto allocOptions = Register::AllocationOptions::FullyContiguous();
+                    auto elementBits  = DataTypeInfo::Get(dataType).elementBits;
+                    if(elementBits == 6 && isPadded && !info.isTransposedTile)
+                    {
+                        auto registerCount
+                            = DataTypeInfo::Get(*unsegmentedVariableType).registerCount;
+                        allocOptions = {.contiguousChunkWidth = int(registerCount), .alignment = 2};
+                    }
                     tmpl = Register::Value::Placeholder(
                         m_context,
                         Register::Type::Vector,
                         *unsegmentedVariableType,
                         m * n * info.elementBits
                             / DataTypeInfo::Get(*unsegmentedVariableType).elementBits,
-                        Register::AllocationOptions::FullyContiguous());
+                        allocOptions);
                 }
                 else
                 {
@@ -868,6 +961,8 @@ namespace rocRoller
                                                                          LoadTiled const& load,
                                                                          Transformer      coords)
         {
+            auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
+
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::LoadStoreTileGenerator::loadMacroTileVGPR()");
             co_yield Instruction::Comment("GEN: loadMacroTileVGPRCI");
@@ -887,7 +982,10 @@ namespace rocRoller
                 tag,
                 nullptr,
                 nullptr,
-                coords);
+                coords,
+                {},
+                /*isTransposedTile=*/false,
+                /*isPadded=*/tile.paddingBytes() > 0);
         }
 
         Generator<Instruction> LoadStoreTileGenerator::loadMacroTileLDS(int                tag,
@@ -1089,10 +1187,14 @@ namespace rocRoller
             auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
 
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::storeMacroTileLDS: OP {} LDS {} MacroTile {}",
+                "KernelGraph::LoadStoreTileGenerator::storeMacroTileLDS: OP {} LDS {} MacroTile {} "
+                "layoutType {} memoryType {} paddingBytes {}",
                 tag,
                 ldsTag,
-                tileTag);
+                tileTag,
+                toString(tile.layoutType),
+                toString(tile.memoryType),
+                tile.paddingBytes());
             co_yield Instruction::Comment(concatenate(
                 "GEN: storeMacroTileLDS OP ", tag, " LDS ", ldsTag, " MacroTile ", tileTag));
 
@@ -1101,13 +1203,15 @@ namespace rocRoller
             auto vgpr     = m_context->registerTagManager()->getRegister(tileTag);
             auto dataType = store.dataType;
 
-            auto numElements = product(tile.subTileSizes) * m_workgroupSizeTotal;
+            auto numElements  = product(tile.subTileSizes) * m_workgroupSizeTotal;
+            auto paddingBytes = tile.paddingBytes();
             // Allocate LDS memory, and store the offset of the beginning of the allocation
             // into ldsOffset.
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                ldsAllocation = Register::Value::AllocateLDS(m_context, dataType, numElements);
+                ldsAllocation = Register::Value::AllocateLDS(
+                    m_context, dataType, numElements, /*alignment*/ 4, paddingBytes);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
             else
@@ -1130,7 +1234,10 @@ namespace rocRoller
                 tag,
                 vgpr,
                 ldsOffset,
-                coords);
+                coords,
+                {},
+                /*isTransposedTile*/ false,
+                /*isPadded*/ paddingBytes > 0);
         }
 
         Generator<Instruction> LoadStoreTileGenerator::storeMacroTileVGPR(int               tag,

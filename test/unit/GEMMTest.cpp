@@ -1511,7 +1511,8 @@ namespace GEMMDriverTest
                          std::string           mfma,
                          std::string           modifiers,
                          uint                  numMFMAs,
-                         uint                  numBufferLoads,
+                         uint                  numBufferLoadsForC,
+                         uint                  numBufferLoadsForAB,
                          uint                  numDSWrites,
                          uint                  numDSReads,
                          uint                  numTrLoads,
@@ -1527,13 +1528,36 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, modifiers), numMFMAs);
 
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load"),
-                  numBufferLoads + numScaleBufferLoads);
-        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "), numBufferLoads);
+                  numBufferLoadsForC + numBufferLoadsForAB + numScaleBufferLoads);
+        if(!isF6Type)
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "),
+                      numBufferLoadsForC + numBufferLoadsForAB);
+        }
+        else
+        {
+            auto numDWordX3BufferLoads = countSubstring(generatedCode, "buffer_load_dwordx3 ");
+            auto numDWordX4orX2DSBufferLoads = numBufferLoadsForAB - numDWordX3BufferLoads;
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "),
+                      numBufferLoadsForC + numDWordX4orX2DSBufferLoads / 2);
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "),
+                      numDWordX4orX2DSBufferLoads / 2);
+        }
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), numScaleBufferLoads);
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
 
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b"), numDSWrites + numScaleDSWrites);
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), numDSWrites);
+        if(!isF6Type)
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), numDSWrites);
+        }
+        else
+        {
+            auto numB96DSWrites       = countSubstring(generatedCode, "ds_write_b96 ");
+            auto numB128orB64DSWrites = numDSWrites - numB96DSWrites;
+            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), numB128orB64DSWrites / 2);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64 "), numB128orB64DSWrites / 2);
+        }
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b8"), numScaleDSWrites);
 
         if(!isF6Type)
@@ -1575,12 +1599,6 @@ namespace GEMMDriverTest
         std::tie(problem.transA, problem.transB) = transOp;
 
         uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
-
-        // TODO: enable non-TN F6 tests
-        if(elementBits == 6 && (problem.transA != "T" || problem.transB != "N"))
-        {
-            GTEST_SKIP();
-        }
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
@@ -1624,10 +1642,10 @@ namespace GEMMDriverTest
         uint const elementsPerWavetile = waveM * waveK / wfs;
         uint const elementsPerTrLoad   = bitsPerTransposeLoad(elementBits) / elementBits;
 
+        uint const bitsPerABMemOp = (elementBits == 6 ? 96 : 128);
         uint const trLoadsPerWave
             = elementsPerWavetile * elementBits / bitsPerTransposeLoad(elementBits);
-        uint const dsLoadsPerWave
-            = elementsPerWavetile * elementBits / (elementBits == 6 ? 96 : 128);
+        uint const dsLoadsPerWave = elementsPerWavetile * elementBits / bitsPerABMemOp;
 
         uint const bitsLoadedForAB
             = (/*A*/ waveM * problem.macK + /*B*/ problem.macK * waveN) * elementBits;
@@ -1635,8 +1653,9 @@ namespace GEMMDriverTest
         uint const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
         uint const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
 
-        uint const numBufferLoads = (bitsLoadedForAB + bitsLoadedForC) / 128 / wfs;
-        uint const numDSWrites    = bitsLoadedForAB / 128 / wfs;
+        uint const numBufferLoadsForC  = bitsLoadedForC / 128 / wfs;
+        uint const numDSWrites         = bitsLoadedForAB / bitsPerABMemOp / wfs;
+        uint const numBufferLoadsForAB = numDSWrites;
 
         uint numTrLoads = 0;
         uint numDSReads = 0;
@@ -1660,7 +1679,8 @@ namespace GEMMDriverTest
                         mfma,
                         modifiers,
                         numMFMAs,
-                        numBufferLoads,
+                        numBufferLoadsForC,
+                        numBufferLoadsForAB,
                         numDSWrites,
                         numDSReads,
                         numTrLoads,
@@ -1716,12 +1736,6 @@ namespace GEMMDriverTest
 
         uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
 
-        // TODO: enable non-TN F6 tests
-        if(elementBits == 6 && (problem.transA != "T" || problem.transB != "N"))
-        {
-            GTEST_SKIP();
-        }
-
         problem.scaleAMode = Operations::ScaleMode::Separate;
         problem.scaleBMode = Operations::ScaleMode::Separate;
 
@@ -1772,10 +1786,10 @@ namespace GEMMDriverTest
         uint const elementsPerWavetile = waveM * waveK / wfs;
         uint const elementsPerTrLoad   = bitsPerTransposeLoad(elementBits) / elementBits;
 
+        uint const bitsPerABMemOp = (elementBits == 6 ? 96 : 128);
         uint const trLoadsPerWave
             = elementsPerWavetile * elementBits / bitsPerTransposeLoad(elementBits);
-        uint const dsLoadsPerWave
-            = elementsPerWavetile * elementBits / (elementBits == 6 ? 96 : 128);
+        uint const dsLoadsPerWave = elementsPerWavetile * elementBits / bitsPerABMemOp;
 
         uint const bitsLoadedForAB
             = (/*A*/ waveM * problem.macK + /*B*/ problem.macK * waveN) * elementBits;
@@ -1783,8 +1797,9 @@ namespace GEMMDriverTest
         uint const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
         uint const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
 
-        uint const numBufferLoads = (bitsLoadedForAB + bitsLoadedForC) / 128 / wfs;
-        uint const numDSWrites    = bitsLoadedForAB / 128 / wfs;
+        uint const numBufferLoadsForC  = bitsLoadedForC / 128 / wfs;
+        uint const numDSWrites         = bitsLoadedForAB / bitsPerABMemOp / wfs;
+        uint const numBufferLoadsForAB = numDSWrites;
 
         uint numTrLoads = 0;
         uint numDSReads = 0;
@@ -1812,7 +1827,8 @@ namespace GEMMDriverTest
                         mfma,
                         modifiers,
                         numMFMAs,
-                        numBufferLoads,
+                        numBufferLoadsForC,
+                        numBufferLoadsForAB,
                         numDSWrites,
                         numDSReads,
                         numTrLoads,
@@ -2310,11 +2326,6 @@ namespace GEMMDriverTest
         // TODO: enable non-TN F6 tests
         auto const elementBitsA = DataTypeInfo::Get(typeA).elementBits;
         auto const elementBitsB = DataTypeInfo::Get(typeB).elementBits;
-        if((elementBitsA == 6 || elementBitsB == 6)
-           && (problem.transA != "T" || problem.transB != "N"))
-        {
-            GTEST_SKIP();
-        }
 
         basicGEMMMixed(typeA, typeB, problem);
 
@@ -2369,11 +2380,6 @@ namespace GEMMDriverTest
         // TODO: enable non-TN F6 tests
         auto const elementBitsA = DataTypeInfo::Get(typeA).elementBits;
         auto const elementBitsB = DataTypeInfo::Get(typeB).elementBits;
-        if((elementBitsA == 6 || elementBitsB == 6)
-           && (problem.transA != "T" || problem.transB != "N"))
-        {
-            GTEST_SKIP();
-        }
 
         problem.scaleAMode = rocRoller::Operations::ScaleMode::Separate;
         problem.scaleBMode = rocRoller::Operations::ScaleMode::Separate;

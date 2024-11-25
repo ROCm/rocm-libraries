@@ -40,6 +40,12 @@ namespace rocRoller
         return 0;
     }
 
+    uint extraLDSBytesPerElementBlock(uint elementBits)
+    {
+        // 6-bit transposes are special as they require 128b alignment even though they only load 96 bits.
+        return elementBits == 6 ? (128 - 96) / 8 : 0;
+    }
+
     std::string transposeLoadMnemonic(uint elementBits)
     {
         AssertFatal((elementBits == 16 || elementBits == 8 || elementBits == 6 || elementBits == 4),
@@ -75,7 +81,7 @@ namespace rocRoller
                     "Invalid number of bytes");
 
         // 6-bit transposes are special as they require 128b alignment even though they only load 96 bits.
-        const uint        extraLDSBytes  = elementBits == 6 ? (128 - 96) / 8 : 0;
+        const uint        extraLDSBytes  = extraLDSBytesPerElementBlock(elementBits);
         const uint        bytesPerTrLoad = bitsPerTransposeLoad(elementBits) / 8 + extraLDSBytes;
         const std::string dsReadTrMnemonic{transposeLoadMnemonic(elementBits)};
 
