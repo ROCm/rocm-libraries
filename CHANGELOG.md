@@ -18,6 +18,9 @@ Documentation for rocSPARSE is available at
 
 * By default, build rocsparse shared library using `--offload-compress` compiler option which compresses the fat binary. This significantly reduces the shared library binary size.
 
+### Resolved issues
+* Fixed an issue in the routine `rocsparse_spgemm` when using `rocsparse_spgemm_stage_symbolic` and `rocsparse_spgemm_stage_numeric`, where the routine would crash when `alpha` and `beta` were passed as host pointers and where `beta != 0`.
+
 ### Optimized
 
 * Improved adaptive CSR sparse matrix-vector multiplcation algorithm when the sparse matrix has many empty rows at the beginning or end of the matrix. This improves the routines `rocsparse_spmv` and `rocsparse_spmv_ex` when the adaptive algorithm `rocsparse_spmv_alg_csr_adaptive` is used.

@@ -181,6 +181,7 @@ set(ROCSPARSE_TEST_SOURCES
   test_extract.cpp
   test_spgemm_bsr.cpp
   test_spgemm_csr.cpp
+  test_spgemm_reuse_csr.cpp
   test_gtsv.cpp
   test_gemvi.cpp
   test_sddmm.cpp
@@ -312,6 +313,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_extract.cpp
 ../testings/testing_spgemm_bsr.cpp
 ../testings/testing_spgemm_csr.cpp
+../testings/testing_spgemm_reuse_csr.cpp
 ../testings/testing_gtsv.cpp
 ../testings/testing_gemvi.cpp
 ../testings/testing_sddmm.cpp

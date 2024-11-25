@@ -275,7 +275,7 @@ extern "C" {
 *   int64_t cols_C;
 *   int64_t nnz_C;
 *
-*   Extract number of non-zeros in C matrix so we can allocate the column indices and values arrays
+*   // Extract number of non-zeros in C matrix so we can allocate the column indices and values arrays
 *   rocsparse_spmat_get_size(matC, &rows_C, &cols_C, &nnz_C);
 *
 *   int* dcsr_col_ind_C;

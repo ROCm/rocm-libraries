@@ -136,6 +136,7 @@ include: test_sparse_to_sparse.yaml
 include: test_extract.yaml
 include: test_spgemm_bsr.yaml
 include: test_spgemm_csr.yaml
+include: test_spgemm_reuse_csr.yaml
 include: test_gemvi.yaml
 include: test_sddmm.yaml
 include: test_csrcolor.yaml

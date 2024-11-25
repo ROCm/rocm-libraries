@@ -252,6 +252,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_csrgemm_reuse.hpp"
 #include "testing_spgemm_bsr.hpp"
 #include "testing_spgemm_csr.hpp"
+#include "testing_spgemm_reuse_csr.hpp"
 
 // Preconditioner
 #include "testing_bsric0.hpp"
@@ -524,7 +525,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_T(csrgeam);
         DEFINE_CASE_IJT_X(bsrgemm, testing_spgemm_bsr);
         DEFINE_CASE_IJT_X(csrgemm, testing_spgemm_csr);
-        DEFINE_CASE_T(csrgemm_reuse);
+        DEFINE_CASE_IJT_X(csrgemm_reuse, testing_spgemm_reuse_csr);
         DEFINE_CASE_IJAXYT_X(bsrmv, testing_spmv_bsr);
         DEFINE_CASE_IJAXYT_X(csrmv, testing_spmv_csr);
         DEFINE_CASE_T(csrmv_managed);

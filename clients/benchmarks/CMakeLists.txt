@@ -182,6 +182,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_extract.cpp
 ../testings/testing_spgemm_bsr.cpp
 ../testings/testing_spgemm_csr.cpp
+../testings/testing_spgemm_reuse_csr.cpp
 ../testings/testing_gemvi.cpp
 ../testings/testing_sddmm.cpp
 ../testings/testing_csrcolor.cpp
