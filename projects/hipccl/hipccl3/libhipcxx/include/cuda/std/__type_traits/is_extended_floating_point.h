@@ -39,6 +39,17 @@
 
 #include <cuda/std/__type_traits/integral_constant.h>
 
+#if defined(_LIBCUDACXX_HAS_NVFP16)
+#  include <cuda_fp16.h>
+#endif // _LIBCUDACXX_HAS_NVFP16
+
+#if defined(_LIBCUDACXX_HAS_NVBF16)
+_CCCL_DIAG_PUSH
+_CCCL_DIAG_SUPPRESS_CLANG("-Wunused-function")
+#  include <cuda_bf16.h>
+_CCCL_DIAG_POP
+#endif // _LIBCUDACXX_HAS_NVBF16
+
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
 template <class _Tp>
@@ -56,13 +67,6 @@ _CCCL_INLINE_VAR constexpr bool __is_extended_floating_point_v
 #endif // !_CCCL_NO_VARIABLE_TEMPLATES
 
 #if defined(_LIBCUDACXX_HAS_NVFP16)
-
-#if defined(__HIP_PLATFORM_AMD__)
-#  include <hip/hip_fp16.h>
-#else
-#  include <cuda_fp16.h>
-#endif
-
 template <>
 struct __is_extended_floating_point<__half> : true_type
 {};
@@ -74,15 +78,6 @@ _CCCL_INLINE_VAR constexpr bool __is_extended_floating_point_v<__half> = true;
 #endif // _LIBCUDACXX_HAS_NVFP16
 
 #if defined(_LIBCUDACXX_HAS_NVBF16)
-_CCCL_DIAG_PUSH
-_CCCL_DIAG_SUPPRESS_CLANG("-Wunused-function")
-#if defined(__HIP_PLATFORM_AMD__)
-#  include <hip/hip_bf16.h>
-#else
-#  include <cuda_bf16.h>
-#endif
-_CCCL_DIAG_POP
-
 template <>
 struct __is_extended_floating_point<__hip_bfloat16> : true_type
 {};
