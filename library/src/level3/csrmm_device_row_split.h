@@ -466,8 +466,8 @@ namespace rocsparse
             return;
         }
 
-        __shared__ J shared_col[BLOCKSIZE / WF_SIZE][WF_SIZE];
-        __shared__ T shared_val[BLOCKSIZE / WF_SIZE][WF_SIZE];
+        __shared__ int64_t shared_col[BLOCKSIZE / WF_SIZE][WF_SIZE];
+        __shared__ T       shared_val[BLOCKSIZE / WF_SIZE][WF_SIZE];
 
         const I row_start
             = rocsparse::nontemporal_load(csr_row_ptr + row + offsets_batch_stride_A * batch)
@@ -476,82 +476,79 @@ namespace rocsparse
             = rocsparse::nontemporal_load(csr_row_ptr + row + 1 + offsets_batch_stride_A * batch)
               - idx_base;
 
-        for(J l = col_start; l < col_end; l += SUB_WF_SIZE)
+        const J col = col_start + slid;
+        T       sum = static_cast<T>(0);
+
+        for(I j = row_start; j < row_end; j += WF_SIZE)
         {
-            const J col = l + slid;
-            T       sum = static_cast<T>(0);
+            const I k = j + lid;
 
-            for(I j = row_start; j < row_end; j += WF_SIZE)
+            __syncthreads();
+
+            if(k < row_end)
             {
-                const I k = j + lid;
+                shared_col[wid][lid]
+                    = ldb
+                          * (rocsparse::nontemporal_load(csr_col_ind + k
+                                                         + columns_values_batch_stride_A * batch)
+                             - idx_base)
+                      + batch_stride_B * batch;
+                shared_val[wid][lid]
+                    = rocsparse::conj_val(rocsparse::nontemporal_load(
+                                              csr_val + k + columns_values_batch_stride_A * batch),
+                                          conj_A);
+            }
+            else
+            {
+                shared_col[wid][lid] = 0;
+                shared_val[wid][lid] = static_cast<T>(0);
+            }
 
-                __threadfence_block();
+            __syncthreads();
 
-                if(k < row_end)
+            if(col < col_end)
+            {
+                for(uint32_t i = 0; i < SUB_WF_SIZE; ++i)
                 {
-                    shared_col[wid][lid]
-                        = (rocsparse::nontemporal_load(csr_col_ind + k
-                                                       + columns_values_batch_stride_A * batch)
-                           - idx_base);
-                    shared_val[wid][lid] = rocsparse::conj_val(
-                        rocsparse::nontemporal_load(csr_val + k
-                                                    + columns_values_batch_stride_A * batch),
-                        conj_A);
+                    sum = rocsparse::fma<T>(
+                        shared_val[wid][SUB_WF_SIZE * swid + i],
+                        rocsparse::conj_val(
+                            rocsparse::ldg(dense_B + col + shared_col[wid][SUB_WF_SIZE * swid + i]),
+                            conj_B),
+                        sum);
+                }
+            }
+        }
+
+        if(SUB_WF_SIZE < WF_SIZE)
+        {
+            sum = rocsparse::wfreduce_partial_sum<WF_SIZE, SUB_WF_SIZE>(sum);
+        }
+
+        if(col < col_end && lid < SUB_WF_SIZE)
+        {
+            if(beta == static_cast<T>(0))
+            {
+                if(order_C == rocsparse_order_column)
+                {
+                    dense_C[row + col * ldc + batch_stride_C * batch] = alpha * sum;
                 }
                 else
                 {
-                    shared_col[wid][lid] = 0;
-                    shared_val[wid][lid] = static_cast<T>(0);
-                }
-
-                __threadfence_block();
-
-                if(col < col_end)
-                {
-                    for(uint32_t i = 0; i < SUB_WF_SIZE; ++i)
-                    {
-                        sum = rocsparse::fma<T>(
-                            shared_val[wid][SUB_WF_SIZE * swid + i],
-                            rocsparse::conj_val(
-                                rocsparse::ldg(dense_B + col
-                                               + ldb * shared_col[wid][SUB_WF_SIZE * swid + i]
-                                               + batch_stride_B * batch),
-                                conj_B),
-                            sum);
-                    }
+                    dense_C[row * ldc + col + batch_stride_C * batch] = alpha * sum;
                 }
             }
-
-            if(SUB_WF_SIZE < WF_SIZE)
+            else
             {
-                sum = rocsparse::wfreduce_partial_sum<WF_SIZE, SUB_WF_SIZE>(sum);
-            }
-
-            if(col < col_end && lid < SUB_WF_SIZE)
-            {
-                if(beta == static_cast<T>(0))
+                if(order_C == rocsparse_order_column)
                 {
-                    if(order_C == rocsparse_order_column)
-                    {
-                        dense_C[row + col * ldc + batch_stride_C * batch] = alpha * sum;
-                    }
-                    else
-                    {
-                        dense_C[row * ldc + col + batch_stride_C * batch] = alpha * sum;
-                    }
+                    dense_C[row + col * ldc + batch_stride_C * batch] = rocsparse::fma<T>(
+                        beta, dense_C[row + col * ldc + batch_stride_C * batch], alpha * sum);
                 }
                 else
                 {
-                    if(order_C == rocsparse_order_column)
-                    {
-                        dense_C[row + col * ldc + batch_stride_C * batch] = rocsparse::fma<T>(
-                            beta, dense_C[row + col * ldc + batch_stride_C * batch], alpha * sum);
-                    }
-                    else
-                    {
-                        dense_C[row * ldc + col + batch_stride_C * batch] = rocsparse::fma<T>(
-                            beta, dense_C[row * ldc + col + batch_stride_C * batch], alpha * sum);
-                    }
+                    dense_C[row * ldc + col + batch_stride_C * batch] = rocsparse::fma<T>(
+                        beta, dense_C[row * ldc + col + batch_stride_C * batch], alpha * sum);
                 }
             }
         }
