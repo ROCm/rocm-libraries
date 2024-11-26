@@ -2,13 +2,9 @@
 """ Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
 Manage build and installation"""
 
-import re
-import sys
 import os
 import subprocess
 import argparse
-import ctypes
-import pathlib
 from fnmatch import fnmatchcase
 import platform as pf
 import shutil
