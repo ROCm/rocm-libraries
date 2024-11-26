@@ -1,8 +1,8 @@
 * @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
 # Documentation files
-docs/* @ROCm/rocm-documentation
+docs/ @ROCm/rocm-documentation
 *.md @ROCm/rocm-documentation
 *.rst @ROCm/rocm-documentation
 .readthedocs.yaml @ROCm/rocm-documentation
 # Header directory for Doxygen documentation
-library/include/* @ROCm/rocm-documentation
+library/include/ @ROCm/rocm-documentation @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
