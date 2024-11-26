@@ -96,7 +96,7 @@ __host__ __device__ void test_is_constructible()
 #if !defined(TEST_COMPILER_MSVC) && !defined(TEST_COMPILER_HIPCC)
   // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
-  static_assert((cuda::std::__libcpp_is_constructible<T>::type::value), "");
+  static_assert((cuda::std::__cccl_is_constructible<T>::type::value), "");
 #endif
 #if TEST_STD_VER > 2011
   static_assert(cuda::std::is_constructible_v<T>, "");
@@ -110,7 +110,7 @@ __host__ __device__ void test_is_constructible()
 #ifndef TEST_COMPILER_MSVC
   // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
-  static_assert((cuda::std::__libcpp_is_constructible<T, A0>::type::value), "");
+  static_assert((cuda::std::__cccl_is_constructible<T, A0>::type::value), "");
 #endif
 #if TEST_STD_VER > 2011
   static_assert((cuda::std::is_constructible_v<T, A0>), "");
@@ -124,7 +124,7 @@ __host__ __device__ void test_is_constructible()
 #if !defined(TEST_COMPILER_MSVC) && !defined(TEST_COMPILER_HIPCC)
   // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
-  static_assert((cuda::std::__libcpp_is_constructible<T, A0, A1>::type::value), "");
+  static_assert((cuda::std::__cccl_is_constructible<T, A0, A1>::type::value), "");
 #endif
 #if TEST_STD_VER > 2011
   static_assert((cuda::std::is_constructible_v<T, A0, A1>), "");
@@ -138,7 +138,7 @@ __host__ __device__ void test_is_constructible()
 #if !defined(TEST_COMPILER_MSVC) && !defined(TEST_COMPILER_HIPCC)
   // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
-  static_assert((cuda::std::__libcpp_is_constructible<T, A0, A1, A2>::type::value), "");
+  static_assert((cuda::std::__cccl_is_constructible<T, A0, A1, A2>::type::value), "");
 #endif
 #if TEST_STD_VER > 2011
   static_assert((cuda::std::is_constructible_v<T, A0, A1, A2>), "");
@@ -152,7 +152,7 @@ __host__ __device__ void test_is_not_constructible()
 #if !defined(TEST_COMPILER_MSVC) && !defined(TEST_COMPILER_HIPCC)
   // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
-  static_assert((!cuda::std::__libcpp_is_constructible<T>::type::value), "");
+  static_assert((!cuda::std::__cccl_is_constructible<T>::type::value), "");
 #endif
 #if TEST_STD_VER > 2011
   static_assert((!cuda::std::is_constructible_v<T>), "");
@@ -166,7 +166,7 @@ __host__ __device__ void test_is_not_constructible()
 #if !defined(TEST_COMPILER_MSVC) && !(defined(TEST_COMPILER_CLANG) && __clang_major__ >= 16) && !defined(TEST_COMPILER_HIPCC)
   // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
-  static_assert((!cuda::std::__libcpp_is_constructible<T, A0>::type::value), "");
+  static_assert((!cuda::std::__cccl_is_constructible<T, A0>::type::value), "");
 #endif
 #if TEST_STD_VER > 2011
   static_assert((!cuda::std::is_constructible_v<T, A0>), "");
@@ -314,11 +314,11 @@ int main(int, char**)
   // FIXME Clang disallows this construction because it thinks that
   // 'static_cast<int&&>(declval<ExplicitTo<int&&>>())' is ill-formed.
   LIBCPP_STATIC_ASSERT(
-    clang_disallows_valid_static_cast_bug != cuda::std::__libcpp_is_constructible<int&&, ExplicitTo<int&&>>::value, "");
+    clang_disallows_valid_static_cast_bug != cuda::std::__cccl_is_constructible<int&&, ExplicitTo<int&&>>::value, "");
   ((void) clang_disallows_valid_static_cast_bug); // Prevent unused warning
 #  else
   static_assert(clang_disallows_valid_static_cast_bug == false, "");
-  LIBCPP_STATIC_ASSERT(cuda::std::__libcpp_is_constructible<int&&, ExplicitTo<int&&>>::value, "");
+  LIBCPP_STATIC_ASSERT(cuda::std::__cccl_is_constructible<int&&, ExplicitTo<int&&>>::value, "");
 #  endif
 #endif
 
@@ -326,7 +326,7 @@ int main(int, char**)
 #if defined(TEST_CLANG_VER) && !defined(TEST_COMPILER_NVCC) && !defined(TEST_COMPILER_HIPCC)
   test_is_constructible<const int&, ExplicitTo<int>>();
   LIBCPP_STATIC_ASSERT(
-    clang_disallows_valid_static_cast_bug != cuda::std::__libcpp_is_constructible<int&&, ExplicitTo<int>>::value, "");
+    clang_disallows_valid_static_cast_bug != cuda::std::__cccl_is_constructible<int&&, ExplicitTo<int>>::value, "");
   static_assert(cuda::std::is_constructible<int&&, ExplicitTo<int>>::value, "");
 #elif defined(TEST_COMPILER_MSVC) && defined(TEST_COMPILER_NVCC) && defined(TEST_COMPILER_HIPCC)
   // FIXME NVCC and MSVC disagree about the validity of these tests, and give

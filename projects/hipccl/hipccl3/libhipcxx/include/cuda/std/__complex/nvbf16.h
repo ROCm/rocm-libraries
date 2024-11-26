@@ -104,7 +104,7 @@ struct __type_to_vector<__hip_bfloat16>
 };
 
 template <>
-struct __libcpp_complex_overload_traits<__hip_bfloat16, false, false>
+struct __cccl_complex_overload_traits<__hip_bfloat16, false, false>
 {
   typedef __hip_bfloat16 _ValueType;
   typedef complex<__hip_bfloat16> _ComplexType;

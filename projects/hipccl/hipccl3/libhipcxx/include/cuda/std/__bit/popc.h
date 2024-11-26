@@ -93,10 +93,10 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __constexpr_popcount(uint64_t __x) noexc
 #  endif
 }
 
-_LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint32_t __x) noexcept
+_LIBCUDACXX_HIDE_FROM_ABI constexpr int __cccl_popc(uint32_t __x) noexcept
 {
 #  if _CCCL_STD_VER >= 2014
-  if (!__libcpp_default_is_constant_evaluated())
+  if (!__cccl_default_is_constant_evaluated())
   {
     NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return __popc(__x);), (return __builtin_popcount(__x);))
   }
@@ -104,10 +104,10 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint32_t __x) noexcept
   return __constexpr_popcount(static_cast<uint64_t>(__x));
 }
 
-_LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint64_t __x) noexcept
+_LIBCUDACXX_HIDE_FROM_ABI constexpr int __cccl_popc(uint64_t __x) noexcept
 {
 #  if _CCCL_STD_VER >= 2014
-  if (!__libcpp_default_is_constant_evaluated())
+  if (!__cccl_default_is_constant_evaluated())
   {
     NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return __popcll(__x);), (return __builtin_popcountll(__x);))
   }
@@ -117,9 +117,9 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint64_t __x) noexcept
 
 #else // _CCCL_COMPILER(MSVC)
 
-_LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint32_t __x)
+_LIBCUDACXX_HIDE_FROM_ABI constexpr int __cccl_popc(uint32_t __x)
 {
-  if (!__libcpp_default_is_constant_evaluated())
+  if (!__cccl_default_is_constant_evaluated())
   {
     NV_IF_TARGET_LIBHIPCXX(NV_IS_HOST_LIBHIPCXX, (return static_cast<int>(_LIBCUDACXX_MSVC_POPC(__x));))
   }
@@ -127,9 +127,9 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint32_t __x)
   return __fallback_popc64(static_cast<uint64_t>(__x));
 }
 
-_LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint64_t __x)
+_LIBCUDACXX_HIDE_FROM_ABI constexpr int __cccl_popc(uint64_t __x)
 {
-  if (!__libcpp_default_is_constant_evaluated())
+  if (!__cccl_default_is_constant_evaluated())
   {
     NV_IF_TARGET_LIBHIPCXX(NV_IS_HOST_LIBHIPCXX, (return static_cast<int>(_LIBCUDACXX_MSVC_POPC64(__x));))
   }

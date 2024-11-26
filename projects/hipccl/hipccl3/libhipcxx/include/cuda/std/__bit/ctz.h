@@ -93,10 +93,10 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __constexpr_ctz(uint64_t __x) noexcept
 #  endif
 }
 
-_LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint32_t __x) noexcept
+_LIBCUDACXX_HIDE_FROM_ABI constexpr int __cccl_ctz(uint32_t __x) noexcept
 {
 #  if _CCCL_STD_VER >= 2014
-  if (!__libcpp_default_is_constant_evaluated())
+  if (!__cccl_default_is_constant_evaluated())
   {
     NV_IF_ELSE_TARGET(
       NV_IS_DEVICE_LIBHIPCXX, (return (!__x) ? (sizeof(uint32_t) * 8) : (__ffs(__x) - 1);), (return __builtin_ctz(__x);))
@@ -105,10 +105,10 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint32_t __x) noexcept
   return __constexpr_ctz(__x);
 }
 
-_LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint64_t __x) noexcept
+_LIBCUDACXX_HIDE_FROM_ABI constexpr int __cccl_ctz(uint64_t __x) noexcept
 {
 #  if _CCCL_STD_VER >= 2014
-  if (!__libcpp_default_is_constant_evaluated())
+  if (!__cccl_default_is_constant_evaluated())
   {
     NV_IF_ELSE_TARGET(
       NV_IS_DEVICE_LIBHIPCXX, (return (!__x) ? (sizeof(uint64_t) * 8) : (libhipcxx::__FFS(__x) - 1);), (return __builtin_ctzll(__x);))
@@ -120,10 +120,10 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint64_t __x) noexcept
 #else // _CCCL_COMPILER(MSVC)
 
 // Precondition:  __x != 0
-_LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint32_t __x)
+_LIBCUDACXX_HIDE_FROM_ABI constexpr int __cccl_ctz(uint32_t __x)
 {
 #  if !defined(__CUDA_ARCH__)
-  if (!__libcpp_default_is_constant_evaluated())
+  if (!__cccl_default_is_constant_evaluated())
   {
     unsigned long __where = 0;
     if (_BitScanForward(&__where, __x))
@@ -137,10 +137,10 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint32_t __x)
   return __binary_ctz32(static_cast<uint64_t>(__x), 0);
 }
 
-_LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint64_t __x)
+_LIBCUDACXX_HIDE_FROM_ABI constexpr int __cccl_ctz(uint64_t __x)
 {
 #  if !defined(__CUDA_ARCH__)
-  if (!__libcpp_default_is_constant_evaluated())
+  if (!__cccl_default_is_constant_evaluated())
   {
     unsigned long __where = 0;
 #    if defined(_LIBCUDACXX_HAS_BITSCAN64) && (defined(_M_AMD64) || defined(__x86_64__))
