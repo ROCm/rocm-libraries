@@ -219,7 +219,7 @@ class AutoBuilder:
             if self.args.install:
                 subprocess.run(f'make install')
         else:
-            v, = ''
+            v = ''
             if self.args.verbose:
                 v = '--verbose'
             subprocess.run(f'ninja -j {self.OS_info["Num Processor"]} {v}')
