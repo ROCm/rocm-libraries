@@ -10,7 +10,6 @@ import shutil
 
 class AutoBuilder:
     def __init__(self):
-        self.param = {}
         self.parser = argparse.ArgumentParser(description="""
         Checks build arguments
         """)
@@ -66,7 +65,7 @@ class AutoBuilder:
         self.parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default=default_gpus, #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
                             help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)')
         self.parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
-                            help='Verbose build (default: False)')  
+                            help='Verbose build (default: False)')   
         
         self.args = self.parser.parse_args()
 
@@ -88,7 +87,7 @@ class AutoBuilder:
             full_path = os.path.join(self.lib_dir, dir_path)
         try:
             if self.OS_info['System'] == 'Linux':
-                subprocess.run(f'rm -rf "{full_path}"')
+                subprocess.run(f'rm -rf "{full_path}"', shell=True)
             else:
                 subprocess.run(f'RMDIR /S /Q {full_path}', shell=True)
 
@@ -199,7 +198,7 @@ class AutoBuilder:
         print()
         return command_str
     
-    def run(self):
+    def __call__(self):
         self.__parse_args__()
         cmake_command = self.__get_cmake_cmd__()
 
@@ -211,27 +210,26 @@ class AutoBuilder:
         os.chdir(self.build_path)
 
 
-        subprocess.run(cmake_command)
+        subprocess.run(cmake_command, shell=True)
         
         if self.OS_info['System'] == 'Linux':
             v = ''
             if self.args.verbose:
-                v = 'VERBOSE=1'
-            subprocess.run(f' make -j {self.OS_info["Num Processor"]} {v}')
+                v = ' VERBOSE=1'
+            subprocess.run(f' make -j {self.OS_info["Num Processor"]}{v}', shell=True)
 
             if self.args.install:
-                subprocess.run(f'make install')
+                subprocess.run(f'make install', shell=True)
         else:
             v = ''
             if self.args.verbose:
-                v = '--verbose'
-            subprocess.run(f'ninja -j {self.OS_info["Num Processor"]} {v}')
+                v = ' --verbose'
+            subprocess.run(f'ninja -j {self.OS_info["Num Processor"]}{v}', shell=True)
             if self.args.install:
-                subprocess.run(f'ninja install')    
+                subprocess.run(f'ninja install', shell=True)    
 
         os.chdir(curr_dir)
 
 if __name__ == '__main__':
     builder = AutoBuilder()
-    
-    builder.run()
+    builder()
