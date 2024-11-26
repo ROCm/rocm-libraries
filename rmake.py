@@ -88,9 +88,9 @@ class AutoBuilder:
             full_path = os.path.join(self.lib_dir, dir_path)
         try:
             if self.OS_info['System'] == 'Linux':
-                subprocess.run(f'rm -rf {full_path}')
+                subprocess.run(f'rm -rf "{full_path}"')
             else:
-                subprocess.run(f'RMDIR /S /Q {full_path}')
+                subprocess.run(f'RMDIR /S /Q {full_path}', shell=True)
 
         except FileNotFoundError:
             ... # no file to remove
@@ -203,8 +203,8 @@ class AutoBuilder:
         self.__parse_args__()
         cmake_command = self.__get_cmake_cmd__()
 
-        self.__rm_dir__('build')
         self.__rm_dir__(self.build_path)
+        self.__rm_dir__('build')
         self.__mk_dir__(self.build_path)
 
         curr_dir = os.path.abspath(os.curdir)
