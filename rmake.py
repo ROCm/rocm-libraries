@@ -131,11 +131,33 @@ class AutoBuilder:
                 raise(SystemError('Did not find cmake or cmake3 in system'))
 
             rocm_path = os.getenv('ROCM_PATH', '/opt/rocm')
+
+            cmake_options.append(f"-DROCM_DIR:PATH={rocm_path}")
+            cmake_options.append(f"-DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}")
+            cmake_options.append(f"-DROCM_PATH={rocm_path}")
+            cmake_options.append(f"-DCMAKE_PREFIX_PATH:PATH={rocm_path}")
             
-            cmake_options.append(f'-DROCM_DIR:PATH={rocm_path}')
-            cmake_options.append(f'-DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}')
-            cmake_options.append(f'-DROCM_PATH={rocm_path}')
-            cmake_options.append(f'-DCMAKE_PREFIX_PATH:PATH={rocm_path},{rocm_path}')
+        else:
+            cmake_exe = shutil.which('cmake.exe')
+            
+            if cmake_exe is None:
+                cmake_exe = shutil.which('cmake3.exe')
+
+            if cmake_exe is None:
+                raise(SystemError('Did not find cmake or cmake3 in system'))
+            
+            rocm_path = os.getenv('ROCM_PATH', 'C:/hip')
+            rocm_cmake_path = os.getenv('ROCM_CMAKE_PATH', r'C:/hipSDK')
+
+            rocm_path.replace('\\', '/')
+            rocm_cmake_path.replace('\\', '/')
+
+            cmake_options.append(f'-G Ninja')
+            cmake_options.append( f"-DWIN32=ON -DCPACK_PACKAGING_INSTALL_PREFIX=") #" -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"
+            cmake_options.append( f'-DCMAKE_INSTALL_PREFIX="C:/hipSDK"' )
+            cmake_options.append( f'-DCMAKE_CXX_FLAGS="-D_ENABLE_EXTENDED_ALIGNED_STORAGE"')
+            cmake_options.append(f'-DROCM_PATH={rocm_path}') 
+            cmake_options.append(f'-DCMAKE_PREFIX_PATH:PATH={rocm_path};{rocm_cmake_path}')
 
 
         if self.args.static_lib:
@@ -158,7 +180,11 @@ class AutoBuilder:
         if self.args.cmake_dargs:
             cmake_options += [f'-D{i}' for i in self.args.cmake_dargs]
         
-        command_str = cmake_exe
+        # putting '' around paths to avoid white space in pathing
+        if self.OS_info['System'] == 'Linux':
+            command_str = f"{cmake_exe}"  
+        else:
+            command_str = f'"{cmake_exe}"'
 
         m = 'CMAKE Options'
         print(f'{m:-^100}')
@@ -167,7 +193,7 @@ class AutoBuilder:
             command_str += f' {op}'
         print()
 
-        command_str += f' {self.lib_dir}'
+        command_str += f' "{self.lib_dir}"'
         m = 'Final Command'
         print(f'{m:-^100}')
         print(command_str)
@@ -185,127 +211,32 @@ class AutoBuilder:
         curr_dir = os.path.abspath(os.curdir)
         os.chdir(self.build_path)
 
-        os.system(cmake_command)
 
+        subprocess.run(cmake_command)
+        
         if self.OS_info['System'] == 'Linux':
+            v = ''
             if self.args.verbose:
                 v = 'VERBOSE=1'
-            else:
-                v = ''
-
-            os.system(f' make -j {self.OS_info["Num Processor"]} {v}')
+            subprocess.run(f' make -j {self.OS_info["Num Processor"]} {v}')
 
             if self.args.install:
-                os.system(f'make install')
+                subprocess.run(f'make install')
+        else:
+            v, i, = '', ''
+            if self.args.verbose:
+                v = '--verbose'
+
+            if self.args.install:
+                i = f'--target package --target install'
+
+            if self.args.install:
+                subprocess.run(f'ninja install')    
+            subprocess.run(f'ninja -j {self.OS_info["Num Processor"]} {v} {i}')
 
         os.chdir(curr_dir)
-
-# if (OS_info["ID"] == 'windows'):
-#         # we don't have ROCM on windows but have hip, ROCM can be downloaded if required
-#         # CMAKE_PREFIX_PATH set to rocm_path and HIP_PATH set BY SDK Installer
-#         raw_rocm_path = cmake_path(os.getenv('HIP_PATH', "C:/hip"))
-#         rocm_path = f'"{raw_rocm_path}"' # guard against spaces in path
-#         cmake_executable = "cmake.exe"
-#         toolchain = os.path.join( src_path, "toolchain-windows.cmake" )
-#         #set CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
-#         cmake_platform_opts.append( f"-DWIN32=ON -DCPACK_PACKAGING_INSTALL_PREFIX=") #" -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"
-#         cmake_platform_opts.append( f"-DCMAKE_INSTALL_PREFIX=\"C:/hipSDK\"" )
-
-#         # MSVC requires acknowledgement of using extended aligned storage.
-#         # Before VS 2017 15.8, has non-conforming alignment. VS 2017 15.8 fixes this, but inherently changes layouts of
-#         # aligned storage with extended alignment, and thus binary compatibility with such types.
-#         cmake_platform_opts.append( "-DCMAKE_CXX_FLAGS=\"-D_ENABLE_EXTENDED_ALIGNED_STORAGE\"")
-
-#         rocm_cmake_path = '"' + cmake_path(os.getenv("ROCM_CMAKE_PATH", "C:/hipSDK")) + '"'
-#         generator = f"-G Ninja"
-#         # "-G \"Visual Studio 16 2019\" -A x64"  #  -G NMake ")  #
-#         cmake_options.append( generator )
-
-#     if (OS_info["ID"] == 'windows'):
-#         cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path[:-1]};{rocm_cmake_path[1:]}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
-#     else:
-
-#     print( cmake_options )
-
-#     # clean
-#     delete_dir( build_path )
-
-#     create_dir( os.path.join(build_path, "clients") )
-#     os.chdir( build_path )
-
-
-#     cmd_opts = " ".join(cmake_options)
-
-#     return cmake_executable, cmd_opts
-
-# def run_cmd(exe, opts):
-#     program = f"{exe} {opts}"
-#     if sys.platform.startswith('win'):
-#         sh = True
-#     else:
-#         sh = True
-#     print(program)
-#     proc = subprocess.run(program, check=True, stderr=subprocess.STDOUT, shell=sh)
-#     #proc = subprocess.Popen(cmd, cwd=os.getcwd())
-#     #cwd=os.path.join(workingdir,"..",".."), stdout=fout, stderr=fout,
-#      #                       env=os.environ.copy())
-#     #proc.wait()
-#     return proc.returncode
-
-# def cmake_path(os_path):
-#     if OS_info["ID"] == "windows":
-#         return os_path.replace("\\", "/")
-#     else:
-#         return os.path.realpath(os_path)
-
-
-
-# def make_cmd():
-#     global args
-#     global OS_info
-
-#     make_options = []
-
-#     if (OS_info["ID"] == 'windows'):
-#         make_executable = "cmake.exe --build ." # ninja"
-#         if args.verbose:
-#           make_options.append( "--verbose" )
-#         make_options.append( "--target all" )
-#         if args.install:
-#           make_options.append( "--target package --target install" )
-#     else:
-#         nproc = OS_info["NUM_PROC"]
-#         make_executable = f"make -j {nproc}"
-#         if args.verbose:
-#           make_options.append( "VERBOSE=1" )
-#         if args.install:
-#           make_options.append( "install" )
-#     cmd_opts = " ".join(make_options)
-
-#     return make_executable, cmd_opts
-
-
-# def main():
-#     global args
-#     os_detect()
-#     args = parse_args()
-#     # configure
-#     exe, opts = config_cmd()
-#     run_cmd(exe, opts)
-
-#     # make/build/install
-#     exe, opts = make_cmd()
-#     run_cmd(exe, opts)
-
 
 if __name__ == '__main__':
     builder = AutoBuilder()
     
     builder.run()
-
-    # builder.__mk_dir__(f'build')
-    # builder.__mk_dir__(f'/home/zenguyen/forks/rocPRIM/build')
-    # builder.__rm_dir__(f'build')
-    # builder.__rm_dir__(f'/home/zenguyen/forks/rocPRIM/build')
-
-
