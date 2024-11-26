@@ -223,16 +223,12 @@ class AutoBuilder:
             if self.args.install:
                 subprocess.run(f'make install')
         else:
-            v, i, = '', ''
+            v, = ''
             if self.args.verbose:
                 v = '--verbose'
-
-            if self.args.install:
-                i = f'--target package --target install'
-
+            subprocess.run(f'ninja -j {self.OS_info["Num Processor"]} {v}')
             if self.args.install:
                 subprocess.run(f'ninja install')    
-            subprocess.run(f'ninja -j {self.OS_info["Num Processor"]} {v} {i}')
 
         os.chdir(curr_dir)
 
