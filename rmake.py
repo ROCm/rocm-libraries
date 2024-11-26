@@ -5,7 +5,6 @@ Manage build and installation"""
 import os
 import subprocess
 import argparse
-from fnmatch import fnmatchcase
 import platform as pf
 import shutil
 
@@ -80,7 +79,7 @@ class AutoBuilder:
         try:
             os.makedirs(full_path)
         except FileExistsError:
-            ...
+            ... # file already exists
 
     def __rm_dir__(self, dir_path: str):
         if os.path.isabs(dir_path):
@@ -88,9 +87,13 @@ class AutoBuilder:
         else:
             full_path = os.path.join(self.lib_dir, dir_path)
         try:
-            shutil.rmtree(full_path)
+            if self.OS_info['System'] == 'Linux':
+                subprocess.run(f'rm -rf {full_path}')
+            else:
+                subprocess.run(f'RMDIR /S /Q {full_path}')
+
         except FileNotFoundError:
-            ...
+            ... # no file to remove
     
     def __get_cmake_cmd__(self):
 
