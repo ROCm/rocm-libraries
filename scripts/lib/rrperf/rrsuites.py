@@ -87,6 +87,7 @@ def unit():
     )
     yield mkGEMM(default, fp32)
     yield mkGEMM(default, fp16)
+    yield from tail_loop_reproducer()
 
 
 def sgemm():
@@ -289,6 +290,23 @@ def visualizer():
         visualize=True,
         prefetch=False,
         **fp16,
+    )
+
+
+def tail_loop_reproducer():
+    yield mkGEMM(
+        M=64,
+        N=128,
+        K=8,
+        trans_A="T",
+        trans_B="N",
+        wave_m=32,
+        wave_n=32,
+        wave_k=2,
+        wave_b=1,
+        mac_m=64,
+        mac_n=64,
+        mac_k=8,
     )
 
 

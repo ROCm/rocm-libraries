@@ -55,10 +55,16 @@ namespace GEMMDriverTest
             float alpha = gemm.alpha;
             float beta  = gemm.beta;
 
-            AssertFatal(M % gemm.macM == 0, "MacroTile size mismatch (M)");
-            AssertFatal(N % gemm.macN == 0, "MacroTile size mismatch (N)");
+            AssertFatal(M % gemm.macM == 0,
+                        "MacroTile size mismatch (M)",
+                        ShowValue(M),
+                        ShowValue(gemm.macM));
+            AssertFatal(N % gemm.macN == 0,
+                        "MacroTile size mismatch (N)",
+                        ShowValue(N),
+                        ShowValue(gemm.macN));
 
-            if(gemm.unrollK > 0)
+            if(gemm.unrollK > 0 && !gemm.tailLoops)
             {
                 AssertFatal(K % (gemm.macK * gemm.unrollK) == 0,
                             "MacroTile size mismatch (K unroll)");
@@ -235,6 +241,7 @@ namespace GEMMDriverTest
             params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
 
             params->fuseLoops                     = gemm.fuseLoops;
+            params->tailLoops                     = gemm.tailLoops;
             params->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
             params->unrollK                       = gemm.unrollK;
             params->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
@@ -728,6 +735,24 @@ namespace GEMMDriverTest
         gemm.loadLDSB  = false;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
+        gemm.unrollK   = 4;
+        gemm.macK      = 8;
+        basicGEMM<float>(gemm);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKTailLoop)
+    {
+        GEMMProblem gemm;
+        gemm.m         = 64;
+        gemm.n         = 128;
+        gemm.k         = 8;
+        gemm.transA    = "T";
+        gemm.transB    = "N";
+        gemm.loadLDSA  = false;
+        gemm.loadLDSB  = false;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = true;
+        gemm.tailLoops = true;
         gemm.unrollK   = 4;
         gemm.macK      = 8;
         basicGEMM<float>(gemm);

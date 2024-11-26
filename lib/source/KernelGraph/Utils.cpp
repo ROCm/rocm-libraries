@@ -28,15 +28,17 @@ namespace rocRoller
                                      VariableType              vtype,
                                      int                       forLoopCoord)
         {
-            auto unitStride = Expression::literal(1u);
-            auto rangeK     = graph.coordinates.addElement(Linear(size, unitStride));
+            auto sizeDataType
+                = vtype == DataType::None ? Expression::resultVariableType(size) : vtype;
+
+            auto unitStride = Expression::literal(1, sizeDataType);
+
+            auto rangeK = graph.coordinates.addElement(Linear(size, unitStride));
 
             int dimK = forLoopCoord;
             if(forLoopCoord <= 0)
                 dimK = graph.coordinates.addElement(ForLoop(size, unitStride));
 
-            auto sizeDataType
-                = vtype == DataType::None ? Expression::resultVariableType(size) : vtype;
             auto exprK = std::make_shared<Expression::Expression>(
                 DataFlowTag{rangeK, Register::Type::Scalar, sizeDataType});
 
@@ -617,11 +619,9 @@ namespace rocRoller
 
             while(true)
             {
-                auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
-                AssertFatal(parent, "Unique body-parent not found.");
-
-                auto setCoord = graph.control.get<SetCoordinate>(*parent);
-                AssertFatal(setCoord, "Expected a SetCoordinate operation.");
+                auto parent = findContainingOperation<SetCoordinate>(tag, graph);
+                AssertFatal(
+                    parent, "Could not find a containing SetCoordinate for ", ShowValue(tag));
 
                 tag = *parent;
 
@@ -631,6 +631,19 @@ namespace rocRoller
                 if(unroll == dim)
                     return tag;
             }
+        }
+
+        unsigned int getUnrollValueForOp(KernelGraph const& graph, int unrollDim, int op)
+        {
+            auto setCoordTag = getSetCoordinateForDim(graph, unrollDim, op);
+            auto setCoord    = graph.control.get<SetCoordinate>(setCoordTag);
+
+            auto valueExpr = setCoord.value().value;
+
+            AssertFatal(evaluationTimes(valueExpr)[Expression::EvaluationTime::Translate],
+                        "Unroll value should be a literal.");
+
+            return getUnsignedInt(evaluate(valueExpr));
         }
 
         VariableType getVariableType(KernelGraph const& graph, int opTag)

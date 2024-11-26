@@ -322,6 +322,8 @@ namespace rocRoller
                                            SolutionParameters const& solutionParams) override
                 {
                     using namespace rocRoller::Expression;
+                    auto params = commandKernel->getCommandParameters();
+
                     // predicate building blocks
                     // A sizes
                     auto aSizes
@@ -333,7 +335,7 @@ namespace rocRoller
                     });
 
                     // parameters
-                    auto unrollKExp = literal(commandKernel->getCommandParameters()->unrollK);
+                    auto unrollKExp = literal(params->unrollK);
                     auto macKExp    = literal(solutionParams.macK);
 
                     // constants
@@ -346,11 +348,21 @@ namespace rocRoller
 
                     // predicates
                     // unrollK size match predicates
-                    auto unrollKPredicate = (aSizeExps[1] % (macKExp * sanUnrollKExp) == zero);
-                    setComment(unrollKPredicate,
-                               "K must be a multiple of macK * unrollK (unrollK may be "
-                               "set by prefetchInFlight)");
-                    commandKernel->addPredicate(unrollKPredicate);
+
+                    if(params->unrollX <= 1 && params->unrollY <= 1 && !params->streamK)
+                    {
+                        auto unrollKPredicate = (aSizeExps[1] % macKExp == zero);
+                        setComment(unrollKPredicate, "K must be a multiple of macK.");
+                        commandKernel->addPredicate(unrollKPredicate);
+                    }
+                    else
+                    {
+                        auto unrollKPredicate = (aSizeExps[1] % (macKExp * sanUnrollKExp) == zero);
+                        setComment(unrollKPredicate,
+                                   "K must be a multiple of macK * unrollK (unrollK may be "
+                                   "set by prefetchInFlight)");
+                        commandKernel->addPredicate(unrollKPredicate);
+                    }
                 }
             };
         }

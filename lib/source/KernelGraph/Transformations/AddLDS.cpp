@@ -263,51 +263,9 @@ namespace rocRoller
             MemoryType   memoryType;
 
             bool jammed;
+
+            auto operator<=>(const LDSSpec&) const = default;
         };
-
-        bool operator<(LDSSpec const& a, LDSSpec const& b)
-        {
-            int aDataType   = static_cast<int>(a.variableType.dataType);
-            int bDataType   = static_cast<int>(b.variableType.dataType);
-            int aMemoryType = static_cast<int>(a.memoryType);
-            int bMemoryType = static_cast<int>(b.memoryType);
-            return std::tie(a.userCoord,
-                            a.forLoopCoord,
-                            a.unrollCoord,
-                            a.unrollCoordValue,
-                            a.operation,
-                            aDataType,
-                            aMemoryType)
-                   < std::tie(b.userCoord,
-                              b.forLoopCoord,
-                              b.unrollCoord,
-                              b.unrollCoordValue,
-                              b.operation,
-                              bDataType,
-                              bMemoryType);
-        }
-
-        bool operator==(LDSSpec const& a, LDSSpec const& b)
-        {
-            int aDataType   = static_cast<int>(a.variableType.dataType);
-            int bDataType   = static_cast<int>(b.variableType.dataType);
-            int aMemoryType = static_cast<int>(a.memoryType);
-            int bMemoryType = static_cast<int>(b.memoryType);
-            return std::tie(a.userCoord,
-                            a.forLoopCoord,
-                            a.unrollCoord,
-                            a.unrollCoordValue,
-                            a.operation,
-                            aDataType,
-                            aMemoryType)
-                   == std::tie(b.userCoord,
-                               b.forLoopCoord,
-                               b.unrollCoord,
-                               b.unrollCoordValue,
-                               b.operation,
-                               bDataType,
-                               bMemoryType);
-        }
 
         /**
          * @brief Return LDS specifier for the load/store operation.
@@ -437,7 +395,7 @@ namespace rocRoller
         };
 
         /**
-         * @brief Find loads that can be prefetched.
+         * @brief Find loops (and loads in them) that can be prefetched.
          *
          * To find prefetch candidates:
          *
@@ -472,6 +430,9 @@ namespace rocRoller
 
                 if(maybeForLoop)
                 {
+                    if(rv.contains(*maybeForLoop))
+                        continue;
+
                     // TODO: Only do the K-Loop for now
                     auto fl = kgraph.control.get<ForLoopOp>(*maybeForLoop);
                     if(fl->loopName != rocRoller::KLOOP)
@@ -481,16 +442,23 @@ namespace rocRoller
                     auto maybeUnrollCoord = findUnrollNeighbour(kgraph, forLoopCoord);
                     if(forLoopCoordinates.contains(forLoopCoord) && maybeUnrollCoord)
                     {
-                        Dimension unroll     = *kgraph.coordinates.get<Unroll>(*maybeUnrollCoord);
-                        auto      unrollSize = getUnsignedInt(evaluate(getSize(unroll)));
+                        auto myUnroll = getUnrollValueForOp(kgraph, *maybeUnrollCoord, candidate);
 
-                        Log::debug(
-                            "KernelGraph::AddLDS(): ForLoop {} is a prefetch candidate: {} {}",
-                            *maybeForLoop,
-                            *maybeUnrollCoord,
-                            unrollSize);
+                        if(myUnroll > 0)
+                        {
+                            Dimension unroll
+                                = kgraph.coordinates.get<Unroll>(*maybeUnrollCoord).value();
+                            auto unrollSize = getUnsignedInt(evaluate(getSize(unroll)));
 
-                        rv[*maybeForLoop] = unrollSize;
+                            Log::debug("KernelGraph::AddLDS(): ForLoop {} is a prefetch candidate: "
+                                       "{} {} ({})",
+                                       *maybeForLoop,
+                                       *maybeUnrollCoord,
+                                       unrollSize,
+                                       candidate);
+
+                            rv[*maybeForLoop] = unrollSize;
+                        }
                     }
                 }
             }
@@ -622,6 +590,8 @@ namespace rocRoller
                     storeChain = setCoordForStore;
                 }
 
+                AssertFatal(!m_info.contains(spec));
+
                 m_info[spec]
                     = {true, userTag, loadTileFromGlobal, storeTileIntoLDS, loadChain, storeChain};
             }
@@ -653,6 +623,8 @@ namespace rocRoller
                     loadChain  = setCoordForLoad;
                     storeChain = setCoordForStore;
                 }
+
+                AssertFatal(!m_info.contains(spec));
 
                 m_info[spec]
                     = {false, userTag, storeTileToGlobal, loadTileFromLDS, storeChain, loadChain};
@@ -821,14 +793,20 @@ namespace rocRoller
             // At this point, each of the unrolled loop bodies are
             // detached and isolated from the rest of the graph.
 
+            std::set<LDSSpec> specsToErase;
+
             std::map<int, std::vector<ldsOperationInfo>> globalLoadsByUnroll;
             for(auto spec : m_loadSpecs)
             {
                 if(spec.operation == forLoop)
                 {
                     globalLoadsByUnroll[spec.unrollCoordValue].push_back(m_info[spec]);
+                    specsToErase.insert(spec);
                 }
             }
+
+            for(auto const& spec : specsToErase)
+                m_loadSpecs.erase(spec);
 
             //
             // Add Scope above the ForLoop
@@ -1159,8 +1137,6 @@ namespace rocRoller
                 {
                     addLoadOperationsPrefetch(graph, forLoop, numUnroll);
                 }
-
-                return;
             }
 
             for(auto spec : m_loadSpecs)

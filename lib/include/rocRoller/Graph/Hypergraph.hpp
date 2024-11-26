@@ -105,6 +105,12 @@ namespace rocRoller
             int addElement(T&& element);
 
             /**
+             * Adds each element to the graph and returns a tuple of int.
+             */
+            template <typename T, typename... Ts>
+            auto addElements(T&& element, Ts&&... rest);
+
+            /**
              * @brief Set (overwrite) existing element.
              *
              * Asserts that the index exists already.

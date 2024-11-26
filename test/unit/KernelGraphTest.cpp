@@ -1256,13 +1256,13 @@ namespace KernelGraphTest
             {block_id, thread_id}, {user0}, {block0, thread0}, nullptr);
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
-                  "Multiply(Add(Multiply(2:I, 32:U32)U32, 33:I)U32, "
-                  "CommandArgument(Tensor_0_stride_0)I64)I64");
+                  "{Split: Multiply({Tile: Add(Multiply(2:I, 32:U32)U32, 33:I)U32}, "
+                  "CommandArgument(Tensor_0_stride_0)I64)I64}");
 
         exprs = kgraph1.coordinates.reverse(
             {block_id, thread_id}, {user0}, {block0, thread0}, fastArith);
         sexpr = Expression::toString(exprs[0]);
-        EXPECT_EQ(sexpr, "Multiply(97:U32, Tensor_0_stride_0_1:I64)I64");
+        EXPECT_EQ(sexpr, "{Split: Multiply(97:U32, Tensor_0_stride_0_1:I64)I64}");
     }
 
 #if 0

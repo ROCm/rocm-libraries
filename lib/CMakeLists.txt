@@ -182,6 +182,8 @@ set(rocroller_src
  source/Schedulers/RoundRobinScheduler.cpp
  source/Schedulers/SequentialScheduler.cpp
 
+ source/Utilities/Version.cpp
+
  ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE}
  ${ROCROLLER_GIT_VERSION_CPP_FILE}
 )

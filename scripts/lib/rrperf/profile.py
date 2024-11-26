@@ -4,6 +4,7 @@ Specify a YAML config file to invoke Tensile to build a kernel to be profiled.
 Alternatively, specify an rrperf suite to profile a RocRoller kernel.
 These kernels are profiled with Omniperf.
 """
+
 import argparse
 import shutil
 import subprocess

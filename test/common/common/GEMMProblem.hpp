@@ -40,6 +40,7 @@ struct GEMMProblem
     bool storeLDSD = true;
 
     bool fuseLoops                 = true;
+    bool tailLoops                 = true;
     bool allowAmbiguousMemoryNodes = false;
     bool betaInFma                 = true;
     bool literalStrides            = true;

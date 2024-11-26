@@ -200,12 +200,13 @@ set(
   catch/FastArithmeticTest.cpp
   catch/KernelArgumentsTest.cpp
   catch/KernelGraphConstraintsTest.cpp
+  catch/RandomNumberExpressionTest.cpp
   catch/ScalarExpressionTest.cpp
+  catch/SettingsTest.cpp
   catch/TernaryExpressionTest.cpp
   catch/TestContextTest.cpp
+  catch/UnrollLoopsTest.cpp
   catch/UtilsTest.cpp
-  catch/RandomNumberExpressionTest.cpp
-  catch/SettingsTest.cpp
   catch/mxDataGeneratorTest.cpp
 )
 

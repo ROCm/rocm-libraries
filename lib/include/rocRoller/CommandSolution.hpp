@@ -88,6 +88,7 @@ namespace rocRoller
         unsigned int unrollY   = 0;
         unsigned int unrollK   = 0;
         bool         fuseLoops = true;
+        bool         tailLoops = true;
 
         bool prefetch          = false;
         int  prefetchInFlight  = 1;

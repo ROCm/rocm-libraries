@@ -69,7 +69,7 @@ namespace rocRoller
                                  const float       min          = -1.f,
                                  const float       max          = 1.f,
                                  const uint32_t    seed         = 1713573849,
-                                 const int         blockScaling = 8,
+                                 const int         blockScaling = 1,
                                  const DataPattern pattern      = DataPattern::Bounded)
     {
         auto dgen = getDataGenerator<rrDT>(dim1, dim2, min, max, seed, blockScaling, pattern);
