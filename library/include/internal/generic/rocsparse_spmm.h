@@ -33,13 +33,13 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Sparse matrix dense matrix multiplication, extension routine.
+*  \brief Sparse matrix dense matrix multiplication.
 *
 *  \details
-*  \p rocsparse_spmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
-*  matrix \f$A\f$, defined in CSR or COO or Blocked ELL storage format, and the dense \f$k \times n\f$
-*  matrix \f$B\f$ and adds the result to the dense \f$m \times n\f$ matrix \f$C\f$ that
-*  is multiplied by the scalar \f$\beta\f$, such that
+*  \p rocsparse_spmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$ matrix \f$op(A)\f$,
+*  defined in CSR, COO, BSR or Blocked ELL storage format, and the dense \f$k \times n\f$ matrix \f$op(B)\f$
+*  and adds the result to the dense \f$m \times n\f$ matrix \f$C\f$ that is multiplied by the scalar
+*  \f$\beta\f$, such that
 *  \f[
 *    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
@@ -63,9 +63,21 @@ extern "C" {
 *    \end{array}
 *    \right.
 *  \f]
+*  Both \f$B\f$ and \f$C\f$ can be in row or column order.
 *
-*  \details
-*  \ref rocsparse_spmm supports multiple different algorithms. These algorithms have different trade offs depending on the sparsity
+*  \p rocsparse_spmm requires three stages to complete. First, the user passes the \ref rocsparse_spmm_stage_buffer_size
+*  stage to determine the size of the required temporary storage buffer. Next, the user allocates this buffer and calls
+*  \p rocsparse_spmm again with the \ref rocsparse_spmm_stage_preprocess stage which will perform analysis on the sparse
+*  matrix \f$op(A)\f$. Finally, the user calls \p rocsparse_spmm with the \ref rocsparse_spmm_stage_compute stage to perform
+*  the actual computation. The buffer size, buffer allocation, and preprecess stages only need to be called once for a given
+*  sparse matrix \f$op(A)\f$ while the computation stage can be repeatedly used with different \f$B\f$ and \f$C\f$ matrices.
+*  Once all calls to \p rocsparse_spmm are complete, the temporary buffer can be deallocated.
+*
+*  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is 
+*  row order and \f$C\f$ is column order and vice versa). For best performance, use row order for both \f$B\f$ and \f$C\f$ as 
+*  this provides the best memory access.
+*
+*  \p rocsparse_spmm supports multiple different algorithms. These algorithms have different trade offs depending on the sparsity
 *  pattern of the matrix, whether or not the results need to be deterministic, and how many times the sparse-matrix product will
 *  be performed.
 *
@@ -98,11 +110,19 @@ extern "C" {
 *  <tr><td>rocsparse_spmm_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td></td>
 *  </table>
 *
-*  \note
-*  None of the algorithms above are deterministic when \f$A\f$ is transposed.
+*  One can also pass \ref rocsparse_spmm_alg_default which will automatically select from the algorithms listed above
+*  base on the sparse matrix format. In the case of CSR matrices this will set the algorithm to be \ref rocsparse_spmm_alg_csr, in
+*  the case of Blocked ELL matrices this will set the algorithm to be \ref rocsparse_spmm_alg_bell, in the case of BSR matrix this
+*  will set the algorithm to be \ref rocsparse_spmm_alg_bsr and for COO matrices it will set the algorithm to be
+*  \ref rocsparse_spmm_alg_coo_atomic.
 *
-*  \note
-*  All algorithms perform best when using row ordering for the dense \f$B\f$ and \f$C\f$ matrices
+*  When A is transposed, \p rocsparse_spmm will revert to using \ref rocsparse_spmm_alg_csr
+*  for CSR format and \ref rocsparse_spmm_alg_coo_atomic for COO format regardless of algorithm selected.
+*
+*  \p rocsparse_spmm supports multiple combinations of data types and compute types. The tables below indicate the currently
+*  supported different data types that can be used for for the sparse matrix \f$op(A)\f$ and the dense matrices \f$op(B)\f$ and
+*  \f$C\f$ and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on
+*  memory bandwidth and storage when a user application allows while performing the actual computation in a higher precision.
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -122,7 +142,10 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_i8_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
 *  </table>
 *
-*  SpMM also supports batched computation for CSR and COO matrices. There are three supported batch modes:
+*  \p rocsparse_spmm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions 
+*  for storing the row pointer and column indices arrays of the sparse matrices.
+*
+*  \p rocsparse_spmm also supports batched computation for CSR and COO matrices. There are three supported batch modes:
 *  \f[
 *      C_i = A \times B_i \\
 *      C_i = A_i \times B \\
@@ -164,7 +187,17 @@ extern "C" {
 *  See examples below.
 *
 *  \note
-*  Mixed precisions only supported for CSR, CSC, and COO matrix formats.
+*  None of the algorithms above are deterministic when \f$A\f$ is transposed or conjugate transposed.
+*
+*  \note
+*  All algorithms perform best when using row ordering for the dense \f$B\f$ and \f$C\f$ matrices
+*
+*  \note
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo, \ref rocsparse_format_csr, 
+*  \ref rocsparse_format_csc, \ref rocsparse_format_bsr, and \ref rocsparse_format_bell.
+*
+*  \note
+*  Mixed precisions only supported for BSR, CSR, CSC, and COO matrix formats.
 *
 *  \note
 *  Only the \ref rocsparse_spmm_stage_buffer_size stage and the \ref rocsparse_spmm_stage_compute stage are non blocking
@@ -180,30 +213,6 @@ extern "C" {
 *
 *  \note
 *  Currently, only CSR, COO, BSR and Blocked ELL sparse formats are supported.
-*
-*  \note
-*  Different algorithms are available which can provide better performance for different matrices.
-*  Currently, the available algorithms are \ref rocsparse_spmm_alg_csr, \ref rocsparse_spmm_alg_csr_row_split,
-*  \ref rocsparse_spmm_alg_csr_nnz_split (also named \ref rocsparse_spmm_alg_csr_merge) or
-*  \ref rocsparse_spmm_alg_csr_merge_path for CSR matrices, \ref rocsparse_spmm_alg_bell for Blocked ELL matrices
-*  and \ref rocsparse_spmm_alg_coo_segmented or \ref rocsparse_spmm_alg_coo_atomic for COO matrices. Additionally,
-*  one can specify the algorithm to be \ref rocsparse_spmm_alg_default. In the case of CSR matrices this will set
-*  the algorithm to be \ref rocsparse_spmm_alg_csr, in the case of Blocked ELL matrices this will set the algorithm
-*  to be \ref rocsparse_spmm_alg_bell and for COO matrices it will set the algorithm to be
-*  \ref rocsparse_spmm_alg_coo_atomic. When A is transposed, \ref rocsparse_spmm will revert to using
-*  \ref rocsparse_spmm_alg_csr for CSR format and \ref rocsparse_spmm_alg_coo_atomic for COO format regardless
-*  of algorithm selected.
-*
-*  \note
-*  This function writes the required allocation size (in bytes) to \p buffer_size and
-*  returns without performing the SpMM operation, when a nullptr is passed for
-*  \p temp_buffer.
-*
-*  \note SpMM requires three stages to complete. The first stage
-*  \ref rocsparse_spmm_stage_buffer_size will return the size of the temporary storage buffer
-*  that is required for subsequent calls to \ref rocsparse_spmm. The second stage
-*  \ref rocsparse_spmm_stage_preprocess will preprocess data that would be saved in the temporary storage buffer.
-*  In the final stage \ref rocsparse_spmm_stage_compute, the actual computation is performed.
 *
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
@@ -228,12 +237,12 @@ extern "C" {
 *  @param[in]
 *  stage        SpMM stage for the SpMM computation.
 *  @param[out]
-*  buffer_size  number of bytes of the temporary storage buffer. buffer_size is set when
-*               \p temp_buffer is nullptr.
+*  buffer_size  number of bytes of the temporary storage buffer.
 *  @param[in]
-*  temp_buffer  temporary storage buffer allocated by the user. When a nullptr is passed,
-*               the required allocation size (in bytes) is written to \p buffer_size and
-*               function returns without performing the SpMM operation.
+*  temp_buffer  temporary storage buffer allocated by the user. When the
+*               \ref rocsparse_spmm_stage_buffer_size stage is passed, the required
+*               allocation size (in bytes) is written to \p buffer_size and function
+*               returns without performing the SpMM operation.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.

@@ -33,10 +33,11 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Calculate the size in bytes of the required buffer for the use of \ref rocsparse_sddmm and \ref rocsparse_sddmm_preprocess
+*  \brief  Sampled Dense-Dense Matrix Multiplication.
 *
 *  \details
 *  \p rocsparse_sddmm_buffer_size returns the size of the required buffer to execute the SDDMM operation from a given configuration.
+*  This routine is used in conjunction with \ref rocsparse_sddmm_preprocess() and \ref rocsparse_sddmm().
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -87,7 +88,7 @@ rocsparse_status rocsparse_sddmm_buffer_size(rocsparse_handle            handle,
                                              size_t*                     buffer_size);
 
 /*! \ingroup generic_module
-*  \brief Preprocess data before the use of \ref rocsparse_sddmm.
+*  \brief  Sampled Dense-Dense Matrix Multiplication.
 *
 *  \details
 *  \p rocsparse_sddmm_preprocess executes a part of the algorithm that can be calculated once in the context of multiple
@@ -147,8 +148,8 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *
 *  \details
 *  \p rocsparse_sddmm multiplies the scalar \f$\alpha\f$ with the dense
-*  \f$m \times k\f$ matrix \f$A\f$, the dense \f$k \times n\f$ matrix \f$B\f$, filtered by the sparsity pattern of the \f$m \times n\f$ sparse matrix \f$C\f$ and
-*  adds the result to \f$C\f$ scaled by
+*  \f$m \times k\f$ matrix \f$op(A)\f$, the dense \f$k \times n\f$ matrix \f$op(B)\f$, filtered by the sparsity pattern
+*  of the \f$m \times n\f$ sparse matrix \f$C\f$ and adds the result to \f$C\f$ scaled by
 *  \f$\beta\f$. The final result is stored in the sparse \f$m \times n\f$ matrix \f$C\f$,
 *  such that
 *  \f[
@@ -181,16 +182,42 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *    \right.
 *  \f]
 *
-*  \note \p opA == \ref rocsparse_operation_conjugate_transpose is not supported.
-*  \note \p opB == \ref rocsparse_operation_conjugate_transpose is not supported.
-*  \note
-*  This routine supports execution in a hipGraph context only when \p alg == \ref rocsparse_sddmm_alg_default.
+*  Computing the above sampled dense-dense multiplication requires three steps to complete. First, the user calls
+*  \ref rocsparse_sddmm_buffer_size to determine the size of the required temporary storage buffer. Next, the user
+*  allocates this buffer and calls \ref rocsparse_sddmm_preprocess which performs any analysis of the input matrices
+*  that may be required. Finally, the user calls \p rocsparse_sddmm to complete the computation. Once all calls to
+*  \p rocsparse_sddmm are complete, the temporary buffer can be deallocated.
+*
+*  \p rocsparse_sddmm supports different algorithms which can provide better performance for different matrices.
+*
+*  <table>
+*  <caption id="sddmm_algorithms">Algorithms</caption>
+*  <tr><th>Algorithm                         <th>Deterministic  <th>Preprocessing  <th>Notes
+*  <tr><td>rocsparse_sddmm_alg_default</td>  <td>Yes</td>       <td>No</td>        <td>Uses the sparsity pattern of matrix C to perform a limited set of dot products </td>
+*  <tr><td>rocsparse_sddmm_alg_dense</td>    <td>Yes</td>       <td>No</td>        <td>Explicitly converts the matrix C into a dense matrix to perform a dense matrix multiply and add </td>
+*  </table>
+*
+*  Currently, \p rocsparse_sddmm only supports the uniform precisions indicated in the table below. For the sparse matrix \f$C\f$, \p rocsparse_sddmm supports the index types
+*  \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64.
+*
+*  \par Uniform Precisions:
+*  <table>
+*  <caption id="sddmm_uniform">Uniform Precisions</caption>
+*  <tr><th>A / B / C / compute_type
+*  <tr><td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f64_c
+*  </table>
 *
 *  \note
-*  Different algorithms are available which can provide better performance for different matrices.
-*  Currently, the available algorithms are \ref rocsparse_sddmm_alg_default or \ref rocsparse_sddmm_alg_dense.
-*  The algorithm \ref rocsparse_sddmm_alg_default uses the sparsity pattern of matrix C to perform a limited set of dot products.
-*  On the other hand, \ref rocsparse_sddmm_alg_dense explicitly converts the matrix C into a dense matrix to perform a dense matrix multiply and add.
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_csr.
+*
+*  \note \p opA == \ref rocsparse_operation_conjugate_transpose is not supported.
+*  \note \p opB == \ref rocsparse_operation_conjugate_transpose is not supported.
+*
+*  \note
+*  This routine supports execution in a hipGraph context only when \p alg == \ref rocsparse_sddmm_alg_default.
 *
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.

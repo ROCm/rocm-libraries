@@ -46,6 +46,9 @@ extern "C" {
 *      }
 *  \endcode
 *
+*  \p rocsparse_scatter supports the following uniform precision data types for the sparse and dense vectors x and 
+*  y.
+*
 *  \par Uniform Precisions:
 *  <table>
 *  <caption id="scatter_uniform">Uniform Precisions</caption>

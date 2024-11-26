@@ -36,6 +36,68 @@ extern "C" {
    *  \brief Sparse matrix extraction.
    *
    *  \details
+   *  \p rocsparse_extract_buffer_size calculates the required buffer size in bytes for a given stage \p stage.
+   *
+   *  \note
+   *  This routine is asynchronous with respect to the host.
+   *  This routine does support execution in a hipGraph context.
+   *
+   *  @param[in]
+   *  handle       handle to the rocsparse library context queue.
+   *  @param[in]
+   *  descr        descriptor of the extract algorithm.
+   *  @param[in]
+   *  source       source sparse matrix descriptor.
+   *  @param[in]
+   *  target       target sparse matrix descriptor.
+   *  @param[in]
+   *  stage        stage of the extract computation.
+   *  @param[out]
+   *  buffer_size_in_bytes  size in bytes of the buffer.
+   *
+   *  \retval      rocsparse_status_success the operation completed successfully.
+   *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
+   *  \retval      rocsparse_status_invalid_value if \p stage is invalid.
+   *  \retval      rocsparse_status_invalid_pointer \p descr, \p source, \p target, or \p buffer_size_in_bytes
+   *               pointer is invalid.
+   */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_extract_buffer_size(rocsparse_handle            handle,
+                                               rocsparse_extract_descr     descr,
+                                               rocsparse_const_spmat_descr source,
+                                               rocsparse_spmat_descr       target,
+                                               rocsparse_extract_stage     stage,
+                                               size_t*                     buffer_size_in_bytes);
+
+/*! \ingroup generic_module
+   *  \brief Sparse matrix extraction.
+   *
+   *  \details
+   *  \p rocsparse_extract_nnz returns the number of non-zeros of the extracted matrix. The value is available after the analysis phase \ref rocsparse_extract_stage_analysis being executed.
+   *
+   *  \note
+   *  This routine is asynchronous with respect to the host.
+   *  This routine does support execution in a hipGraph context.
+   *
+   *  @param[in]
+   *  handle       handle to the rocsparse library context queue.
+   *  @param[in]
+   *  descr        descriptor of the extract algorithm.
+   *  @param[out]
+   *  nnz          the number of non-zeros.
+   *
+   *  \retval      rocsparse_status_success the operation completed successfully.
+   *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
+   *  \retval      rocsparse_status_invalid_pointer \p descr or \p nnz pointer is invalid.
+   */
+ROCSPARSE_EXPORT
+rocsparse_status
+    rocsparse_extract_nnz(rocsparse_handle handle, rocsparse_extract_descr descr, int64_t* nnz);
+
+/*! \ingroup generic_module
+   *  \brief Sparse matrix extraction.
+   *
+   *  \details
    *  \p rocsparse_extract performs the extraction of the lower or upper part of a sparse matrix.
    *
    *  \note
@@ -191,68 +253,6 @@ rocsparse_status rocsparse_extract(rocsparse_handle            handle,
                                    rocsparse_extract_stage     stage,
                                    size_t                      buffer_size_in_bytes,
                                    void*                       buffer);
-
-/*! \ingroup generic_module
-   *  \brief Sparse matrix extraction.
-   *
-   *  \details
-   *  \p rocsparse_extract_buffer_size calculates the required buffer size in bytes for a given stage \p stage.
-   *
-   *  \note
-   *  This routine is asynchronous with respect to the host.
-   *  This routine does support execution in a hipGraph context.
-   *
-   *  @param[in]
-   *  handle       handle to the rocsparse library context queue.
-   *  @param[in]
-   *  descr        descriptor of the extract algorithm.
-   *  @param[in]
-   *  source       source sparse matrix descriptor.
-   *  @param[in]
-   *  target       target sparse matrix descriptor.
-   *  @param[in]
-   *  stage        stage of the extract computation.
-   *  @param[out]
-   *  buffer_size_in_bytes  size in bytes of the buffer.
-   *
-   *  \retval      rocsparse_status_success the operation completed successfully.
-   *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
-   *  \retval      rocsparse_status_invalid_value if \p stage is invalid.
-   *  \retval      rocsparse_status_invalid_pointer \p descr, \p source, \p target, or \p buffer_size_in_bytes
-   *               pointer is invalid.
-   */
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_extract_buffer_size(rocsparse_handle            handle,
-                                               rocsparse_extract_descr     descr,
-                                               rocsparse_const_spmat_descr source,
-                                               rocsparse_spmat_descr       target,
-                                               rocsparse_extract_stage     stage,
-                                               size_t*                     buffer_size_in_bytes);
-
-/*! \ingroup generic_module
-   *  \brief Sparse matrix extraction.
-   *
-   *  \details
-   *  \p rocsparse_extract_nnz returns the number of non-zeros of the extracted matrix. The value is available after the analysis phase \ref rocsparse_extract_stage_analysis being executed.
-   *
-   *  \note
-   *  This routine is asynchronous with respect to the host.
-   *  This routine does support execution in a hipGraph context.
-   *
-   *  @param[in]
-   *  handle       handle to the rocsparse library context queue.
-   *  @param[in]
-   *  descr        descriptor of the extract algorithm.
-   *  @param[out]
-   *  nnz          the number of non-zeros.
-   *
-   *  \retval      rocsparse_status_success the operation completed successfully.
-   *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
-   *  \retval      rocsparse_status_invalid_pointer \p descr or \p nnz pointer is invalid.
-   */
-ROCSPARSE_EXPORT
-rocsparse_status
-    rocsparse_extract_nnz(rocsparse_handle handle, rocsparse_extract_descr descr, int64_t* nnz);
 
 #ifdef __cplusplus
 }

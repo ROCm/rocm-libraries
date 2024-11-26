@@ -55,6 +55,9 @@ extern "C" {
 *      }
 *  \endcode
 *
+*  \p rocsparse_axpby supports the following uniform precision data types for the sparse and dense vectors x and 
+*  y and compute types for the scalars \f$\alpha\f$ and \f$\beta\f$.
+*
 *  \par Uniform Precisions:
 *  <table>
 *  <caption id="axpby_uniform">Uniform Precisions</caption>

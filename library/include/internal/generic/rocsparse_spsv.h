@@ -33,12 +33,11 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Sparse triangular solve
+*  \brief Sparse triangular system solve
 *
 *  \details
-*  \p rocsparse_spsv solves a sparse triangular linear system of a sparse
-*  \f$m \times m\f$ matrix, defined in CSR or COO storage format, a dense solution vector
-*  \f$y\f$ and the right-hand side \f$x\f$ that is multiplied by \f$\alpha\f$, such that
+*  \p rocsparse_spsv solves a triangular linear system of equations defined by a sparse \f$m \times m\f$ square matrix \f$op(A)\f$, 
+*  given in CSR or COO storage format, such that
 *  \f[
 *    op(A) \cdot y = \alpha \cdot x,
 *  \f]
@@ -47,11 +46,22 @@ extern "C" {
 *    op(A) = \left\{
 *    \begin{array}{ll}
 *        A,   & \text{if trans == rocsparse_operation_none} \\
-*        A^T, & \text{if trans == rocsparse_operation_transpose} \\
-*        A^H, & \text{if trans == rocsparse_operation_conjugate_transpose}
+*        A^T, & \text{if trans == rocsparse_operation_transpose}
 *    \end{array}
 *    \right.
 *  \f]
+*  and where \f$y\f$ is the dense solution vector and \f$x\f$ is the dense right-hand side vector.
+*
+*  Performing the above operation requires three stages. First, \p rocsparse_spsv must be called with the stage 
+*  \ref rocsparse_spsv_stage_buffer_size which will determine the size of the required temporary storage buffer. 
+*  The user then allocates this buffer and calls \p rocsparse_spsv with the stage \ref rocsparse_spsv_stage_preprocess 
+*  which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes the computation by calling 
+*  \p rocsparse_spsv with the stage \ref rocsparse_spsv_stage_compute. The buffer size, buffer allocation, and preprecess 
+*  stages only need to be called once for a given sparse matrix \f$op(A)\f$ while the computation stage can be repeatedly 
+*  used with different \f$x\f$ and \f$y\f$ vectors. Once all calls to \p rocsparse_spsv are complete, the temporary buffer 
+*  can be deallocated. 
+*
+*  \p rocsparse_spsv supports the following data types for \f$op(A)\f$, \f$x\f$, \f$y\f$ and compute types for \f$\alpha\f$:  
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -63,11 +73,11 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_f64_c
 *  </table>
 *
-*  \note SpSV requires three stages to complete. The first stage
-*  \ref rocsparse_spsv_stage_buffer_size will return the size of the temporary storage buffer
-*  that is required for subsequent calls. The second stage
-*  \ref rocsparse_spsv_stage_preprocess will preprocess data that would be saved in the temporary storage buffer.
-*  In the final stage \ref rocsparse_spsv_stage_compute, the actual computation is performed.
+*  \p rocsparse_spsv supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions 
+*  for storing the row pointer and column indices arrays of the sparse matrices.
+*
+*  \note
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo and \ref rocsparse_format_csr.
 *
 *  \note
 *  Only the \ref rocsparse_spsv_stage_buffer_size stage and the \ref rocsparse_spsv_stage_compute stage are non blocking
@@ -102,7 +112,8 @@ extern "C" {
 *  @param[out]
 *  buffer_size  number of bytes of the temporary storage buffer.
 *  @param[in]
-*  temp_buffer  temporary storage buffer allocated by the user. When a nullptr is passed,
+*  temp_buffer  temporary storage buffer allocated by the user. When the 
+*               \ref rocsparse_spsv_stage_buffer_size stage is passed,
 *               the required allocation size (in bytes) is written to \p buffer_size and
 *               function returns without performing the SpSV operation.
 *
@@ -233,13 +244,6 @@ extern "C" {
 *
 *   // Copy result back to host
 *   hipMemcpy(hy.data(), dy, sizeof(float) * m, hipMemcpyDeviceToHost);
-*
-*   std::cout << "hy" << std::endl;
-*   for(size_t i = 0; i < hy.size(); ++i)
-*   {
-*       std::cout << hy[i] << " ";
-*   }
-*   std::cout << std::endl;
 *
 *   // Clear rocSPARSE
 *   rocsparse_destroy_spmat_descr(matA);

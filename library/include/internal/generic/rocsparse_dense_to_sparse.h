@@ -38,6 +38,52 @@ extern "C" {
 *  \details
 *  \p rocsparse_dense_to_sparse performs the conversion of a dense matrix to a sparse matrix in CSR, CSC, or COO format.
 *
+*  \p rocsparse_dense_to_sparse requires multiple steps to complete. First, the user calls \p rocsparse_dense_to_sparse 
+*  with \p nullptr passed into \p temp_buffer:
+*  \code{.c}
+*   // Call dense_to_sparse to get required buffer size
+*   size_t buffer_size = 0;
+*   rocsparse_dense_to_sparse(handle,
+*                             matA,
+*                             matB,
+*                             rocsparse_dense_to_sparse_alg_default,
+*                             &buffer_size,
+*                             nullptr);
+*  \endcode
+*  After this is called, the \p buffer_size will be filled with the size of the required buffer that must be then allocated by the 
+*  user. Next the user calls \p rocsparse_dense_to_sparse with the newly allocated \p temp_buffer and \p nullptr passed into 
+*  \p buffer_size:
+*  \code{.c}
+*   // Call dense_to_sparse to perform analysis
+*   rocsparse_dense_to_sparse(handle,
+*                             matA,
+*                             matB,
+*                             rocsparse_dense_to_sparse_alg_default,
+*                             nullptr,
+*                             temp_buffer);
+*  \endcode
+*  This will determine the number of non-zeros that will exist in the sparse matrix which can be queried using 
+*  \ref rocsparse_spmat_get_size routine. With this, the user can allocate the sparse matrix device arrays and 
+*  set them on the sparse matrix descriptor using \ref rocsparse_csr_set_pointers (CSR format), 
+*  \ref rocsparse_csc_set_pointers (for CSC format), or rocsparse_coo_set_pointers (for COO format). Finally, the 
+*  conversion is completed by calling \p rocsparse_dense_to_sparse with both the \p buffer_size and \p temp_buffer:
+*  \code{.c}
+*   // Call dense_to_sparse to complete conversion
+*   rocsparse_dense_to_sparse(handle,
+*                             matA,
+*                             matB,
+*                             rocsparse_dense_to_sparse_alg_default,
+*                             &buffer_size,
+*                             temp_buffer);
+*  \endcode
+*  Currently, \p rocsparse_dense_to_sparse only supports the algorithm \ref rocsparse_dense_to_sparse_alg_default. 
+*  See full example below.
+*
+*  \p rocsparse_dense_to_sparse supports \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, 
+*  \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c for values arrays in the sparse matrix (stored in 
+*  CSR, CSC, or COO format) and the dense matrix. For the row/column offset and row/column index arrays of the sparse matrix, 
+*  \p rocsparse_dense_to_sparse supports the precisions \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64.
+*
 *  \note
 *  This function writes the required allocation size (in bytes) to \p buffer_size and
 *  returns without performing the dense to sparse operation, when a nullptr is passed for
@@ -76,8 +122,8 @@ extern "C" {
 *   // A = 0 2 3 0 0 0
 *   //     5 0 0 7 8 0
 *   //     0 0 9 0 6 0
-*   rocsparse_int m   = 4;
-*   rocsparse_int n   = 6;
+*   int m   = 4;
+*   int n   = 6;
 *
 *   std::vector<float> hdense = {1, 0, 5, 0, 4, 2, 0, 0, 0, 3, 0, 9, 0, 0, 7, 0, 0, 0, 8, 6, 0, 0, 0, 0};
 *
@@ -161,28 +207,7 @@ extern "C" {
 *   // Copy result back to host
 *   hipMemcpy(hcsr_row_ptr.data(), dcsr_row_ptr, sizeof(int) * (m + 1), hipMemcpyDeviceToHost);
 *   hipMemcpy(hcsr_col_ind.data(), dcsr_col_ind, sizeof(int) * nnz, hipMemcpyDeviceToHost);
-*   hipMemcpy(hcsr_val.data(), dcsr_val, sizeof(int) * nnz, hipMemcpyDeviceToHost);
-*
-*   std::cout << "hcsr_row_ptr" << std::endl;
-*   for(size_t i = 0; i < hcsr_row_ptr.size(); ++i)
-*   {
-*       std::cout << hcsr_row_ptr[i] << " ";
-*   }
-*   std::cout << std::endl;
-*
-*   std::cout << "hcsr_col_ind" << std::endl;
-*   for(size_t i = 0; i < hcsr_col_ind.size(); ++i)
-*   {
-*       std::cout << hcsr_col_ind[i] << " ";
-*   }
-*   std::cout << std::endl;
-*
-*   std::cout << "hcsr_val" << std::endl;
-*   for(size_t i = 0; i < hcsr_val.size(); ++i)
-*   {
-*       std::cout << hcsr_val[i] << " ";
-*   }
-*   std::cout << std::endl;
+*   hipMemcpy(hcsr_val.data(), dcsr_val, sizeof(float) * nnz, hipMemcpyDeviceToHost);
 *
 *   // Clear rocSPARSE
 *   rocsparse_destroy_dnmat_descr(matA);

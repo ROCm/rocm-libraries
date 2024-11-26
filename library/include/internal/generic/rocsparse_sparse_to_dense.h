@@ -36,8 +36,39 @@ extern "C" {
 *  \brief Sparse matrix to dense matrix conversion
 *
 *  \details
-*  \p rocsparse_sparse_to_dense performs the conversion of a sparse matrix in CSR, CSC, or COO format to
-*     a dense matrix
+*  \p rocsparse_sparse_to_dense performs the conversion of a sparse matrix in CSR, CSC, or COO format to a dense matrix
+*
+*  \p rocsparse_sparse_to_dense requires multiple steps to complete. First, the user calls \p rocsparse_sparse_to_dense 
+*  with \p nullptr passed into \p temp_buffer:
+*  \code{.c}
+*   // Call sparse_to_dense to get required buffer size
+*   size_t buffer_size = 0;
+*   rocsparse_sparse_to_dense(handle,
+*                             matA,
+*                             matB,
+*                             rocsparse_sparse_to_dense_alg_default,
+*                             &buffer_size,
+*                             nullptr);
+*  \endcode
+*  Finally, the conversion is completed by calling \p rocsparse_sparse_to_dense with both the \p buffer_size and \p temp_buffer:
+*  \code{.c}
+*   // Call dense_to_sparse to complete conversion
+*   rocsparse_sparse_to_dense(handle,
+*                             matA,
+*                             matB,
+*                             rocsparse_sparse_to_dense_alg_default,
+*                             &buffer_size,
+*                             temp_buffer);
+*  \endcode
+*  Currently, \p rocsparse_sparse_to_dense only supports the algorithm \ref rocsparse_sparse_to_dense_alg_default. 
+*  See full example below.
+*
+*  \p rocsparse_sparse_to_dense supports \ref rocsparse_datatype_f32_r, \ref rocsparse_datatype_f64_r, 
+*  \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c for values arrays in the sparse matrix 
+*  (stored in CSR, CSC, or COO format) and the dense matrix. For the row/column offset and row/column index arrays of the 
+*  sparse matrix, \p rocsparse_sparse_to_dense supports the precisions \ref rocsparse_indextype_i32 and 
+*  \ref rocsparse_indextype_i64.
+*
 *  \note
 *  This function writes the required allocation size (in bytes) to \p buffer_size and
 *  returns without performing the sparse to dense operation, when a nullptr is passed for
@@ -76,15 +107,15 @@ extern "C" {
 *   // A = 0 2 3 0 0 0
 *   //     5 0 0 7 8 0
 *   //     0 0 9 0 6 0
-*   rocsparse_int m   = 4;
-*   rocsparse_int n   = 6;
+*   int m   = 4;
+*   int n   = 6;
 *
 *   std::vector<int> hcsr_row_ptr = {0, 2, 4, 7, 9};
 *   std::vector<int> hcsr_col_ind = {0, 1, 1, 2, 0, 3, 4, 2, 4};
 *   std::vector<float> hcsr_val   = {1, 4, 2, 3, 5, 7, 8, 9, 6};
 *   std::vector<float> hdense(m * n, 0.0f);
 *
-*   rocsparse_int nnz = hcsr_row_ptr[m] - hcsr_row_ptr[0];
+*   int nnz = hcsr_row_ptr[m] - hcsr_row_ptr[0];
 *
 *   // Offload data to device
 *   int* dcsr_row_ptr;
@@ -149,13 +180,6 @@ extern "C" {
 *
 *   // Copy result back to host
 *   hipMemcpy(hdense.data(), ddense, sizeof(float) * m * n, hipMemcpyDeviceToHost);
-*
-*   std::cout << "hdense" << std::endl;
-*   for(size_t i = 0; i < hdense.size(); ++i)
-*   {
-*       std::cout << hdense[i] << " ";
-*   }
-*   std::cout << std::endl;
 *
 *   // Clear rocSPARSE
 *   rocsparse_destroy_spmat_descr(matA);

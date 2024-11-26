@@ -33,12 +33,11 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Sparse triangular system solve
+*  \brief Sparse triangular system solve with multiple right-hand sides
 *
 *  \details
-*  \p rocsparse_spsm solves a sparse triangular linear system of a sparse
-*  \f$m \times m\f$ matrix, defined in CSR or COO storage format, a dense solution matrix
-*  \f$C\f$ and the right-hand side \f$B\f$ that is multiplied by \f$\alpha\f$, such that
+*  \p rocsparse_spsm solves a triangular linear system of equations defined by a sparse \f$m \times m\f$ square matrix \f$op(A)\f$,
+*  given in CSR or COO storage format, such that
 *  \f[
 *    op(A) \cdot C = \alpha \cdot op(B),
 *  \f]
@@ -47,8 +46,7 @@ extern "C" {
 *    op(A) = \left\{
 *    \begin{array}{ll}
 *        A,   & \text{if trans == rocsparse_operation_none} \\
-*        A^T, & \text{if trans == rocsparse_operation_transpose} \\
-*        A^H, & \text{if trans == rocsparse_operation_conjugate_transpose}
+*        A^T, & \text{if trans == rocsparse_operation_transpose}
 *    \end{array}
 *    \right.
 *  \f]
@@ -57,11 +55,35 @@ extern "C" {
 *    op(B) = \left\{
 *    \begin{array}{ll}
 *        B,   & \text{if trans_B == rocsparse_operation_none} \\
-*        B^T, & \text{if trans_B == rocsparse_operation_transpose} \\
-*        B^H, & \text{if trans_B == rocsparse_operation_conjugate_transpose}
+*        B^T, & \text{if trans_B == rocsparse_operation_transpose}
 *    \end{array}
 *    \right.
 *  \f]
+*  and where \f$C\f$ is the dense solution matrix and \f$B\f$ is the dense right-hand side matrix. Both \f$B\f$
+*  and \f$C\f$ can be in row or column order.
+*
+*  Performing the above operation requires three stages. First, \p rocsparse_spsm must be called with the stage
+*  \ref rocsparse_spsm_stage_buffer_size which will determine the size of the required temporary storage buffer.
+*  The user then allocates this buffer and calls \p rocsparse_spsm with the stage \ref rocsparse_spsm_stage_preprocess
+*  which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes the computation by calling
+*  \p rocsparse_spsm with the stage \ref rocsparse_spsm_stage_compute. The buffer size, buffer allocation, and preprecess
+*  stages only need to be called once for a given sparse matrix \f$op(A)\f$ while the computation stage can be repeatedly
+*  used with different \f$B\f$ and \f$C\f$ matrices. Once all calls to \p rocsparse_spsm are complete, the temporary buffer
+*  can be deallocated.
+*
+*  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is 
+*  row order and \f$C\f$ is column order and vice versa). Internally however, rocSPARSE kernels solve the system assuming the 
+*  matrices \f$B\f$ and \f$C\f$ are in row order as this provides the best memory access. This means that if the matrix 
+*  \f$C\f$ is not in row order and/or the matrix \f$B\f$ is not row order (or \f$B^{T}\f$ is not column order as this is 
+*  equivalent to being in row order), then internally memory copies and/or transposing of data may be performed to get them 
+*  into the correct order (possbily using extra buffer size). Once computation is completed, additional memory copies and/or 
+*  transposing of data may be performed to get them back into the user arrays. For best performance and smallest required 
+*  temporary storage buffers, use row order for the matrix \f$C\f$ and row order for the matrix \f$B\f$ (or column order if 
+*  \f$B\f$ is being transposed). 
+*
+*  \p rocsparse_spsm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions for storing the 
+*  row pointer and column indices arrays of the sparse matrices. \p rocsparse_spsm supports the following data types for 
+*  \f$op(A)\f$, \f$op(B)\f$, \f$C\f$ and compute types for \f$\alpha\f$:
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -73,11 +95,8 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_f64_c
 *  </table>
 *
-*  \note SpSM requires three stages to complete. The first stage
-*  \ref rocsparse_spsm_stage_buffer_size will return the size of the temporary storage buffer
-*  that is required for subsequent calls. The second stage
-*  \ref rocsparse_spsm_stage_preprocess will preprocess data that would be saved in the temporary storage buffer.
-*  In the final stage \ref rocsparse_spsm_stage_compute, the actual computation is performed.
+*  \note
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo and \ref rocsparse_format_csr.
 *
 *  \note
 *  Only the \ref rocsparse_spsm_stage_buffer_size stage and the \ref rocsparse_spsm_stage_compute stage are non blocking
@@ -95,17 +114,17 @@ extern "C" {
 *  @param[in]
 *  handle       handle to the rocsparse library context queue.
 *  @param[in]
-*  trans_A      matrix operation type for the sparse matrix A.
+*  trans_A      matrix operation type for the sparse matrix \f$op(A)\f$.
 *  @param[in]
-*  trans_B      matrix operation type for the dense matrix B.
+*  trans_B      matrix operation type for the dense matrix \f$op(B)\f$.
 *  @param[in]
 *  alpha        scalar \f$\alpha\f$.
 *  @param[in]
-*  matA          sparse matrix descriptor.
+*  matA         sparse matrix descriptor.
 *  @param[in]
-*  matB          dense matrix descriptor.
+*  matB         dense matrix descriptor.
 *  @param[inout]
-*  matC          dense matrix descriptor.
+*  matC         dense matrix descriptor.
 *  @param[in]
 *  compute_type floating point precision for the SpSM computation.
 *  @param[in]
@@ -115,7 +134,8 @@ extern "C" {
 *  @param[out]
 *  buffer_size  number of bytes of the temporary storage buffer.
 *  @param[in]
-*  temp_buffer  temporary storage buffer allocated by the user. When a nullptr is passed,
+*  temp_buffer  temporary storage buffer allocated by the user. When the
+*               \ref rocsparse_spsm_stage_buffer_size stage is passed,
 *               the required allocation size (in bytes) is written to \p buffer_size and
 *               function returns without performing the SpSM operation.
 *

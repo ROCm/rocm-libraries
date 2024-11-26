@@ -224,3 +224,13 @@ rocsparse_gtsv_interleaved_alg
 ------------------------------
 
 .. doxygenenum:: rocsparse_gtsv_interleaved_alg
+
+rocsparse_spitsv_alg
+--------------------
+
+.. doxygenenum:: rocsparse_spitsv_alg
+
+rocsparse_spitsv_stage
+----------------------
+
+.. doxygenenum:: rocsparse_spitsv_stage

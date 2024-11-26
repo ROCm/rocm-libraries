@@ -37,7 +37,7 @@ extern "C" {
 *
 *  \details
 *  \p rocsparse_spgemm multiplies the scalar \f$\alpha\f$ with the sparse
-*  \f$m \times k\f$ matrix \f$A\f$ and the sparse \f$k \times n\f$ matrix \f$B\f$ and
+*  \f$m \times k\f$ matrix \f$op(A)\f$ and the sparse \f$k \times n\f$ matrix \f$op(B)\f$ and
 *  adds the result to the sparse \f$m \times n\f$ matrix \f$D\f$ that is multiplied by
 *  \f$\beta\f$. The final result is stored in the sparse \f$m \times n\f$ matrix \f$C\f$,
 *  such that
@@ -48,9 +48,7 @@ extern "C" {
 *  \f[
 *    op(A) = \left\{
 *    \begin{array}{ll}
-*        A,   & \text{if trans_A == rocsparse_operation_none} \\
-*        A^T, & \text{if trans_A == rocsparse_operation_transpose} \\
-*        A^H, & \text{if trans_A == rocsparse_operation_conjugate_transpose}
+*        A,   & \text{if trans_A == rocsparse_operation_none}
 *    \end{array}
 *    \right.
 *  \f]
@@ -58,12 +56,35 @@ extern "C" {
 *  \f[
 *    op(B) = \left\{
 *    \begin{array}{ll}
-*        B,   & \text{if trans_B == rocsparse_operation_none} \\
-*        B^T, & \text{if trans_B == rocsparse_operation_transpose} \\
-*        B^H, & \text{if trans_B == rocsparse_operation_conjugate_transpose}
+*        B,   & \text{if trans_B == rocsparse_operation_none}
 *    \end{array}
 *    \right.
 *  \f]
+*
+*  \p rocsparse_spgemm requires three stages to complete. First, the user passes the \ref rocsparse_spgemm_stage_buffer_size
+*  stage to determine the size of the required temporary storage buffer. Next, the user allocates this buffer and calls
+*  \p rocsparse_spgemm again with the \ref rocsparse_spgemm_stage_nnz stage which will determine the number of non-zeros
+*  in \f$C\f$. This stage will also fill in the row pointer array of \f$C\f$. Now that the number of non-zeros in \f$C\f$
+*  is known, the user allocates space for the column indices and values arrays of \f$C\f$. Finally, the user calls
+*  \p rocsparse_spgemm with the \ref rocsparse_spgemm_stage_compute stage to perform the actual computation which fills in
+*  the column indices and values arrays of \f$C\f$. Once all calls to \p rocsparse_spgemm are complete, the temporary buffer
+*  can be deallocated.
+*
+*  Alternatively, the user may also want to perform sparse matrix products multiple times with matrices having the same sparsity
+*  pattern, but whose values differ. In this scenario, the process begins like before. First, the user calls \p rocsparse_spgemm
+*  with stage \ref rocsparse_spgemm_stage_buffer_size to determine the required buffer size. The user again allocates this buffer
+*  and calls \p rocsparse_spgemm with the stage \ref rocsparse_spgemm_stage_nnz to determine the number of non-zeros in \f$C\f$.
+*  The user allocates the \f$C\f$ column indices and values arrays. Now, however, the user calls \p rocsparse_spgemm with the
+*  \ref rocsparse_spgemm_stage_symbolic stage which will fill in the column indices array of \f$C\f$ but not the values array.
+*  The user is then free to repeatedly change the values of \f$A\f$, \f$B\f$, and \f$D\f$ and call \p rocsparse_spgemm with
+*  the \ref rocsparse_spgemm_stage_numeric stage which fill th values array of \f$C\f$. The use of the extra
+*  \ref rocsparse_spgemm_stage_symbolic and \ref rocsparse_spgemm_stage_numeric stages allows the user to compute sparsity pattern
+*  of \f$C\f$ once, but compute the values multiple times.
+*
+*  \p rocsparse_spgemm supports multiple combinations of data types and compute types. The tables below indicate the currently
+*  supported different data types that can be used for for the sparse matrices \f$op(A)\f$, \f$op(B)\f$, \f$C\f$, and \f$D\f$
+*  and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on
+*  memory bandwidth and storage when a user application allows while performing the actual computation in a higher precision.
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -74,6 +95,15 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f64_c
 *  </table>
+*
+*  \p rocsparse_spgemm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions for storing the row
+*  pointer and column indices arrays of the sparse matrices.
+*
+*  In general, when multiplying two sparse matrices together, it is entirely possible that the resulting matrix will require a
+*  a larger index representation to store correctly. For example, when multiplying \f$A \times B\f$ using
+*  \ref rocsparse_indextype_i32 index types for the row pointer and column indices arrays, it may be the case that the row pointer
+*  of the resulting \f$C\f$ matrix would require index precision \ref rocsparse_indextype_i64. This is currently not supported. 
+*  In this scenario, the user would need to store the \f$A\f$ and \f$B\f$ matrices using the higher index precision.
 *
 *  \note
 *  This function does not produce deterministic results.
