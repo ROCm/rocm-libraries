@@ -297,6 +297,22 @@ namespace rocRoller
                                            bool                              high = false);
 
         /**
+         * @brief Generate the instructions required to perform a direct global to lds buffer load.
+         *
+         *
+         * @param addr  The register containing the LDS address to write data.
+         * @param data The register containing the data to store.
+         * @param buffDesc Buffer descriptor to use.
+         * @param buffOpts Buffer options
+         * @param numBytes The number of bytes to load.
+         */
+        Generator<Instruction> bufferLoad2LDS(Register::ValuePtr                addr,
+                                              Register::ValuePtr                data,
+                                              std::shared_ptr<BufferDescriptor> buffDesc,
+                                              BufferInstructionOptions          buffOpts,
+                                              int                               numBytes);
+
+        /**
          * @brief Generate the instructions required to add a memory barrier.
          *
          * @return Generator<Instruction>

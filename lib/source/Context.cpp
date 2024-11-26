@@ -130,6 +130,12 @@ namespace rocRoller
 
     Context::~Context() = default;
 
+    Register::ValuePtr Context::getM0()
+    {
+        return std::make_shared<Register::Value>(
+            shared_from_this(), Register::Type::M0, DataType::UInt32, 1);
+    }
+
     Register::ValuePtr Context::getVCC()
     {
         if(kernel()->wavefront_size() == 32)
