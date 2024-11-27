@@ -15,25 +15,16 @@ Prerequisites
 Building and testing hipFORT from source
 ==========================================
 
-1. Ensure `gfortran`, `git`, `cmake`, and HIP are installed.
+1. Ensure you have ``gfortran``, ``git``, ``cmake``, and HIP installed.
 2. Build, install, and test hipFORT from source with the following commands:
 
-.. code-block:: 
+   .. code-block:: 
 
-        git clone https://github.com/ROCmSoftwarePlatform/hipfort
-        mkdir build ; cd build
-        cmake -DHIPFORT_INSTALL_DIR=/tmp/hipfort ..
-        make install
-        export PATH=/tmp/hipfort/bin:$PATH
-        cd ../test/f2003/vecadd
-        hipfc -v hip_implementation.cpp main.f03
-        ./a.out
-
-
-
-.. note::
-    
-The preceding steps demonstrate the `hipfc` utility. `hipfc` calls `hipcc` for non-Fortran files and then compiles the Fortran files and links to the object file created by `hipcc`.
+      git clone https://github.com/ROCm/hipfort.git
+      cd hipfort
+      cmake -S. -Bbuild -DHIPFORT_INSTALL_DIR=/tmp/hipfort -DBUILD_TESTING=ON
+      make -C build
+      make -C build check
 
 Fortran interfaces
 ===================
@@ -133,6 +124,13 @@ hipfc wrapper compiler and Makefile.hipfort
 ================================================
 
 Aside from Fortran interfaces to the HIP and ROCm libraries, hipFORT ships the `hipfc` wrapper compiler and a `Makefile. fort` that can be included in a project's build system. hipfc is in the `bin/` subdirectory, and Makefile.hipfort is in share/hipfort of the repository. While both can be configured using a number of environment variables, ` hipfc` also understands a greater number of command line options that you can print to the screen using `hipfc -h.`
+
+.. note::
+
+   The hipfc wrapper compiler is deprecated and will be removed in a future release. Users are
+   encouraged to call the Fortran or HIP compilers directly instead of relying on the hipfc wrapper.
+   The hipfort component provides exported CMake targets that can be used to link to the appropriate
+   ROCm libraries.
 
 Among the environment variables, the most important are:
 
