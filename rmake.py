@@ -151,9 +151,9 @@ class AutoBuilder:
             rocm_cmake_path.replace('\\', '/')
 
             cmake_options.append(f'-G Ninja')
-            cmake_options.append( f"-DWIN32=ON -DCPACK_PACKAGING_INSTALL_PREFIX=") #" -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"
-            cmake_options.append( f'-DCMAKE_INSTALL_PREFIX="C:/hipSDK"' )
-            cmake_options.append( f'-DCMAKE_CXX_FLAGS="-D_ENABLE_EXTENDED_ALIGNED_STORAGE"')
+            cmake_options.append(f"-DWIN32=ON -DCPACK_PACKAGING_INSTALL_PREFIX=") #" -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"
+            cmake_options.append(f'-DCMAKE_INSTALL_PREFIX="C:/hipSDK"')
+            cmake_options.append(f'-DCMAKE_CXX_FLAGS="-D_ENABLE_EXTENDED_ALIGNED_STORAGE"')
             cmake_options.append(f'-DROCM_PATH={rocm_path}') 
             cmake_options.append(f'-DCMAKE_PREFIX_PATH:PATH={rocm_path};{rocm_cmake_path}')
 
@@ -208,7 +208,6 @@ class AutoBuilder:
 
         curr_dir = os.path.abspath(os.curdir)
         os.chdir(self.build_path)
-
 
         subprocess.run(cmake_command, shell=True)
         

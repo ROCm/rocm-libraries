@@ -84,7 +84,6 @@ class TestRunner():
             
             # find the test dir with default install dir
             if self.args.install_dir == 'build':
-                
                 # if its debug mode
                 if self.args.debug: 
                     self.test_dir = os.path.join(self.lib_dir, f'build/debug/test')
