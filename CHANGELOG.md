@@ -8,7 +8,7 @@ Documentation for rocSPARSE is available at
 ### Added
 
 * Added `rocsparse_[s|d|c|z]csritilu0_compute_ex` routines for iterative ILU
-* Added `rocsparse_[s|d|c|z]csritsvx_solve` routines for iterative triangular solve
+* Added `rocsparse_[s|d|c|z]csritsv_solve_ex` routines for iterative triangular solve
 * Added BSR format to SpMM generic routine `rocsparse_spmm`
 * Added `GPU_TARGETS` to replace the now deprecated `AMDGPU_TARGETS` in cmake files
 * Added `azurelinux` OS name for correcting gfortran dependency
@@ -23,14 +23,16 @@ Documentation for rocSPARSE is available at
 
 ### Optimized
 
-* Improved adaptive CSR sparse matrix-vector multiplcation algorithm when the sparse matrix has many empty rows at the beginning or end of the matrix. This improves the routines `rocsparse_spmv` and `rocsparse_spmv_ex` when the adaptive algorithm `rocsparse_spmv_alg_csr_adaptive` is used.
+* Improved the adaptive CSR sparse matrix-vector multiplication algorithm when the sparse matrix has many empty rows at the beginning or at the end of the matrix. This improves the routines `rocsparse_spmv` and `rocsparse_spmv_ex` when the adaptive algorithm `rocsparse_spmv_alg_csr_adaptive` is used.
 * Improved stream CSR sparse matrix-vector multiplication algorithm when the sparse matrix size (number of rows) decreases. This improves the routines `rocsparse_spmv` and `rocsparse_spmv_ex` when the stream algorithm `rocsparse_spmv_alg_csr_stream` is used.
+* Compared to `rocsparse_[s|d|c|z]csritilu0_compute`, the routines `rocsparse_[s|d|c|z]csritilu0_compute_ex` introduce a number of free iterations. A free iteration is an iteration that does not compute the evaluation of the stopping criteria, if enabled. This allows the user to tune the algorithm for performance improvements.
+* Compared to `rocsparse_[s|d|c|z]csritsv_solve`, the routines `rocsparse_[s|d|c|z]csritsv_solve_ex` introduce a number of free iterations. A free iteration is an iteration that does not compute the evaluation of the stopping criteria. This allows the user to tune the algorithm for performance improvements.
 * Improved user documentation
 
 ### Upcoming changes
 
 * Deprecated `rocsparse_[s|d|c|z]csritilu0_compute` routines. Users should use the newly added `rocsparse_[s|d|c|z]csritilu0_compute_ex` routines going forward.
-* Deprecated `rocsparse_[s|d|c|z]csritsvx_solve` routines. Users should use the newly added `rocsparse_[s|d|c|z]csritsvx_solve` routines going forward.
+* Deprecated `rocsparse_[s|d|c|z]csritsv_solve` routines. Users should use the newly added `rocsparse_[s|d|c|z]csritsv_solve_ex` routines going forward.
 * Deprecated `AMDGPU_TARGETS` using in cmake files. Users should use `GPU_TARGETS` going forward.
 
 ## rocSPARSE 3.3.0 for ROCm 6.3.0
