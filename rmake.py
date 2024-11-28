@@ -9,36 +9,6 @@ import platform as pf
 import shutil
 
 class AutoBuilder:
-    def __init__(self):
-        self.parser = argparse.ArgumentParser(description="""
-        Checks build arguments
-        """)
-        
-        sysInfo = pf.uname()
-
-        # getting os information
-        self.OS_info = {
-            "Machine" : sysInfo.machine,
-            "Node Name" : sysInfo.node,
-            "Num Processor" : os.cpu_count(),
-            "Processor" : sysInfo.processor,
-            "Release" : sysInfo.release,
-            "System" : sysInfo.system,
-            "Version" : sysInfo.version,
-        }
-        m = ' System Information '
-
-        print()
-        print(f'{m:-^100}')
-        
-        for k in self.OS_info:
-            print(f'\t {k}: {self.OS_info[k]}')
-        print()
-        
-
-        self.lib_dir = os.path.dirname(os.path.abspath(__file__)) 
-        self.toolchain = f'toolchain-linux.cmake' if self.OS_info['System'] == 'Linux' else f'toolchain-windows.cmake'
-
     def __parse_args__(self):
         """Parse command-line arguments"""
         default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201'
@@ -68,6 +38,39 @@ class AutoBuilder:
                             help='Verbose build (default: False)')   
         
         self.args = self.parser.parse_args()
+
+    def __init__(self):
+        self.parser = argparse.ArgumentParser(description="Checks build arguments")
+        self.__parse_args__()
+        
+        sysInfo = pf.uname()
+
+        # getting os information
+        self.OS_info = {
+            "Machine" : sysInfo.machine,
+            "Node Name" : sysInfo.node,
+            "Num Processor" : os.cpu_count(),
+            "Processor" : sysInfo.processor,
+            "Release" : sysInfo.release,
+            "System" : sysInfo.system,
+            "Version" : sysInfo.version,
+        }
+        m = ' System Information '
+
+        print()
+        print(f'{m:-^100}')
+        
+        for k in self.OS_info:
+            print(f'\t {k}: {self.OS_info[k]}')
+        print()
+
+        self.custom_cmake_args = set()
+
+        for item in self.args.cmake_dargs:
+            self.custom_cmake_args.add(item.split('=')[0]) # get the argument name
+
+        self.lib_dir = os.path.dirname(os.path.abspath(__file__)) 
+        self.toolchain = f'toolchain-linux.cmake' if self.OS_info['System'] == 'Linux' else f'toolchain-windows.cmake'
 
     def __mk_dir__(self, dir_path: str):
         if os.path.isabs(dir_path):
@@ -130,10 +133,20 @@ class AutoBuilder:
 
             rocm_path = os.getenv('ROCM_PATH', '/opt/rocm')
 
-            cmake_options.append(f"-DROCM_DIR:PATH={rocm_path}")
-            cmake_options.append(f"-DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}")
-            cmake_options.append(f"-DROCM_PATH={rocm_path}")
-            cmake_options.append(f"-DCMAKE_PREFIX_PATH:PATH={rocm_path}")
+            #These ifs will make sure there are no duplicates arguments
+            if "ROCM_DIR:PATH" not in self.custom_cmake_args: 
+                cmake_options.append(f"-DROCM_DIR:PATH={rocm_path}")
+            
+            if "CPACK_PACKAGING_INSTALL_PREFIX" not in self.custom_cmake_args: 
+                cmake_options.append(f"-DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}")
+            if "ROCM_PATH" not in self.custom_cmake_args:
+                cmake_options.append(f"-DROCM_PATH={rocm_path}")
+           
+            if "CMAKE_PREFIX_PATH:PATH" not in self.custom_cmake_args:
+                cmake_options.append(f"-DCMAKE_PREFIX_PATH:PATH={rocm_path}")
+
+            if "CMAKE_CXX_FLAGS" not in self.custom_cmake_args:
+                cmake_options.append(f'-DCMAKE_CXX_FLAGS="-w"')
             
         else:
             cmake_exe = shutil.which('cmake.exe')
@@ -150,12 +163,26 @@ class AutoBuilder:
             rocm_path.replace('\\', '/')
             rocm_cmake_path.replace('\\', '/')
 
-            cmake_options.append(f'-G Ninja')
-            cmake_options.append(f"-DWIN32=ON -DCPACK_PACKAGING_INSTALL_PREFIX=") #" -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"
-            cmake_options.append(f'-DCMAKE_INSTALL_PREFIX="C:/hipSDK"')
-            cmake_options.append(f'-DCMAKE_CXX_FLAGS="-D_ENABLE_EXTENDED_ALIGNED_STORAGE"')
-            cmake_options.append(f'-DROCM_PATH={rocm_path}') 
-            cmake_options.append(f'-DCMAKE_PREFIX_PATH:PATH={rocm_path};{rocm_cmake_path}')
+            if '-G Ninja' not in self.custom_cmake_args:
+                cmake_options.append(f'-G Ninja')
+            
+            if 'WIN32' not in self.custom_cmake_args:
+                cmake_options.append(f"-DWIN32=ON")
+            
+            if 'CPACK_PACKAGING_INSTALL_PREFIX' not in self.custom_cmake_args:
+                cmake_options.append(f"-DCPACK_PACKAGING_INSTALL_PREFIX=") 
+            
+            if 'CMAKE_INSTALL_PREFIX' not  in self.custom_cmake_args:
+                cmake_options.append(f'-DCMAKE_INSTALL_PREFIX="C:/hipSDK"')
+
+            if 'CMAKE_CXX_FLAGS' not in self.custom_cmake_args:
+                cmake_options.append(f'-DCMAKE_CXX_FLAGS="-D_ENABLE_EXTENDED_ALIGNED_STORAGE -w"')
+
+            if 'ROCM_PATH' not in self.custom_cmake_args:
+                cmake_options.append(f'-DROCM_PATH={rocm_path}') 
+
+            if 'CMAKE_PREFIX_PATH:PATH' not in self.custom_cmake_args:
+                cmake_options.append(f'-DCMAKE_PREFIX_PATH:PATH={rocm_path};{rocm_cmake_path}')
 
 
         if self.args.static_lib:
@@ -199,7 +226,6 @@ class AutoBuilder:
         return command_str
     
     def __call__(self):
-        self.__parse_args__()
         cmake_command = self.__get_cmake_cmd__()
 
         self.__rm_dir__(self.build_path)

@@ -121,7 +121,6 @@ class TestRunner():
 
             if self.output_path:
                 self.output_path = self.output_path.replace('\\', '/')
-
                 self.output = open(os.path.abspath(self.output_path), 'w')
 
         m = ' Current Paths'
