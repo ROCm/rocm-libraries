@@ -211,22 +211,29 @@ template <size_t queueSize>
     return nullptr;
 }
 
+static inline __device__ WorkNode_Header *getWork(bool yielding) {
+    WorkNode_Header *workFromCpu = cpuWorkQueue.tryPop_cpuSafe(!yielding);
+    WorkNode_Header *workFromMainQueue = mainWorkQueue.tryPop(!yielding && workFromCpu == nullptr);
+
+    if (workFromMainQueue == nullptr && workFromCpu == nullptr)
+        return nullptr;
+
+    if (workFromMainQueue != nullptr) {
+        if (workFromCpu != nullptr) {
+            mainWorkQueue.push(workFromCpu);
+        }
+        return workFromMainQueue;
+    }
+    else {
+        return workFromCpu;
+    }
+}
+
 // Returns true if there was work waiting
 static inline __device__ bool invokeNext(bool yielding = false) {
     __shared__ WorkNode_Header *worknode_s;
     if (threadIdx.x == 0) {
-        WorkNode_Header *workFromCpu = cpuWorkQueue.tryPop_cpuSafe(!yielding);
-        WorkNode_Header *workFromMainQueue = mainWorkQueue.tryPop(!yielding && workFromCpu == nullptr);
-
-        if (workFromMainQueue != nullptr) {
-            if (workFromCpu != nullptr) {
-                mainWorkQueue.push(workFromCpu);
-            }
-            worknode_s = workFromMainQueue;
-        }
-        else {
-            worknode_s = workFromCpu;
-        }
+        worknode_s = getWork(yielding);
     }
     __syncthreads();
     if (worknode_s == nullptr) {
