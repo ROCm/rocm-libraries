@@ -65,6 +65,7 @@ class AutoBuilder:
         print()
 
         self.custom_cmake_args = set()
+        self.cmake_options = []
 
         for item in self.args.cmake_dargs:
             self.custom_cmake_args.add(item.split('=')[0]) # get the argument name
@@ -96,6 +97,11 @@ class AutoBuilder:
 
         except FileNotFoundError:
             ... # no file to remove
+
+    def __insert_cmake_args__(self, arg, val):
+        # This is to prevent the case of having duplicate cmake args from the argument --cmake-darg
+        if arg not in self.custom_cmake_args:
+            self.cmake_options.append(f'-D{arg}={val}')
     
     def __get_cmake_cmd__(self):
 
@@ -103,14 +109,12 @@ class AutoBuilder:
         print(f'{m:-^100}\n\t{self.lib_dir}')
         print()
 
-        cmake_exe = ''
-        cmake_options = [
-            f'--toolchain={self.toolchain}',
-            f'-DCPACK_SET_DESTDIR=OFF', 
-            f'-DCPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF',
-            f'-DGPU_TARGETS={self.args.gpu_architecture}'
-        ]
+        self.__insert_cmake_args__('CMAKE_TOOLCHAIN_FILE', self.toolchain)
+        self.__insert_cmake_args__('CPACK_INCLUDE_TOPLEVEL_DIRECTORY', 'OFF')
+        self.__insert_cmake_args__('CPACK_SET_DESTDIR', 'OFF')
+        self.__insert_cmake_args__('GPU_TARGETS', self.args.gpu_architecture)
  
+        cmake_exe = ''
         if self.args.debug:
             build_path = os.path.join(self.args.build_dir, 'debug')
             cmake_config = 'Debug'
@@ -120,7 +124,7 @@ class AutoBuilder:
         
         self.build_path = build_path
         
-        cmake_options.append(f"-DCMAKE_BUILD_TYPE={cmake_config}")
+        self.cmake_options.append(f"-DCMAKE_BUILD_TYPE={cmake_config}")
 
         if self.OS_info['System'] == 'Linux':
             cmake_exe = shutil.which('cmake3')
@@ -133,21 +137,10 @@ class AutoBuilder:
 
             rocm_path = os.getenv('ROCM_PATH', '/opt/rocm')
 
-            #These ifs will make sure there are no duplicates arguments
-            if "ROCM_DIR:PATH" not in self.custom_cmake_args: 
-                cmake_options.append(f"-DROCM_DIR:PATH={rocm_path}")
-            
-            if "CPACK_PACKAGING_INSTALL_PREFIX" not in self.custom_cmake_args: 
-                cmake_options.append(f"-DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}")
-            if "ROCM_PATH" not in self.custom_cmake_args:
-                cmake_options.append(f"-DROCM_PATH={rocm_path}")
-           
-            if "CMAKE_PREFIX_PATH:PATH" not in self.custom_cmake_args:
-                cmake_options.append(f"-DCMAKE_PREFIX_PATH:PATH={rocm_path}")
-
-            if "CMAKE_CXX_FLAGS" not in self.custom_cmake_args:
-                cmake_options.append(f'-DCMAKE_CXX_FLAGS="-w"')
-            
+            self.__insert_cmake_args__('CMAKE_CXX_FLAGS', f'"-w"')
+            self.__insert_cmake_args__('CMAKE_PREFIX_PATH:PATH', rocm_path)
+            self.__insert_cmake_args__('CPACK_PACKAGING_INSTALL_PREFIX', rocm_path)
+            self.__insert_cmake_args__('ROCM_DIR:PATH', rocm_path)
         else:
             cmake_exe = shutil.which('cmake.exe')
             
@@ -164,46 +157,28 @@ class AutoBuilder:
             rocm_cmake_path.replace('\\', '/')
 
             if '-G Ninja' not in self.custom_cmake_args:
-                cmake_options.append(f'-G Ninja')
-            
-            if 'WIN32' not in self.custom_cmake_args:
-                cmake_options.append(f"-DWIN32=ON")
-            
-            if 'CPACK_PACKAGING_INSTALL_PREFIX' not in self.custom_cmake_args:
-                cmake_options.append(f"-DCPACK_PACKAGING_INSTALL_PREFIX=") 
-            
-            if 'CMAKE_INSTALL_PREFIX' not  in self.custom_cmake_args:
-                cmake_options.append(f'-DCMAKE_INSTALL_PREFIX="C:/hipSDK"')
+                self.cmake_options.append(f'-G Ninja')
+            self.__insert_cmake_args__('WIN32', 'ON')
+            self.__insert_cmake_args__('CPACK_PACKAGING_INSTALL_PREFIX', '')            
+            self.__insert_cmake_args__('CMAKE_INSTALL_PREFIX', rocm_cmake_path)            
+            self.__insert_cmake_args__('CMAKE_CXX_FLAGS', f'"-D_ENABLE_EXTENDED_ALIGNED_STORAGE -w"')
+            self.__insert_cmake_args__('CMAKE_PREFIX_PATH:PATH', f'{rocm_path};{rocm_cmake_path}')
 
-            if 'CMAKE_CXX_FLAGS' not in self.custom_cmake_args:
-                cmake_options.append(f'-DCMAKE_CXX_FLAGS="-D_ENABLE_EXTENDED_ALIGNED_STORAGE -w"')
+        self.__insert_cmake_args__('ROCM_PATH', rocm_path)
 
-            if 'ROCM_PATH' not in self.custom_cmake_args:
-                cmake_options.append(f'-DROCM_PATH={rocm_path}') 
-
-            if 'CMAKE_PREFIX_PATH:PATH' not in self.custom_cmake_args:
-                cmake_options.append(f'-DCMAKE_PREFIX_PATH:PATH={rocm_path};{rocm_cmake_path}')
-
-
-        if self.args.static_lib:
-           cmake_options.append( f'-DBUILD_SHARED_LIBS=OFF')
-
-        if self.args.skip_ld_conf_entry:
-            cmake_options.append( f'-DROCM_DISABLE_LDCONFIG=ON' )
-
+        if self.args.static_lib: self.__insert_cmake_args__('BUILD_SHARED_LIBS', 'OFF')
+        if self.args.skip_ld_conf_entry: self.__insert_cmake_args__('ROCM_DISABLE_LDCONFIG', 'ON')
+        
         if self.args.build_clients:
             self.args.build_tests = True
             self.args.build_bench = True
-            cmake_options.append(f'-DBUILD_EXAMPLE=ON')
+            self.__insert_cmake_args__('BUILD_EXAMPLE', 'ON')
 
-        if self.args.build_tests:
-          cmake_options.append(f'-DBUILD_TEST=ON')
-        
-        if self.args.build_bench:
-          cmake_options.append(f'-DBUILD_BENCHMARK=ON')
+        if self.args.build_tests: self.__insert_cmake_args__('BUILD_TEST', 'ON')
+        if self.args.build_bench: self.__insert_cmake_args__('BUILD_BENCHMARK', 'ON')
 
         if self.args.cmake_dargs:
-            cmake_options += [f'-D{i}' for i in self.args.cmake_dargs]
+            self.cmake_options += [f'-D{i}' for i in self.args.cmake_dargs]
         
         # putting '' around paths to avoid white space in pathing
         if self.OS_info['System'] == 'Linux':
@@ -213,7 +188,7 @@ class AutoBuilder:
 
         m = 'CMAKE Options'
         print(f'{m:-^100}')
-        for op in cmake_options:
+        for op in self.cmake_options:
             print(f'\t{op}')
             command_str += f' {op}'
         print()
