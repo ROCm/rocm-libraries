@@ -26,7 +26,7 @@ endif()
 # Bring in CMAKE_INSTALL_LIBDIR
 include(GNUInstallDirs)
 
-# Libcudacxx headers
+# Libhipcxx headers
 install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/cuda"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   PATTERN CMakeLists.txt EXCLUDE
