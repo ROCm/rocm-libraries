@@ -11,31 +11,31 @@ import shutil
 class AutoBuilder:
     def __parse_args__(self):
         """Parse command-line arguments"""
-        default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201'
+        self.default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201'
 
+        self.parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default=self.default_gpus, 
+                            help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)')
+        self.parser.add_argument('-b', '--benchmarks', required=False, default=False, dest='build_bench', action='store_true',
+                                 help='Generate benchmarks only (default: False)')
+        self.parser.add_argument('-c', '--clients', required=False, default=False, dest='build_clients', action='store_true',
+                            help='Generate all client builds (default: False)')
         self.parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                             help='Generate Debug build (default: False)')
+        self.parser.add_argument('-i', '--install', required=False, default=False, dest='install', action='store_true',
+                            help='Install after build (default: False)')
+        self.parser.add_argument('-t', '--tests', required=False, default=False, dest='build_tests', action='store_true',
+                            help='Generate unit tests only (default: False)')
+        self.parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
+                            help='Verbose build (default: False)')  
         self.parser.add_argument(      '--build_dir', type=str, required=False, default="build",
                             help='Build directory path (default: build)')
+        self.parser.add_argument(      '--cmake-darg', required=False, dest='cmake_dargs', action='append', default=[],
+                            help='List of additional cmake defines for builds (e.g. CMAKE_CXX_COMPILER_LAUNCHER=ccache)')
         self.parser.add_argument(      '--deps_dir', type=str, required=False, default=None,
                             help='Dependencies directory path (default: build/deps)')
         self.parser.add_argument(      '--skip_ld_conf_entry', required=False, default=False)
         self.parser.add_argument(      '--static', required=False, default=False, dest='static_lib', action='store_true',
                             help='Generate static library build (default: False)')
-        self.parser.add_argument('-c', '--clients', required=False, default=False, dest='build_clients', action='store_true',
-                            help='Generate all client builds (default: False)')
-        self.parser.add_argument('-t', '--tests', required=False, default=False, dest='build_tests', action='store_true',
-                            help='Generate unit tests only (default: False)')
-        self.parser.add_argument('-b', '--benchmarks', required=False, default=False, dest='build_bench', action='store_true',
-                                 help='Generate benchmarks only (default: False)')
-        self.parser.add_argument('-i', '--install', required=False, default=False, dest='install', action='store_true',
-                            help='Install after build (default: False)')
-        self.parser.add_argument(      '--cmake-darg', required=False, dest='cmake_dargs', action='append', default=[],
-                            help='List of additional cmake defines for builds (e.g. CMAKE_CXX_COMPILER_LAUNCHER=ccache)')
-        self.parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default=default_gpus, #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
-                            help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)')
-        self.parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
-                            help='Verbose build (default: False)')   
         
         self.args = self.parser.parse_args()
 
@@ -55,14 +55,6 @@ class AutoBuilder:
             "System" : sysInfo.system,
             "Version" : sysInfo.version,
         }
-        m = ' System Information '
-
-        print()
-        print(f'{m:-^100}')
-        
-        for k in self.OS_info:
-            print(f'\t {k}: {self.OS_info[k]}')
-        print()
 
         self.custom_cmake_args = set()
         self.cmake_options = []
@@ -186,7 +178,7 @@ class AutoBuilder:
         else:
             command_str = f'"{cmake_exe}"'
 
-        m = 'CMAKE Options'
+        m = ' CMake Options '
         print(f'{m:-^100}')
         for op in self.cmake_options:
             print(f'\t{op}')
@@ -194,13 +186,21 @@ class AutoBuilder:
         print()
 
         command_str += f' "{self.lib_dir}"'
-        m = 'Final Command'
+        m = ' Final Command '
         print(f'{m:-^100}')
         print(command_str)
         print()
         return command_str
     
     def __call__(self):
+        m = ' System Information '
+        print()
+        print(f'{m:-^100}')
+        
+        for k in self.OS_info:
+            print(f'\t {k}: {self.OS_info[k]}')
+        print()
+
         cmake_command = self.__get_cmake_cmd__()
 
         self.__rm_dir__(self.build_path)
