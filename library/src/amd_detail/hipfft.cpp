@@ -329,6 +329,20 @@ struct hipfft_plan_description_t
     }
 };
 
+static inline hipfftResult handle_exception() noexcept
+try
+{
+    throw;
+}
+catch(hipfftResult e)
+{
+    return e;
+}
+catch(...)
+{
+    return HIPFFT_INTERNAL_ERROR;
+}
+
 hipfftResult hipfftPlan1d(hipfftHandle* plan, int nx, hipfftType type, int batch)
 try
 {
@@ -338,13 +352,9 @@ try
 
     return hipfftMakePlan1d(*plan, nx, type, batch, nullptr);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftPlan2d(hipfftHandle* plan, int nx, int ny, hipfftType type)
@@ -357,13 +367,9 @@ try
 
     return hipfftMakePlan2d(*plan, nx, ny, type, nullptr);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftPlan3d(hipfftHandle* plan, int nx, int ny, int nz, hipfftType type)
@@ -376,13 +382,9 @@ try
 
     return hipfftMakePlan3d(*plan, nx, ny, nz, type, nullptr);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftPlanMany(hipfftHandle* plan,
@@ -405,13 +407,9 @@ try
     return hipfftMakePlanMany(
         *plan, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, nullptr);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftPlanMany64(hipfftHandle*  plan,
@@ -434,13 +432,9 @@ try
     return hipfftMakePlanMany64(
         *plan, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, nullptr);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
@@ -948,13 +942,9 @@ try
     *plan = h;
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftExtPlanScaleFactor(hipfftHandle plan, double scalefactor)
@@ -965,13 +955,9 @@ try
     plan->scale_factor = scalefactor;
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult
@@ -994,13 +980,9 @@ try
     return hipfftMakePlan_internal(
         plan, 1, lengths, iotype, number_of_transforms, desc, workSize, false);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftMakePlan2d(hipfftHandle plan, int nx, int ny, hipfftType type, size_t* workSize)
@@ -1023,13 +1005,9 @@ try
     return hipfftMakePlan_internal(
         plan, 2, lengths, iotype, number_of_transforms, desc, workSize, false);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult
@@ -1054,13 +1032,9 @@ try
     return hipfftMakePlan_internal(
         plan, 3, lengths, iotype, number_of_transforms, desc, workSize, false);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 template <typename T>
@@ -1190,13 +1164,9 @@ try
     return hipfftMakePlanMany_internal<int>(
         plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftMakePlanMany64(hipfftHandle   plan,
@@ -1219,13 +1189,9 @@ try
     return hipfftMakePlanMany_internal<long long int>(
         plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftEstimate1d(int nx, hipfftType type, int batch, size_t* workSize)
@@ -1235,13 +1201,9 @@ try
     hipfftResult ret  = hipfftGetSize1d(plan, nx, type, batch, workSize);
     return ret;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftEstimate2d(int nx, int ny, hipfftType type, size_t* workSize)
@@ -1251,13 +1213,9 @@ try
     hipfftResult ret  = hipfftGetSize2d(plan, nx, ny, type, workSize);
     return ret;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftEstimate3d(int nx, int ny, int nz, hipfftType type, size_t* workSize)
@@ -1267,13 +1225,9 @@ try
     hipfftResult ret  = hipfftGetSize3d(plan, nx, ny, nz, type, workSize);
     return ret;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftEstimateMany(int        rank,
@@ -1294,13 +1248,9 @@ try
         plan, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize);
     return ret;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult
@@ -1319,13 +1269,9 @@ try
 
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftGetSize2d(hipfftHandle plan, int nx, int ny, hipfftType type, size_t* workSize)
@@ -1343,13 +1289,9 @@ try
 
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult
@@ -1368,13 +1310,9 @@ try
 
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftGetSizeMany(hipfftHandle plan,
@@ -1399,13 +1337,9 @@ try
 
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftGetSizeMany64(hipfftHandle   plan,
@@ -1430,13 +1364,9 @@ try
 
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftGetSize(hipfftHandle plan, size_t* workSize)
@@ -1445,13 +1375,9 @@ try
     *workSize = plan->workBufferSize;
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftSetAutoAllocation(hipfftHandle plan, int autoAllocate)
@@ -1461,13 +1387,9 @@ try
         plan->autoAllocate = bool(autoAllocate);
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftSetWorkArea(hipfftHandle plan, void* workArea)
@@ -1486,13 +1408,9 @@ try
     }
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 // Find the specific plan to execute - check placement and direction
@@ -1550,13 +1468,9 @@ try
     }
     return HIPFFT_EXEC_FAILED;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftExecR2C(hipfftHandle plan, hipfftReal* idata, hipfftComplex* odata)
@@ -1564,13 +1478,9 @@ try
 {
     return hipfftExecForward(plan, idata, odata);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftExecC2R(hipfftHandle plan, hipfftComplex* idata, hipfftReal* odata)
@@ -1578,13 +1488,9 @@ try
 {
     return hipfftExecBackward(plan, idata, odata);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftExecZ2Z(hipfftHandle         plan,
@@ -1602,13 +1508,9 @@ try
     }
     return HIPFFT_EXEC_FAILED;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftExecD2Z(hipfftHandle plan, hipfftDoubleReal* idata, hipfftDoubleComplex* odata)
@@ -1616,13 +1518,9 @@ try
 {
     return hipfftExecForward(plan, idata, odata);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftExecZ2D(hipfftHandle plan, hipfftDoubleComplex* idata, hipfftDoubleReal* odata)
@@ -1630,13 +1528,9 @@ try
 {
     return hipfftExecBackward(plan, idata, odata);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftSetStream(hipfftHandle plan, hipStream_t stream)
@@ -1645,13 +1539,9 @@ try
     ROC_FFT_CHECK_INVALID_VALUE(rocfft_execution_info_set_stream(plan->info, stream));
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftDestroy(hipfftHandle plan)
@@ -1681,13 +1571,9 @@ try
 
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftGetVersion(int* version)
@@ -1718,13 +1604,9 @@ try
     *version = std::stoi(result.str());
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftGetProperty(hipfftLibraryPropertyType type, int* value)
@@ -1748,13 +1630,9 @@ try
 
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtSetCallback(hipfftHandle         plan,
@@ -1848,13 +1726,9 @@ try
         return HIPFFT_INVALID_VALUE;
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtClearCallback(hipfftHandle plan, hipfftXtCallbackType cbtype)
@@ -1862,13 +1736,9 @@ try
 {
     return hipfftXtSetCallback(plan, nullptr, cbtype, nullptr);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult
@@ -1911,13 +1781,9 @@ try
         return HIPFFT_INVALID_VALUE;
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtMakePlanMany(hipfftHandle   plan,
@@ -1941,13 +1807,9 @@ try
     return hipfftMakePlanMany_internal<long long int>(
         plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtGetSizeMany(hipfftHandle   plan,
@@ -1977,13 +1839,9 @@ try
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtExec(hipfftHandle plan, void* input, void* output, int direction)
@@ -2004,13 +1862,9 @@ try
 
     return hipfftExec(plan_ptr, plan->info, input, output);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtSetGPUs(hipfftHandle plan, int count, int* gpus)
@@ -2037,13 +1891,9 @@ try
 
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 // get number of bytes used for elements of a given hipDataType
@@ -2133,13 +1983,9 @@ try
     *desc                = lib_desc.release();
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_ALLOC_FAILED;
+    return handle_exception();
 }
 
 // collapse contiguous dimensions in the specified length + stride -
@@ -2325,13 +2171,9 @@ try
         throw HIPFFT_INVALID_VALUE;
     }
 }
-catch(hipfftResult err)
-{
-    return err;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtFree(hipLibXtDesc* desc)
@@ -2349,13 +2191,9 @@ try
     delete desc;
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 static hipfftResult hipfftXtExecDescriptorBase(const rocfft_plan&           rplan,
@@ -2387,13 +2225,9 @@ try
 
     return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
@@ -2407,13 +2241,9 @@ try
 
     return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
@@ -2427,13 +2257,9 @@ try
 
     return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
@@ -2450,13 +2276,9 @@ try
 
     return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
@@ -2470,13 +2292,9 @@ try
 
     return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
@@ -2490,13 +2308,9 @@ try
 
     return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,
@@ -2513,13 +2327,9 @@ try
 
     return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 #ifdef HIPFFT_MPI_ENABLE
@@ -2546,13 +2356,9 @@ try
     plan->comm_handle = comm_handle;
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtSetDistribution(hipfftHandle         plan,
@@ -2606,13 +2412,9 @@ try
     setBrick(plan->outBricks.front(), output_lower, output_upper, output_stride);
     return HIPFFT_SUCCESS;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 hipfftResult hipfftXtSetSubformatDefault(hipfftHandle      plan,
@@ -2626,13 +2428,9 @@ try
 
     return HIPFFT_NOT_IMPLEMENTED;
 }
-catch(hipfftResult e)
-{
-    return e;
-}
 catch(...)
 {
-    return HIPFFT_INTERNAL_ERROR;
+    return handle_exception();
 }
 
 #endif
