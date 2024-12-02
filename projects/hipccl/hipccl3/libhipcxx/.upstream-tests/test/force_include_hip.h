@@ -23,6 +23,8 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
+#ifndef LIBCUDACXX_FORCE_INCLUDE_HIP
+#define LIBCUDACXX_FORCE_INCLUDE_HIP
 
 #include "cuda_runtime.h"
 
@@ -113,4 +115,6 @@ int main(int argc, char** argv)
 #define main __device__ __host__ fake_main
 #else
 #define main fake_main
+#endif
+
 #endif
