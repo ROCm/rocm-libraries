@@ -24,7 +24,6 @@
 # rocSPARSE source
 set(rocsparse_source
   src/handle.cpp
-  src/rocsparse_primitives.cpp
   src/rocsparse_common.cpp
   src/rocsparse_auxiliary.cpp
   src/rocsparse_blas.cpp
@@ -37,6 +36,17 @@ set(rocsparse_source
   src/rocsparse_message.cpp
   ##
   src/to_string.cpp
+
+# Primitives
+  src/primitives/rocsparse_radix_sort_pairs.cpp
+  src/primitives/rocsparse_radix_sort_keys.cpp
+  src/primitives/rocsparse_run_length_encode.cpp
+  src/primitives/rocsparse_exclusive_scan.cpp
+  src/primitives/rocsparse_inclusive_scan.cpp
+  src/primitives/rocsparse_find_max.cpp
+  src/primitives/rocsparse_find_sum.cpp
+  src/primitives/rocsparse_segmented_radix_sort_pairs.cpp
+  src/primitives/rocsparse_segmented_radix_sort_keys.cpp
 
 # Level1
   src/level1/rocsparse_axpyi.cpp
