@@ -330,7 +330,7 @@ if (NOT CODE_ANALYSIS)
   # Add script linting
   add_test(NAME PythonLint
            COMMAND flake8
-           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/scripts)
   set_tests_properties(PythonLint
                        PROPERTIES
                         ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}"
