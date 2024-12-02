@@ -9,6 +9,9 @@ Datatypes:
         f32_r: 0
         i8_r: 3
         bf16_r: 14
+        f8_r: 28
+        bf8_r: 29
+
   - hipsparseLtComputetype_t:
       bases: [ c_int ]
       attr:
@@ -55,6 +58,10 @@ Real precisions: &real_precisions
     { a_type:  i8_r, b_type:  i8_r, c_type: f16_r, d_type: f16_r, compute_type: c_i32_r }
   - &hpa_int8_bf16_precision
     { a_type:  i8_r, b_type:  i8_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_i32_r }
+  - &hpa_e4m3_fp32_precision
+    { a_type:  f8_r, b_type:  f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r }
+  - &hpa_e5m2_fp32_precision
+    { a_type:  bf8_r, b_type:  bf8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r }
 
 Real precisions 2 bytes: &real_precisions_2b
   - *hpa_half_precision
@@ -67,6 +74,8 @@ Real precisions 1 bytes: &real_precisions_1b
 
 Real precisions 1 bytes for input: &real_precisions_1b_input
   - *hpa_int8_precision
+  - *hpa_e4m3_fp32_precision
+  - *hpa_e5m2_fp32_precision
 
 acvation_sigmoid_tanh precisions: &activation_sigmoid_tanh_precisions
   - *hpa_half_precision

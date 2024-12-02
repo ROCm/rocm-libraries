@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (c) 2022 Advanced Micro Devices, Inc.
+# Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@ foreach( exe ${sample_list_all} )
   target_link_libraries( ${exe} PRIVATE roc::hipsparselt )
 
   set_target_properties( ${exe} PROPERTIES
-    CXX_STANDARD 14
+    CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"

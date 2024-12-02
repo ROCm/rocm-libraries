@@ -78,6 +78,7 @@
 #if defined(__HIP_PLATFORM_AMD__)
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
+#include <hip/hip_fp8.h>
 #include <hip/library_types.h>
 #else
 #include <cuda_bf16.h>

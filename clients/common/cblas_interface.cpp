@@ -764,3 +764,181 @@ void cblas_gemm<int8_t, hip_bfloat16, float>(hipsparseOrder_t     order,
     for(size_t i = 0; i < sizeC; i++)
         C[i] = static_cast<hip_bfloat16>(C_double[i]);
 }
+
+template <>
+void cblas_gemm<__hip_fp8_e4m3, float, float>(hipsparseOrder_t      order,
+                                              hipsparseOperation_t  transA,
+                                              hipsparseOperation_t  transB,
+                                              int64_t               m,
+                                              int64_t               n,
+                                              int64_t               k,
+                                              float                 alpha,
+                                              const __hip_fp8_e4m3* A,
+                                              int64_t               lda,
+                                              int64_t               sizeA,
+                                              const __hip_fp8_e4m3* B,
+                                              int64_t               ldb,
+                                              int64_t               sizeB,
+                                              float                 beta,
+                                              float*                C,
+                                              int64_t               ldc,
+                                              int64_t               sizeC,
+                                              float*                alphaVec,
+                                              bool                  alt)
+{
+    // cblas does not support int8_t input / int8_t output, however non-overflowing
+    // 32-bit integer operations can be represented accurately with double-precision
+    // floats, so convert to doubles and downcast result down to int32_t.
+    // NOTE: This will not properly account for 32-bit integer overflow, however
+    //       the result should be acceptable for testing.
+
+    host_vector<double> A_double(sizeA);
+    host_vector<double> B_double(sizeB);
+    host_vector<double> C_double(sizeC);
+
+    for(size_t i = 0; i < sizeA; i++)
+        A_double[i] = static_cast<double>(A[i]);
+    for(size_t i = 0; i < sizeB; i++)
+        B_double[i] = static_cast<double>(B[i]);
+    for(size_t i = 0; i < sizeC; i++)
+        C_double[i] = static_cast<double>(C[i]);
+
+    if(alphaVec != nullptr)
+    {
+        host_vector<double> T_double(sizeC);
+        memset(T_double, 0, sizeC);
+        cblas_dgemm(HIPOrderToCBLASOrder(order),
+                    HIPOperationToCBLASTanspose(transA),
+                    HIPOperationToCBLASTanspose(transB),
+                    m,
+                    n,
+                    k,
+                    static_cast<double>(1),
+                    A_double,
+                    lda,
+                    B_double,
+                    ldb,
+                    static_cast<double>(0),
+                    T_double,
+                    ldc);
+        for(int i = 0; i < m; i++)
+        {
+            for(int j = 0; j < n; j++)
+            {
+                size_t pos    = order == HIPSPARSE_ORDER_COL ? j * ldc + i : i * ldc + j;
+                C_double[pos] = T_double[pos] * static_cast<double>(alphaVec[i])
+                                + C_double[pos] * static_cast<double>(beta);
+            }
+        }
+    }
+    else
+    {
+        // just directly cast, since transA, transB are integers in the enum
+        cblas_dgemm(HIPOrderToCBLASOrder(order),
+                    HIPOperationToCBLASTanspose(transA),
+                    HIPOperationToCBLASTanspose(transB),
+                    m,
+                    n,
+                    k,
+                    alpha,
+                    A_double,
+                    lda,
+                    B_double,
+                    ldb,
+                    beta,
+                    C_double,
+                    ldc);
+    }
+
+    for(size_t i = 0; i < sizeC; i++)
+        C[i] = static_cast<float>(C_double[i]);
+}
+
+template <>
+void cblas_gemm<__hip_fp8_e5m2, float, float>(hipsparseOrder_t      order,
+                                              hipsparseOperation_t  transA,
+                                              hipsparseOperation_t  transB,
+                                              int64_t               m,
+                                              int64_t               n,
+                                              int64_t               k,
+                                              float                 alpha,
+                                              const __hip_fp8_e5m2* A,
+                                              int64_t               lda,
+                                              int64_t               sizeA,
+                                              const __hip_fp8_e5m2* B,
+                                              int64_t               ldb,
+                                              int64_t               sizeB,
+                                              float                 beta,
+                                              float*                C,
+                                              int64_t               ldc,
+                                              int64_t               sizeC,
+                                              float*                alphaVec,
+                                              bool                  alt)
+{
+    // cblas does not support int8_t input / int8_t output, however non-overflowing
+    // 32-bit integer operations can be represented accurately with double-precision
+    // floats, so convert to doubles and downcast result down to int32_t.
+    // NOTE: This will not properly account for 32-bit integer overflow, however
+    //       the result should be acceptable for testing.
+
+    host_vector<double> A_double(sizeA);
+    host_vector<double> B_double(sizeB);
+    host_vector<double> C_double(sizeC);
+
+    for(size_t i = 0; i < sizeA; i++)
+        A_double[i] = static_cast<double>(A[i]);
+    for(size_t i = 0; i < sizeB; i++)
+        B_double[i] = static_cast<double>(B[i]);
+    for(size_t i = 0; i < sizeC; i++)
+        C_double[i] = static_cast<double>(C[i]);
+
+    if(alphaVec != nullptr)
+    {
+        host_vector<double> T_double(sizeC);
+        memset(T_double, 0, sizeC);
+        cblas_dgemm(HIPOrderToCBLASOrder(order),
+                    HIPOperationToCBLASTanspose(transA),
+                    HIPOperationToCBLASTanspose(transB),
+                    m,
+                    n,
+                    k,
+                    static_cast<double>(1),
+                    A_double,
+                    lda,
+                    B_double,
+                    ldb,
+                    static_cast<double>(0),
+                    T_double,
+                    ldc);
+        for(int i = 0; i < m; i++)
+        {
+            for(int j = 0; j < n; j++)
+            {
+                size_t pos    = order == HIPSPARSE_ORDER_COL ? j * ldc + i : i * ldc + j;
+                C_double[pos] = T_double[pos] * static_cast<double>(alphaVec[i])
+                                + C_double[pos] * static_cast<double>(beta);
+            }
+        }
+    }
+    else
+    {
+        // just directly cast, since transA, transB are integers in the enum
+        cblas_dgemm(HIPOrderToCBLASOrder(order),
+                    HIPOperationToCBLASTanspose(transA),
+                    HIPOperationToCBLASTanspose(transB),
+                    m,
+                    n,
+                    k,
+                    alpha,
+                    A_double,
+                    lda,
+                    B_double,
+                    ldb,
+                    beta,
+                    C_double,
+                    ldc);
+    }
+
+    for(size_t i = 0; i < sizeC; i++)
+        C[i] = static_cast<float>(C_double[i]);
+}

@@ -31,6 +31,7 @@
 #include "rocsparselt_spmm_utils.hpp"
 #include "utility.hpp"
 
+#include <hip/hip_fp8.h>
 #include <hip/hip_runtime_api.h>
 
 template <typename Ti, int SG0I, int SG1J, int TT0I, int TT1J>
@@ -53,8 +54,12 @@ __global__ void compress_kernel(const Ti*      in,
                                 int64_t        c_sizes,
                                 int64_t        m_sizes)
 {
-    constexpr int metadata_tiles_y = 8;
-    constexpr int tiles_y          = 4;
+    constexpr int    metadata_tiles_y = 8;
+    constexpr int    tiles_y          = 4;
+
+    using c_type = std::conditional_t<std::is_same<__hip_fp8_e4m3, Ti>::value || std::is_same<__hip_fp8_e5m2, Ti>::value, float, Ti>;
+    const c_type ZERO_C = static_cast<c_type>(0.0f);
+    const Ti     ZERO   = static_cast<Ti>(0.0f);
 
     constexpr unsigned int MT0I = SG0I * TT0I;
     constexpr unsigned int MT1J = SG1J * TT1J;
@@ -96,10 +101,7 @@ __global__ void compress_kernel(const Ti*      in,
         {
             int64_t offset = globalReadOffset + i * stride1 + j * stride2;
 
-            Ti            values[] = {static_cast<Ti>(0.0f),
-                                      static_cast<Ti>(0.0f),
-                                      static_cast<Ti>(0.0f),
-                                      static_cast<Ti>(0.0f)};
+            Ti            values[] = {ZERO, ZERO, ZERO, ZERO};
             unsigned char md       = 0xEE;
 
             for(int t = 0; t < metadata_tiles_y / tiles_y; t++)
@@ -113,7 +115,7 @@ __global__ void compress_kernel(const Ti*      in,
                         break;
 
                     Ti value = in[pos];
-                    if(value != static_cast<Ti>(0.0f))
+                    if(static_cast<c_type>(value) != ZERO_C)
                     {
                         if(m_idx == 0 && k == 3)
                             m_idx++;
@@ -244,6 +246,14 @@ rocsparselt_status rocsparselt_smfmac_compress_impl(const _rocsparselt_handle*  
         return rocsparselt_smfmac_compress_template<hip_bfloat16>(COMPRESS_PARAMS(hip_bfloat16));
     case HIP_R_8I:
         return rocsparselt_smfmac_compress_template<int8_t>(COMPRESS_PARAMS(int8_t));
+#if HIP_FP8_TYPE_OCP
+    case HIP_R_8F_E4M3:
+        return rocsparselt_smfmac_compress_template<__hip_fp8_e4m3>(
+            COMPRESS_PARAMS(__hip_fp8_e4m3));
+    case HIP_R_8F_E5M2:
+        return rocsparselt_smfmac_compress_template<__hip_fp8_e5m2>(
+            COMPRESS_PARAMS(__hip_fp8_e5m2));
+#endif
     default:
         log_error(handle,
                   "rocsparselt_smfmac_compress",

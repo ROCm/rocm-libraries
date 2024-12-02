@@ -60,9 +60,9 @@ const char* hipDataType_to_string(hipDataType type)
         return "i8_r";
     case HIP_R_16BF:
         return "bf16_r";
-    case HIP_R_8F_E4M3_FNUZ:
+    case HIP_R_8F_E4M3:
         return "f8_r";
-    case HIP_R_8F_E5M2_FNUZ:
+    case HIP_R_8F_E5M2:
         return "bf8_r";
     default:
         return "Invalid";

@@ -86,6 +86,10 @@ template <>
 static constexpr char rocsparselt_precision_string<int32_t>[] = "i32_r";
 template <>
 static constexpr char rocsparselt_precision_string<uint32_t>[] = "u32_r";
+template <>
+static constexpr char rocsparselt_precision_string<__hip_fp8_e4m3>[] = "f8_r";
+template <>
+static constexpr char rocsparselt_precision_string<__hip_fp8_e5m2>[] = "bf8_r";
 
 std::string prefix(const char* layer, const char* caller);
 

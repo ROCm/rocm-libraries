@@ -56,7 +56,8 @@ namespace
         Tc,
         TBias,
         std::enable_if_t<std::is_same<Ti, __half>{} || std::is_same<Ti, hip_bfloat16>{}
-                         || std::is_same<Ti, int8_t>{}>> : hipsparselt_test_valid
+                         || std::is_same<Ti, int8_t>{} || std::is_same<Ti, __hip_fp8_e4m3>{}
+                         || std::is_same<Ti, __hip_fp8_e5m2>{}>> : hipsparselt_test_valid
     {
         void operator()(const Arguments& arg)
         {

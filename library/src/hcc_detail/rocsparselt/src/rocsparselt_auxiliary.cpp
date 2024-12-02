@@ -1322,6 +1322,20 @@ rocsparselt_status
                 status = findTopConfigs<int8_t, hip_bfloat16, float>(
                     _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
             }
+            else if(in_type == HIP_R_8F_E4M3 && out_type == HIP_R_32F
+                    && compute_type == rocsparselt_compute_f32)
+            {
+                // @TODO, implement the f8 soluction.
+                // assume we find one soluction
+                config_max_id = 1;
+            }
+            else if(in_type == HIP_R_8F_E5M2 && out_type == HIP_R_32F
+                    && compute_type == rocsparselt_compute_f32)
+            {
+                // @TODO, implement the f8 soluction.
+                // assume we find one soluction
+                config_max_id = 1;
+            }
             if(status != rocsparselt_status_success)
                 return status;
 #else
@@ -1728,5 +1742,11 @@ std::string rocsparselt_internal_get_arch_name()
     THROW_IF_HIP_ERROR(hipGetDevice(&deviceId));
     hipDeviceProp_t deviceProperties;
     THROW_IF_HIP_ERROR(hipGetDeviceProperties(&deviceProperties, deviceId));
+    return ArchName{}(deviceProperties);
+}
+
+//Get architecture name
+std::string rocsparselt_internal_get_arch_name(const hipDeviceProp_t& deviceProperties)
+{
     return ArchName{}(deviceProperties);
 }

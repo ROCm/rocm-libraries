@@ -103,7 +103,11 @@ void self_validate(T*             A,
 {
     // n1, n2, n3 are matrix dimensions, sometimes called m, n, batch_count
     // s1, s1, s3 are matrix strides, sometimes called 1, lda, stride_a
-    using c_type = std::conditional_t<std::is_same<__half, T>::value, float, T>;
+    using c_type = std::conditional_t<std::is_same<__half, T>::value
+                                          || std::is_same<__hip_fp8_e4m3, T>::value
+                                          || std::is_same<__hip_fp8_e5m2, T>::value,
+                                      float,
+                                      T>;
     for(int i3 = 0; i3 < m_n3; i3++)
     {
         for(int i1 = 0; i1 < m_n1; i1++)
@@ -172,7 +176,11 @@ void compress(const Ti*      in,
               int            num_batches)
 {
     constexpr int tiles_y = 8;
-    using c_type          = std::conditional_t<std::is_same<__half, Ti>::value, float, Ti>;
+    using c_type          = std::conditional_t<std::is_same<__half, Ti>::value
+                                          || std::is_same<__hip_fp8_e4m3, Ti>::value
+                                          || std::is_same<__hip_fp8_e5m2, Ti>::value,
+                                      float,
+                                      Ti>;
 
     for(int b = 0; b < num_batches; b++)
         for(int i = 0; i < m; i++)

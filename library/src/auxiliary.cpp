@@ -44,13 +44,8 @@ const hipDataType string_to_hip_datatype(const std::string& value)
         value == "f16_r" || value == "h" ? HIP_R_16F  :
         value == "bf16_r"                ? HIP_R_16BF  :
         value == "i8_r"                  ? HIP_R_8I   :
-#ifdef __HIP_PLATFORM_AMD__
-        value == "f8_r"                  ? HIP_R_8F_E4M3_FNUZ    :
-        value == "bf8_r"                 ? HIP_R_8F_E5M2_FNUZ    :
-#else
         value == "f8_r"                  ? HIP_R_8F_E4M3    :
-        value == "bf8_r"                 ? HIP_R_8F_E5M2   :
-#endif
+        value == "bf8_r"                 ? HIP_R_8F_E5M2    :
         static_cast<hipDataType>(-1);
 }
 

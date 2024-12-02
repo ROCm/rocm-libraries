@@ -32,6 +32,7 @@
 #include "utility.hpp"
 
 #include "hipsparselt_ostream.hpp"
+#include <hip/hip_fp8.h>
 #include <hip/hip_runtime_api.h>
 
 template <typename Ti, int SG0I, int SG1J, int TT0I, int TT1J>
@@ -47,6 +48,8 @@ __global__ void prune_check_kernel(const Ti* in,
 {
     constexpr unsigned int MT0I = SG0I * TT0I;
     constexpr unsigned int MT1J = SG1J * TT1J;
+    using c_type = std::conditional_t<std::is_same<__hip_fp8_e4m3, Ti>::value || std::is_same<__hip_fp8_e5m2, Ti>::value, float, Ti>;
+    const c_type ZERO_C = static_cast<c_type>(0.0f);
 
     unsigned int serial = hc_get_workitem_id(0);
     unsigned int sg0I   = serial % SG0I;
@@ -82,7 +85,7 @@ __global__ void prune_check_kernel(const Ti* in,
                 int64_t pos = globalReadOffset + offset + k * stride2;
                 if(pos < sizes)
                 {
-                    if(in[pos] != static_cast<Ti>(0.0))
+                    if(static_cast<c_type>(in[pos]) != ZERO_C)
                     {
                         nz++;
                     }
@@ -598,6 +601,14 @@ rocsparselt_status rocsparselt_smfmac_prune_impl(const _rocsparselt_handle*    h
         return rocsparselt_smfmac_prune_template<hip_bfloat16, float>(PRUNE_PARAMS(hip_bfloat16));
     case HIP_R_8I:
         return rocsparselt_smfmac_prune_template<int8_t, float>(PRUNE_PARAMS(int8_t));
+#if HIP_FP8_TYPE_OCP
+    case HIP_R_8F_E4M3:
+        return rocsparselt_smfmac_prune_template<__hip_fp8_e4m3, float>(
+            PRUNE_PARAMS(__hip_fp8_e4m3));
+    case HIP_R_8F_E5M2:
+        return rocsparselt_smfmac_prune_template<__hip_fp8_e5m2, float>(
+            PRUNE_PARAMS(__hip_fp8_e5m2));
+#endif
     default:
         log_error(handle,
                   "rocsparselt_smfmac_prune",
@@ -646,6 +657,14 @@ rocsparselt_status rocsparselt_smfmac_prune_check_impl(const _rocsparselt_handle
             PRUNE_CHECK_PARAMS(hip_bfloat16));
     case HIP_R_8I:
         return rocsparselt_smfmac_prune_check_template<int8_t>(PRUNE_CHECK_PARAMS(int8_t));
+#if HIP_FP8_TYPE_OCP
+    case HIP_R_8F_E4M3:
+        return rocsparselt_smfmac_prune_check_template<__hip_fp8_e4m3>(
+            PRUNE_CHECK_PARAMS(__hip_fp8_e4m3));
+    case HIP_R_8F_E5M2:
+        return rocsparselt_smfmac_prune_check_template<__hip_fp8_e5m2>(
+            PRUNE_CHECK_PARAMS(__hip_fp8_e5m2));
+#endif
     default:
         log_error(handle,
                   "rocsparselt_smfmac_prune_check",

@@ -115,6 +115,8 @@ inline int64_t rocsparselt_metadata_offset_in_compressed_matrix(int64_t     num_
             return 2;
         case HIP_R_8F_E4M3_FNUZ:
         case HIP_R_8F_E5M2_FNUZ:
+        case HIP_R_8F_E4M3:
+        case HIP_R_8F_E5M2:
         case HIP_R_8I:
             return 1;
         default:
@@ -211,6 +213,8 @@ inline rocsparselt_status validateMatrixArgs(const _rocsparselt_handle* handle,
     case HIP_R_8I:
     case HIP_R_8F_E4M3_FNUZ:
     case HIP_R_8F_E5M2_FNUZ:
+    case HIP_R_8F_E4M3:
+    case HIP_R_8F_E5M2:
         num_elements = 16;
         break;
     default:
@@ -255,10 +259,17 @@ inline rocsparselt_status validateMatrixArgs(const _rocsparselt_handle* handle,
     //TODO should support other datatype in the future.
     switch(valueType)
     {
+    case HIP_R_32F:
     case HIP_R_16F:
     case HIP_R_16BF:
     case HIP_R_8I:
         break;
+#if HIP_FP8_TYPE_OCP
+    case HIP_R_8F_E4M3:
+    case HIP_R_8F_E5M2:
+        if(handle->has_fp8_ocp)
+            break;
+#endif
     default:
         hipsparselt_cerr << "datatype (" << hipDataType_to_string(valueType) << ") is not supported"
                          << std::endl;
@@ -355,6 +366,8 @@ inline rocsparselt_status validateMatmulDescrArgs(const _rocsparselt_handle* han
         }
     case HIP_R_8F_E4M3_FNUZ:
     case HIP_R_8F_E5M2_FNUZ:
+    case HIP_R_8F_E4M3:
+    case HIP_R_8F_E5M2:
         if(compute_type != rocsparselt_compute_f32)
         {
             log_error(handle, __func__, "computType must be f32");

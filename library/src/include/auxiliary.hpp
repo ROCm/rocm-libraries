@@ -146,14 +146,8 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "bf16_r";
     case HIP_R_8I:
         return "i8_r";
-#ifdef __HIP_PLATFORM_AMD__
-    case HIP_R_8F_E4M3_FNUZ:
-#endif
     case HIP_R_8F_E4M3:
         return "f8_r";
-#ifdef __HIP_PLATFORM_AMD__
-    case HIP_R_8F_E5M2_FNUZ:
-#endif
     case HIP_R_8F_E5M2:
         return "bf8_r";
     default:
@@ -234,6 +228,15 @@ __host__ __device__ inline bool hipsparselt_isnan(__nv_bfloat16 arg)
 }
 #endif
 
+__host__ __device__ inline bool hipsparselt_isnan(__hip_fp8_e4m3 arg)
+{
+    return internal::hip_fp8_ocp_is_nan(arg, __HIP_E4M3);
+}
+
+__host__ __device__ inline bool hipsparselt_isnan(__hip_fp8_e5m2 arg)
+{
+    return internal::hip_fp8_ocp_is_nan(arg, __HIP_E5M2);
+}
 /*******************************************************************************
 * \brief  returns true if arg is Infinity
 ********************************************************************************/

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -73,4 +73,16 @@ inline hip_bfloat16 negate(hip_bfloat16 x)
     raw.x ^= 0x8000;
     return raw;
 #endif
+}
+
+template <>
+inline __hip_fp8_e4m3 negate(__hip_fp8_e4m3 x)
+{
+    return x.__x & 0xA0;
+}
+
+template <>
+inline __hip_fp8_e5m2 negate(__hip_fp8_e5m2 x)
+{
+    return x.__x & 0xA0;
 }

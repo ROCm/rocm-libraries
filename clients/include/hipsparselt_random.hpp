@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -122,6 +122,17 @@ public:
     explicit operator hip_bfloat16()
     {
         return random_nan_data<hip_bfloat16, uint16_t, 7, 8>();
+    }
+
+    // Random NaN bfloat16
+    explicit operator __hip_fp8_e4m3()
+    {
+        return __hip_fp8_e4m3(random_nan_data<float, uint32_t, 7, 8>());
+    }
+    // Random NaN bfloat16
+    explicit operator __hip_fp8_e5m2()
+    {
+        return __hip_fp8_e5m2(random_nan_data<float, uint32_t, 7, 8>());
     }
 };
 
@@ -276,6 +287,20 @@ template <typename T>
 inline T random_hpl_generator()
 {
     return std::uniform_real_distribution<double>(-0.5, 0.5)(t_hipsparselt_rng);
+}
+
+/*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
+template <>
+inline __hip_fp8_e4m3 random_hpl_generator()
+{
+    return __hip_fp8_e4m3(std::uniform_real_distribution<float>(-0.5, 0.5)(t_hipsparselt_rng));
+}
+
+/*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
+template <>
+inline __hip_fp8_e5m2 random_hpl_generator()
+{
+    return __hip_fp8_e5m2(std::uniform_real_distribution<float>(-0.5, 0.5)(t_hipsparselt_rng));
 }
 
 /*! \brief  generate a random number in [-1.0,1.0] doubles  */

@@ -60,6 +60,8 @@ struct _rocsparselt_handle
     // asic revision
     int asic_rev;
 
+    bool has_fp8_ocp = false;
+
     // pointer mode ; default mode is host
     rocsparselt_pointer_mode pointer_mode = rocsparselt_pointer_mode_host;
     // logging mode

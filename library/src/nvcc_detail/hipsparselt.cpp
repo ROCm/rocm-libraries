@@ -152,6 +152,12 @@ cudaDataType HIPDatatypeToCuSparseLtDatatype(hipDataType type)
     case HIP_R_8I:
         return CUDA_R_8I;
 
+    case HIP_R_8F_E4M3:
+        return CUDA_R_8F_E4M3;
+
+    case HIP_R_8F_E5M2:
+        return CUDA_R_8F_E5M2;
+
     default:
         throw HIPSPARSE_STATUS_NOT_SUPPORTED;
     }
@@ -172,6 +178,12 @@ hipDataType CuSparseLtDatatypeToHIPDatatype(cudaDataType type)
 
     case CUDA_R_8I:
         return HIP_R_8I;
+
+    case CUDA_R_8F_E4M3:
+        return HIP_R_8F_E4M3;
+
+    case CUDA_R_8F_E5M2:
+        return HIP_R_8F_E5M2;
 
     default:
         throw HIPSPARSE_STATUS_NOT_SUPPORTED;
