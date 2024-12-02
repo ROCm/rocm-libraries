@@ -49,8 +49,12 @@
 // expensive to include. The APIs use only pointers, so we do not have to define
 // the types. If the user wants to use these types, it is their responsibility
 // to include the headers.
+#ifdef _LIBCUDACXX_HAS_NVF16
 struct __half;
+#endif // _LIBCUDACXX_HAS_NVF16
+#ifdef _LIBCUDACXX_HAS_NVBF16
 struct __hip_bfloat16;
+#endif // _LIBCUDACXX_HAS_NVBF16
 
 _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_PTX
 
