@@ -39,7 +39,7 @@ THE SOFTWARE.
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <cuda/std/atomic>
+#include <cuda/atomic>
 #include <cuda/std/cstddef>
 #include <cuda/std/cstdint>
 
