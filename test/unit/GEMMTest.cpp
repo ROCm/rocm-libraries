@@ -772,11 +772,13 @@ namespace GEMMDriverTest
         gemm.macN             = 256;
         gemm.loadLDSA         = true;
         gemm.loadLDSB         = true;
+        gemm.storeLDSD        = true;
         gemm.prefetchInFlight = 1;
         auto maxLDS = m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize);
-        auto ldsA   = gemm.loadLDSA ? (gemm.macM * gemm.macK * 4 * gemm.prefetchInFlight) : 0;
-        auto ldsB   = gemm.loadLDSB ? (gemm.macK * gemm.macN * 4 * gemm.prefetchInFlight) : 0;
-        auto ldsD   = gemm.storeLDSD ? (gemm.waveM * gemm.waveN * 4) : 0;
+        auto bytesPerElement = sizeof(float);
+        auto ldsA            = gemm.macM * gemm.macK * bytesPerElement * gemm.prefetchInFlight;
+        auto ldsB            = gemm.macK * gemm.macN * bytesPerElement * gemm.prefetchInFlight;
+        auto ldsD            = gemm.waveM * gemm.waveN * bytesPerElement;
 
         if(ldsA + ldsB + ldsD <= maxLDS)
         {

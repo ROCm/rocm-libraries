@@ -174,7 +174,7 @@ namespace multipleLDSAllocTest
         int m_numBytes1, m_numLoads1, m_numBytes2, m_numLoads2, m_numBytes3, m_numLoads3;
     };
 
-    TEST_CASE("Assemble multiple lds allocation test", "[multipleLDSAlloc][largerLDS][codegen]")
+    TEST_CASE("Assemble multiple lds allocation test", "[lds][codegen]")
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
@@ -192,7 +192,7 @@ namespace multipleLDSAllocTest
         }
     }
 
-    TEST_CASE("Run multiple lds allocation test", "[multipleLDSAlloc][largerLDS][gpu]")
+    TEST_CASE("Run multiple lds allocation test", "[lds][gpu]")
     {
         auto       context   = TestContext::ForTestDevice();
         const auto numBytes1 = 256;
