@@ -8,9 +8,10 @@
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
-#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
+
 #include <common/GEMMProblem.hpp>
+#include <common/TensorDescriptor.hpp>
 
 using namespace rocRoller;
 

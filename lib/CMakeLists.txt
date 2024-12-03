@@ -128,6 +128,7 @@ set(rocroller_src
  source/KernelGraph/Transformations/AddDeallocate.cpp
  source/KernelGraph/Transformations/AddLDS.cpp
  source/KernelGraph/Transformations/AddStreamK.cpp
+ source/KernelGraph/Transformations/AddPRNG.cpp
  source/KernelGraph/Transformations/CleanArguments.cpp
  source/KernelGraph/Transformations/CleanLoops.cpp
  source/KernelGraph/Transformations/ConnectWorkgroups.cpp

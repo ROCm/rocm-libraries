@@ -20,9 +20,9 @@
 
 #include "GPUContextFixture.hpp"
 #include "SourceMatcher.hpp"
-#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 #include <common/GEMMProblem.hpp>
+#include <common/TensorDescriptor.hpp>
 #include <common/mxDataGen.hpp>
 
 namespace GEMMDriverTest

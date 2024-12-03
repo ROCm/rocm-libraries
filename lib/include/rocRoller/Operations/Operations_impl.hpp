@@ -97,6 +97,11 @@ namespace rocRoller
             return {};
         }
 
+        inline std::unordered_set<OperationTag> Inputs::operator()(RandomNumberGenerator const& rng)
+        {
+            return rng.getInputs();
+        }
+
         inline std::unordered_set<OperationTag> Outputs::call(Operation const& op)
         {
             return std::visit(*this, op);
@@ -180,6 +185,12 @@ namespace rocRoller
         inline std::unordered_set<OperationTag> Outputs::operator()(Nop const& exec)
         {
             return {};
+        }
+
+        inline std::unordered_set<OperationTag>
+            Outputs::operator()(RandomNumberGenerator const& rng)
+        {
+            return {rng.getTag()};
         }
 
         inline OperationTag TagVisitor::call(XOp const& op)
@@ -335,6 +346,18 @@ namespace rocRoller
             return {};
         }
 
+        inline std::unordered_set<OperationTag>
+            AssignOutputs::operator()(RandomNumberGenerator& rng)
+        {
+            if(rng.getTag().uninitialized())
+            {
+                rng.setTag(m_nextTagValue);
+                m_nextTagValue++;
+            }
+
+            return {rng.getTag()};
+        }
+
         inline std::unordered_set<OperationTag> AssignOutputs::call(XOp&         op,
                                                                     OperationTag nextTagValue)
         {
@@ -463,6 +486,11 @@ namespace rocRoller
             return "";
         }
 
+        inline std::string ToStringVisitor::operator()(RandomNumberGenerator const& rng)
+        {
+            return rng.toString();
+        }
+
         inline SetCommand::SetCommand(CommandPtr com)
             : command(com)
         {
@@ -530,6 +558,11 @@ namespace rocRoller
 
         inline void SetCommand::operator()(Nop& exec) {}
 
+        inline void SetCommand::operator()(RandomNumberGenerator& rng)
+        {
+            rng.setCommand(command);
+        }
+
         inline void AllocateArguments::call(Operation& op)
         {
             return std::visit(*this, op);
@@ -564,6 +597,8 @@ namespace rocRoller
         inline void AllocateArguments::operator()(T_Execute& exec) {}
 
         inline void AllocateArguments::operator()(Nop& nop) {}
+
+        inline void AllocateArguments::operator()(RandomNumberGenerator& rng) {}
 
         inline rocRoller::VariableType
             rocRoller::Operations::VariableTypeVisitor::call(Operation& op)
@@ -639,6 +674,12 @@ namespace rocRoller
 
         inline rocRoller::VariableType
             rocRoller::Operations::VariableTypeVisitor::operator()(Nop& nop)
+        {
+            return {rocRoller::DataType::None};
+        }
+
+        inline rocRoller::VariableType
+            rocRoller::Operations::VariableTypeVisitor::operator()(RandomNumberGenerator&)
         {
             return {rocRoller::DataType::None};
         }

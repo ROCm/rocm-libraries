@@ -10,6 +10,7 @@
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
+#include <rocRoller/Operations/RandomNumberGenerator.hpp>
 #include <rocRoller/Operations/T_Execute_fwd.hpp>
 #include <rocRoller/Operations/T_LoadStore.hpp>
 #include <rocRoller/Operations/T_Mul.hpp>
@@ -43,6 +44,7 @@ namespace rocRoller
             std::unordered_set<OperationTag> operator()(T_Store_Linear const&);
             std::unordered_set<OperationTag> operator()(T_Store_Tiled const&);
             std::unordered_set<OperationTag> operator()(T_Execute const&);
+            std::unordered_set<OperationTag> operator()(RandomNumberGenerator const&);
 
             std::unordered_set<OperationTag> call(XOp const&);
             std::unordered_set<OperationTag> operator()(E_Unary const&);
@@ -66,6 +68,7 @@ namespace rocRoller
             std::unordered_set<OperationTag> operator()(T_Store_Linear const&);
             std::unordered_set<OperationTag> operator()(T_Store_Tiled const&);
             std::unordered_set<OperationTag> operator()(T_Execute const&);
+            std::unordered_set<OperationTag> operator()(RandomNumberGenerator const&);
 
             std::unordered_set<OperationTag> call(XOp const&);
             std::unordered_set<OperationTag> operator()(E_Unary const&);
@@ -97,6 +100,7 @@ namespace rocRoller
             std::unordered_set<OperationTag> operator()(T_Store_Linear&);
             std::unordered_set<OperationTag> operator()(T_Store_Tiled&);
             std::unordered_set<OperationTag> operator()(T_Execute&);
+            std::unordered_set<OperationTag> operator()(RandomNumberGenerator&);
 
             std::unordered_set<OperationTag> call(XOp&, OperationTag);
             std::unordered_set<OperationTag> operator()(E_Unary&);
@@ -123,6 +127,7 @@ namespace rocRoller
             std::string operator()(T_Store_Linear const&);
             std::string operator()(T_Store_Tiled const&);
             std::string operator()(T_Execute const&);
+            std::string operator()(RandomNumberGenerator const&);
 
             std::string call(XOp const&);
             std::string operator()(E_Unary const&);
@@ -152,6 +157,7 @@ namespace rocRoller
             void operator()(T_Store_Tiled&);
             void operator()(T_Execute&);
             void operator()(Nop&);
+            void operator()(RandomNumberGenerator&);
 
             CommandPtr command;
         };
@@ -172,6 +178,7 @@ namespace rocRoller
             void operator()(T_Store_Tiled&);
             void operator()(T_Execute&);
             void operator()(Nop&);
+            void operator()(RandomNumberGenerator&);
         };
 
         struct VariableTypeVisitor
@@ -190,6 +197,7 @@ namespace rocRoller
             rocRoller::VariableType operator()(T_Store_Tiled&);
             rocRoller::VariableType operator()(T_Execute&);
             rocRoller::VariableType operator()(Nop&);
+            rocRoller::VariableType operator()(RandomNumberGenerator&);
         };
 
     }

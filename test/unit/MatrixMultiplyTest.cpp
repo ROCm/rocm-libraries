@@ -16,8 +16,8 @@
 
 #include "GPUContextFixture.hpp"
 #include "SourceMatcher.hpp"
-#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
+#include <common/TensorDescriptor.hpp>
 #include <common/mxDataGen.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 

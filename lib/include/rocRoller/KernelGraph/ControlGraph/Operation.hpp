@@ -321,6 +321,11 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(NOP);
 
         /**
+         * Block - similar to NOP but Block locks the scheduler
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(Block);
+
+        /**
          * StoreLinear - Store linear dimension.
          */
         RR_EMPTY_STRUCT_WITH_NAME(StoreLinear);
@@ -399,6 +404,21 @@ namespace rocRoller
          * Store tile -> WaitZero -> Store sync flags
          */
         RR_EMPTY_STRUCT_WITH_NAME(WaitZero);
+
+        /**
+         * SeedPRNG - Set the initial seed value of a random number generator
+         */
+        struct SeedPRNG
+        {
+            SeedPRNG();
+            SeedPRNG(bool addTID);
+            std::string toString() const;
+
+            std::string name() const;
+
+            // Add workitem ID to the seed if this flag is true
+            bool addTID = false;
+        };
 
         template <CConcreteOperation Op>
         std::string name(const Op& x);

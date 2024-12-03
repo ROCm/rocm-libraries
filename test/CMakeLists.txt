@@ -207,6 +207,7 @@ set(
   catch/TestContextTest.cpp
   catch/UnrollLoopsTest.cpp
   catch/UtilsTest.cpp
+  catch/RandomNumberGenerationTest.cpp
   catch/mxDataGeneratorTest.cpp
 )
 

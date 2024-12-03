@@ -57,6 +57,7 @@ namespace rocRoller
         MAKE_UNARY_XOP(E_Neg)
         MAKE_UNARY_XOP(E_Abs)
         MAKE_UNARY_XOP(E_Not)
+        MAKE_UNARY_XOP(E_RandomNumber)
 
         struct E_Cvt : public E_Unary
         {

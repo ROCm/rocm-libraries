@@ -486,6 +486,18 @@ namespace rocRoller
                                     Throw<FatalError>("T_Execute E_Cvt type not implemented yet.");
                                 }
                             },
+                            [&](Operations::E_RandomNumber const& op) -> Expression::ExpressionPtr {
+                                // In kernel graph transformation (AddPRNG), a new Assign op will
+                                // be inserted before each E_RandomNumber to generate and store a new
+                                // random number in the seed VGPR. So, here E_RandomNumber just gets
+                                // the generated random number from input (seed VGPR). To ensure a
+                                // VGPR will be allocated for the output of E_RandomNumber, the data
+                                // type of the input must be set to UInt32 instead of None.
+                                auto& dataFlowTag
+                                    = std::get<rocRoller::Expression::DataFlowTag>(*dflow[0]);
+                                dataFlowTag.varType.dataType = DataType::UInt32;
+                                return dflow[0];
+                            },
                             [&](Operations::E_StochasticRoundingCvt const& op)
                                 -> Expression::ExpressionPtr {
                                 // Stochastic conversion
@@ -501,7 +513,6 @@ namespace rocRoller
                                     Throw<FatalError>("Not implemented yet.");
                                 }
                             },
-
                             [&](Operations::E_Add const& op) -> Expression::ExpressionPtr {
                                 return std::make_shared<Expression::Expression>(
                                     Expression::Add{dflow[0], dflow[1]});
@@ -551,6 +562,35 @@ namespace rocRoller
                     Operations::TagVisitor tagVisitor;
                     m_op.insert_or_assign(tagVisitor.call(*xop), op);
                 }
+            }
+
+            void operator()(Operations::RandomNumberGenerator const& rng)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::TranslateVisitor::RandomNumberGenerator");
+
+                // Coordinate Graph
+                auto& coordinates = m_graph.coordinates;
+
+                auto seedVGPR = coordinates.addElement(VGPR(rng.getTag()));
+                m_dim.insert_or_assign(rng.getTag(), seedVGPR);
+                AssertFatal(m_dim.contains(rng.seed),
+                            "A seed should be provided to be the initial seed value of random "
+                            "number generator");
+                coordinates.addElement(DataFlow(), {m_dim.at(rng.seed)}, {seedVGPR});
+
+                // Control Graph
+                auto& control = m_graph.control;
+
+                bool const addTID
+                    = rng.getSeedMode() == Operations::RandomNumberGenerator::SeedMode::PerThread;
+                auto seedPRNG = control.addElement(SeedPRNG{addTID});
+                m_op.insert_or_assign(rng.getTag(), seedPRNG);
+                control.addElement(Sequence(), {m_op.at(rng.seed)}, {seedPRNG});
+
+                // Associate SeedPRNG op with seed VGPR (DEST) and the user-given seed value (RHS)
+                m_graph.mapper.connect(seedPRNG, seedVGPR, NaryArgument::DEST);
+                m_graph.mapper.connect(seedPRNG, m_dim.at(rng.seed), NaryArgument::RHS);
             }
 
             /**

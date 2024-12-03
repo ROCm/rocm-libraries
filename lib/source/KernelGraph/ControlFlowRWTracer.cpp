@@ -349,6 +349,15 @@ namespace rocRoller::KernelGraph
         trackConnections(tag, {dst}, ReadWrite::READ);
     }
 
+    void ControlFlowRWTracer::operator()(SeedPRNG const& op, int tag)
+    {
+        // Tracking read/write from/to the VGPR that stores the seed of random number generator
+        // This VGPR should be deallocated by tracer when it is no longer being used.
+        auto seedVGPR = m_graph.mapper.get(tag, NaryArgument::DEST);
+        trackRegister(tag, seedVGPR, ReadWrite::WRITE);
+        trackConnections(tag, {seedVGPR}, ReadWrite::READ);
+    }
+
     void ControlFlowRWTracer::operator()(LoadTiled const& op, int tag)
     {
 
@@ -388,6 +397,16 @@ namespace rocRoller::KernelGraph
     }
 
     void ControlFlowRWTracer::operator()(NOP const& op, int tag)
+    {
+        auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
+        for(auto const& b : body)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
+        generate(body);
+    }
+
+    void ControlFlowRWTracer::operator()(Block const& op, int tag)
     {
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
         for(auto const& b : body)

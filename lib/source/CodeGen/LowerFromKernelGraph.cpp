@@ -817,6 +817,16 @@ namespace rocRoller
                 co_yield generate(body, coords);
             }
 
+            Generator<Instruction> operator()(int tag, Block const& op, Transformer coords)
+            {
+                co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Block");
+
+                auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+                co_yield generate(body, coords);
+
+                co_yield Instruction::Unlock("Unlock Block");
+            }
+
             Generator<Instruction>
                 operator()(int tag, TensorContraction const& mul, Transformer coords)
             {
@@ -916,6 +926,32 @@ namespace rocRoller
             {
                 co_yield Instruction::Wait(WaitCount::Zero("Explicit WaitZero operation",
                                                            m_context->targetArchitecture()));
+            }
+
+            Generator<Instruction> operator()(int tag, SeedPRNG const& seedPRNG, Transformer coords)
+            {
+                co_yield Instruction::Comment("GEN: SeedPRNG");
+
+                auto seedTag     = m_graph->mapper.get(tag, NaryArgument::DEST);
+                auto userSeedTag = m_graph->mapper.get(tag, NaryArgument::RHS);
+
+                // Allocate a register as SeedVGPR
+                auto seedReg = m_context->registerTagManager()->getRegister(
+                    seedTag, Register::Type::Vector, DataType::UInt32);
+                auto userSeedVGPR = m_context->registerTagManager()->getRegister(userSeedTag);
+
+                auto seedExpr = userSeedVGPR->expression();
+
+                if(seedPRNG.addTID)
+                {
+                    // Generate an expression of TID and add it to the seed
+                    auto tidTag  = m_graph->mapper.get(tag, NaryArgument::LHS);
+                    auto indexes = coords.forward({tidTag});
+                    seedExpr     = seedExpr + indexes[0];
+                }
+
+                // Set the initial seed value
+                co_yield Expression::generate(seedReg, seedExpr, m_context);
             }
 
         private:

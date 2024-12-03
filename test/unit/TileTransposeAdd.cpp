@@ -5,6 +5,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -12,9 +13,8 @@
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include "GPUContextFixture.hpp"
-#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
-#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <common/TensorDescriptor.hpp>
 
 using namespace rocRoller;
 

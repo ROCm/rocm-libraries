@@ -41,6 +41,11 @@ namespace rocRoller::KernelGraph::ControlGraph
         return concatenate(name(), " ", regType, " ", expression);
     }
 
+    std::string SeedPRNG::toString() const
+    {
+        return concatenate(name(), " ", addTID);
+    }
+
     ComputeIndex::ComputeIndex() = default;
     ComputeIndex::ComputeIndex(bool     forward,
                                DataType valueType,
@@ -106,6 +111,12 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
     }
 
+    SeedPRNG::SeedPRNG() = default;
+    SeedPRNG::SeedPRNG(bool addTID)
+        : addTID(addTID)
+    {
+    }
+
     TensorContraction::TensorContraction() = default;
     TensorContraction::TensorContraction(std::vector<int> const& aContractedDimensions,
                                          std::vector<int> const& bContractedDimensions)
@@ -130,6 +141,7 @@ namespace rocRoller::KernelGraph::ControlGraph
     RR_CLASS_NAME_IMPL(StoreTiled);
     RR_CLASS_NAME_IMPL(StoreSGPR);
     RR_CLASS_NAME_IMPL(StoreLDSTile);
+    RR_CLASS_NAME_IMPL(SeedPRNG);
     RR_CLASS_NAME_IMPL(TensorContraction);
 
 }

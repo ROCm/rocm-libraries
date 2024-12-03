@@ -197,6 +197,30 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::ControlGraph::SeedPRNG, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, KernelGraph::ControlGraph::SeedPRNG& op, Context&)
+            {
+                iot::mapRequired(io, "addTID", op.addTID);
+
+                std::string addTIDStr;
+                if(iot::outputting(io))
+                    addTIDStr = toString(op.addTID);
+
+                iot::mapRequired(io, "addTIDStr", addTIDStr);
+            }
+
+            static void mapping(IO& io, KernelGraph::ControlGraph::SeedPRNG& op)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, op, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::ControlGraph::Assign, IO, Context>
         {
             using iot = IOTraits<IO>;

@@ -21,6 +21,7 @@ namespace rocRoller
         struct T_Store_Tiled;
         struct T_Execute;
         struct Nop;
+        struct RandomNumberGenerator;
         using Operation = std::variant<Tensor,
                                        Scalar,
                                        Literal,
@@ -32,7 +33,8 @@ namespace rocRoller
                                        T_Store_Linear,
                                        T_Store_Tiled,
                                        T_Execute,
-                                       Nop>;
+                                       Nop,
+                                       RandomNumberGenerator>;
 
         template <typename T>
         concept COperation = std::constructible_from<Operation, T>;
