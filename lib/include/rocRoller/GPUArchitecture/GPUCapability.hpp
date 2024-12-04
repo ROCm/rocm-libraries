@@ -27,6 +27,7 @@ namespace rocRoller
             HasExplicitNC,
 
             HasDirectToLds,
+            HasWiderDirectToLds,
             HasAddLshl,
             HasLshlOr,
             HasSMulHi,

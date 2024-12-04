@@ -30,6 +30,8 @@ namespace GPUArchitectureGenerator
             {rocRoller::GPUCapability::HasExplicitNC, {"v_add_nc_u32 v0,v0,1", ""}},
             {rocRoller::GPUCapability::HasDirectToLds,
              {"buffer_load_dword v0, s[0:3], 0 offen offset:0 lds", ""}},
+            {rocRoller::GPUCapability::HasWiderDirectToLds,
+             {"buffer_load_dwordx4 v0, s[8:11], 0 offen offset: 0 lds", ""}},
             {rocRoller::GPUCapability::HasAddLshl, {"v_add_lshl_u32 v47, v36, v34, 0x2", ""}},
             {rocRoller::GPUCapability::HasLshlOr, {"v_lshl_or_b32 v47, v36, 0x2, v34", ""}},
             {rocRoller::GPUCapability::HasSMulHi, {"s_mul_hi_u32 s47, s36, s34", ""}},

@@ -39,6 +39,7 @@ namespace rocRoller
             {"HasExplicitNC", Value::HasExplicitNC},
 
             {"HasDirectToLds", Value::HasDirectToLds},
+            {"HasWiderDirectToLds", Value::HasWiderDirectToLds},
             {"HasAddLshl", Value::HasAddLshl},
             {"HasLshlOr", Value::HasLshlOr},
             {"HasSMulHi", Value::HasSMulHi},

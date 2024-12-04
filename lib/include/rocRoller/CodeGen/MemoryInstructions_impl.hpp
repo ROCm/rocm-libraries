@@ -720,7 +720,7 @@ namespace rocRoller
             auto constantOffset = (offset <= 64) ? offset : 0;
             if(offset > 64)
             {
-                auto sOffset  = (offset <= 64 + m_wordSize) ? offset : stride;
+                auto sOffset  = (offset <= 64 + stride) ? offset : stride;
                 auto readAddr = data;
                 data          = nullptr;
                 co_yield generate(data, readAddr->expression() + Expression::literal(sOffset), ctx);
@@ -744,7 +744,15 @@ namespace rocRoller
             else
             {
                 opEnd += "dword";
-                stride = m_wordSize;
+                auto width = 1;
+                if(ctx->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))
+                {
+                    width = chooseWidth(
+                        remain / m_wordSize, {4, 3, 1}, ctx->kernelOptions().loadGlobalWidth);
+                }
+                auto widthStr = (width == 1) ? "" : "x" + std::to_string(width);
+                opEnd += widthStr;
+                stride = m_wordSize * width;
             }
 
             co_yield_(Instruction("buffer_load_" + opEnd,
