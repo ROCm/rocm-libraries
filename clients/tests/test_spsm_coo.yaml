@@ -274,7 +274,7 @@ Tests:
   spsm_alg: [rocsparse_spsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron3]
-  skip_hardware: gfx1151
+  skip_hardware: gfx1151, gfx1101
   req_memory: 12
 
 - name: spsm_coo_file
