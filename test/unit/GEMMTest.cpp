@@ -1722,6 +1722,111 @@ namespace GEMMDriverTest
         check_GEMMF8_TN(m_context);
     }
 
+    void check_mfma_f8f6f4(rocRoller::ContextPtr m_context,
+                           std::string           f8f6f4_inst,
+                           std::string           modifier)
+    {
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        {
+            auto generatedCode = m_context->instructions()->toString();
+
+            auto mfma_count     = countSubstring(generatedCode, "v_mfma_");
+            auto f8f6f4_count   = countSubstring(generatedCode, f8f6f4_inst);
+            auto modifier_count = countSubstring(generatedCode, modifier);
+
+            // All mfma instructions should be f8f6f4
+            EXPECT_EQ(mfma_count, f8f6f4_count);
+            // All f8f6f4 instructions should use 0b100 (FP4) as input matrix format
+            EXPECT_EQ(f8f6f4_count, modifier_count);
+        }
+    }
+
+    TEST_P(GEMMF8F6F4TestGPU, GPU_DwordScaledGEMMMXF8F6F4)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto gemm = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        std::tie(gemm.transA, gemm.transB) = transOp;
+
+        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.macM = 128;
+        gemm.macN = 128;
+        gemm.macK = (typeAB != rocRoller::DataType::FP4) ? 256 : 512;
+        gemm.m    = 2 * gemm.macM;
+        gemm.n    = 3 * gemm.macN;
+        gemm.k    = 4 * gemm.macK;
+
+        gemm.loadLDSA      = true;
+        gemm.loadLDSB      = true;
+        gemm.loadLDSScaleA = true;
+        gemm.loadLDSScaleB = true;
+
+        std::string modifiers{"cbsz:0b000 blgp:0b000"};
+
+        switch(typeAB)
+        {
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(gemm);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(gemm);
+            modifiers = "cbsz:0b001 blgp:0b001";
+            break;
+        case DataType::FP6:
+            basicGEMM<FP6, FP6, float>(gemm);
+            modifiers = "cbsz:0b010 blgp:0b010";
+            break;
+        case DataType::BF6:
+            basicGEMM<BF6, BF6, float>(gemm);
+            modifiers = "cbsz:0b011 blgp:0b011";
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(gemm);
+            modifiers = "cbsz:0b100 blgp:0b100";
+            break;
+        default:
+            Throw<FatalError>(
+                std::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
+        }
+
+        auto const mfma{std::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
+        check_mfma_f8f6f4(m_context, mfma, modifiers);
+
+        uint const totalWorkitems = gemm.workgroupSizeX * gemm.workgroupSizeY;
+        // Example A:256x128 => scaleA:256x4 => 1024 values/256 workitems => 4 values per workitem
+        uint const numABScaleLoadStorePerWorkitem = (gemm.macM * (gemm.macK / 32)) / totalWorkitems;
+        AssertFatal(
+            numABScaleLoadStorePerWorkitem % 4 == 0,
+            "long dword instructions require multiple of 4 scale(8-bit) values per workitem");
+
+        std::string bufferLoad{"buffer_load_dword "};
+        std::string dsWrite{"ds_write_b32"};
+        uint const  factor = numABScaleLoadStorePerWorkitem / 4;
+        AssertFatal(factor > 0 && factor <= 2,
+                    "For the given macrotile, dword factor can't be greater than 2");
+        if(factor == 2)
+        {
+            bufferLoad = "buffer_load_dwordx2 ";
+            dsWrite    = "ds_write_b64";
+        }
+
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, bufferLoad), 2);
+        EXPECT_EQ(countSubstring(generatedCode, dsWrite), 2);
+    }
+
     TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMMF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
@@ -2292,25 +2397,6 @@ namespace GEMMDriverTest
         gemm.storeLDSD = true;
 
         basicGEMM<Half>(gemm);
-    }
-
-    void check_mfma_f8f6f4(rocRoller::ContextPtr m_context,
-                           std::string           f8f6f4_inst,
-                           std::string           modifier)
-    {
-        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
-        {
-            auto generatedCode = m_context->instructions()->toString();
-
-            auto mfma_count     = countSubstring(generatedCode, "v_mfma_");
-            auto f8f6f4_count   = countSubstring(generatedCode, f8f6f4_inst);
-            auto modifier_count = countSubstring(generatedCode, modifier);
-
-            // All mfma instructions should be f8f6f4
-            EXPECT_EQ(mfma_count, f8f6f4_count);
-            // All f8f6f4 instructions should use 0b100 (FP4) as input matrix format
-            EXPECT_EQ(f8f6f4_count, modifier_count);
-        }
     }
 
     TEST_P(MixedGEMMF8F6F4TestGPU, GPU_MixedBasicGEMMF8F6F4)
