@@ -20,10 +20,11 @@ namespace rocRoller
             {
                 Default, //< Use original value
                 PerThread, //< Thread (workitem) ID will be added to seed
+                Count
             };
 
             RandomNumberGenerator() = delete;
-            RandomNumberGenerator(OperationTag seed);
+            explicit RandomNumberGenerator(OperationTag seed);
             RandomNumberGenerator(OperationTag seed, SeedMode mode);
 
             std::unordered_set<OperationTag> getInputs() const;
@@ -32,8 +33,11 @@ namespace rocRoller
 
             OperationTag seed;
             SeedMode     mode;
+
+            bool operator==(RandomNumberGenerator const&) const;
         };
+
+        std::string   toString(RandomNumberGenerator::SeedMode const&);
+        std::ostream& operator<<(std::ostream& stream, RandomNumberGenerator::SeedMode mode);
     }
 }
-
-#include "RandomNumberGenerator_impl.hpp"

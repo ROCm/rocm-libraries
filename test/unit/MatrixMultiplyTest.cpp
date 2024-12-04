@@ -170,10 +170,6 @@ namespace MatrixMultiplyTest
             commandKernel->setCommandParameters(params);
             commandKernel->generateKernel();
 
-            auto launch = std::make_shared<CommandLaunchParameters>();
-            launch->setManualWorkitemCount({NX, NY, NZ});
-            commandKernel->setLaunchParameters(launch);
-
             if(isLocalDevice())
             {
                 commandKernel->launchKernel(commandArgs.runtimeArguments());
@@ -290,15 +286,11 @@ namespace MatrixMultiplyTest
             params->setDimensionInfo(tagLoadB, macTileB);
             params->setManualWavefrontCount({2u, 2u});
 
-            auto launch = std::make_shared<CommandLaunchParameters>();
-            launch->setManualWorkitemCount({NX, NY, NZ});
-
             CommandKernel commandKernel(command, "MatrixMultiplyAB");
             commandKernel.setContext(m_context);
             commandKernel.setCommandParameters(params);
             commandKernel.generateKernel();
 
-            commandKernel.setLaunchParameters(launch);
             if(isLocalDevice())
             {
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
@@ -421,10 +413,6 @@ namespace MatrixMultiplyTest
             commandKernel.setContext(m_context);
             commandKernel.setCommandParameters(params);
             commandKernel.generateKernel();
-
-            auto launch = std::make_shared<CommandLaunchParameters>();
-            launch->setManualWorkitemCount({NX, NY, NZ});
-            commandKernel.setLaunchParameters(launch);
 
             if(isLocalDevice())
             {

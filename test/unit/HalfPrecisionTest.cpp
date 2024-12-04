@@ -573,13 +573,9 @@ namespace rocRollerTest
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
-        auto launch = std::make_shared<CommandLaunchParameters>();
-        launch->setManualWorkitemCount({NX, NY, NZ});
-
         CommandKernel commandKernel(command, "HalfPrecisionAdd");
         commandKernel.setContext(Context::ForDefaultHipDevice("HalfPrecisionAdd"));
         commandKernel.setCommandParameters(params);
-        commandKernel.setLaunchParameters(launch);
         commandKernel.generateKernel();
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 

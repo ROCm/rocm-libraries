@@ -33,6 +33,11 @@ namespace rocRoller
         return m_context.lock();
     }
 
+    inline CommandPtr AssemblyKernel::command() const
+    {
+        return m_command;
+    }
+
     inline AssemblyKernel& AssemblyKernel::operator=(AssemblyKernel const& rhs) = default;
     inline AssemblyKernel& AssemblyKernel::operator=(AssemblyKernel&& rhs) = default;
 
@@ -178,6 +183,7 @@ namespace rocRoller
     {
         return m_arguments;
     }
+
     inline size_t AssemblyKernel::argumentSize() const
     {
         return m_argumentSize;
@@ -274,9 +280,14 @@ namespace rocRoller
         return m_workitemIndex;
     }
 
-    inline void AssemblyKernel::setKernelGraphMeta(std::shared_ptr<KernelGraph::KernelGraph> graph)
+    inline void AssemblyKernel::setKernelGraphMeta(KernelGraph::KernelGraphPtr graph)
     {
         m_kernelGraph = graph;
+    }
+
+    inline void AssemblyKernel::setCommandMeta(CommandPtr command)
+    {
+        m_command = command;
     }
 
     inline std::shared_ptr<KernelGraph::KernelGraph> AssemblyKernel::kernel_graph() const

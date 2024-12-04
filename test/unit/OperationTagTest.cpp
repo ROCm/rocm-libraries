@@ -28,6 +28,9 @@ TEST_F(OperationTagTest, Basic)
     EXPECT_GT(tagVec[3].value, tagVec[2].value);
     EXPECT_GT(tagVec[2].value, tagVec[1].value);
     EXPECT_GT(tagVec[1].value, tagVec[0].value);
+    EXPECT_GT(tagVec[3], tagVec[2]);
+    EXPECT_GT(tagVec[2], tagVec[1]);
+    EXPECT_GT(tagVec[1], tagVec[0]);
 
     // Verify OperationTag can hash
     std::unordered_set<Operations::OperationTag> tagSet;

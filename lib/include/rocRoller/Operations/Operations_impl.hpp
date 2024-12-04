@@ -684,5 +684,46 @@ namespace rocRoller
             return {rocRoller::DataType::None};
         }
 
+        template <CConcreteOperation T>
+        struct OperationName
+        {
+            constexpr static std::string_view name()
+            {
+                // This works with clang but not gcc.
+                // static_assert(false, "Unknown name");
+                return "Unknown";
+            }
+        };
+
+#define RR_OPERATION_NAME(T)                     \
+    template <>                                  \
+    struct OperationName<T>                      \
+    {                                            \
+        constexpr static std::string_view name() \
+        {                                        \
+            return #T;                           \
+        }                                        \
+    };
+        RR_OPERATION_NAME(Tensor);
+        RR_OPERATION_NAME(Scalar);
+        RR_OPERATION_NAME(Literal);
+        RR_OPERATION_NAME(BlockScale);
+        RR_OPERATION_NAME(T_Load_Linear);
+        RR_OPERATION_NAME(T_Load_Scalar);
+        RR_OPERATION_NAME(T_Load_Tiled);
+        RR_OPERATION_NAME(T_Mul);
+        RR_OPERATION_NAME(T_Store_Linear);
+        RR_OPERATION_NAME(T_Store_Tiled);
+        RR_OPERATION_NAME(T_Execute);
+        RR_OPERATION_NAME(Nop);
+        RR_OPERATION_NAME(RandomNumberGenerator);
+#undef RR_OPERATION_NAME
+
+        template <CConcreteOperation T>
+        std::string name()
+        {
+            return std::string(OperationName<T>::name());
+        }
+
     }
 }

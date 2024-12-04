@@ -55,6 +55,17 @@ namespace rocRoller
                                 const GPUArchitectureTarget& target);
 
         /**
+         * @brief Loads a kernel from a file.
+         *
+         * @param fileName Code-object file name
+         * @param kernelName The name of the kernel
+         * @param target The target architecture
+         */
+        void loadKernelFromCodeObjectFile(std::string const&           fileName,
+                                          std::string const&           kernelName,
+                                          const GPUArchitectureTarget& target);
+
+        /**
          * @brief Loads a kernel from a string of machine code.
          *
          * @param instructions A string containing an entire assembly file

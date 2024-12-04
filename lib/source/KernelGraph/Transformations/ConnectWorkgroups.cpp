@@ -21,12 +21,14 @@ namespace rocRoller
                 if(empty(kgraph.coordinates.getNeighbours<GD::Downstream>(tileNumTag)))
                 {
                     // MacroTileNumber is dangling, connect it to a Workgroup
-                    auto tileNum      = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
-                    auto workgroupTag = kgraph.coordinates.addElement(Workgroup(tileNum.dim));
-                    logger->debug(
-                        "KernelGraph::ConnectWorkgroups: Adding PassThrough from {} to {}",
-                        tileNumTag,
-                        workgroupTag);
+                    auto tileNum = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
+                    auto workgroupTag
+                        = kgraph.coordinates.addElement(Workgroup(tileNum.dim, tileNum.size));
+                    logger->debug("KernelGraph::ConnectWorkgroups: Adding PassThrough from tile {} "
+                                  "({}) to workgroup {}",
+                                  tileNumTag,
+                                  toString(tileNum.size),
+                                  workgroupTag);
                     kgraph.coordinates.addElement(PassThrough(), {tileNumTag}, {workgroupTag});
                 }
                 if(empty(kgraph.coordinates.getNeighbours<GD::Upstream>(tileNumTag)))
@@ -34,10 +36,11 @@ namespace rocRoller
                     // MacroTileNumber is dangling, connect it to a Workgroup
                     auto tileNum      = *kgraph.coordinates.get<MacroTileNumber>(tileNumTag);
                     auto workgroupTag = kgraph.coordinates.addElement(Workgroup(tileNum.dim));
-                    logger->debug(
-                        "KernelGraph::ConnectWorkgroups: Adding PassThrough from {} to {}",
-                        workgroupTag,
-                        tileNumTag);
+                    logger->debug("KernelGraph::ConnectWorkgroups: Adding PassThrough from "
+                                  "workgroup {} to tile {} ({})",
+                                  workgroupTag,
+                                  tileNumTag,
+                                  toString(tileNum.size));
                     kgraph.coordinates.addElement(PassThrough(), {workgroupTag}, {tileNumTag});
                 }
             }

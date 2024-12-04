@@ -45,5 +45,24 @@ namespace rocRoller
         private:
             CommandParametersPtr m_params;
         };
+
+        class SetWorkitemCount : public GraphTransform
+        {
+        public:
+            SetWorkitemCount(ContextPtr context)
+                : m_context(context)
+            {
+            }
+
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "SetWorkitemCount";
+            }
+
+        private:
+            ContextPtr m_context;
+        };
+
     }
 }

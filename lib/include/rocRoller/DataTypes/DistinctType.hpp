@@ -71,38 +71,11 @@ namespace rocRoller
         }
 
         T value = static_cast<T>(0);
-    };
 
-    template <typename T, typename Subclass>
-    struct Comparison<DistinctType<T, Subclass>>
-    {
-        enum
-        {
-            implemented = true
-        };
-
-        static int compare(DistinctType<T, Subclass> const& lhs,
-                           DistinctType<T, Subclass> const& rhs)
-        {
-            return LexicographicCompare(lhs.value, rhs.value);
-        }
-    };
-
-    template <typename T, typename Subclass>
-    struct Comparison<DistinctType<T, Subclass>, T>
-    {
-        enum
-        {
-            implemented = true
-        };
-
-        static int compare(DistinctType<T, Subclass> const& lhs, T const& rhs)
-        {
-            return LexicographicCompare(lhs.value, rhs);
-        }
+        auto operator<=>(DistinctType<T, Subclass> const&) const = default;
     };
 
     /**
- * @}
- */
-} // namespace rocRoller
+     * @}
+     */
+}

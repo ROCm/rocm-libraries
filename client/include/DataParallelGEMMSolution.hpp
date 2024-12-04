@@ -114,7 +114,8 @@ namespace rocRoller
                 }
 
                 virtual CommandParametersPtr
-                    makeCommandParameters(SolutionParameters const& solutionParams) override
+                    makeCommandParameters(CommandPtr                command,
+                                          SolutionParameters const& solutionParams) override
                 {
                     auto params = std::make_shared<CommandParameters>();
 
@@ -261,34 +262,12 @@ namespace rocRoller
                     return params;
                 }
 
-                virtual CommandLaunchParametersPtr
-                    makeLaunchParameters(ProblemParameters const&  problemParams,
-                                         SolutionParameters const& solutionParams,
-                                         RunParameters const&      runParams) override
-                {
-                    uint num_workgroup_x = problemParams.m / solutionParams.macM;
-                    uint num_workgroup_y = problemParams.n / solutionParams.macN;
-
-                    uint workgroup_size_x
-                        = solutionParams.workgroupSizeX * solutionParams.workgroupSizeY;
-                    uint workgroup_size_y = 1;
-
-                    auto NX = std::make_shared<Expression::Expression>(num_workgroup_x
-                                                                       * workgroup_size_x);
-                    auto NY = std::make_shared<Expression::Expression>(num_workgroup_y
-                                                                       * workgroup_size_y);
-                    auto NZ = std::make_shared<Expression::Expression>(1u);
-
-                    auto launch = std::make_shared<CommandLaunchParameters>();
-                    launch->setManualWorkitemCount({NX, NY, NZ});
-                    return launch;
-                }
-
                 virtual CommandArguments
-                    commandArguments(ProblemParameters const& problemParams,
+                    commandArguments(CommandPtr               command,
+                                     ProblemParameters const& problemParams,
                                      RunParameters const&     runParams) const override
                 {
-                    CommandArguments commandArgs = command()->createArguments();
+                    CommandArguments commandArgs = command->createArguments();
 
                     size_t M = problemParams.m;
                     size_t N = problemParams.n;
@@ -318,7 +297,8 @@ namespace rocRoller
                     return commandArgs;
                 }
 
-                virtual void setPredicates(CommandKernelPtr          commandKernel,
+                virtual void setPredicates(CommandPtr                command,
+                                           CommandKernelPtr          commandKernel,
                                            SolutionParameters const& solutionParams) override
                 {
                     using namespace rocRoller::Expression;
@@ -327,8 +307,7 @@ namespace rocRoller
                     // predicate building blocks
                     // A sizes
                     auto aSizes
-                        = std::get<Operations::Tensor>(*(this->m_command->findTag(m_tagTensorA)))
-                              .sizes();
+                        = std::get<Operations::Tensor>(*(command->findTag(m_tagTensorA))).sizes();
                     std::vector<ExpressionPtr> aSizeExps(aSizes.size());
                     std::transform(aSizes.begin(), aSizes.end(), aSizeExps.begin(), [](auto arg) {
                         return arg->expression();

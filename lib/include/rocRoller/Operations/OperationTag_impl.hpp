@@ -29,16 +29,6 @@ namespace rocRoller
             return rv;
         }
 
-        inline bool OperationTag::operator<(OperationTag const& rhs) const
-        {
-            return this->value < rhs.value;
-        }
-
-        inline bool OperationTag::operator==(OperationTag const& tag) const
-        {
-            return this->value == tag.value;
-        }
-
         inline bool OperationTag::uninitialized() const
         {
             return value == -1;

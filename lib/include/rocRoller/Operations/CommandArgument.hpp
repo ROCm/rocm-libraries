@@ -6,6 +6,8 @@
 #include <optional>
 #include <string>
 
+#include <rocRoller/Serialization/Base_fwd.hpp>
+
 #include "CommandArgument_fwd.hpp"
 #include "Command_fwd.hpp"
 
@@ -62,6 +64,9 @@ namespace rocRoller
         bool operator==(CommandArgument const& rhs) const;
 
     private:
+        template <typename T1, typename T2, typename T3>
+        friend struct rocRoller::Serialization::MappingTraits;
+
         std::weak_ptr<Command> m_command;
 
         int           m_size;

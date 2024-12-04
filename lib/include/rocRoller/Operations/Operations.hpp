@@ -1,17 +1,15 @@
-/**
- *
- */
-
 #pragma once
 
 #include <unordered_set>
-#include <variant>
 
 #include <rocRoller/Context_fwd.hpp>
-#include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
+#include <rocRoller/Operations/Operations_fwd.hpp>
 #include <rocRoller/Operations/RandomNumberGenerator.hpp>
 #include <rocRoller/Operations/T_Execute_fwd.hpp>
+
+#include <rocRoller/Operations/BlockScale.hpp>
+#include <rocRoller/Operations/OperationTag.hpp>
 #include <rocRoller/Operations/T_LoadStore.hpp>
 #include <rocRoller/Operations/T_Mul.hpp>
 #include <rocRoller/Operations/TensorScalar.hpp>
@@ -27,6 +25,8 @@ namespace rocRoller
             Nop(Args&&... i)
             {
             }
+
+            auto operator<=>(Nop const&) const = default;
         };
 
         struct Inputs

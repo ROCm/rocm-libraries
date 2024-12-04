@@ -128,6 +128,9 @@ def from_token(token: str):
 def run_problems(
     generator, build_dir: Path, work_dir: Path, env: Dict[str, str]
 ) -> bool:
+
+    SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
+
     already_run = set()
     result = True
     failed = []
@@ -157,12 +160,16 @@ def run_problems(
             print(f"  log:     {log.resolve()}")
             print(f"  token:   {problem.token}", flush=True)
             p = subprocess.run(cmd, stdout=f, cwd=build_dir, env=env, check=False)
-            result &= p.returncode == 0
+            status = None
             if p.returncode == 0:
-                print("  status:  ok", flush=True)
+                status = "ok"
+            elif p.returncode == SOLUTION_NOT_SUPPORTED_ON_ARCH:
+                status = "skipped (not support on arch)"
             else:
-                print("  status:  error", flush=True)
+                status = "error"
+                result = False
                 failed.append((i, problem))
+            print(f"  status:  {status}", flush=True)
 
         already_run.add(problem)
 

@@ -386,7 +386,7 @@ namespace rocRollerTest
                            fastArith);
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
-                  "{Split: ShiftL({Tile: Add(ShiftL(Convert<DataType::UInt32>(Add(128:I, "
+                  "{Split: ShiftL({Tile: Add(ShiftL(Convert_UInt32(Add(128:I, "
                   "v0:I)I)U32, 2:U32)U32, "
                   "2:I)U32}, 1:U32)U32}");
     }
@@ -451,7 +451,7 @@ namespace rocRollerTest
                            fastArith);
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
-                  "{Split: ShiftL({Tile: Add(ShiftL(Convert<DataType::UInt32>(v0:I)U32, 2:U32)U32, "
+                  "{Split: ShiftL({Tile: Add(ShiftL(Convert_UInt32(v0:I)U32, 2:U32)U32, "
                   "514:I)U32}, 1:U32)U32}");
     }
 

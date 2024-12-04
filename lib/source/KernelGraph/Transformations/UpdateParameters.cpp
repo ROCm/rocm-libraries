@@ -373,5 +373,29 @@ namespace rocRoller
 
             return kgraph;
         }
+
+        KernelGraph SetWorkitemCount::apply(KernelGraph const& original)
+        {
+            auto workgroupSize = m_context->kernel()->workgroupSize();
+            auto workitemCount = std::array<ExpressionPtr, 3>{nullptr, nullptr, nullptr};
+            auto workgroupTags = original.coordinates.getNodes<Workgroup>().to<std::vector>();
+            for(auto const& workgroupTag : workgroupTags)
+            {
+                auto workgroup = *original.coordinates.get<Workgroup>(workgroupTag);
+                if(workgroup.size)
+                {
+                    // TODO: For linear things this isn't quite right;
+                    // we need to set according to the size of the
+                    // incoming tensor.
+                    workitemCount[workgroup.dim]
+                        = workgroup.size * literal(workgroupSize[workgroup.dim]);
+                    Log::debug("Setting Workitem count to {} based on size of Workgroup {}",
+                               toString(workgroup.size),
+                               workgroupTag);
+                }
+            }
+            m_context->kernel()->setWorkitemCount(workitemCount);
+            return original;
+        }
     }
 }

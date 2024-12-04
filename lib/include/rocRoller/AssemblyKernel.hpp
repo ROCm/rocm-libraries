@@ -33,6 +33,7 @@ namespace rocRoller
         ~AssemblyKernel();
 
         ContextPtr context() const;
+        CommandPtr command() const;
 
         std::string kernelName() const;
         void        setKernelName(std::string const& name);
@@ -144,7 +145,8 @@ namespace rocRoller
         void setWorkgroupSize(std::array<unsigned int, 3> const& val);
         void setWorkitemCount(std::array<Expression::ExpressionPtr, 3> const& val);
         void setDynamicSharedMemBytes(Expression::ExpressionPtr const& val);
-        void setKernelGraphMeta(std::shared_ptr<KernelGraph::KernelGraph> graph);
+        void setKernelGraphMeta(KernelGraph::KernelGraphPtr graph);
+        void setCommandMeta(CommandPtr graph);
         void setWavefrontSize(int);
 
         std::array<Register::ValuePtr, 3> const& workgroupIndex() const;
@@ -163,6 +165,9 @@ namespace rocRoller
         void clearIndexRegisters();
 
     private:
+        template <typename T1, typename T2, typename T3>
+        friend struct rocRoller::Serialization::MappingTraits;
+
         /**
          * If a kernel argument exists with an expression equivalent to `exp`, return an
          * expression referencing that argument, and return its index in `idx`, otherwise return
@@ -198,7 +203,8 @@ namespace rocRoller
 
         int m_wavefrontSize = 64;
 
-        std::shared_ptr<KernelGraph::KernelGraph> m_kernelGraph;
+        KernelGraph::KernelGraphPtr m_kernelGraph;
+        CommandPtr                  m_command;
     };
 
     struct AssemblyKernels
@@ -208,6 +214,8 @@ namespace rocRoller
             return {1, 2}; // Assuming -mcode-object-version=5
         }
         std::vector<AssemblyKernel> kernels;
+
+        static AssemblyKernels fromYAML(std::string const& str);
     };
 }
 

@@ -2,6 +2,8 @@
 
 #include "Operation.hpp"
 
+#include <rocRoller/Serialization/Base_fwd.hpp>
+
 namespace rocRoller
 {
     namespace Operations
@@ -10,12 +12,17 @@ namespace rocRoller
         {
         public:
             T_Load_Linear() = delete;
-            T_Load_Linear(OperationTag tensor);
+            explicit T_Load_Linear(OperationTag tensor);
 
             OperationTag getTensorTag() const;
             std::string  toString() const;
 
+            bool operator==(T_Load_Linear const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             OperationTag m_tensorTag;
         };
 
@@ -25,12 +32,17 @@ namespace rocRoller
         {
         public:
             T_Load_Scalar() = delete;
-            T_Load_Scalar(OperationTag scalar);
+            explicit T_Load_Scalar(OperationTag scalar);
 
             OperationTag getScalarTag() const;
             std::string  toString() const;
 
+            bool operator==(T_Load_Scalar const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             OperationTag m_scalarTag;
         };
 
@@ -40,12 +52,17 @@ namespace rocRoller
         {
         public:
             T_Load_Tiled() = delete;
-            T_Load_Tiled(OperationTag tensor);
+            explicit T_Load_Tiled(OperationTag tensor);
 
             OperationTag getTensorTag() const;
             std::string  toString() const;
 
+            bool operator==(T_Load_Tiled const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             OperationTag m_tensorTag;
         };
 
@@ -53,6 +70,9 @@ namespace rocRoller
 
         class T_Store_Linear : public BaseOperation
         {
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
         public:
             T_Store_Linear() = delete;
             T_Store_Linear(OperationTag source, OperationTag tensor);
@@ -60,6 +80,8 @@ namespace rocRoller
             OperationTag getSrcTag() const;
             OperationTag getTensorTag() const;
             std::string  toString() const;
+
+            bool operator==(T_Store_Linear const& rhs) const;
 
         private:
             OperationTag m_srcTag;
@@ -78,7 +100,12 @@ namespace rocRoller
             OperationTag getTensorTag() const;
             std::string  toString() const;
 
+            bool operator==(T_Store_Tiled const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             OperationTag m_srcTag;
             OperationTag m_tensorTag;
         };

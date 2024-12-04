@@ -59,6 +59,21 @@ namespace rocRoller
 #endif
 
         /**
+         * Override this struct for a type to use a custom constructor.
+         *
+         * Useful for Variant and SharedPointer is the types default
+         * contructor has been explicitly deleted.
+         */
+        template <typename T, typename U>
+        struct DefaultConstruct
+        {
+            static T call()
+            {
+                return U();
+            }
+        };
+
+        /**
          * Override this struct for a type to use a custom string serialization.
          *
          * You must implement:
@@ -273,7 +288,7 @@ namespace rocRoller
 
                 if(!isNull && !iot::outputting(io))
                 {
-                    p = std::make_shared<Element>();
+                    p = std::make_shared<Element>(DefaultConstruct<Element, Element>::call());
                 }
 
                 AssertFatal(Nullable || p != nullptr);

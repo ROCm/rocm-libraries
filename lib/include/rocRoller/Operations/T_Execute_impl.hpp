@@ -1,11 +1,59 @@
 #pragma once
 
+#include <variant>
+
 #include "Command.hpp"
 
 namespace rocRoller
 {
     namespace Operations
     {
+        template <CXOp T>
+        struct XOpName
+        {
+            constexpr static std::string_view name()
+            {
+                // This works with clang but not gcc
+                // static_assert(false, "Unknown name");
+                return "Unknown";
+            }
+        };
+
+#define RR_XOP_NAME(T)                           \
+    template <>                                  \
+    struct XOpName<T>                            \
+    {                                            \
+        constexpr static std::string_view name() \
+        {                                        \
+            return #T;                           \
+        }                                        \
+    };
+        RR_XOP_NAME(E_Neg);
+        RR_XOP_NAME(E_Abs);
+        RR_XOP_NAME(E_Not);
+        RR_XOP_NAME(E_Cvt);
+        RR_XOP_NAME(E_Add);
+        RR_XOP_NAME(E_Sub);
+        RR_XOP_NAME(E_Mul);
+        RR_XOP_NAME(E_Div);
+        RR_XOP_NAME(E_And);
+        RR_XOP_NAME(E_Or);
+        RR_XOP_NAME(E_GreaterThan);
+        RR_XOP_NAME(E_Conditional);
+        RR_XOP_NAME(E_RandomNumber);
+#undef RR_XOP_NAME
+
+        template <CXOp T>
+        inline std::string name()
+        {
+            return std::string(XOpName<T>::name());
+        }
+
+        inline std::string name(XOp const& x)
+        {
+            return std::visit([](auto y) { return std::string(XOpName<decltype(y)>::name()); }, x);
+        }
+
         // ------------------------
         // XOp methods
         // ------------------------
@@ -210,6 +258,20 @@ namespace rocRoller
                 msg << std::endl << "  " << toStringVistor.call(*xop);
 
             return msg.str();
+        }
+
+        inline bool T_Execute::operator==(T_Execute const& rhs) const
+        {
+            if(m_xops.size() != rhs.m_xops.size())
+                return false;
+
+            bool equal = true;
+            for(auto i = 0; i < m_xops.size(); ++i)
+                equal &= (*m_xops[i]) == (*rhs.m_xops[i]);
+            equal &= m_inputs == rhs.m_inputs;
+            equal &= m_outputs == rhs.m_outputs;
+            equal &= m_nextTag == rhs.m_nextTag;
+            return equal;
         }
     }
 }

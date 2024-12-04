@@ -22,5 +22,10 @@ namespace rocRoller
         {
             return "T_Mul";
         }
+
+        inline bool T_Mul::operator==(T_Mul const& rhs) const
+        {
+            return m_tag == rhs.m_tag && a == rhs.a && b == rhs.b;
+        }
     }
 }

@@ -3,6 +3,7 @@
  */
 
 #pragma once
+#include <string>
 #include <variant>
 
 namespace rocRoller
@@ -45,5 +46,11 @@ namespace rocRoller
         struct Inputs;
         struct Outputs;
         struct TagVisitor;
+
+        std::string name(Operation const&);
+
+        template <CConcreteOperation T>
+        std::string name();
+
     }
 }

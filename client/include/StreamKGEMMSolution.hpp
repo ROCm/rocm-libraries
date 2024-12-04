@@ -15,7 +15,7 @@ namespace rocRoller
         {
             class StreamKGEMMSolution : public DataParallelGEMMSolution
             {
-                Operations::OperationTag m_scratchTag;
+                Operations::OperationTag m_scratchTag, m_numWGsTag;
 
             public:
                 using DataParallelGEMMSolution::DataParallelGEMMSolution;
@@ -30,6 +30,13 @@ namespace rocRoller
                 {
                     auto command = DataParallelGEMMSolution::makeCommand(solutionParams);
 
+                    m_numWGsTag    = command->allocateTag();
+                    auto numWGsArg = command->allocateArgument(DataType::UInt32,
+                                                               m_numWGsTag,
+                                                               ArgumentType::Value,
+                                                               DataDirection::ReadOnly,
+                                                               rocRoller::NUMWGS);
+
                     m_scratchTag = command->allocateTag();
                     command->allocateArgument(
                         VariableType(DataType::UInt32, PointerType::PointerGlobal),
@@ -42,9 +49,11 @@ namespace rocRoller
                 }
 
                 virtual CommandParametersPtr
-                    makeCommandParameters(SolutionParameters const& solutionParams) override
+                    makeCommandParameters(CommandPtr                command,
+                                          SolutionParameters const& solutionParams) override
                 {
-                    auto params = DataParallelGEMMSolution::makeCommandParameters(solutionParams);
+                    auto params
+                        = DataParallelGEMMSolution::makeCommandParameters(command, solutionParams);
 
                     params->loopOverOutputTilesDimensions = {0, 1};
                     params->streamK                       = true;
@@ -54,64 +63,45 @@ namespace rocRoller
                 }
 
                 virtual CommandArguments
-                    commandArguments(ProblemParameters const& problemParams,
+                    commandArguments(CommandPtr               command,
+                                     ProblemParameters const& problemParams,
                                      RunParameters const&     runParams) const override
                 {
-                    auto commandArgs
-                        = DataParallelGEMMSolution::commandArguments(problemParams, runParams);
+                    auto commandArgs = DataParallelGEMMSolution::commandArguments(
+                        command, problemParams, runParams);
 
-                    commandArgs.setArgument(
-                        command()->getNextTag(), ArgumentType::Value, runParams.numWGs);
+                    commandArgs.setArgument(m_numWGsTag, ArgumentType::Value, runParams.numWGs);
 
                     return commandArgs;
                 }
 
-                virtual void validateRunParameters(SolutionParameters const& solutionParams,
-                                                   ProblemParameters const&  problemParams,
-                                                   RunParameters const&      runParams,
-                                                   CommandKernelPtr          commandKernel) override
+                virtual void validateRunParameters(CommandPtr               command,
+                                                   ProblemParameters const& problemParams,
+                                                   RunParameters const&     runParams,
+                                                   CommandKernelPtr         commandKernel) override
                 {
-                    // Determine the number of CUs on the device
+                    DataParallelGEMMSolution::validateRunParameters(
+                        command, problemParams, runParams, commandKernel);
+
+                    // Determine the number of WGs on the device
                     hipDeviceProp_t deviceProperties;
                     AssertFatal(hipGetDeviceProperties(&deviceProperties, runParams.device)
                                 == (hipError_t)HIP_SUCCESS);
                     auto numWGs = deviceProperties.multiProcessorCount;
 
+                    auto flatWorkgroupSize
+                        = product(commandKernel->getContext()->kernel()->workgroupSize());
+
                     // Determine the occupancy for the kernel
                     int occupancy;
-                    AssertFatal(hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
-                                    &occupancy,
-                                    commandKernel->getHipFunction(),
-                                    solutionParams.workgroupSizeX * solutionParams.workgroupSizeY,
-                                    0)
-                                == (hipError_t)HIP_SUCCESS);
+                    AssertFatal(
+                        hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
+                            &occupancy, commandKernel->getHipFunction(), flatWorkgroupSize, 0)
+                        == (hipError_t)HIP_SUCCESS);
 
                     AssertFatal(runParams.numWGs <= numWGs * occupancy,
                                 "StreamK kernel requires that the number of workgroups is not "
                                 "greater than the number of compute units * occupancy.");
-                }
-
-                virtual CommandLaunchParametersPtr
-                    makeLaunchParameters(ProblemParameters const&  problemParams,
-                                         SolutionParameters const& solutionParams,
-                                         RunParameters const&      runParams) override
-                {
-                    uint num_workgroup_x = runParams.numWGs;
-                    uint num_workgroup_y = 1;
-
-                    uint workgroup_size_x
-                        = solutionParams.workgroupSizeX * solutionParams.workgroupSizeY;
-                    uint workgroup_size_y = 1;
-
-                    auto NX = std::make_shared<Expression::Expression>(num_workgroup_x
-                                                                       * workgroup_size_x);
-                    auto NY = std::make_shared<Expression::Expression>(num_workgroup_y
-                                                                       * workgroup_size_y);
-                    auto NZ = std::make_shared<Expression::Expression>(1u);
-
-                    auto launch = std::make_shared<CommandLaunchParameters>();
-                    launch->setManualWorkitemCount({NX, NY, NZ});
-                    return launch;
                 }
             };
         }

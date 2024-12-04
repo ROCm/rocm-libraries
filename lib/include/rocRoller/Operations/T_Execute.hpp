@@ -34,6 +34,8 @@ namespace rocRoller
             }
             OperationTag dest;
             OperationTag a;
+
+            auto operator<=>(E_Unary const&) const = default;
         };
 
 // Macro for declaring a new Unary XOp
@@ -96,6 +98,8 @@ namespace rocRoller
             OperationTag dest;
             OperationTag a;
             OperationTag b;
+
+            auto operator<=>(E_Binary const&) const = default;
         };
 
 // Macro for defining a new binary XOp
@@ -165,6 +169,8 @@ namespace rocRoller
             OperationTag a;
             OperationTag b;
             OperationTag c;
+
+            auto operator<=>(E_Ternary const&) const = default;
         };
 
 // Macro for defining a new ternary XOp
@@ -204,7 +210,12 @@ namespace rocRoller
                 return m_xops;
             }
 
+            bool operator==(T_Execute const&) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             std::vector<std::shared_ptr<XOp>> m_xops;
 
             std::unordered_set<OperationTag> m_inputs;
@@ -212,6 +223,25 @@ namespace rocRoller
 
             OperationTag m_nextTag;
         };
+
+        template <typename T>
+        concept CUnaryXOp = requires()
+        {
+            requires std::derived_from<T, E_Unary>;
+        };
+
+        template <typename T>
+        concept CBinaryXOp = requires()
+        {
+            requires std::derived_from<T, E_Binary>;
+        };
+
+        template <typename T>
+        concept CTernaryXOp = requires()
+        {
+            requires std::derived_from<T, E_Ternary>;
+        };
+
     }
 }
 

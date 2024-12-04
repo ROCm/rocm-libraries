@@ -189,6 +189,7 @@ set(
 
   catch/BinaryExpressionTest.cpp
   catch/CommandArgumentValueTest.cpp
+  catch/CommandTest.cpp
   catch/CustomAssertionTest.cpp
   catch/CustomMatcherTest.cpp
   catch/ExpressionIdenticalTest.cpp

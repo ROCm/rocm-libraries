@@ -362,6 +362,10 @@ namespace rocRoller
         return name(obj);
     }
 
+    std::vector<char> readFile(std::string const&);
+
+    std::string readMetaDataFromCodeObject(std::string const& fileName);
+
     /**
      * @}
      */

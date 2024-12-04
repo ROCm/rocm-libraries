@@ -118,12 +118,12 @@ namespace rocRoller
         }
 
         Workgroup::Workgroup(int const dim)
-            : SubDimension(dim)
+            : SubDimension(dim, nullptr, Expression::literal(1u))
         {
         }
 
-        Workgroup::Workgroup(int const dim, Expression::ExpressionPtr stride)
-            : SubDimension(dim, nullptr, stride)
+        Workgroup::Workgroup(int const dim, Expression::ExpressionPtr size)
+            : SubDimension(dim, size, Expression::literal(1u))
         {
         }
 

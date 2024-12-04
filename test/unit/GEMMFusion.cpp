@@ -83,7 +83,7 @@ namespace GEMMDriverTest
             }
             else if(gemm.streamK)
             {
-                numWorkgroupX = gemm.numCUs;
+                numWorkgroupX = gemm.numWGs;
                 numWorkgroupY = 1;
             }
             else
@@ -229,8 +229,6 @@ namespace GEMMDriverTest
                     "Current scratch space implementation assumes that the kernel is launched "
                     "with numWorkgroupY == 1");
 
-                params->numScratchTiles = std::min(gemm.numCUs, numWorkgroupX * numWorkgroupY);
-
                 params->loopOverOutputTilesDimensions = {0, 1};
                 params->streamK                       = true;
                 params->streamKTwoTile                = gemm.streamKTwoTile;
@@ -279,10 +277,6 @@ namespace GEMMDriverTest
             commandKernel.setCommandParameters(params);
             commandKernel.generateKernel();
 
-            auto launch = std::make_shared<CommandLaunchParameters>();
-            launch->setManualWorkitemCount({NX, NY, NZ});
-            commandKernel.setLaunchParameters(launch);
-
             CommandArguments commandArgs = command->createArguments();
 
             TensorDescriptor descA(dataType, {size_t(M), size_t(K)}, gemm.transA);
@@ -308,7 +302,7 @@ namespace GEMMDriverTest
             // Create scratch space
             if(gemm.streamK)
             {
-                commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numCUs);
+                commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numWGs);
             }
             auto scratchSpaceRequired
                 = commandKernel.scratchSpaceRequired(commandArgs.runtimeArguments());

@@ -1,8 +1,11 @@
 #pragma once
 
-#include "Command_fwd.hpp"
-#include "OperationTag.hpp"
 #include <memory>
+
+#include <rocRoller/Operations/Command_fwd.hpp>
+#include <rocRoller/Operations/OperationTag.hpp>
+
+#include <rocRoller/Serialization/Base_fwd.hpp>
 
 namespace rocRoller
 {
@@ -20,6 +23,9 @@ namespace rocRoller
         protected:
             OperationTag           m_tag;
             std::weak_ptr<Command> m_command;
+
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
         };
     }
 } // namespace rocRoller

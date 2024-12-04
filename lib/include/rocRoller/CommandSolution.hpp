@@ -78,8 +78,6 @@ namespace rocRoller
         bool allowAmbiguousMemoryNodes   = false;
         bool enableLongDwordInstructions = true;
 
-        uint numScratchTiles = 0;
-
         EnumBitset<LayoutType> transposeMemoryAccess = {};
 
         bool packMultipleElementsInto1VGPR = true;
@@ -173,7 +171,7 @@ namespace rocRoller
          * @brief Assembles a generated kernel.  Does not try to load
          * it.
          */
-        void assembleKernel();
+        std::vector<char> assembleKernel();
 
         /**
          * @brief Assembles and loads a generated kernel onto the GPU.
@@ -205,6 +203,12 @@ namespace rocRoller
          * Load (and compile) a kernel from the assembly source file `fileName`.
          */
         void loadKernelFromAssembly(std::string const& fileName, std::string const& kernelName);
+
+        /**
+         * Load a kernel from the code-object file `fileName`.
+         */
+        AssemblyKernelPtr loadKernelFromCodeObject(std::string const& fileName,
+                                                   std::string const& kernelName);
 
         /**
          * @brief Determines launch bounds and arguments, and launches the kernel.

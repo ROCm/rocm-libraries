@@ -38,5 +38,11 @@ namespace rocRoller
             }
         };
 
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::KernelGraphPtr, IO, Context>
+            : public SharedPointerMappingTraits<KernelGraph::KernelGraphPtr, IO, Context, true>
+        {
+        };
+
     }
 }

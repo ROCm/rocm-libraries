@@ -19,7 +19,12 @@ namespace rocRoller
             std::string          toString() const;
             CommandArgumentValue value() const;
 
+            bool operator==(Literal const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             CommandArgumentValue m_value;
         };
 
@@ -39,7 +44,12 @@ namespace rocRoller
             CommandArgumentPtr data() const;
             VariableType       variableType() const;
 
+            bool operator==(Scalar const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             std::string getArgumentString(const unsigned char*) const;
 
             CommandArgumentPtr m_pointer;
@@ -73,7 +83,12 @@ namespace rocRoller
             VariableType variableType() const;
             DataType     dataType() const;
 
+            bool operator==(Tensor const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             std::string getArgumentString(const unsigned char*) const;
 
             VariableType m_variableType;

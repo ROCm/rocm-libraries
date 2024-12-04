@@ -9,6 +9,7 @@ set(rocroller_src
  source/AssemblyKernelArgument.cpp
  source/AssemblyKernel_serialization.cpp
  source/AssertOpKinds.cpp
+ source/Command_serialization.cpp
  source/CommandSolution.cpp
  source/CommonSubexpressionElim.cpp
  source/Context.cpp
@@ -173,9 +174,11 @@ set(rocroller_src
  source/Observers/XDLWrite90a.cpp
  source/Observers/MFMAObserver.cpp
 
- source/Operations/Operation.cpp
- source/Operations/TensorScalar.cpp
  source/Operations/BlockScale.cpp
+ source/Operations/Command.cpp
+ source/Operations/Operation.cpp
+ source/Operations/RandomNumberGenerator.cpp
+ source/Operations/TensorScalar.cpp
 
  source/Schedulers/CooperativeScheduler.cpp
  source/Schedulers/PriorityScheduler.cpp
@@ -183,6 +186,8 @@ set(rocroller_src
  source/Schedulers/RoundRobinScheduler.cpp
  source/Schedulers/SequentialScheduler.cpp
 
+ source/Utilities/ReadELF.cpp
+ source/Utilities/Utils.cpp
  source/Utilities/Version.cpp
 
  ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE}

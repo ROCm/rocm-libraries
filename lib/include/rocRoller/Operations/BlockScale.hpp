@@ -4,10 +4,12 @@
 
 #pragma once
 
-#include "Operation.hpp"
 #include <optional>
 #include <unordered_set>
 #include <vector>
+
+#include <rocRoller/Operations/Operation.hpp>
+#include <rocRoller/Serialization/Base_fwd.hpp>
 
 namespace rocRoller
 {
@@ -42,10 +44,15 @@ namespace rocRoller
             PointerMode                      pointerMode() const;
             const std::vector<size_t>&       strides() const;
 
+            bool operator==(BlockScale const&) const;
+
         private:
-            const OperationTag                m_data;
-            const std::optional<OperationTag> m_scale;
-            const std::vector<size_t>         m_strides;
+            OperationTag                m_data;
+            std::optional<OperationTag> m_scale;
+            std::vector<size_t>         m_strides;
+
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
         };
 
     }

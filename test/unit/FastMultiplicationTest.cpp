@@ -49,12 +49,12 @@ namespace FastMultiplicationTest
 
         ExpectCommutative(a,
                           std::make_shared<Expression::Expression>(1u),
-                          "Convert<DataType::UInt32>(CommandArgument(user_Int32_Value_0)I)U32");
+                          "Convert_UInt32(CommandArgument(user_Int32_Value_0)I)U32");
 
         ExpectCommutative(
             a,
             std::make_shared<Expression::Expression>(8u),
-            "ShiftL(Convert<DataType::UInt32>(CommandArgument(user_Int32_Value_0)I)U32, 3:U32)U32");
+            "ShiftL(Convert_UInt32(CommandArgument(user_Int32_Value_0)I)U32, 3:U32)U32");
 
         ExpectCommutative(a,
                           std::make_shared<Expression::Expression>(16),
@@ -63,7 +63,7 @@ namespace FastMultiplicationTest
         ExpectCommutative(
             a,
             Expression::literal(64u),
-            "ShiftL(Convert<DataType::UInt32>(CommandArgument(user_Int32_Value_0)I)U32, 6:U32)U32");
+            "ShiftL(Convert_UInt32(CommandArgument(user_Int32_Value_0)I)U32, 6:U32)U32");
 
         ExpectCommutative(a,
                           std::make_shared<Expression::Expression>(256),

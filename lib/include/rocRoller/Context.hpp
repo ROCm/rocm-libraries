@@ -99,6 +99,8 @@ namespace rocRoller
         GPUArchitecture const&        targetArchitecture() const;
         int                           hipDeviceIndex() const;
 
+        void setKernel(AssemblyKernelPtr);
+
         /**
          * @brief Returns an expression representing how much scratch space is required (in bytes)
          *

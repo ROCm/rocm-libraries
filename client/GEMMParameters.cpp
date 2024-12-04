@@ -81,11 +81,7 @@ namespace rocRoller
 
             std::ostream& operator<<(std::ostream& s, SolutionParameters const& x)
             {
-                if(x.scheduler == "TENSILE_ASM")
-                {
-                    s << "Algorithm: TENSILE" << std::endl;
-                    return s;
-                }
+                s << "Arch:      " << x.architecture.toString();
                 if(x.streamK)
                 {
                     s << "Algorithm: StreamK twoTile:" << x.streamKTwoTile << std::endl;

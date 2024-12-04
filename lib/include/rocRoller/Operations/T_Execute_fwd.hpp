@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <variant>
 
 namespace rocRoller
@@ -46,5 +47,10 @@ namespace rocRoller
             requires std::constructible_from<XOp, T>;
             requires !std::same_as<XOp, T>;
         };
+
+        std::string name(XOp const&);
+
+        template <CXOp T>
+        std::string name();
     }
 }

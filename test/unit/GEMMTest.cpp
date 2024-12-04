@@ -107,7 +107,7 @@ namespace GEMMDriverTest
             }
             else if(gemm.streamK)
             {
-                numWorkgroupX = gemm.numCUs;
+                numWorkgroupX = gemm.numWGs;
                 numWorkgroupY = 1;
             }
             else
@@ -234,6 +234,17 @@ namespace GEMMDriverTest
                                       DataDirection::ReadWrite,
                                       rocRoller::SCRATCH);
 
+            Operations::OperationTag tagNumWGs;
+            if(gemm.streamK)
+            {
+                tagNumWGs      = command->allocateTag();
+                auto numWGsArg = command->allocateArgument(DataType::UInt32,
+                                                           tagNumWGs,
+                                                           ArgumentType::Value,
+                                                           DataDirection::ReadOnly,
+                                                           rocRoller::NUMWGS);
+            }
+
             auto params = std::make_shared<CommandParameters>();
             params->setManualKernelDimension(2);
             // TODO: Calculate these values internally based on workgroup sizes.
@@ -268,8 +279,6 @@ namespace GEMMDriverTest
                     numWorkgroupY == 1,
                     "Current scratch space implementation assumes that the kernel is launched "
                     "with numWorkgroupY == 1");
-
-                params->numScratchTiles = std::min(gemm.numCUs, numWorkgroupX * numWorkgroupY);
 
                 params->loopOverOutputTilesDimensions = {0, 1};
                 params->streamK                       = true;
@@ -345,7 +354,7 @@ namespace GEMMDriverTest
             // Create scratch space
             if(gemm.streamK)
             {
-                commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numCUs);
+                commandArgs.setArgument(tagNumWGs, ArgumentType::Value, gemm.numWGs);
             }
 
             auto scratchSpaceRequired
@@ -538,12 +547,12 @@ namespace GEMMDriverTest
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numCUs = deviceProperties.multiProcessorCount;
+        gemm.numWGs = deviceProperties.multiProcessorCount;
 
         gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * gemm.numCUs / 2 + gemm.macN * 2;
+        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numCUs);
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
@@ -577,12 +586,12 @@ namespace GEMMDriverTest
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numCUs = deviceProperties.multiProcessorCount;
+        gemm.numWGs = deviceProperties.multiProcessorCount;
 
         gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * gemm.numCUs / 2 + gemm.macN * 2;
+        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numCUs);
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
@@ -614,7 +623,7 @@ namespace GEMMDriverTest
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numCUs = deviceProperties.multiProcessorCount;
+        gemm.numWGs = deviceProperties.multiProcessorCount;
 
         gemm.waveK = 8;
         gemm.macK  = 16;
@@ -625,9 +634,9 @@ namespace GEMMDriverTest
         gemm.workgroupSizeY = 2;
 
         gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * gemm.numCUs / 2 + gemm.macN * 2;
+        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numCUs);
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;
@@ -667,7 +676,7 @@ namespace GEMMDriverTest
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numCUs = 3;
+        gemm.numWGs = 3;
 
         gemm.waveK = 8;
         gemm.macK  = 16;
@@ -680,7 +689,7 @@ namespace GEMMDriverTest
         gemm.m = 4 * gemm.macM;
         gemm.n = 4 * gemm.macN;
 
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numCUs);
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
         gemm.streamK = true;
         gemm.k       = gemm.macK * 8;

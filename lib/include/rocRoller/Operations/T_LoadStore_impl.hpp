@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sstream>
+
 #include "T_LoadStore.hpp"
 
 namespace rocRoller
@@ -31,6 +33,11 @@ namespace rocRoller
             return stream << val.toString();
         }
 
+        inline bool T_Load_Linear::operator==(T_Load_Linear const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_tensorTag == rhs.m_tensorTag;
+        }
+
         inline T_Load_Scalar::T_Load_Scalar(OperationTag scalar)
             : BaseOperation()
             , m_scalarTag(scalar)
@@ -56,6 +63,11 @@ namespace rocRoller
             return stream << val.toString();
         }
 
+        inline bool T_Load_Scalar::operator==(T_Load_Scalar const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_scalarTag == rhs.m_scalarTag;
+        }
+
         inline T_Load_Tiled::T_Load_Tiled(OperationTag tensor)
             : BaseOperation()
             , m_tensorTag(tensor)
@@ -79,6 +91,11 @@ namespace rocRoller
         inline std::ostream& operator<<(std::ostream& stream, T_Load_Tiled const& val)
         {
             return stream << val.toString();
+        }
+
+        inline bool T_Load_Tiled::operator==(T_Load_Tiled const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_tensorTag == rhs.m_tensorTag;
         }
 
         inline T_Store_Linear::T_Store_Linear(OperationTag source, OperationTag tensor)
@@ -113,6 +130,11 @@ namespace rocRoller
             return stream << val.toString();
         }
 
+        inline bool T_Store_Linear::operator==(T_Store_Linear const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_tensorTag == rhs.m_tensorTag && m_srcTag == rhs.m_srcTag;
+        }
+
         inline T_Store_Tiled::T_Store_Tiled(OperationTag source, OperationTag tensor)
             : BaseOperation()
             , m_srcTag(source)
@@ -142,6 +164,11 @@ namespace rocRoller
         inline std::ostream& operator<<(std::ostream& stream, T_Store_Tiled const& val)
         {
             return stream << val.toString();
+        }
+
+        inline bool T_Store_Tiled::operator==(T_Store_Tiled const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_tensorTag == rhs.m_tensorTag && m_srcTag == rhs.m_srcTag;
         }
     }
 }
