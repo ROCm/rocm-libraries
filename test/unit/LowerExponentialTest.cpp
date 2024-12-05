@@ -108,7 +108,7 @@ namespace LowerExponentialTest
                 co_yield Expression::generate(s_c, expr, m_context);
 
                 co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr v_c to store.");
-                co_yield m_context->mem()->storeFlat(
+                co_yield m_context->mem()->storeGlobal(
                     v_result, v_c, 0, v_c->variableType().getElementSize());
             };
 

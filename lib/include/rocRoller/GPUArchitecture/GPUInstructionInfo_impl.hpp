@@ -31,14 +31,14 @@ namespace rocRoller
                                                   int                                  latency,
                                                   bool         implicitAccess,
                                                   bool         branch,
-                                                  unsigned int maxLiteralValue)
+                                                  unsigned int maxOffsetValue)
         : m_instruction(instruction)
         , m_waitCount(waitcnt)
         , m_waitQueues(waitQueues)
         , m_latency(latency)
         , m_implicitAccess(implicitAccess)
         , m_isBranch(branch)
-        , m_maxLiteralValue(maxLiteralValue)
+        , m_maxOffsetValue(maxOffsetValue)
     {
     }
 
@@ -71,9 +71,9 @@ namespace rocRoller
         return m_isBranch;
     }
 
-    inline unsigned int GPUInstructionInfo::maxLiteralValue() const
+    inline unsigned int GPUInstructionInfo::maxOffsetValue() const
     {
-        return m_maxLiteralValue;
+        return m_maxOffsetValue;
     }
 
     //--GPUWaitQueue

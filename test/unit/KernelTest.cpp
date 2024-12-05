@@ -268,7 +268,7 @@ amdhsa.kernels:
 
             co_yield m_context->copier()->copy(v_value, s_value, "Move value");
 
-            co_yield m_context->mem()->storeFlat(v_ptr, v_value, 0, 4);
+            co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
         };
 
         m_context->schedule(kb());
@@ -392,7 +392,7 @@ amdhsa.kernels:
 
             co_yield m_context->copier()->copy(v_value, s_value, "Move value");
 
-            co_yield m_context->mem()->storeFlat(v_ptr, v_value, 0, 4);
+            co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
         };
 
         m_context->schedule(kb());

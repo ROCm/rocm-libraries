@@ -738,7 +738,7 @@ namespace rocRoller
 
                 auto numBytes = CeilDivide(DataTypeInfo::Get(vgpr->variableType()).elementBits, 8u);
                 co_yield m_context->mem()->load(
-                    MemoryInstructions::MemoryKind::Flat, vgpr, vPtr, nullptr, numBytes);
+                    MemoryInstructions::MemoryKind::Global, vgpr, vPtr, nullptr, numBytes);
             }
 
             Generator<Instruction> loadVGPRFromGlobalArray(int                userTag,
@@ -765,7 +765,7 @@ namespace rocRoller
 
                 auto numBytes = CeilDivide(DataTypeInfo::Get(vgpr->variableType()).elementBits, 8u);
                 co_yield m_context->mem()->load(
-                    MemoryInstructions::MemoryKind::Flat, vgpr, vPtr, offset, numBytes);
+                    MemoryInstructions::MemoryKind::Global, vgpr, vPtr, offset, numBytes);
             }
 
             Generator<Instruction> operator()(int tag, Multiply const& mult, Transformer coords)
@@ -881,7 +881,7 @@ namespace rocRoller
 
                 auto numBytes = CeilDivide(DataTypeInfo::Get(src->variableType()).elementBits, 8u);
                 co_yield m_context->mem()->store(
-                    MemoryInstructions::MemoryKind::Flat, vPtr, src, offset, numBytes);
+                    MemoryInstructions::MemoryKind::Global, vPtr, src, offset, numBytes);
             }
 
             Generator<Instruction> operator()(int tag, StoreSGPR const& store, Transformer coords)

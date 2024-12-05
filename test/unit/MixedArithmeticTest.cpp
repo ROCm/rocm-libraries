@@ -427,7 +427,7 @@ namespace MixedArithmeticTest
                                 v_result, result, "Move result to VGPR");
                         }
 
-                        co_yield m_context->mem()->storeFlat(
+                        co_yield m_context->mem()->storeGlobal(
                             resultPtr, v_result, 0, param.resultVarType.getElementSize());
 
                         co_yield generateOp<Expression::Add>(
@@ -668,7 +668,7 @@ namespace MixedArithmeticTest
                                     v_result, result, "Move result to VGPR");
                             }
 
-                            co_yield m_context->mem()->storeFlat(
+                            co_yield m_context->mem()->storeGlobal(
                                 resultPtr, v_result, 0, param.resultVarType.getElementSize());
 
                             co_yield generateOp<Expression::Add>(

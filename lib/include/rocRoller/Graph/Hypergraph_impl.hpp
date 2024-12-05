@@ -107,16 +107,7 @@ namespace rocRoller
         auto Hypergraph<Node, Edge, Hyper>::addElements(T&& element, Ts&&... rest)
         {
             auto myValue = addElement(std::forward<T>(element));
-
-            if constexpr(sizeof...(rest) > 0)
-            {
-                return std::tuple_cat(std::make_tuple(myValue),
-                                      addElements(std::forward<Ts>(rest)...));
-            }
-            else
-            {
-                return std::make_tuple(myValue);
-            }
+            return std::tuple{myValue, addElement(std::forward<Ts>(rest))...};
         }
 
         template <typename Node, typename Edge, bool Hyper>

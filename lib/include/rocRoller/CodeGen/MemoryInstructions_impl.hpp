@@ -33,9 +33,9 @@ namespace rocRoller
 
         switch(kind)
         {
-        case Flat:
+        case Global:
             // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to loadFlat
+            // of addr + offset and pass it to loadGlobal
             if(offset && offset->regType() != Register::Type::Literal)
             {
                 newAddr
@@ -43,7 +43,7 @@ namespace rocRoller
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
-            co_yield loadFlat(dest, newAddr, offsetVal, numBytes, high);
+            co_yield loadGlobal(dest, newAddr, offsetVal, numBytes, high);
             break;
 
         case Local:
@@ -111,9 +111,9 @@ namespace rocRoller
 
         switch(kind)
         {
-        case Flat:
+        case Global:
             // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to storeFlat
+            // of addr + offset and pass it to storeGlobal
             if(offset && offset->regType() != Register::Type::Literal)
             {
                 newAddr
@@ -121,7 +121,7 @@ namespace rocRoller
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
-            co_yield storeFlat(newAddr, data, offsetVal, numBytes, high);
+            co_yield storeGlobal(newAddr, data, offsetVal, numBytes, high);
             break;
 
         case Local:
@@ -211,7 +211,27 @@ namespace rocRoller
         return *width;
     }
 
-    inline Generator<Instruction> MemoryInstructions::loadFlat(
+    inline Generator<Instruction> MemoryInstructions::addLargerOffset2Addr(int& offset,
+                                                                           Register::ValuePtr& addr,
+                                                                           std::string instruction)
+    {
+        AssertFatal(!instruction.empty());
+        auto maxOffset = m_context.lock()
+                             ->targetArchitecture()
+                             .GetInstructionInfo(instruction)
+                             .maxOffsetValue();
+
+        if(maxOffset != 0 && (offset > maxOffset || offset < 0))
+        {
+            auto currentAddr = addr;
+            addr             = nullptr;
+            co_yield generate(
+                addr, currentAddr->expression() + Expression::literal(offset), m_context.lock());
+            offset = 0;
+        }
+    }
+
+    inline Generator<Instruction> MemoryInstructions::loadGlobal(
         Register::ValuePtr dest, Register::ValuePtr addr, int offset, int numBytes, bool high)
     {
         AssertFatal(dest != nullptr);
@@ -225,6 +245,7 @@ namespace rocRoller
                     "Invalid number of bytes");
 
         auto ctx = m_context.lock();
+        co_yield addLargerOffset2Addr(offset, addr, "global_load_dword");
 
         if(numBytes < m_wordSize)
         {
@@ -233,20 +254,26 @@ namespace rocRoller
             auto offsetModifier = genOffsetModifier(offset);
             if(numBytes == 1)
             {
-                co_yield_(
-                    Instruction("flat_load_ubyte", {dest}, {addr}, {offsetModifier}, "Load value"));
+                co_yield_(Instruction(
+                    "global_load_ubyte", {dest}, {addr}, {"off " + offsetModifier}, "Load value"));
             }
             else if(numBytes == 2)
             {
                 if(high)
                 {
-                    co_yield_(Instruction(
-                        "flat_load_short_d16_hi", {dest}, {addr}, {offsetModifier}, "Load value"));
+                    co_yield_(Instruction("global_load_short_d16_hi",
+                                          {dest},
+                                          {addr},
+                                          {"off", offsetModifier},
+                                          "Load value"));
                 }
                 else
                 {
-                    co_yield_(Instruction(
-                        "flat_load_ushort", {dest}, {addr}, {offsetModifier}, "Load value"));
+                    co_yield_(Instruction("global_load_ushort",
+                                          {dest},
+                                          {addr},
+                                          {"off", offsetModifier},
+                                          "Load value"));
                 }
             }
         }
@@ -263,10 +290,10 @@ namespace rocRoller
                     numWords - count, potentialWords, ctx->kernelOptions().loadGlobalWidth);
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 co_yield_(Instruction(
-                    concatenate("flat_load_dword", width == 1 ? "" : "x" + std::to_string(width)),
+                    concatenate("global_load_dword", width == 1 ? "" : "x" + std::to_string(width)),
                     {dest->subset(Generated(iota(count, count + width)))},
                     {addr},
-                    {offsetModifier},
+                    {"off", offsetModifier},
                     "Load value"));
                 count += width;
             }
@@ -277,7 +304,7 @@ namespace rocRoller
                 WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
     }
 
-    inline Generator<Instruction> MemoryInstructions::storeFlat(
+    inline Generator<Instruction> MemoryInstructions::storeGlobal(
         Register::ValuePtr addr, Register::ValuePtr data, int offset, int numBytes, bool high)
     {
         AssertFatal(addr != nullptr);
@@ -287,6 +314,7 @@ namespace rocRoller
                     "Invalid number of bytes");
 
         auto ctx = m_context.lock();
+        co_yield addLargerOffset2Addr(offset, addr, "global_store_dword");
 
         if(numBytes < m_wordSize)
         {
@@ -296,22 +324,25 @@ namespace rocRoller
             if(numBytes == 1)
             {
                 co_yield_(Instruction(
-                    "flat_store_byte", {}, {addr, data}, {offsetModifier}, "Store value"));
+                    "global_store_byte", {}, {addr, data}, {"off", offsetModifier}, "Store value"));
             }
             else if(numBytes == 2)
             {
                 if(high)
                 {
-                    co_yield_(Instruction("flat_store_short_d16_hi",
+                    co_yield_(Instruction("global_store_short_d16_hi",
                                           {},
                                           {addr, data},
-                                          {offsetModifier},
+                                          {"off", offsetModifier},
                                           "Store value"));
                 }
                 else
                 {
-                    co_yield_(Instruction(
-                        "flat_store_short", {}, {addr, data}, {offsetModifier}, "Store value"));
+                    co_yield_(Instruction("global_store_short",
+                                          {},
+                                          {addr, data},
+                                          {"off", offsetModifier},
+                                          "Store value"));
                 }
             }
         }
@@ -328,12 +359,12 @@ namespace rocRoller
                     numWords - count, potentialWords, ctx->kernelOptions().storeGlobalWidth);
                 // Find the largest store instruction that can be used
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
-                co_yield_(Instruction(
-                    concatenate("flat_store_dword", width == 1 ? "" : "x" + std::to_string(width)),
-                    {},
-                    {addr, data->subset(Generated(iota(count, count + width)))},
-                    {offsetModifier},
-                    "Store value"));
+                co_yield_(Instruction(concatenate("global_store_dword",
+                                                  width == 1 ? "" : "x" + std::to_string(width)),
+                                      {},
+                                      {addr, data->subset(Generated(iota(count, count + width)))},
+                                      {"off", offsetModifier},
+                                      "Store value"));
                 count += width;
             }
         }
@@ -569,19 +600,8 @@ namespace rocRoller
                     "Operation doesn't support hi argument for sizes of "
                         + std::to_string(numBytes));
 
-        auto               ctx        = m_context.lock();
-        Register::ValuePtr newAddr    = addr;
-        auto               maxLiteral = m_context.lock()
-                              ->targetArchitecture()
-                              .GetInstructionInfo("buffer_load_dword")
-                              .maxLiteralValue();
-        if(offset > maxLiteral || offset < 0)
-        {
-            newAddr = Register::Value::Placeholder(ctx, addr->regType(), DataType::UInt32, 1);
-            co_yield ctx->copier()->copy(newAddr, Register::Value::Literal(offset), "");
-            co_yield generateOp<Expression::Add>(newAddr, addr, newAddr);
-            offset = 0;
-        }
+        auto ctx = m_context.lock();
+        co_yield addLargerOffset2Addr(offset, addr, "buffer_load_dword");
 
         std::string offsetModifier = "", glc = "", slc = "", lds = "";
         if(buffOpts.offen || offset == 0)
@@ -629,7 +649,7 @@ namespace rocRoller
             }
             co_yield_(Instruction("buffer_load_" + opEnd,
                                   {dest},
-                                  {newAddr, sgprSrd, Register::Value::Literal(0)},
+                                  {addr, sgprSrd, Register::Value::Literal(0)},
                                   {"offen", offsetModifier, glc, slc, lds},
                                   "Load value"));
         }
@@ -646,7 +666,7 @@ namespace rocRoller
                 co_yield_(Instruction(
                     concatenate("buffer_load_dword", width == 1 ? "" : "x" + std::to_string(width)),
                     {dest->subset(Generated(iota(count, count + width)))},
-                    {newAddr, sgprSrd, Register::Value::Literal(0)},
+                    {addr, sgprSrd, Register::Value::Literal(0)},
                     {"offen", offsetModifier, glc, slc, lds},
                     "Load value"));
                 count += width;
@@ -761,19 +781,8 @@ namespace rocRoller
                         && ((numBytes < m_wordSize && numBytes != 3) || numBytes % m_wordSize == 0),
                     "Invalid number of bytes");
 
-        auto               ctx        = m_context.lock();
-        Register::ValuePtr newAddr    = addr;
-        auto               maxLiteral = m_context.lock()
-                              ->targetArchitecture()
-                              .GetInstructionInfo("buffer_store_dword")
-                              .maxLiteralValue();
-        if(offset > maxLiteral || offset < 0)
-        {
-            newAddr = Register::Value::Placeholder(ctx, addr->regType(), DataType::UInt64, 1);
-            co_yield ctx->copier()->copy(newAddr, Register::Value::Literal(offset), "");
-            co_yield generateOp<Expression::Add>(newAddr, addr, newAddr);
-            offset = 0;
-        }
+        auto ctx = m_context.lock();
+        co_yield addLargerOffset2Addr(offset, addr, "buffer_store_dword");
 
         std::string offsetModifier = "", glc = "", slc = "", sc1 = "", lds = "";
         if(buffOpts.offen || offset == 0)
@@ -810,7 +819,7 @@ namespace rocRoller
         // by a ComputeIndex operation for a StoreTiled operation is
         // 64bit.
         if(!offsetModifier.empty())
-            newAddr = newAddr->subset({0});
+            addr = addr->subset({0});
 
         if(numBytes < m_wordSize)
         {
@@ -834,7 +843,7 @@ namespace rocRoller
             }
             co_yield_(Instruction("buffer_store_" + opEnd,
                                   {},
-                                  {data, newAddr, sgprSrd, Register::Value::Literal(0)},
+                                  {data, addr, sgprSrd, Register::Value::Literal(0)},
                                   {"offen", offsetModifier, glc, slc, sc1, lds},
                                   "Store value"));
         }
@@ -866,7 +875,7 @@ namespace rocRoller
                 co_yield_(Instruction(concatenate("buffer_store_dword",
                                                   width == 1 ? "" : "x" + std::to_string(width)),
                                       {},
-                                      {dataSubset, newAddr, sgprSrd, Register::Value::Literal(0)},
+                                      {dataSubset, addr, sgprSrd, Register::Value::Literal(0)},
                                       {"offen", offsetModifier, glc, slc, sc1, lds},
                                       "Store value"));
                 count += width;

@@ -151,7 +151,7 @@ namespace rocRollerTest
 
             co_yield Instruction::Unlock("Loop end");
 
-            co_yield m_context->mem()->storeFlat(v_ptr, v_value, 0, 4);
+            co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
         };
 
         auto comment_generator = [&](int max_comments) -> Generator<Instruction> {
@@ -295,7 +295,7 @@ namespace rocRollerTest
             co_yield Instruction::Label(scc_zero);
             co_yield m_context->copier()->copy(r_value, Register::Value::Literal(3014));
             co_yield Instruction::Label(end).unlock();
-            co_yield m_context->mem()->storeFlat(r_ptr, r_value, 0, 4);
+            co_yield m_context->mem()->storeGlobal(r_ptr, r_value, 0, 4);
         };
 
         auto scalar_compare = [&]() -> Generator<Instruction> {
@@ -406,7 +406,7 @@ namespace rocRollerTest
 
         auto int64_addc = [&]() -> Generator<Instruction> {
             co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
-            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 8);
+            co_yield m_context->mem()->storeGlobal(v_result, v_c, 0, 8);
         };
 
         // With consume comments, padding comments no longer needed to interleave VCC overwrite
@@ -549,7 +549,7 @@ namespace rocRollerTest
             co_yield m_context->copier()->copy(v_value, Register::Value::Literal(10));
             co_yield Instruction::Label(end).unlock();
 
-            co_yield m_context->mem()->storeFlat(v_ptr, v_value, 0, 4);
+            co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
         };
 
         auto set_vcc2 = [&]() -> Generator<Instruction> {

@@ -189,7 +189,7 @@ namespace msgpack
                     o.pack(v.getLatency());
                     o.pack(v.hasImplicitAccess());
                     o.pack(v.isBranch());
-                    o.pack(v.maxLiteralValue());
+                    o.pack(v.maxOffsetValue());
                     return o;
                 }
             };

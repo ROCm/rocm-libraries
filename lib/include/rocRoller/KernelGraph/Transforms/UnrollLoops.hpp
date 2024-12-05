@@ -56,7 +56,7 @@ namespace rocRoller
             std::map<int, int>                                             m_unrolledLoopDimensions;
             std::map<std::pair<int, int>, std::shared_ptr<GraphReindexer>> m_unrollReindexers;
             std::unordered_set<int>                                        m_unrolledLoopOps;
-            std::shared_ptr<Context>                                       m_context;
+            ContextPtr                                                     m_context;
             CommandParametersPtr                                           m_params;
         };
 

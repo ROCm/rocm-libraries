@@ -108,13 +108,13 @@ namespace rocRollerTest
 
             for(int i = 0; i < N / 2; i++)
             {
-                co_yield m_context->mem()->loadFlat(v_a, a_ptr, i * 4, 4);
-                co_yield m_context->mem()->loadFlat(v_b, b_ptr, i * 4, 4);
+                co_yield m_context->mem()->loadGlobal(v_a, a_ptr, i * 4, 4);
+                co_yield m_context->mem()->loadGlobal(v_b, b_ptr, i * 4, 4);
 
                 co_yield generateOp<Expression::Multiply>(v_b, v_a, v_b);
                 co_yield generateOp<Expression::Add>(v_a, v_a, v_b);
 
-                co_yield m_context->mem()->storeFlat(v_result, v_a, i * 4, 4);
+                co_yield m_context->mem()->storeGlobal(v_result, v_a, i * 4, 4);
             }
         };
 
@@ -213,12 +213,12 @@ namespace rocRollerTest
 
             for(int i = 0; i < N; i++)
             {
-                co_yield m_context->mem()->loadFlat(v_a, a_ptr, i * 2, 2);
-                co_yield m_context->mem()->loadFlat(v_b, b_ptr, i * 2, 2);
+                co_yield m_context->mem()->loadGlobal(v_a, a_ptr, i * 2, 2);
+                co_yield m_context->mem()->loadGlobal(v_b, b_ptr, i * 2, 2);
 
                 co_yield Expression::generate(v_a, expr, m_context);
 
-                co_yield m_context->mem()->storeFlat(v_result, v_a, i * 2, 2);
+                co_yield m_context->mem()->storeGlobal(v_result, v_a, i * 2, 2);
             }
         };
 
@@ -379,7 +379,7 @@ namespace rocRollerTest
             for(int i = 0; i < N; i++)
             {
                 // Load and pack from flat into registers
-                co_yield m_context->mem()->loadAndPack(MemoryInstructions::Flat,
+                co_yield m_context->mem()->loadAndPack(MemoryInstructions::Global,
                                                        v_a,
                                                        a_ptr,
                                                        Register::Value::Literal(i * 2),
@@ -418,7 +418,7 @@ namespace rocRollerTest
                 co_yield generateOp<Expression::LogicalShiftR>(
                     v_hi, v_a, Register::Value::Literal(16));
 
-                co_yield m_context->mem()->packAndStore(MemoryInstructions::Flat,
+                co_yield m_context->mem()->packAndStore(MemoryInstructions::Global,
                                                         v_result,
                                                         v_lo,
                                                         v_hi,
@@ -441,7 +441,7 @@ namespace rocRollerTest
                 co_yield generateOp<Expression::LogicalShiftR>(
                     v_hi, v_a, Register::Value::Literal(16));
 
-                co_yield m_context->mem()->packAndStore(MemoryInstructions::Flat,
+                co_yield m_context->mem()->packAndStore(MemoryInstructions::Global,
                                                         v_result,
                                                         v_lo,
                                                         v_hi,
@@ -629,14 +629,14 @@ namespace rocRollerTest
                      FatalError);
 
         // memory instructions
-        EXPECT_THROW(m_context->schedule(m_context->mem()->loadFlat(vh16x2, addr, 0, 4, true)),
+        EXPECT_THROW(m_context->schedule(m_context->mem()->loadGlobal(vh16x2, addr, 0, 4, true)),
                      FatalError);
 
         EXPECT_THROW(m_context->schedule(m_context->mem()->loadLocal(vh16x2, addr, 0, 4, "", true)),
                      FatalError);
 
         EXPECT_THROW(m_context->schedule(m_context->mem()->loadAndPack(
-                         MemoryInstructions::MemoryKind::Flat, vf32, addr, addr, addr, addr, "")),
+                         MemoryInstructions::MemoryKind::Global, vf32, addr, addr, addr, addr, "")),
                      FatalError);
 
         EXPECT_THROW(m_context->schedule(

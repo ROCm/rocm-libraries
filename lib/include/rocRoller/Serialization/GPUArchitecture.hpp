@@ -100,7 +100,7 @@ namespace rocRoller
                 iot::mapRequired(io, KeyLatency.c_str(), info.m_latency);
                 iot::mapRequired(io, KeyImplicitAccess.c_str(), info.m_implicitAccess);
                 iot::mapRequired(io, KeyIsBranch.c_str(), info.m_isBranch);
-                iot::mapRequired(io, KeyMaxLiteral.c_str(), info.m_maxLiteralValue);
+                iot::mapRequired(io, KeyMaxLiteral.c_str(), info.m_maxOffsetValue);
             }
 
             static void mapping(IO& io, GPUInstructionInfo& info, EmptyContext& ctx)

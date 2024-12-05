@@ -158,10 +158,10 @@ namespace rocRoller
         GPUInstructionInfo(std::string const&                   instruction,
                            int                                  waitcnt,
                            std::vector<GPUWaitQueueType> const& waitQueues,
-                           int                                  latency         = 0,
-                           bool                                 implicitAccess  = false,
-                           bool                                 branch          = false,
-                           unsigned int                         maxLiteralValue = 0);
+                           int                                  latency        = 0,
+                           bool                                 implicitAccess = false,
+                           bool                                 branch         = false,
+                           unsigned int                         maxOffsetValue = 0);
 
         std::string                   getInstruction() const;
         int                           getWaitCount() const;
@@ -169,7 +169,7 @@ namespace rocRoller
         int                           getLatency() const;
         bool                          hasImplicitAccess() const;
         bool                          isBranch() const;
-        unsigned int                  maxLiteralValue() const;
+        unsigned int                  maxOffsetValue() const;
 
         friend std::ostream& operator<<(std::ostream& os, const GPUInstructionInfo& d);
 
@@ -220,10 +220,10 @@ namespace rocRoller
         std::string                   m_instruction = "";
         int                           m_waitCount   = -1;
         std::vector<GPUWaitQueueType> m_waitQueues;
-        int                           m_latency         = -1;
-        bool                          m_implicitAccess  = false;
-        bool                          m_isBranch        = false;
-        unsigned int                  m_maxLiteralValue = 0;
+        int                           m_latency        = -1;
+        bool                          m_implicitAccess = false;
+        bool                          m_isBranch       = false;
+        unsigned int                  m_maxOffsetValue = 0;
     };
 
     std::string toString(GPUWaitQueue);

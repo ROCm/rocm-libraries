@@ -380,7 +380,7 @@ namespace FastDivisionTest
                             ShowValue(expr));
 
                 co_yield this->m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-                co_yield this->m_context->mem()->storeFlat(
+                co_yield this->m_context->mem()->storeGlobal(
                     v_result, v_c, 0, CeilDivide(infoResult.elementBits, 8u));
             };
 
@@ -524,7 +524,7 @@ namespace FastDivisionTest
                 co_yield Expression::generate(s_c, expr, m_context);
 
                 co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-                co_yield m_context->mem()->storeFlat(
+                co_yield m_context->mem()->storeGlobal(
                     v_result, v_c, 0, v_c->variableType().getElementSize());
             };
 

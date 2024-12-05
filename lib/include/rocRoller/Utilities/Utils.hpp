@@ -168,24 +168,12 @@ namespace rocRoller
         }
     }
 
-    template <typename T>
-    inline std::ostream& stream_write(std::ostream& stream, T const& val)
-    {
-        return stream << val;
-    }
-
-    template <typename T, typename... Ts>
-    inline std::ostream& stream_write(std::ostream& stream, T const& val, Ts const&... vals)
-    {
-        return stream_write(stream << val, vals...);
-    }
-
     template <typename... Ts>
     inline std::string concatenate(Ts const&... vals)
     {
         std::ostringstream msg;
         msg.setf(std::ios::showpoint);
-        stream_write(msg, vals...);
+        ((msg << (vals)), ...);
 
         return msg.str();
     }
@@ -209,7 +197,7 @@ namespace rocRoller
     template <bool T_Enable, typename... Ts>
     inline std::string concatenate_if(Ts const&... vals)
     {
-        if(!T_Enable)
+        if constexpr(!T_Enable)
             return "";
 
         return concatenate(vals...);

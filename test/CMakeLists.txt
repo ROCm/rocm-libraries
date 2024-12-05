@@ -210,6 +210,7 @@ set(
   catch/UtilsTest.cpp
   catch/RandomNumberGenerationTest.cpp
   catch/mxDataGeneratorTest.cpp
+  catch/GlobalLoadStoreTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})

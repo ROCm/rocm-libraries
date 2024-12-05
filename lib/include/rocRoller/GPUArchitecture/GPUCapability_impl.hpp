@@ -55,7 +55,7 @@ namespace rocRoller
             {"HasMFMA_bf16_16x16x16_1k", Value::HasMFMA_bf16_16x16x16_1k},
 
             {"HasAccumOffset", Value::HasAccumOffset},
-            {"HasFlatOffset", Value::HasFlatOffset},
+            {"HasGlobalOffset", Value::HasGlobalOffset},
 
             {"v_mac_f16", Value::v_mac_f16},
 

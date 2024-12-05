@@ -169,7 +169,7 @@ namespace ExpressionTest
                         v_resultValue, resultValue->expression(), m_context);
                 }
 
-                co_yield m_context->mem()->storeFlat(
+                co_yield m_context->mem()->storeGlobal(
                     v_result, v_resultValue, 0, DataTypeInfo::Get(m_resultType).elementBytes);
             };
 
