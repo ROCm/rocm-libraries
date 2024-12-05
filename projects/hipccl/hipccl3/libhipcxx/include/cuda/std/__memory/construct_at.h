@@ -62,9 +62,10 @@
   #endif
 #endif
 
-#if defined(_CCCL_CUDA_COMPILER_CLANG) || defined(_CCCL_COMPILER_HIPCC)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(_CCCL_COMPILER_HIPCC)
 #  include <new>
-#endif // _CCCL_CUDA_COMPILER_CLANG
+#endif // _CCCL_CUDA_COMPILER(CLANG)
+
 #if _CCCL_STD_VER >= 2020 // need to backfill ::std::construct_at
 #  if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #    include <memory>

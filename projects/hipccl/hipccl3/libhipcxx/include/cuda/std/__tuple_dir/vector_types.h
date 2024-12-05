@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if defined(_CCCL_CUDA_COMPILER)  || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC_RTC__)
+#if _CCCL_HAS_CUDA_COMPILER  || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC_RTC__)
 
 _CCCL_DIAG_PUSH
 _CCCL_DIAG_SUPPRESS_CLANG("-Wmismatched-tags")

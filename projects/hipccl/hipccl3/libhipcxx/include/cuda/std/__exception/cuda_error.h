@@ -39,9 +39,9 @@
 #  pragma system_header
 #endif // no system header
 
-#if defined(_CCCL_CUDA_COMPILER_CLANG) && !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC_RTC__)
+#if _CCCL_CUDA_COMPILER(CLANG) && !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC_RTC__)
 #  include <cuda_runtime_api.h>
-#endif // _CCCL_CUDA_COMPILER_CLANG
+#endif // _CCCL_CUDA_COMPILER(CLANG)
 
 #include <cuda/std/__exception/terminate.h>
 
@@ -57,7 +57,7 @@ _LIBCUDACXX_BEGIN_NAMESPACE_CUDA
 /**
  * @brief Exception thrown when a CUDA error is encountered.
  */
-#if defined(_CCCL_CUDA_COMPILER)
+#if _CCCL_HAS_CUDA_COMPILER
 #  ifndef _CCCL_NO_EXCEPTIONS
 class cuda_error : public ::std::runtime_error
 {
