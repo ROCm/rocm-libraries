@@ -78,11 +78,11 @@ namespace ScopeTest
 
         auto kexpected = R"(
             // CodeGeneratorVisitor::generate() begin
-            // generate(1)
+            // generate({1})
             // Kernel(1) BEGIN
-            // generate()
-            // end: generate()
-            // generate(4)
+            // generate({})
+            // end: generate({})
+            // generate({4})
             // Assign VGPR 11:U32(4) BEGIN
             // Assign dim(1) = 11:U32
             // Generate 11:U32 into v**UNALLOCATED**
@@ -91,10 +91,10 @@ namespace ScopeTest
             // Assign VGPR 11:U32(4) END
             // Scope(2) BEGIN
             // Lock Scope 2
-            // generate(3)
+            // generate({3})
             // Scope(3) BEGIN
             // Lock Scope 3
-            // generate(6)
+            // generate({6})
             // Assign VGPR 33:U32(6) BEGIN
             // Assign dim(3) = 33:U32
             // Generate 33:U32 into v**UNALLOCATED**
@@ -106,7 +106,7 @@ namespace ScopeTest
             // Generate 44:U32 into v0
             v_mov_b32 v0, 44 // call()
             // Assign VGPR 44:U32(7) END
-            // end: generate(6)
+            // end: generate({6})
             // Deleting tag 3
             // Freeing DataFlowTag3: 1 VGPR (Value: UInt32): v1
             // Unlock Scope 3
@@ -117,16 +117,16 @@ namespace ScopeTest
             // Allocated DataFlowTag2: 1 VGPR (Value: UInt32): v1
             v_mov_b32 v1, 22 // call()
             // Assign VGPR 22:U32(5) END
-            // end: generate(3)
+            // end: generate({3})
             // Deleting tag 2
             // Freeing DataFlowTag2: 1 VGPR (Value: UInt32): v1
             // Unlock Scope 2
             // Scope(2) END
-            // end: generate(4)
+            // end: generate({4})
             // Deleting tag 1
             // Freeing DataFlowTag1: 1 VGPR (Value: UInt32): v0
             // Kernel(1) END
-            // end: generate(1)
+            // end: generate({1})
             // CodeGeneratorVisitor::generate() end
         )";
 

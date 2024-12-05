@@ -527,4 +527,59 @@ namespace rocRollerTest
         EXPECT_EQ(g.followEdges<TestForget>({sd2}), std::set<int>({sd2}));
     }
 
+    TEST_F(HypergraphTest, ReachableNodes)
+    {
+        myHypergraph g;
+
+        auto u0  = g.addElement(TestUser{});
+        auto sd0 = g.addElement(TestSubDimension{});
+        auto sd1 = g.addElement(TestSubDimension{});
+        auto sd2 = g.addElement(TestSubDimension{});
+        auto sd3 = g.addElement(TestSubDimension{});
+        auto u1  = g.addElement(TestUser{});
+        auto u2  = g.addElement(TestUser{});
+        auto v0  = g.addElement(TestVGPR{});
+
+        g.addElement(TestSplit{}, {u0}, {sd0});
+        g.addElement(TestSplit{}, {u0}, {sd1});
+        g.addElement(TestSplit{}, {sd1}, {sd2, u1});
+        g.addElement(TestForget{}, {sd0}, {sd2});
+        g.addElement(TestSplit{}, {u1}, {sd3});
+        g.addElement(TestSplit{}, {u2}, {v0});
+        g.addElement(TestSplit{}, {v0}, {sd1});
+
+        auto isSubDimension
+            = [](auto const& node) { return std::holds_alternative<TestSubDimension>(node); };
+
+        auto isSplit = [](auto const& edge) { return std::holds_alternative<TestSplit>(edge); };
+
+        auto isUser = [](auto const& node) { return std::holds_alternative<TestUser>(node); };
+
+        auto truePred = [](auto const& node) { return true; };
+
+        EXPECT_EQ(reachableNodes<Graph::Direction::Downstream>(
+                      g, u0, isSubDimension, isSplit, isSubDimension)
+                      .to<std::set>(),
+                  std::set<int>({sd0, sd1, sd2}));
+
+        EXPECT_EQ(
+            reachableNodes<Graph::Direction::Downstream>(g, u0, isSubDimension, isSplit, truePred)
+                .to<std::set>(),
+            std::set<int>({sd0, sd1, sd2, u1}));
+
+        EXPECT_EQ(
+            reachableNodes<Graph::Direction::Upstream>(g, sd3, isSubDimension, truePred, isUser)
+                .to<std::set>(),
+            std::set<int>({u1}));
+
+        EXPECT_EQ(
+            reachableNodes<Graph::Direction::Upstream>(g, u1, isSubDimension, truePred, isUser)
+                .to<std::set>(),
+            std::set<int>({u0}));
+
+        EXPECT_EQ(reachableNodes<Graph::Direction::Upstream>(g, u1, truePred, truePred, isUser)
+                      .to<std::set>(),
+                  std::set<int>({u0, u2}));
+    }
+
 }

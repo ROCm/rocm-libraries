@@ -4,9 +4,9 @@
 set(rocroller_src
 
  source/AssemblyKernel.cpp
- source/AssemblyKernel_serialization.cpp
  source/AssemblyKernel.cpp
  source/AssemblyKernelArgument.cpp
+ source/AssemblyKernel_serialization.cpp
  source/AssemblyKernel_serialization.cpp
  source/AssertOpKinds.cpp
  source/Command_serialization.cpp
@@ -14,8 +14,8 @@ set(rocroller_src
  source/CommonSubexpressionElim.cpp
  source/Context.cpp
  source/DataTypes.cpp
- source/DataTypes_F8_Utils.cpp
  source/DataTypes_BF16_Utils.cpp
+ source/DataTypes_F8_Utils.cpp
  source/Error.cpp
  source/ExecutableKernel.cpp
  source/Expression.cpp
@@ -45,24 +45,25 @@ set(rocroller_src
  source/ExpressionTransformations/CombineShifts.cpp
  source/ExpressionTransformations/DataFlowTagPropagation.cpp
  source/ExpressionTransformations/FastArithmetic.cpp
- source/ExpressionTransformations/LowerExponential.cpp
  source/ExpressionTransformations/FastDivision.cpp
  source/ExpressionTransformations/FastMultiplication.cpp
  source/ExpressionTransformations/FuseAssociative.cpp
  source/ExpressionTransformations/FuseTernary.cpp
  source/ExpressionTransformations/Identity.cpp
  source/ExpressionTransformations/LaunchTimeSubExpressions.cpp
+ source/ExpressionTransformations/LowerExponential.cpp
+ source/ExpressionTransformations/LowerPRNG.cpp
  source/ExpressionTransformations/RestoreCommandArguments.cpp
  source/ExpressionTransformations/Simplify.cpp
- source/ExpressionTransformations/LowerPRNG.cpp
 
+ source/CodeGen/ArgumentLoader.cpp
  source/CodeGen/Arithmetic/Add.cpp
  source/CodeGen/Arithmetic/AddShiftL.cpp
  source/CodeGen/Arithmetic/ArithmeticGenerator.cpp
  source/CodeGen/Arithmetic/ArithmeticShiftR.cpp
  source/CodeGen/Arithmetic/BitFieldExtract.cpp
- source/CodeGen/Arithmetic/BitwiseNegate.cpp
  source/CodeGen/Arithmetic/BitwiseAnd.cpp
+ source/CodeGen/Arithmetic/BitwiseNegate.cpp
  source/CodeGen/Arithmetic/BitwiseOr.cpp
  source/CodeGen/Arithmetic/BitwiseXor.cpp
  source/CodeGen/Arithmetic/Conditional.cpp
@@ -70,27 +71,26 @@ set(rocroller_src
  source/CodeGen/Arithmetic/Divide.cpp
  source/CodeGen/Arithmetic/Equal.cpp
  source/CodeGen/Arithmetic/Exponential2.cpp
- source/CodeGen/Arithmetic/NotEqual.cpp
  source/CodeGen/Arithmetic/GreaterThan.cpp
  source/CodeGen/Arithmetic/GreaterThanEqual.cpp
  source/CodeGen/Arithmetic/LessThan.cpp
  source/CodeGen/Arithmetic/LessThanEqual.cpp
- source/CodeGen/Arithmetic/LogicalShiftR.cpp
  source/CodeGen/Arithmetic/LogicalAnd.cpp
- source/CodeGen/Arithmetic/LogicalOr.cpp
  source/CodeGen/Arithmetic/LogicalNot.cpp
+ source/CodeGen/Arithmetic/LogicalOr.cpp
+ source/CodeGen/Arithmetic/LogicalShiftR.cpp
  source/CodeGen/Arithmetic/MatrixMultiply.cpp
  source/CodeGen/Arithmetic/Modulo.cpp
  source/CodeGen/Arithmetic/Multiply.cpp
  source/CodeGen/Arithmetic/MultiplyAdd.cpp
  source/CodeGen/Arithmetic/MultiplyHigh.cpp
  source/CodeGen/Arithmetic/Negate.cpp
+ source/CodeGen/Arithmetic/NotEqual.cpp
+ source/CodeGen/Arithmetic/RandomNumber.cpp
  source/CodeGen/Arithmetic/ShiftL.cpp
  source/CodeGen/Arithmetic/ShiftLAdd.cpp
  source/CodeGen/Arithmetic/Subtract.cpp
- source/CodeGen/Arithmetic/RandomNumber.cpp
  source/CodeGen/Arithmetic/Utility.cpp
- source/CodeGen/ArgumentLoader.cpp
  source/CodeGen/Buffer.cpp
  source/CodeGen/CrashKernelGenerator.cpp
  source/CodeGen/Instruction.cpp
@@ -133,8 +133,10 @@ set(rocroller_src
  source/KernelGraph/Transformations/CleanArguments.cpp
  source/KernelGraph/Transformations/CleanLoops.cpp
  source/KernelGraph/Transformations/ConnectWorkgroups.cpp
+ source/KernelGraph/Transformations/ConstantPropagation.cpp
  source/KernelGraph/Transformations/FuseExpressions.cpp
  source/KernelGraph/Transformations/FuseLoops.cpp
+ source/KernelGraph/Transformations/IdentifyParallelDimensions.cpp
  source/KernelGraph/Transformations/InlineIncrements.cpp
  source/KernelGraph/Transformations/KernelGraph_loop.cpp
  source/KernelGraph/Transformations/LoopOverTileNumbers.cpp
@@ -146,7 +148,6 @@ set(rocroller_src
  source/KernelGraph/Transformations/Simplify.cpp
  source/KernelGraph/Transformations/UnrollLoops.cpp
  source/KernelGraph/Transformations/UpdateParameters.cpp
- source/KernelGraph/Transformations/ConstantPropagation.cpp
 
  source/Observers/ACCVGPRReadWrite.cpp
  source/Observers/ACCVGPRWriteWrite.cpp
@@ -154,8 +155,9 @@ set(rocroller_src
  source/Observers/DGEMM16x16x4Write.cpp
  source/Observers/DGEMM4x4x4Write.cpp
  source/Observers/DLWrite.cpp
- source/Observers/ObserverCreation.cpp
+ source/Observers/MFMAObserver.cpp
  source/Observers/OPSEL94x.cpp
+ source/Observers/ObserverCreation.cpp
  source/Observers/RegisterLivenessObserver.cpp
  source/Observers/SupportedInstructionObserver.cpp
  source/Observers/VALUTransWrite94x.cpp
@@ -167,12 +169,11 @@ set(rocroller_src
  source/Observers/VCMPXWrite94x.cpp
  source/Observers/WaitcntObserver.cpp
  source/Observers/XDLReadSrcC908.cpp
- source/Observers/XDLReadSrcC94x.cpp
  source/Observers/XDLReadSrcC90a.cpp
+ source/Observers/XDLReadSrcC94x.cpp
  source/Observers/XDLWrite908.cpp
- source/Observers/XDLWrite94x.cpp
  source/Observers/XDLWrite90a.cpp
- source/Observers/MFMAObserver.cpp
+ source/Observers/XDLWrite94x.cpp
 
  source/Operations/BlockScale.cpp
  source/Operations/Command.cpp

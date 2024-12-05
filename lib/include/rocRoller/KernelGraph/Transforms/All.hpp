@@ -13,6 +13,7 @@
 #include <rocRoller/KernelGraph/Transforms/ConstantPropagation.hpp>
 #include <rocRoller/KernelGraph/Transforms/FuseExpressions.hpp>
 #include <rocRoller/KernelGraph/Transforms/FuseLoops.hpp>
+#include <rocRoller/KernelGraph/Transforms/IdentifyParallelDimensions.hpp>
 #include <rocRoller/KernelGraph/Transforms/InlineIncrements.hpp>
 #include <rocRoller/KernelGraph/Transforms/LoopOverTileNumbers.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerLinear.hpp>
