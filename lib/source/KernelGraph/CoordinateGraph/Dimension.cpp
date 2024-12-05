@@ -304,7 +304,7 @@ namespace rocRoller
                 {
                     auto padBytes0 = macTile.padBytesOfDim[0];
                     auto padBytes1 = macTile.padBytesOfDim[1];
-                    padBytesOfDim  = {(M / m) * padBytes0, (K / k) * padBytes1};
+                    padBytesOfDim  = {(K / k) * padBytes0, (N / n) * padBytes1};
                 }
             }
             if(macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
