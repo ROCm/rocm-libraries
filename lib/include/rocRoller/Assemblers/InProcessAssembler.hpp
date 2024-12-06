@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Assembler.hpp"
-
+#include <rocRoller/Assemblers/Assembler.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
+
 #include <vector>
 
 namespace rocRoller

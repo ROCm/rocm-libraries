@@ -6,10 +6,9 @@
 #include <string>
 #include <unordered_map>
 
-#include <rocRoller/CodeGen/Instruction.hpp>
-
 #include <rocRoller/AssemblyKernelArgument.hpp>
 #include <rocRoller/AssemblyKernel_fwd.hpp>
+#include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 
@@ -92,4 +91,4 @@ namespace rocRoller
 
 }
 
-#include "ArgumentLoader_impl.hpp"
+#include <rocRoller/CodeGen/ArgumentLoader_impl.hpp>

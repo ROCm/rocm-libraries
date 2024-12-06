@@ -1,10 +1,10 @@
 #pragma once
 
-#include "../DataTypes/DataTypes.hpp"
-#include "CommandArgument.hpp"
-#include "CommandArguments_fwd.hpp"
-#include "Operation.hpp"
-#include "TensorScalar_fwd.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Operations/CommandArgument.hpp>
+#include <rocRoller/Operations/CommandArguments_fwd.hpp>
+#include <rocRoller/Operations/Operation.hpp>
+#include <rocRoller/Operations/TensorScalar_fwd.hpp>
 
 namespace rocRoller
 {
@@ -107,4 +107,4 @@ namespace rocRoller
     }
 }
 
-#include "TensorScalar_impl.hpp"
+#include <rocRoller/Operations/TensorScalar_impl.hpp>

@@ -6,10 +6,10 @@
  */
 #pragma once
 
-#include "Component.hpp"
-#include "Error.hpp"
-#include "Logging.hpp"
-#include "Utils.hpp"
+#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Logging.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {

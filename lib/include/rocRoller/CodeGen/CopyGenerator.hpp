@@ -6,7 +6,6 @@
 #pragma once
 
 #include <rocRoller/CodeGen/Instruction.hpp>
-
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
@@ -90,4 +89,4 @@ namespace rocRoller
     };
 }
 
-#include "CopyGenerator_impl.hpp"
+#include <rocRoller/CodeGen/CopyGenerator_impl.hpp>

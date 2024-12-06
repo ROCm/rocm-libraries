@@ -1,6 +1,6 @@
 #pragma once
 
-#include "KernelGraph_fwd.hpp"
+#include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
 
 namespace rocRoller
 {

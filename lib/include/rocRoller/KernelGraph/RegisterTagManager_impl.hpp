@@ -5,9 +5,8 @@
 
 #include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Utilities/Error.hpp>
-
-#include "RegisterTagManager.hpp"
 
 namespace rocRoller
 {

@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "Scheduler.hpp"
-#include "SequentialScheduler_fwd.hpp"
+#include <rocRoller/Scheduling/Scheduler.hpp>
+#include <rocRoller/Scheduling/SequentialScheduler_fwd.hpp>
 
 namespace rocRoller
 {

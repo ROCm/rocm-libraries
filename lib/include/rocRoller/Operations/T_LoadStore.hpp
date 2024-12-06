@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Operation.hpp"
+#include <rocRoller/Operations/Operation.hpp>
 
 #include <rocRoller/Serialization/Base_fwd.hpp>
 
@@ -114,4 +114,4 @@ namespace rocRoller
     }
 }
 
-#include "T_LoadStore_impl.hpp"
+#include <rocRoller/Operations/T_LoadStore_impl.hpp>

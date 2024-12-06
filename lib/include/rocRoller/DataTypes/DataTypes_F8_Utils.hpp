@@ -26,7 +26,7 @@ j* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 
 #pragma once
 
-#include "DataTypes_Half.hpp"
+#include <rocRoller/DataTypes/DataTypes_Half.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller

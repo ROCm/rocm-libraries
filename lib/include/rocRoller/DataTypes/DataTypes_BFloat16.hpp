@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include "DataTypes_BF16_Utils.hpp"
+#include <rocRoller/DataTypes/DataTypes_BF16_Utils.hpp>
 
 #define ROCROLLER_USE_BFloat16
 

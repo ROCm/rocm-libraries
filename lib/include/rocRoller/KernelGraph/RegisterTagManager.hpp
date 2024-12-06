@@ -3,11 +3,10 @@
 #include <map>
 #include <memory>
 
-#include "RegisterTagManager_fwd.hpp"
-
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager_fwd.hpp>
 
 namespace rocRoller
 {
@@ -159,4 +158,4 @@ namespace rocRoller
     };
 }
 
-#include "RegisterTagManager_impl.hpp"
+#include <rocRoller/KernelGraph/RegisterTagManager_impl.hpp>

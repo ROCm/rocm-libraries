@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Random.hpp"
+#include <rocRoller/Utilities/Random.hpp>
 
 namespace rocRoller
 {

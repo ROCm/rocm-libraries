@@ -30,7 +30,7 @@
 #include <hip/hip_runtime.h>
 #endif
 
-#include "DistinctType.hpp"
+#include <rocRoller/DataTypes/DistinctType.hpp>
 
 namespace rocRoller
 {

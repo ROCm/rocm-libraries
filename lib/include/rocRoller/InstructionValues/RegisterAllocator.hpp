@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include "Register.hpp"
+#include <rocRoller/InstructionValues/Register.hpp>
 
 class RegisterTest_RegisterToString_Test;
 
@@ -103,4 +103,4 @@ namespace rocRoller
     }
 }
 
-#include "RegisterAllocator_impl.hpp"
+#include <rocRoller/InstructionValues/RegisterAllocator_impl.hpp>

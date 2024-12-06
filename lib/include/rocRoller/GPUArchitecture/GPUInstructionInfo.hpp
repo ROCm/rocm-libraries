@@ -230,4 +230,4 @@ namespace rocRoller
     std::string toString(GPUWaitQueueType);
 }
 
-#include "GPUInstructionInfo_impl.hpp"
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo_impl.hpp>

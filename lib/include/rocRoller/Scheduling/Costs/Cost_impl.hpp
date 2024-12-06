@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include "Cost.hpp"
+#include <rocRoller/Scheduling/Costs/Cost.hpp>
 
 namespace rocRoller
 {

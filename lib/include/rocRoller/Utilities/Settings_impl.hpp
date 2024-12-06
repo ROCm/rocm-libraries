@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <type_traits>
 
-#include "Settings.hpp"
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Settings.hpp>

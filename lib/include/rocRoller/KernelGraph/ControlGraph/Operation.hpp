@@ -5,14 +5,12 @@
 #include <string>
 #include <vector>
 
-#include "Operation_fwd.hpp"
-
 #include <rocRoller/CodeGen/BufferInstructionOptions.hpp>
-#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
-#include <rocRoller/KernelGraph/StructUtils.hpp>
-
 #include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/Operation_fwd.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/StructUtils.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
@@ -437,4 +435,4 @@ namespace rocRoller
     }
 }
 
-#include "Operation_impl.hpp"
+#include <rocRoller/KernelGraph/ControlGraph/Operation_impl.hpp>

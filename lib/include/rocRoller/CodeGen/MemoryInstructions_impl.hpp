@@ -2,9 +2,10 @@
  * @copyright Copyright 2022 Advanced Micro Devices, Inc.
  */
 
-#include "Arithmetic/ArithmeticGenerator.hpp"
 #include <algorithm>
 #include <ranges>
+
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 
 namespace rocRoller
 {

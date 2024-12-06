@@ -1,15 +1,13 @@
 #pragma once
 
-#include "KernelGraph_fwd.hpp"
-
 #include <rocRoller/AssemblyKernel_fwd.hpp>
 #include <rocRoller/CommandSolution_fwd.hpp>
 #include <rocRoller/Context.hpp>
-
 #include <rocRoller/KernelGraph/Constraints.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform_fwd.hpp>
 
 namespace rocRoller
@@ -105,4 +103,4 @@ namespace rocRoller
     }
 }
 
-#include "KernelGraph_impl.hpp"
+#include <rocRoller/KernelGraph/KernelGraph_impl.hpp>

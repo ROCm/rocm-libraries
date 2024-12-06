@@ -174,4 +174,4 @@ namespace rocRoller
            GPUArchitectureTarget{GPUArchitectureGFX::GFX1201}};
 }
 
-#include "GPUArchitectureTarget_impl.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget_impl.hpp>

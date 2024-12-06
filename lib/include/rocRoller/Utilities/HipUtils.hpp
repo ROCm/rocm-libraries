@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Error.hpp"
-#include "Logging.hpp"
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Logging.hpp>
 
 // Helper macro to check for HIP API errors
 #define HIP_CHECK(cmd)                                                                \

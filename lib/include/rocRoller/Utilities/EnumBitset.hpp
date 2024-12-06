@@ -27,7 +27,7 @@
 
 #include <bitset>
 
-#include "Concepts.hpp"
+#include <rocRoller/Utilities/Concepts.hpp>
 
 namespace rocRoller
 {
@@ -74,4 +74,4 @@ namespace rocRoller
     std::ostream& operator<<(std::ostream& stream, EnumBitset<Enum> const& bs);
 }
 
-#include "EnumBitset_impl.hpp"
+#include <rocRoller/Utilities/EnumBitset_impl.hpp>

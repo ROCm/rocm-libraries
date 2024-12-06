@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "Scheduling.hpp"
+#include <rocRoller/Scheduling/Scheduling.hpp>
 
 namespace rocRoller
 {

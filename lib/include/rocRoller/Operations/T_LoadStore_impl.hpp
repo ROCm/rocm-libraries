@@ -1,8 +1,8 @@
 #pragma once
 
-#include <sstream>
+#include <rocRoller/Operations/T_LoadStore.hpp>
 
-#include "T_LoadStore.hpp"
+#include <sstream>
 
 namespace rocRoller
 {

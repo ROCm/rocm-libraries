@@ -1,15 +1,14 @@
 
-#include <rocRoller/ExpressionTransformations.hpp>
-
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 
 #include <bit>
 
-#include "llvm/Config/llvm-config.h"
-#include "llvm/Support/DivisionByConstantInfo.h"
+#include <llvm/Config/llvm-config.h>
+#include <llvm/Support/DivisionByConstantInfo.h>
 
 #define cast_to_unsigned(N) static_cast<typename std::make_unsigned<T>::type>(N)
 

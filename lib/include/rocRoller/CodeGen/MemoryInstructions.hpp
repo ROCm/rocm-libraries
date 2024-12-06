@@ -4,13 +4,12 @@
 
 #pragma once
 
-#include "Buffer.hpp"
-#include "BufferInstructionOptions.hpp"
-#include "CopyGenerator.hpp"
-#include "Instruction.hpp"
-
-#include "../Context.hpp"
-#include "../Utilities/Generator.hpp"
+#include <rocRoller/CodeGen/Buffer.hpp>
+#include <rocRoller/CodeGen/BufferInstructionOptions.hpp>
+#include <rocRoller/CodeGen/CopyGenerator.hpp>
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {
@@ -347,4 +346,4 @@ namespace rocRoller
     std::ostream& operator<<(std::ostream& stream, MemoryInstructions::MemoryDirection n);
 }
 
-#include "MemoryInstructions_impl.hpp"
+#include <rocRoller/CodeGen/MemoryInstructions_impl.hpp>

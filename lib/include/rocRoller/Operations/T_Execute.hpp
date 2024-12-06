@@ -3,16 +3,15 @@
  */
 #pragma once
 
-#include "Command_fwd.hpp"
-#include "Operation.hpp"
-#include "T_Execute_fwd.hpp"
-
-#include "rocRoller/DataTypes/DataTypes.hpp"
-
 #include <memory>
 #include <unordered_set>
 #include <variant>
 #include <vector>
+
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Operations/Command_fwd.hpp>
+#include <rocRoller/Operations/Operation.hpp>
+#include <rocRoller/Operations/T_Execute_fwd.hpp>
 
 namespace rocRoller
 {
@@ -245,4 +244,4 @@ namespace rocRoller
     }
 }
 
-#include "T_Execute_impl.hpp"
+#include <rocRoller/Operations/T_Execute_impl.hpp>

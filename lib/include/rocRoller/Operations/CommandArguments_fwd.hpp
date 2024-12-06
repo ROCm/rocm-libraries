@@ -1,10 +1,11 @@
 #pragma once
 
-#include "OperationTag.hpp"
 #include <memory>
-#include <rocRoller/Utilities/Comparison.hpp>
 #include <tuple>
 #include <unordered_map>
+
+#include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Utilities/Comparison.hpp>
 
 namespace rocRoller
 {

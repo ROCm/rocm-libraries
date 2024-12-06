@@ -9,8 +9,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <rocRoller/Context_fwd.hpp>
-
 #include <rocRoller/AssemblyKernel_fwd.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader_fwd.hpp>
 #include <rocRoller/CodeGen/BranchGenerator_fwd.hpp>
@@ -18,7 +16,10 @@
 #include <rocRoller/CodeGen/CrashKernelGenerator_fwd.hpp>
 #include <rocRoller/CodeGen/Instruction_fwd.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions_fwd.hpp>
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget_fwd.hpp>
 #include <rocRoller/InstructionValues/LDSAllocator_fwd.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator_fwd.hpp>
@@ -26,14 +27,10 @@
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager_fwd.hpp>
 #include <rocRoller/KernelGraph/ScopeManager_fwd.hpp>
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/ScheduledInstructions_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduling_fwd.hpp>
 #include <rocRoller/Utilities/Random_fwd.hpp>
-
-#include <rocRoller/DataTypes/DataTypes.hpp>
-#include <rocRoller/KernelOptions.hpp>
-
-#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 
 class ContextFixture;
 
@@ -162,4 +159,4 @@ namespace rocRoller
     std::ostream& operator<<(std::ostream&, ContextPtr const&);
 }
 
-#include "Context_impl.hpp"
+#include <rocRoller/Context_impl.hpp>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TensorScalar.hpp"
+#include <rocRoller/Operations/TensorScalar.hpp>
 
 namespace rocRoller
 {

@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "WaitCount.hpp"
+#include <rocRoller/CodeGen/WaitCount.hpp>
 
 namespace rocRoller
 {

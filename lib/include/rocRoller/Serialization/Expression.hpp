@@ -1,17 +1,14 @@
 #pragma once
 
-#include "../DataTypes/DataTypes.hpp"
-
 #include <rocRoller/AssemblyKernelArgument.hpp>
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
-
-#include "Base.hpp"
-#include "Enum.hpp"
-#include "HasTraits.hpp"
-#include "Variant.hpp"
-
-#include "../Expression.hpp"
+#include <rocRoller/Serialization/Base.hpp>
+#include <rocRoller/Serialization/Enum.hpp>
+#include <rocRoller/Serialization/HasTraits.hpp>
+#include <rocRoller/Serialization/Variant.hpp>
 
 namespace rocRoller
 {

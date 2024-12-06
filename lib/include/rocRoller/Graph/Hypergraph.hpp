@@ -1,13 +1,10 @@
 #pragma once
 
-#include "Hypergraph_fwd.hpp"
-
-#include <boost/multi_index_container.hpp>
-
 #include <boost/multi_index/identity.hpp>
 #include <boost/multi_index/key.hpp>
 #include <boost/multi_index/member.hpp>
 #include <boost/multi_index/ordered_index.hpp>
+#include <boost/multi_index_container.hpp>
 
 #include <functional>
 #include <map>
@@ -16,10 +13,10 @@
 #include <variant>
 #include <vector>
 
-#include "../Utilities/Generator.hpp"
-#include "../Utilities/Utils.hpp"
-
-#include "../Serialization/Base_fwd.hpp"
+#include <rocRoller/Graph/Hypergraph_fwd.hpp>
+#include <rocRoller/Serialization/Base_fwd.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
@@ -444,4 +441,4 @@ namespace rocRoller
     }
 }
 
-#include "Hypergraph_impl.hpp"
+#include <rocRoller/Graph/Hypergraph_impl.hpp>

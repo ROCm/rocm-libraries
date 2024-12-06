@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Register_fwd.hpp"
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
 
 #include <list>
 

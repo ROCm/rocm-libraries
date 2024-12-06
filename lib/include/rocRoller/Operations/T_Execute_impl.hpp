@@ -1,8 +1,8 @@
 #pragma once
 
-#include <variant>
+#include <rocRoller/Operations/Command.hpp>
 
-#include "Command.hpp"
+#include <variant>
 
 namespace rocRoller
 {

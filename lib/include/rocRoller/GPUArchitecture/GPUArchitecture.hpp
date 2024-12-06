@@ -11,13 +11,12 @@
 #include <unordered_set>
 #include <vector>
 
-#include "GPUArchitectureTarget.hpp"
-#include "GPUCapability.hpp"
-#include "GPUInstructionInfo.hpp"
-
-#include "../DataTypes/DataTypes.hpp"
-#include "../InstructionValues/Register_fwd.hpp"
-#include "../Serialization/Base_fwd.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Serialization/Base_fwd.hpp>
 
 namespace rocRoller
 {
@@ -104,4 +103,4 @@ namespace rocRoller
     };
 }
 
-#include "GPUArchitecture_impl.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitecture_impl.hpp>

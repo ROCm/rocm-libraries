@@ -4,9 +4,9 @@
 
 #pragma once
 
-#include "Operations.hpp"
-#include "T_Execute.hpp"
-#include "T_Mul.hpp"
+#include <rocRoller/Operations/Operations.hpp>
+#include <rocRoller/Operations/T_Execute.hpp>
+#include <rocRoller/Operations/T_Mul.hpp>
 
 namespace rocRoller
 {

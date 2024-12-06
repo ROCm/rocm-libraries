@@ -26,12 +26,11 @@
 
 #pragma once
 
-#include "MatrixMultiply_fwd.hpp"
-
 #include <memory>
 #include <tuple>
 
-#include "ArithmeticGenerator.hpp"
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/CodeGen/Arithmetic/MatrixMultiply_fwd.hpp>
 
 namespace rocRoller
 {

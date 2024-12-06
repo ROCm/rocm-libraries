@@ -34,7 +34,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "../DataTypes/DataTypes.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
 
 #ifdef ROCROLLER_USE_LLVM
 namespace llvm

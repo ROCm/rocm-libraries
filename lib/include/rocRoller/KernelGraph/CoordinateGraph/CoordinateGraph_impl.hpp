@@ -2,8 +2,8 @@
 
 #include <vector>
 
-#include "CoordinateGraph.hpp"
 #include <rocRoller/Graph/Hypergraph.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 
 namespace rocRoller
 {

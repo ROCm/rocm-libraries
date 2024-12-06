@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Hypergraph.hpp"
-
 #include <algorithm>
 #include <compare>
 #include <map>
@@ -10,9 +8,10 @@
 #include <variant>
 #include <vector>
 
-#include "../Utilities/Comparison.hpp"
-#include "../Utilities/Error.hpp"
-#include "../Utilities/Generator.hpp"
+#include <rocRoller/Graph/Hypergraph.hpp>
+#include <rocRoller/Utilities/Comparison.hpp>
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {

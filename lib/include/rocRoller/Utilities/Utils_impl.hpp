@@ -1,8 +1,7 @@
 #pragma once
 
-#include "Utils.hpp"
-
-#include "Error.hpp"
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {

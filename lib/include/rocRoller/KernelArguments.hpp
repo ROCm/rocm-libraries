@@ -26,10 +26,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
-
-#include <rocRoller/DataTypes/DataTypes.hpp>
 
 namespace rocRoller
 {
@@ -138,4 +137,4 @@ namespace rocRoller
 
 } // namespace rocRoller
 
-#include "KernelArguments_impl.hpp"
+#include <rocRoller/KernelArguments_impl.hpp>

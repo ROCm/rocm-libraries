@@ -36,9 +36,8 @@
 #include <ranges>
 #include <utility>
 
-#include "../InstructionValues/Register_fwd.hpp"
-
-#include "Concepts.hpp"
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Utilities/Concepts.hpp>
 
 namespace rocRoller
 {
@@ -526,4 +525,4 @@ namespace rocRoller
 
 }
 
-#include "Generator_impl.hpp"
+#include <rocRoller/Utilities/Generator_impl.hpp>

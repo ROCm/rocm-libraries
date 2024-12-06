@@ -26,10 +26,11 @@
 
 #pragma once
 
-#include "DataTypes_F8_Utils.hpp"
 #include <cinttypes>
 #include <cmath>
 #include <iostream>
+
+#include <rocRoller/DataTypes/DataTypes_F8_Utils.hpp>
 
 #define ROCROLLER_USE_BF8
 

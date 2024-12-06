@@ -7,8 +7,7 @@
 #include <memory>
 #include <unordered_set>
 
-#include "Operation.hpp"
-
+#include <rocRoller/Operations/Operation.hpp>
 #include <rocRoller/Serialization/Base_fwd.hpp>
 
 namespace rocRoller
@@ -35,4 +34,4 @@ namespace rocRoller
     }
 }
 
-#include "T_Mul_impl.hpp"
+#include <rocRoller/Operations/T_Mul_impl.hpp>

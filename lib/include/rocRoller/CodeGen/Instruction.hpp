@@ -8,12 +8,11 @@
 #include <memory>
 #include <string>
 
-#include "WaitCount.hpp"
-
-#include "../Context_fwd.hpp"
-#include "../InstructionValues/Register_fwd.hpp"
-#include "../Scheduling/Scheduler_fwd.hpp"
-#include "../Utilities/Settings_fwd.hpp"
+#include <rocRoller/CodeGen/WaitCount.hpp>
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Scheduling/Scheduler_fwd.hpp>
+#include <rocRoller/Utilities/Settings_fwd.hpp>
 
 namespace rocRoller
 {
@@ -187,4 +186,4 @@ namespace rocRoller
     };
 }
 
-#include "Instruction_impl.hpp"
+#include <rocRoller/CodeGen/Instruction_impl.hpp>

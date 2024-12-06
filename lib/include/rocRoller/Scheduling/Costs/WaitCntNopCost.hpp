@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "Cost.hpp"
-#include "WaitCntNopCost_fwd.hpp"
+#include <rocRoller/Scheduling/Costs/Cost.hpp>
+#include <rocRoller/Scheduling/Costs/WaitCntNopCost_fwd.hpp>
 
 namespace rocRoller
 {

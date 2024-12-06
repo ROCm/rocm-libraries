@@ -2,7 +2,7 @@
 
 #include <variant>
 
-#include "Base.hpp"
+#include <rocRoller/Serialization/Base.hpp>
 
 #include <rocRoller/Expression.hpp>
 

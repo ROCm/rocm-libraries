@@ -7,13 +7,12 @@
 #include <memory>
 #include <vector>
 
-#include "CommandArgument_fwd.hpp"
-#include "CommandArguments.hpp"
-#include "OperationTag.hpp"
-#include "Operations_fwd.hpp"
-
-#include "../DataTypes/DataTypes.hpp"
-#include "../Expression.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
+#include <rocRoller/Operations/CommandArguments.hpp>
+#include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Operations/Operations_fwd.hpp>
 
 namespace rocRoller
 {
@@ -124,4 +123,4 @@ namespace rocRoller
 
 }
 
-#include "Command_impl.hpp"
+#include <rocRoller/Operations/Command_impl.hpp>
