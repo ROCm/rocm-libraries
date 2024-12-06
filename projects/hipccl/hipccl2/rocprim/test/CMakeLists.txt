@@ -53,6 +53,10 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
 
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
 
+  if(USE_HIPCXX)
+    set_source_files_properties(${TEST_SOURCES} PROPERTIES LANGUAGE HIP)
+  endif()
+
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
   if (ROCPRIM_INSTALL)
     rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
@@ -70,7 +74,11 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
   )
   target_link_libraries(${TEST_TARGET}
     PRIVATE
-      rocprim_hip
+      rocprim
+  )
+  target_link_libraries(${TEST_TARGET}
+    PRIVATE
+      $<IF:$<LINK_LANGUAGE:HIP>,hip::host,hip::device>
   )
 
   target_compile_options(${TEST_TARGET}

@@ -34,6 +34,10 @@ endif()
 function(add_rocprim_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
 
+  if(USE_HIPCXX)
+    set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE HIP)
+  endif()
+
   if(BENCHMARK_CONFIG_TUNING)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${BENCHMARK_TARGET}.parallel.cpp.in")
       message(STATUS "found ${BENCHMARK_TARGET}.parallel.cpp.in file, compiling in parallel.")
@@ -77,9 +81,10 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
       rocprim
       benchmark::benchmark
   )
+
   target_link_libraries(${BENCHMARK_TARGET}
     PRIVATE
-      rocprim_hip
+      $<IF:$<LINK_LANGUAGE:HIP>,hip::host,hip::device>
   )
 
   target_compile_options(${BENCHMARK_TARGET}

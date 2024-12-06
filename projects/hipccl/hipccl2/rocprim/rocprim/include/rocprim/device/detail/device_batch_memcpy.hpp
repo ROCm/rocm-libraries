@@ -382,10 +382,10 @@ struct batch_memcpy_impl
 
     struct copyable_blev_buffers
     {
-        InputBufferItType  srcs;
-        OutputBufferItType dsts;
-        BufferSizeItType   sizes;
-        tile_offset_type*  offsets;
+        input_buffer_type*  srcs;
+        output_buffer_type* dsts;
+        buffer_size_type*   sizes;
+        tile_offset_type*   offsets;
     };
 
 private:

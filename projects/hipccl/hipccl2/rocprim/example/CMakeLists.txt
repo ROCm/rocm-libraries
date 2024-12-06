@@ -22,14 +22,20 @@
 
 function(add_rocprim_example EXAMPLE_SOURCE)
   get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
+
+  if(USE_HIPCXX)
+    set_source_files_properties(${EXAMPLE_SOURCE} PROPERTIES LANGUAGES HIP)
+  endif()
+
   add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
+
   target_link_libraries(${EXAMPLE_TARGET}
     PRIVATE
-    rocprim_hip
+    rocprim
   )
   target_link_libraries(${EXAMPLE_TARGET}
     PRIVATE
-      rocprim_hip
+      $<IF:$<LINK_LANGUAGE:HIP>,hip::host,hip::device>
   )
   set_target_properties(${EXAMPLE_TARGET}
     PROPERTIES

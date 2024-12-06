@@ -38,6 +38,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Fixed an issue where `rocprim::partial_sort_copy` would yield a compile error if the input iterator is const.
 * Fixed incorrect 128-bit signed and unsigned integers type traits.
 * Fixed compilation issue when `rocprim::radix_key_codec<...>` is specialized with a 128-bit integer.
+* Fixed the warp-level reduction `rocprim::warp_reduce.reduce` DPP implementation to avoid undefined intermediate values during the reduction.
 
 ### Upcoming changes
 * Using the initialisation constructor of `rocprim::reverse_iterator` will throw a deprecation warning. It will be marked as explicit in the next major release.
