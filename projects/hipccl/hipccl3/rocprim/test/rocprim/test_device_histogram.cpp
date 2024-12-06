@@ -132,6 +132,7 @@ using custom_config1 = rocprim::histogram_config<rocprim::kernel_config<128, 5>>
 
 typedef ::testing::Types<params1<int, 10, 0, 10>,
                          params1<float, 10, 0, 10>,
+                         params1<float, 10, 0, 10, float, float>,
                          params1<rocprim::half, 10, 0, 10>,
                          params1<rocprim::bfloat16, 10, 0, 10>,
                          params1<int8_t, 10, 0, 10>,
@@ -140,8 +141,8 @@ typedef ::testing::Types<params1<int, 10, 0, 10>,
                          params1<unsigned short, 65536, 0, 65536, int>,
                          params1<unsigned char, 10, 20, 240, unsigned char, unsigned int>,
                          params1<unsigned char, 256, 0, 256, short>,
-
                          params1<double, 10, 0, 1000, double, int>,
+                         params1<double, 10, 0, 1000, double, double>,
                          params1<int, 123, 100, 5635, int>,
                          params1<double, 55, -123, +123, double, unsigned int, custom_config1>,
                          params1<int, 10, 0, 10, int, int, rocprim::default_config, true>>

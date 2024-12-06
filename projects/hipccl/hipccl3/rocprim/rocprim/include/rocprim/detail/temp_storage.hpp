@@ -65,6 +65,7 @@ struct simple_partition
     layout storage_layout;
 
     /// Compute the required layout for this type and return it.
+    ROCPRIM_HOST_DEVICE
     layout get_layout() const
     {
         return this->storage_layout;
@@ -73,6 +74,7 @@ struct simple_partition
     /// \brief Assigns the final storage for this partition. `storage` is assumed to have the required
     /// alignment and size as described by the layout returned by `get_layout()`.
     /// \param storage - Base pointer to the storage to be used for this partition.
+    ROCPRIM_HOST_DEVICE
     void set_storage(void* const storage)
     {
         *this->dest = this->storage_layout.size == 0 ? nullptr : static_cast<T*>(storage);
@@ -84,6 +86,7 @@ struct simple_partition
 /// \param  dest           - Pointer to where to store the final allocated pointer
 /// \param  storage_layout - The required layout that the memory allocated to `*dest` should have.
 template<typename T>
+ROCPRIM_HOST_DEVICE
 simple_partition<T> make_partition(T** dest, layout storage_layout)
 {
     return simple_partition<T>{dest, storage_layout};
@@ -95,6 +98,7 @@ simple_partition<T> make_partition(T** dest, layout storage_layout)
 /// \param  size      - The required size that the memory allocated to `*dest` should have.
 /// \param  alignment - The required alignment that the memory allocated to `*dest` should have.
 template<typename T>
+ROCPRIM_HOST_DEVICE
 simple_partition<T> make_partition(T** dest, size_t size, size_t alignment = default_alignment)
 {
     return make_partition(dest, {size, alignment});
@@ -106,6 +110,7 @@ simple_partition<T> make_partition(T** dest, size_t size, size_t alignment = def
 /// \param  dest     - Pointer to where to store the final allocated pointer
 /// \param  elements - The number of elements of `T` that the memory allocated to `dest` should consist of.
 template<typename T>
+ROCPRIM_HOST_DEVICE
 simple_partition<T> ptr_aligned_array(T** dest, size_t elements)
 {
     return make_partition(dest, elements * sizeof(T), alignof(T));
@@ -126,9 +131,11 @@ struct linear_partition
     ::rocprim::tuple<Ts...> sub_partitions;
 
     /// \brief Constructor.
-    linear_partition(Ts... sub_partitions) : sub_partitions{sub_partitions...} {}
+    ROCPRIM_HOST_DEVICE linear_partition(Ts... sub_partitions) : sub_partitions{sub_partitions...}
+    {}
 
     /// Compute the required layout for this type and return it.
+    ROCPRIM_HOST_DEVICE
     layout get_layout() const
     {
         size_t required_alignment = 1;
@@ -153,6 +160,7 @@ struct linear_partition
     /// \brief Assigns the final storage for this partition. `storage` is assumed to have the required
     /// alignment and size as described by the layout returned by `get_layout()`.
     /// \param storage - Base pointer to the storage to be used for this partition.
+    ROCPRIM_HOST_DEVICE
     void set_storage(void* const storage)
     {
         size_t offset = 0;
@@ -175,6 +183,7 @@ struct linear_partition
 /// \tparam Ts - The sub-partitions to allocate temporary memory for.
 /// \see linear_partition
 template<typename... Ts>
+ROCPRIM_HOST_DEVICE
 linear_partition<Ts...> make_linear_partition(Ts... ts)
 {
     return linear_partition<Ts...>(ts...);
@@ -194,9 +203,11 @@ struct union_partition
     ::rocprim::tuple<Ts...> sub_partitions;
 
     /// \brief Constructor.
-    union_partition(Ts... sub_partitions) : sub_partitions{sub_partitions...} {}
+    ROCPRIM_HOST_DEVICE union_partition(Ts... sub_partitions) : sub_partitions{sub_partitions...}
+    {}
 
     /// Compute the required layout for this type and return it.
+    ROCPRIM_HOST_DEVICE
     layout get_layout() const
     {
         size_t required_alignment = 1;
@@ -218,6 +229,7 @@ struct union_partition
     /// \brief Assigns the final storage for this partition. `storage` is assumed to have the required
     /// alignment and size as described by the layout returned by `get_layout()`.
     /// \param storage - Base pointer to the storage to be used for this partition.
+    ROCPRIM_HOST_DEVICE
     void set_storage(void* const storage)
     {
         for_each_in_tuple(this->sub_partitions,
@@ -229,6 +241,7 @@ struct union_partition
 /// \tparam Ts - The sub-partitions to allocate temporary memory for.
 /// \see union_partition
 template<typename... Ts>
+ROCPRIM_HOST_DEVICE
 union_partition<Ts...> make_union_partition(Ts... ts)
 {
     return union_partition<Ts...>(ts...);
@@ -261,6 +274,7 @@ union_partition<Ts...> make_union_partition(Ts... ts)
 /// \param storage_size [in,out] - The size of `temporary_storage`.
 /// \param partition    [in,out] - The root partition to allocate temporary memory to.
 template<typename TempStoragePartition>
+ROCPRIM_HOST_DEVICE
 hipError_t
     partition(void* const temporary_storage, size_t& storage_size, TempStoragePartition partition)
 {

@@ -190,14 +190,15 @@ private:
             }
             ::rocprim::syncthreads();
 
-            if(flat_tid < warps_no_)
+            if(warp_id == 0)
             {
                 // Use warp partial to calculate the final reduce results for every thread
-                auto warp_partial = storage_.warp_partials[lane_id];
+                auto warp_partial = storage_.warp_partials[lane_id % warps_no_];
 
-                warp_reduce<!warps_no_is_pow_of_two_, warp_reduce_output_type>(
-                    warp_partial, output, warps_no_, reduce_op
-                );
+                warp_reduce<!warps_no_is_pow_of_two_, warp_reduce_output_type>(warp_partial,
+                                                                               output,
+                                                                               warps_no_,
+                                                                               reduce_op);
             }
         }
     }
