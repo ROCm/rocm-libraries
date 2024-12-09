@@ -112,5 +112,7 @@
 // These functions must be wrapped so they return
 // hipError_t instead of cudaError_t
 #include "util_allocator.hpp"
+#include "util_device.hpp"
+#include "util_temporary_storage.hpp"
 
 #endif // HIPCUB_CUB_HIPCUB_HPP_

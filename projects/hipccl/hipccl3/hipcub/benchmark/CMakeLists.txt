@@ -22,6 +22,9 @@
 
 function(add_hipcub_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
+  if(USE_HIPCXX)
+    set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE HIP)
+  endif()
   add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
   target_include_directories(${BENCHMARK_TARGET} SYSTEM BEFORE
     PUBLIC
