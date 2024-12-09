@@ -12,8 +12,11 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Added `--emulation` option for `rtest.py`
   * Unit tests can be run with `[--emulation|-e|--test|-t]=<test_name>`
 * Added `DeviceSelect::FlaggedIf` and its inplace overload.
+* Added CUB macros missing from hipCUB: `HIPCUB_MAX`, `HIPCUB_MIN`, `HIPCUB_QUOTIENT_FLOOR`, `HIPCUB_QUOTIENT_CEILING`, `HIPCUB_ROUND_UP_NEAREST` and `HIPCUB_ROUND_DOWN_NEAREST`.
+* Added `hipcub::AliasTemporaries` function for CUB parity.
 
 ### Changed
+* Removed usage of `std::unary_function` and `std::binary_function` in `test_hipcub_device_adjacent_difference.cpp`
 * Changed the subset of tests that are run for smoke tests such that the smoke test will complete with faster run-time and to never exceed 2GB of vram usage. Use `python rtest.py [--emulation|-e|--test|-t]=smoke` to run these tests.
 * The `rtest.py` options have changed. `rtest.py` is now run with at least either `--test|-t` or `--emulation|-e`, but not both options.
 * The NVIDIA backend now requires CUB, Thrust and libcu++ 2.5.0. If it is not found it will be downloaded from the NVIDIA CCCL repository.

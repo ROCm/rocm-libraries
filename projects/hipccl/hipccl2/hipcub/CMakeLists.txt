@@ -29,13 +29,26 @@ set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended 
 # hipCUB project
 project(hipcub LANGUAGES CXX)
 
-# Set the ROCM install directory.
-if(WIN32)
-  set(ROCM_ROOT "$ENV{HIP_PATH}" CACHE PATH "Root directory of the ROCm installation")
-else()
-  set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
+# Set CXX flags
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if (CMAKE_CXX_STANDARD EQUAL 14)
+  message(WARNING "C++14 will be deprecated in the next major release")
+elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++14 and C++17 are supported")
 endif()
 
+# Set HIP flags
+set(CMAKE_HIP_STANDARD 14)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+set(CMAKE_HIP_EXTENSIONS OFF)
+
+include(CheckLanguage)
+include(CMakeDependentOption)
 
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
@@ -44,6 +57,17 @@ option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
+
+check_language(HIP)
+cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
+
+# Set the ROCM install directory.
+if(WIN32)
+  set(ROCM_ROOT "$ENV{HIP_PATH}" CACHE PATH "Root directory of the ROCm installation")
+else()
+  set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
+endif()
+
 
 # Set the header wrapper ON by default.
 option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
@@ -60,45 +84,36 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
-# Set CXX flags
-if (NOT DEFINED CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
-endif()
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-
-if (CMAKE_CXX_STANDARD EQUAL 14)
-  message(WARNING "C++14 will be deprecated in the next major release")
-elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++14 and C++17 are supported")
-endif()
-
 # rocm-cmake has to be included early so that it's available to set GPU_TARGETS
 # If hip is included prior to setting that then it defaults to building only for the current architecture
 include(ROCmCMakeBuildToolsDependency)
 
 # Setup GPU targets for rocm platform
-if(NOT (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"))
-  if(NOT DEFINED AMDGPU_TARGETS)
-    set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
-  else()
-    set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
-  endif()
-  set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
-
-  if(GPU_TARGETS STREQUAL "all")
-    if(BUILD_ADDRESS_SANITIZER)
-      # ASAN builds require xnack
-      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+"
-      )
+if(USE_HIPCXX)
+  enable_language(HIP)
+else()
+  # Setup GPU targets for rocm platform
+  if(NOT (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"))
+    if(NOT DEFINED AMDGPU_TARGETS)
+      set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
     else()
-      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-        TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
-      )
+      set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
     endif()
-    set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
+    set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
+
+    if(GPU_TARGETS STREQUAL "all")
+      if(BUILD_ADDRESS_SANITIZER)
+        # ASAN builds require xnack
+        rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+          TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+"
+        )
+      else()
+        rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+        )
+      endif()
+      set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
+    endif()
   endif()
 endif()
 
@@ -109,8 +124,7 @@ include(VerifyCompiler)
 include(Dependencies)
 
 if(BUILD_ADDRESS_SANITIZER)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
+  add_compile_options(-fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
 endif()
 

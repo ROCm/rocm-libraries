@@ -34,6 +34,10 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
 endfunction()
 
 function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
+  if(USE_HIPCXX)
+    set_source_files_properties(${TEST_SOURCES} PROPERTIES LANGUAGE HIP)
+  endif()
+
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
   target_link_libraries(${TEST_TARGET}
     PRIVATE
@@ -222,6 +226,7 @@ add_hipcub_test("hipcub.DeviceSpmv" test_hipcub_device_spmv.cpp)
 add_hipcub_test("hipcub.DevicePartition" test_hipcub_device_partition.cpp)
 add_hipcub_test("hipcub.Grid" test_hipcub_grid.cpp)
 add_hipcub_test("hipcub.UtilPtx" test_hipcub_util_ptx.cpp)
+add_hipcub_test("hipcub.UtilDevice" test_hipcub_util_device.cpp)
 add_hipcub_test("hipcub.Vector" test_hipcub_vector.cpp)
 add_hipcub_test("hipcub.WarpExchange" test_hipcub_warp_exchange.cpp)
 add_hipcub_test("hipcub.WarpLoad" test_hipcub_warp_load.cpp)

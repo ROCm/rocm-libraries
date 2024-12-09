@@ -43,6 +43,10 @@ endforeach()
 function(add_hipcub_example EXAMPLE_NAME EXAMPLE_SOURCES)
   list(GET EXAMPLE_SOURCES 0 EXAMPLE_MAIN_SOURCE)
   get_filename_component(EXAMPLE_TARGET ${EXAMPLE_MAIN_SOURCE} NAME_WE)
+  if(USE_HIPCXX)
+    set_source_files_properties(${EXAMPLE_SOURCES} PROPERTIES LANGUAGE HIP)
+  endif()
+
   add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCES})
   target_include_directories(${EXAMPLE_TARGET} SYSTEM BEFORE
     PUBLIC

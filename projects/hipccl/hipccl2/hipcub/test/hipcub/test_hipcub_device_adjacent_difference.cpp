@@ -315,7 +315,7 @@ inline auto make_transform_iterator(InputIterator iterator, UnaryFunction transf
 }
 
 template<class T>
-struct conversion_op : public std::unary_function<T, discard_write<T>>
+struct conversion_op
 {
     HIPCUB_HOST_DEVICE
     auto operator()(const T i) const
@@ -325,7 +325,7 @@ struct conversion_op : public std::unary_function<T, discard_write<T>>
 };
 
 template<class T>
-struct flag_expected_op : public std::binary_function<T, T, discard_write<T>>
+struct flag_expected_op
 {
     bool left;
     T    expected;

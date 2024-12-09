@@ -51,6 +51,7 @@
 
 // Device
 #include "device/device_adjacent_difference.hpp"
+#include "device/device_copy.hpp"
 #include "device/device_histogram.hpp"
 #include "device/device_memcpy.hpp"
 #include "device/device_merge_sort.hpp"
@@ -102,7 +103,10 @@
 // Util
 #include "tuple.hpp"
 #include "util_allocator.hpp"
+#include "util_device.hpp"
+#include "util_macro.hpp"
 #include "util_ptx.hpp"
+#include "util_temporary_storage.hpp"
 #include "util_type.hpp"
 
 #endif // HIPCUB_ROCPRIM_HIPCUB_HPP_
