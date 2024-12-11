@@ -56,33 +56,23 @@ __device__ WorkNode_Header *currentWorkNode[NUM_VCORES] = {};
 hipStream_t mainStream;
 std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
 
+// Attempts to lock the WorkNode at location, and if successful, returns the WorkNode. If unsuccessful (i.e. it's
+// already locked) returns nullptr.
+[[nodiscard]] static inline __device__ WorkNode_Header *tryLockAndFetchWorkNode(WorkNode_Header **location) {
+    // Note: I think access through this cast might be a strict aliasing violation, but it's kind of unavoidable.
+    // atomicExch only accepts arithmetic types, so we have to cast location to an arithmetic type like uintptr_t,
+    // resulting in a strict aliasing violation.
+    return reinterpret_cast<WorkNode_Header*>(atomicExch(reinterpret_cast<uintptr_t*>(location), 0));
+}
 
-// Locks and returns the worknode at location. If *location == nullptr (i.e. it's locked), waits for the node to be unlocked.
+// Locks and returns the WorkNode at location. If *location == nullptr (i.e. it's currently locked), spins until the
+// WorkNode is unlocked.
 [[nodiscard]] static inline __device__ WorkNode_Header *lockAndFetchWorkNode(WorkNode_Header **location) {
     WorkNode_Header *worknode;
     do {
-        // Note: I think access through this cast might be a strict aliasing violation, but it's kind of unavoidable.
-        // atomicExch only accepts arithmetic types, so we have to cast currentWorkNode[blockIdx.x] to an arithmetic type like uintptr_t,
-        // resulting in a strict aliasing violation.
-        worknode = reinterpret_cast<WorkNode_Header*>(atomicExch(reinterpret_cast<uintptr_t*>(location), 0));
+        worknode = tryLockAndFetchWorkNode(location);
     } while (worknode == nullptr);
     return worknode;
-
-    // If we decide to insert a sleep call, switch to this implementation:
-    // uintptr_t worknode;
-    // // Roughly equivalent to, but faster than:
-    // // uintptr_t old = *reinterpret_cast<uintptr_t*>(location), assumed;
-    // // do {
-    // //     assumed = old;
-    // //     old = atomicCAS(reinterpret_cast<uintptr_t*>(location), assumed, 0);
-    // // } while (assumed != old || assumed == 0);
-    // // Note: I think access through this cast might be a strict aliasing violation, but it's kind of unavoidable.
-    // // atomicExch only accepts arithmetic types, so we have to cast *location to an arithmetic type like uintptr_t,
-    // // resulting in a strict aliasing violation.
-    // while((worknode = atomicExch(reinterpret_cast<uintptr_t*>(location), 0)) == 0) {
-    //     //__builtin_amdgcn_s_sleep(1);
-    // }
-    // return reinterpret_cast<WorkNode_Header *>(worknode);
 }
 
 // Lock a worknode we already have a pointer to. For convenience, returns worknode->link_to_self (which might be nullptr
@@ -123,6 +113,23 @@ static inline __device__ void moveAndUnlockWorkNode(WorkNode_Header *worknode, W
     __threadfence();
     // Complete the unlock process for worknode by setting *new_location = worknode;
     atomicExch(reinterpret_cast<uintptr_t*>(new_location), reinterpret_cast<uintptr_t>(worknode));
+}
+// Signal that we're abdicating any responsability for freeing worknode, unless we're the last one to do so, in which
+// case, free worknode.
+// Returns true if we're the last one with any responsability for worknode (i.e. the WorkNode has already been detached,
+// or the WorkNode has finished execution).
+static inline __device__ bool releaseWorkNode(WorkNode_Header *worknode) {
+    // Use a threadfence to establishing a synchronizes-with relationship between releaseWorkNode and itself, and
+    // between lockWorkNode and releaseWorkNode. See https://en.cppreference.com/w/cpp/atomic/atomic_thread_fence.
+    __threadfence();
+    if (atomicExch(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), 0) == 0) {
+        ::free(worknode);
+        return true;
+    }
+    return false;
+}
+[[maybe_unused]] static inline __device__ bool isSchedulerDoneWithWorkNode(WorkNode_Header *worknode) {
+    return atomicAdd(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), 0) == 0;
 }
 
 // Postcondition: unlocks node
@@ -168,10 +175,7 @@ __device__ void WorkQueue<queueSize>::waitForSpace(uint32_t myPushCount) {
 // else got to it first, returns nullptr.
 template <size_t queueSize>
 [[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop(bool shouldIncrementActiveCount, uint32_t index) {
-    // Note: I think access through this cast might be a strict aliasing violation, but it's kind of unavoidable.
-    // atomicExch only accepts arithmetic types, so we have to cast queue[index] to an arithmetic type like uintptr_t,
-    // resulting in a strict aliasing violation.
-    WorkNode_Header *work = reinterpret_cast<WorkNode_Header*>(atomicExch(reinterpret_cast<uintptr_t*>(&queue[index]), 0));
+    WorkNode_Header *work = tryLockAndFetchWorkNode(&queue[index]);
     if (work == nullptr) {
         return nullptr;
     }
@@ -189,9 +193,9 @@ template <size_t queueSize>
 __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t index) {
     // Atomic ops are only atomic with respect to the actions of other GPU cores, not the copy engine. In other words,
     // the copy engine can execute a write in the middle of an atomic op. Thus, if we don't have this 'if' guarding the
-    // atomicExch, it's possible for the atomicExch to load nullptr from cpuWorkQueue[i], the copy engine writes a
-    // non-null value to cpuWorkQueue[i], then the atomicExch over-writes it with null, and finally atomicExch returns
-    // null as if nothing happened.
+    // tryPop call, it's possible for the atomicExch in tryPop to load nullptr from cpuWorkQueue[i], the copy engine
+    // writes a non-null value to cpuWorkQueue[i], then the atomicExch over-writes it with null, and finally atomicExch
+    // returns null as if nothing happened.
     if (atomicAdd(reinterpret_cast<uintptr_t *>(&queue[index]), 0) == 0) {
         return nullptr;
     }
@@ -257,16 +261,7 @@ static inline __device__ bool invokeNext(bool yielding = false) {
             setCurrentWorkNode(waiting, false);
         }
 
-        // Update link_to_self to indicate to detach that the worknode has finished executing and detach needs to free
-        // the worknode itself.
-        if (atomicExch(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), 0) == 0) {
-            // Detach already has been called
-            ::free(worknode);
-        }
-        // Don't need to "unlock" worknode because the scheduler is about to loose any way of accessing worknode, and
-        // detach knows what to do when link_to_self == nullptr.
-        // TODO: do we need a threadfence and/or some way to establishing a synchronizes-with relationship?
-        // See https://en.cppreference.com/w/cpp/atomic/atomic_thread_fence.
+        releaseWorkNode(worknode);
     }
     return true;
 }
@@ -546,11 +541,8 @@ __host__ __device__ void thread::join() {
     if (worknode_d->link_to_self == &currentWorkNode[blockIdx.x]) {
         assert(false && "Attempted to join the gpu::thread object associated with the active thread");
     }
-    // We don't need to lock here because we know nobody is going to call detach on worknode_d, but we do need to make
-    // sure that this does a load from memory and not a cache, so we use an atomicAdd(..., 0).
-    //
-    // Note that link_to_self == nullptr implies the thread has finished, since we can't possibly have called detach
-    while (atomicAdd(reinterpret_cast<uintptr_t *>(&(worknode_d->link_to_self)), 0) != 0) {
+    // We don't need to lock here because we know nobody is going to call detach on worknode_d.
+    while (!isSchedulerDoneWithWorkNode(worknode_d)) {
         // spin while we wait for it to finish.
         __builtin_amdgcn_s_sleep(8);
     }
@@ -580,16 +572,7 @@ __host__ __device__ void thread::detach() {
         assert(joinable() && "Attempted to detach a gpu::thread object that doesn't have an associated thread");
     }
 
-    // We don't need to lock worknode_d before accessing it because the only way for a WorkNode pointer to be
-    // invalidated is for a host-side detach to occur.
-    // If worknode_d->link_to_self == nullptr, free worknode_d, otherwise set worknode_d->link_to_self = nullptr.
-    if (atomicExch(reinterpret_cast<uintptr_t*>(&worknode_d->link_to_self), 0) == 0) {
-        // It's already finished, so we have the only pointer to worknode_d. Thus, we can just free the memory.
-        ::free(worknode_d);
-    }
-    // Since the gpu::thread instance is in device memory, we know the gpu did the allocation for worknode_d, so the
-    // scheduler can already perform the free when the worknode is finished. No need to copy the data over like in the
-    // host version of detach.
+    releaseWorkNode(worknode_d);
 
     worknode_d = nullptr;
 #else // __HIP_DEVICE_COMPILE__
@@ -597,6 +580,7 @@ __host__ __device__ void thread::detach() {
         throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::detach failed");
     }
     hipLaunchKernelGGL(detachWorkNode, dim3(1), dim3(1), 0, getEnqueingStream(), worknode_d.get());
+    // No sync needed because gpu::free does the hipFreeAsync in EnqueingStream.
     worknode_d = nullptr;
 #endif // !__HIP_DEVICE_COMPILE__
 }
