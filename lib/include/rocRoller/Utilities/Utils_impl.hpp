@@ -1,11 +1,11 @@
 #pragma once
 
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/RTTI.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
-
     template <CCountedEnum T>
     T fromString(std::string const& str)
     {
@@ -18,6 +18,6 @@ namespace rocRoller
                 return val;
         }
         Throw<FatalError>(
-            "Invalid fromString: type name: ", typeid(T).name(), ", string input: ", str);
+            "Invalid fromString: type name: ", typeName<T>(), ", string input: ", str);
     }
 }

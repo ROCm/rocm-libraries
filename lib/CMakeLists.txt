@@ -230,6 +230,17 @@ target_include_directories(rocroller SYSTEM PUBLIC
                            ${libdivide_SOURCE_DIR}/
                            ${spdlog_INCLUDES})
 
+# LLVM has RTTI disabled by default and ROCm's LLVM also has RTTI disabled.
+# RTTI is enabled for rocRoller, except for the compilation units below.
+# If RTTI is also desired for this CUs, then the options are:
+#    - Have ROCm ship with LLVM with RTTI enabled;
+#    - Use a pre-build LLVM library with RTTI enabled;
+#    - Build LLVM (or the required components) from source as pre-build step;
+set_source_files_properties(source/Utilities/ReadELF.cpp
+  source/Assemblers/InProcessAssembler.cpp
+  source/ExpressionTransformations/FastDivision.cpp
+  PROPERTIES COMPILE_FLAGS -fno-rtti)
+
 if(YAML_BACKEND STREQUAL "YAML_CPP")
   target_link_libraries(rocroller PUBLIC yaml-cpp)
 endif()

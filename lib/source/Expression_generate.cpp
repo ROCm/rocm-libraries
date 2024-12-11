@@ -15,6 +15,7 @@
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
+#include <rocRoller/Utilities/RTTI.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 namespace rocRoller
@@ -803,7 +804,7 @@ namespace rocRoller
                 Throw<FatalError>("Operation ",
                                   ShowValue(expr),
                                   " not supported at kernel execute time: ",
-                                  typeid(Operation).name());
+                                  typeName<Operation>());
             }
 
             Generator<Instruction> operator()(Register::ValuePtr&       dest,
