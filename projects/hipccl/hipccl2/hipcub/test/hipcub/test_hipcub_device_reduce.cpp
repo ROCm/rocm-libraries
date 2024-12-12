@@ -156,11 +156,9 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
-            hipGraph_t graph;
-            if(TestFixture::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             // Run
             reduce_selector.reduce_sum(d_temp_storage,
@@ -170,11 +168,8 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
                                        input.size(),
                                        stream);
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
             HIP_CHECK(hipDeviceSynchronize());
@@ -193,9 +188,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
                                         test_utils::precision<U>::value * size));
 
             if(TestFixture::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_output));
@@ -204,9 +197,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
@@ -277,11 +268,9 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
-            hipGraph_t graph;
-            if(TestFixture::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             // Run
             HIP_CHECK(hipcub::DeviceReduce::Min(d_temp_storage,
@@ -291,11 +280,8 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
                                                 input.size(),
                                                 stream));
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
             HIP_CHECK(hipDeviceSynchronize());
@@ -316,9 +302,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
                     : std::max(test_utils::precision<T>::value, test_utils::precision<U>::value)));
 
             if(TestFixture::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_output));
@@ -327,9 +311,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 struct ArgMinDispatch
@@ -445,11 +427,9 @@ void test_argminmax(typename TestFixture::input_type empty_value)
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
-            hipGraph_t graph;
-            if(TestFixture::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             // Run
             HIP_CHECK(function(d_temp_storage,
@@ -459,11 +439,8 @@ void test_argminmax(typename TestFixture::input_type empty_value)
                                input.size(),
                                stream));
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
             HIP_CHECK(hipDeviceSynchronize());
@@ -484,16 +461,12 @@ void test_argminmax(typename TestFixture::input_type empty_value)
                                         test_utils::precision<T>::value * size));
 
             if(TestFixture::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
         }
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
@@ -696,11 +669,9 @@ TYPED_TEST(HipcubDeviceReduceTests, TransformReduce)
             // allocate temporary storage
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
-            hipGraph_t graph;
-            if(TestFixture::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             // Run
             HIP_CHECK(hipcub::DeviceReduce::TransformReduce(d_temp_storage,
@@ -713,11 +684,8 @@ TYPED_TEST(HipcubDeviceReduceTests, TransformReduce)
                                                             init,
                                                             stream));
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipPeekAtLastError());
             HIP_CHECK(hipDeviceSynchronize());
@@ -735,9 +703,7 @@ TYPED_TEST(HipcubDeviceReduceTests, TransformReduce)
                                         test_utils::precision<U>::value * size));
 
             if(TestFixture::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_output));
@@ -746,9 +712,7 @@ TYPED_TEST(HipcubDeviceReduceTests, TransformReduce)
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 // ---------------------------------------------------------
