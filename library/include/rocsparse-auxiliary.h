@@ -164,9 +164,11 @@ rocsparse_status rocsparse_get_stream(rocsparse_handle handle, hipStream_t* stre
  *
  *  \details
  *  \p rocsparse_set_pointer_mode specifies the pointer mode to be used by the rocSPARSE
- *  library context and all subsequent function calls. By default, all values are passed
- *  by reference on the host. Valid pointer modes are \ref rocsparse_pointer_mode_host
- *  or \p rocsparse_pointer_mode_device.
+ *  library context and all subsequent function calls. For example, many rocSPARSE routines take
+ *  \f$\alpha\f$ and \f$\beta\f$ pointers as parameters. These can be either host memory pointers 
+ *  or device memory pointers depending on what the pointer mode is set to. By default, all values are passed
+ *  using host pointer mode. Valid pointer modes are \ref rocsparse_pointer_mode_host
+ *  or \ref rocsparse_pointer_mode_device.
  *
  *  @param[in]
  *  handle          the handle to the rocSPARSE library context.
@@ -216,6 +218,13 @@ rocsparse_status rocsparse_get_pointer_mode(rocsparse_handle        handle,
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_handle \p handle is invalid.
+ *  \par Example
+ *  \code{.c}
+ *   rocsparse_handle handle;
+ *   rocsparse_create_handle(&handle);
+ *   rocsparse_get_version(handle, &rocsparse_ver);
+ *   rocsparse_destroy_handle(handle);
+ *  \endcode
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_get_version(rocsparse_handle handle, int* version);
@@ -233,6 +242,13 @@ rocsparse_status rocsparse_get_version(rocsparse_handle handle, int* version);
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_handle \p handle is invalid.
+ *  \par Example
+ *  \code{.c}
+ *   rocsparse_handle handle;
+ *   rocsparse_create_handle(&handle);
+ *   rocsparse_get_git_rev(handle, rocsparse_rev);
+ *   rocsparse_destroy_handle(handle);
+ *  \endcode
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_get_git_rev(rocsparse_handle handle, char* rev);
@@ -241,9 +257,15 @@ rocsparse_status rocsparse_get_git_rev(rocsparse_handle handle, char* rev);
  *  \brief Create a matrix descriptor
  *  \details
  *  \p rocsparse_create_mat_descr creates a matrix descriptor. It initializes
- *  \ref rocsparse_matrix_type to \ref rocsparse_matrix_type_general and
- *  \ref rocsparse_index_base to \ref rocsparse_index_base_zero. It should be destroyed
- *  at the end using rocsparse_destroy_mat_descr().
+ *  \ref rocsparse_matrix_type to \ref rocsparse_matrix_type_general, \ref rocsparse_fill_mode
+ *  to \ref rocsparse_fill_mode_lower, \ref rocsparse_diag_type to \ref rocsparse_diag_type_non_unit,
+ *  \ref rocsparse_index_base to \ref rocsparse_index_base_zero, and \ref rocsparse_storage_mode 
+ *  to \ref rocsparse_storage_mode_sorted.  It should be destroyed at the end using 
+ *  \ref rocsparse_destroy_mat_descr().
+ *
+ *  The matrix type, fill mode, diag type, index base, and storage mode can be set using the 
+ *  \ref rocsparse_set_mat_type, \ref rocsparse_set_mat_fill_mode, \ref rocsparse_set_mat_diag_type, 
+ *  \ref rocsparse_set_mat_index_base, and \ref rocsparse_set_mat_storage_mode APIs respectively.
  *
  *  @param[out]
  *  descr   the pointer to the matrix descriptor.

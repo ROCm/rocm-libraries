@@ -36,7 +36,7 @@ extern "C" {
 *  \brief Sparse vector inner dot product
 *
 *  \details
-*  \p rocsparse_spvv computes the inner dot product of the sparse vecotr \f$x\f$ with the
+*  \p rocsparse_spvv computes the inner dot product of the sparse vector \f$x\f$ with the
 *  dense vector \f$y\f$, such that
 *  \f[
 *    \text{result} := op(x) \cdot y,

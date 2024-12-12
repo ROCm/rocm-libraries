@@ -106,6 +106,11 @@ rocsparse_status
 
 .. doxygenenum:: rocsparse_status
 
+rocsparse_data_status
+---------------------
+
+.. doxygenenum:: rocsparse_data_status
+
 rocsparse_indextype
 -------------------
 
@@ -224,6 +229,11 @@ rocsparse_gtsv_interleaved_alg
 ------------------------------
 
 .. doxygenenum:: rocsparse_gtsv_interleaved_alg
+
+rocsparse_check_spmat_stage
+---------------------------
+
+.. doxygenenum:: rocsparse_check_spmat_stage
 
 rocsparse_spitsv_alg
 --------------------

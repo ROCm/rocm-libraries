@@ -569,7 +569,7 @@ typedef enum rocsparse_sparse_to_sparse_alg_
    *
    *  \details
    *  This is a list of possible stages during sparse_to_sparse conversion. Typical order is
-   *  rocsparse_sparse_to_sparse_stage_analysis, rocsparse_sparse_to_sparse_stage_compute.
+   *  \ref rocsparse_sparse_to_sparse_stage_analysis, \ref rocsparse_sparse_to_sparse_stage_compute.
    */
 typedef enum rocsparse_sparse_to_sparse_stage_
 {
@@ -658,11 +658,11 @@ typedef enum rocsparse_gtsv_interleaved_alg_
 } rocsparse_gtsv_interleaved_alg;
 
 /*! \ingroup types_module
- *  \brief List of check_matrix stages.
+ *  \brief List of check matrix stages.
  *
  *  \details
- *  This is a list of possible stages during check_matrix computation. Typical order is
- *  rocsparse_check_spmat_stage_buffer_size, rocsparse_check_spmat_stage_compute.
+ *  This is a list of possible stages during check matrix computation. Typical order is
+ *  \ref rocsparse_check_spmat_stage_buffer_size, \ref rocsparse_check_spmat_stage_compute.
  */
 typedef enum rocsparse_check_spmat_stage_
 {
@@ -675,7 +675,7 @@ typedef enum rocsparse_check_spmat_stage_
  *
  *  \details
  *  This is a list of possible stages during SpMV computation. Typical order is
- *  rocsparse_spmv_stage_buffer_size, rocsparse_spmv_stage_preprocess, rocsparse_spmv_stage_compute.
+ *  \ref rocsparse_spmv_stage_buffer_size, \ref rocsparse_spmv_stage_preprocess, \ref rocsparse_spmv_stage_compute.
  */
 typedef enum rocsparse_spmv_stage_
 {
@@ -720,7 +720,7 @@ typedef enum rocsparse_spsv_alg_
  *
  *  \details
  *  This is a list of possible stages during SpSV computation. Typical order is
- *  rocsparse_spsv_stage_buffer_size, rocsparse_spsv_stage_preprocess, rocsparse_spsv_stage_compute.
+ *  \ref rocsparse_spsv_stage_buffer_size, \ref rocsparse_spsv_stage_preprocess, \ref rocsparse_spsv_stage_compute.
  */
 typedef enum rocsparse_spsv_stage_
 {
@@ -746,7 +746,7 @@ typedef enum rocsparse_spitsv_alg_
  *
  *  \details
  *  This is a list of possible stages during SpITSV computation. Typical order is
- *  rocsparse_spitsv_stage_buffer_size, rocsparse_spitsv_stage_preprocess, rocsparse_spitsv_stage_compute.
+ *  \ref rocsparse_spitsv_stage_buffer_size, \ref rocsparse_spitsv_stage_preprocess, \ref rocsparse_spitsv_stage_compute.
  */
 typedef enum rocsparse_spitsv_stage_
 {
@@ -772,7 +772,7 @@ typedef enum rocsparse_spsm_alg_
  *
  *  \details
  *  This is a list of possible stages during SpSM computation. Typical order is
- *  rocsparse_spsm_stage_buffer_size, rocsparse_spsm_stage_preprocess, rocsparse_spsm_stage_compute.
+ *  \ref rocsparse_spsm_stage_buffer_size, \ref rocsparse_spsm_stage_preprocess, \ref rocsparse_spsm_stage_compute.
  */
 typedef enum rocsparse_spsm_stage_
 {
@@ -848,7 +848,7 @@ typedef enum rocsparse_dense_to_sparse_alg_
  *
  *  \details
  *  This is a list of possible stages during SpMM computation. Typical order is
- *  rocsparse_spmm_stage_buffer_size, rocsparse_spmm_stage_preprocess, rocsparse_spmm_stage_compute.
+ *  \ref rocsparse_spmm_stage_buffer_size, \ref rocsparse_spmm_stage_preprocess, \ref rocsparse_spmm_stage_compute.
  */
 typedef enum rocsparse_spmm_stage_
 {
@@ -862,7 +862,7 @@ typedef enum rocsparse_spmm_stage_
  *
  *  \details
  *  This is a list of possible stages during SpGEMM computation. Typical order is
- *  rocsparse_spgemm_stage_buffer_size, rocsparse_spgemm_stage_nnz, rocsparse_spgemm_stage_compute.
+ *  \ref rocsparse_spgemm_stage_buffer_size, \ref rocsparse_spgemm_stage_nnz, \ref rocsparse_spgemm_stage_compute.
  */
 typedef enum rocsparse_spgemm_stage_
 {

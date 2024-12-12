@@ -61,7 +61,9 @@ extern "C" {
 *  used with different \f$x\f$ and \f$y\f$ vectors. Once all calls to \p rocsparse_spsv are complete, the temporary buffer 
 *  can be deallocated. 
 *
-*  \p rocsparse_spsv supports the following data types for \f$op(A)\f$, \f$x\f$, \f$y\f$ and compute types for \f$\alpha\f$:  
+*  \p rocsparse_spsv supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index types for 
+*  storing the row pointer and column indices arrays of the sparse matrices. \p rocsparse_spsv supports the following 
+*  data types for \f$op(A)\f$, \f$x\f$, \f$y\f$ and compute types for \f$\alpha\f$:  
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -72,9 +74,6 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f64_c
 *  </table>
-*
-*  \p rocsparse_spsv supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions 
-*  for storing the row pointer and column indices arrays of the sparse matrices.
 *
 *  \note
 *  The sparse matrix formats currently supported are: \ref rocsparse_format_coo and \ref rocsparse_format_csr.

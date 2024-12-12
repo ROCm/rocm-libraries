@@ -111,7 +111,7 @@ extern "C" {
 *  </table>
 *
 *  One can also pass \ref rocsparse_spmm_alg_default which will automatically select from the algorithms listed above
-*  base on the sparse matrix format. In the case of CSR matrices this will set the algorithm to be \ref rocsparse_spmm_alg_csr, in
+*  based on the sparse matrix format. In the case of CSR matrices this will set the algorithm to be \ref rocsparse_spmm_alg_csr, in
 *  the case of Blocked ELL matrices this will set the algorithm to be \ref rocsparse_spmm_alg_bell, in the case of BSR matrix this
 *  will set the algorithm to be \ref rocsparse_spmm_alg_bsr and for COO matrices it will set the algorithm to be
 *  \ref rocsparse_spmm_alg_coo_atomic.
