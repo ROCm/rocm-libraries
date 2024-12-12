@@ -32,21 +32,22 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename X, typename Y, typename U>
+    template <uint32_t BLOCKSIZE, typename I, typename A, typename X, typename Y, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void ellmvn_kernel(I m,
                        I n,
                        I ell_width,
-                       U alpha_device_host,
+                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                        const I* __restrict__ ell_col_ind,
                        const A* __restrict__ ell_val,
                        const X* __restrict__ x,
-                       U beta_device_host,
+                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                        Y* __restrict__ y,
-                       rocsparse_index_base idx_base)
+                       rocsparse_index_base idx_base,
+                       bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha != 0 || beta != 1)
         {
             rocsparse::ellmvn_device<BLOCKSIZE>(
@@ -54,20 +55,21 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename X, typename Y, typename U>
+    template <uint32_t BLOCKSIZE, typename I, typename A, typename X, typename Y, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void ellmvt_kernel(rocsparse_operation trans,
                        I                   m,
                        I                   n,
                        I                   ell_width,
-                       U                   alpha_device_host,
+                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                        const I* __restrict__ ell_col_ind,
                        const A* __restrict__ ell_val,
                        const X* __restrict__ x,
                        Y* __restrict__ y,
-                       rocsparse_index_base idx_base)
+                       rocsparse_index_base idx_base,
+                       bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != 0)
         {
             rocsparse::ellmvt_device<BLOCKSIZE>(
@@ -75,18 +77,18 @@ namespace rocsparse
         }
     }
 
-    template <typename I, typename A, typename X, typename Y, typename U>
+    template <typename I, typename A, typename X, typename Y, typename T>
     rocsparse_status ellmv_dispatch(rocsparse_handle          handle,
                                     rocsparse_operation       trans,
                                     I                         m,
                                     I                         n,
-                                    U                         alpha_device_host,
+                                    const T*                  alpha_device_host,
                                     const rocsparse_mat_descr descr,
                                     const A*                  ell_val,
                                     const I*                  ell_col_ind,
                                     I                         ell_width,
                                     const X*                  x,
-                                    U                         beta_device_host,
+                                    const T*                  beta_device_host,
                                     Y*                        y)
     {
         // Stream
@@ -97,21 +99,23 @@ namespace rocsparse
         {
 #define ELLMVN_DIM 512
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::ellmvn_kernel<ELLMVN_DIM>),
-                                               dim3((m - 1) / ELLMVN_DIM + 1),
-                                               dim3(ELLMVN_DIM),
-                                               0,
-                                               stream,
-                                               m,
-                                               n,
-                                               ell_width,
-                                               alpha_device_host,
-                                               ell_col_ind,
-                                               ell_val,
-                                               x,
-                                               beta_device_host,
-                                               y,
-                                               descr->base);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::ellmvn_kernel<ELLMVN_DIM>),
+                dim3((m - 1) / ELLMVN_DIM + 1),
+                dim3(ELLMVN_DIM),
+                0,
+                stream,
+                m,
+                n,
+                ell_width,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                ell_col_ind,
+                ell_val,
+                x,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                y,
+                descr->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
 
 #undef ELLMVN_DIM
         }
@@ -121,21 +125,23 @@ namespace rocsparse
             // Scale y with beta
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, n, beta_device_host, y));
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::ellmvt_kernel<ELLMVT_DIM>),
-                                               dim3((m - 1) / ELLMVT_DIM + 1),
-                                               dim3(ELLMVT_DIM),
-                                               0,
-                                               stream,
-                                               trans,
-                                               m,
-                                               n,
-                                               ell_width,
-                                               alpha_device_host,
-                                               ell_col_ind,
-                                               ell_val,
-                                               x,
-                                               y,
-                                               descr->base);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::ellmvt_kernel<ELLMVT_DIM>),
+                dim3((m - 1) / ELLMVT_DIM + 1),
+                dim3(ELLMVT_DIM),
+                0,
+                stream,
+                trans,
+                m,
+                n,
+                ell_width,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                ell_col_ind,
+                ell_val,
+                x,
+                y,
+                descr->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef ELLMVT_DIM
         }
 
@@ -209,16 +215,7 @@ rocsparse_status rocsparse::ellmv_template(rocsparse_handle          handle, // 
                 return rocsparse_status_invalid_pointer;
             }
 
-            if(handle->pointer_mode == rocsparse_pointer_mode_device)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_array(handle, ysize, beta_device_host, y));
-            }
-            else
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_array(handle, ysize, *beta_device_host, y));
-            }
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
         }
 
         return rocsparse_status_success;
@@ -240,38 +237,18 @@ rocsparse_status rocsparse::ellmv_template(rocsparse_handle          handle, // 
     ROCSPARSE_CHECKARG_POINTER(9, x);
     ROCSPARSE_CHECKARG_POINTER(11, y);
 
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellmv_dispatch(handle,
-                                                            trans,
-                                                            m,
-                                                            n,
-                                                            alpha_device_host,
-                                                            descr,
-                                                            ell_val,
-                                                            ell_col_ind,
-                                                            ell_width,
-                                                            x,
-                                                            beta_device_host,
-                                                            y));
-        return rocsparse_status_success;
-    }
-    else
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellmv_dispatch(handle,
-                                                            trans,
-                                                            m,
-                                                            n,
-                                                            *alpha_device_host,
-                                                            descr,
-                                                            ell_val,
-                                                            ell_col_ind,
-                                                            ell_width,
-                                                            x,
-                                                            *beta_device_host,
-                                                            y));
-        return rocsparse_status_success;
-    }
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellmv_dispatch(handle,
+                                                        trans,
+                                                        m,
+                                                        n,
+                                                        alpha_device_host,
+                                                        descr,
+                                                        ell_val,
+                                                        ell_col_ind,
+                                                        ell_width,
+                                                        x,
+                                                        beta_device_host,
+                                                        y));
     return rocsparse_status_success;
 }
 

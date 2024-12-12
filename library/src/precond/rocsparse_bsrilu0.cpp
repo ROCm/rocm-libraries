@@ -32,96 +32,113 @@
 #include "control.h"
 #include "utility.h"
 
-#define LAUNCH_BSRILU28()                                                               \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrilu0_2_8<64, 64, 8>),              \
-                                      dim3(mb),                                         \
-                                      dim3(8, 8),                                       \
-                                      0,                                                \
-                                      handle->stream,                                   \
-                                      dir,                                              \
-                                      mb,                                               \
-                                      bsr_row_ptr,                                      \
-                                      bsr_col_ind,                                      \
-                                      bsr_val,                                          \
-                                      (rocsparse_int*)info->bsrilu0_info->trm_diag_ind, \
-                                      block_dim,                                        \
-                                      done_array,                                       \
-                                      (rocsparse_int*)info->bsrilu0_info->row_map,      \
-                                      (rocsparse_int*)info->zero_pivot,                 \
-                                      base,                                             \
-                                      info->boost_enable,                               \
-                                      boost_tol_device_host,                            \
-                                      boost_val_device_host)
+#define LAUNCH_BSRILU28()                                                   \
+    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                      \
+        (rocsparse::bsrilu0_2_8<64, 64, 8>),                                \
+        dim3(mb),                                                           \
+        dim3(8, 8),                                                         \
+        0,                                                                  \
+        handle->stream,                                                     \
+        dir,                                                                \
+        mb,                                                                 \
+        bsr_row_ptr,                                                        \
+        bsr_col_ind,                                                        \
+        bsr_val,                                                            \
+        (rocsparse_int*)info->bsrilu0_info->trm_diag_ind,                   \
+        block_dim,                                                          \
+        done_array,                                                         \
+        (rocsparse_int*)info->bsrilu0_info->row_map,                        \
+        (rocsparse_int*)info->zero_pivot,                                   \
+        base,                                                               \
+        info->boost_enable,                                                 \
+        info->boost_tol_size,                                               \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32), \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64), \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),    \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
 
-#define LAUNCH_BSRILU932(dim)                                                           \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrilu0_9_32<64, 64, dim>),           \
-                                      dim3(mb),                                         \
-                                      dim3(dim, 64 / dim),                              \
-                                      0,                                                \
-                                      handle->stream,                                   \
-                                      dir,                                              \
-                                      mb,                                               \
-                                      bsr_row_ptr,                                      \
-                                      bsr_col_ind,                                      \
-                                      bsr_val,                                          \
-                                      (rocsparse_int*)info->bsrilu0_info->trm_diag_ind, \
-                                      block_dim,                                        \
-                                      done_array,                                       \
-                                      (rocsparse_int*)info->bsrilu0_info->row_map,      \
-                                      (rocsparse_int*)info->zero_pivot,                 \
-                                      base,                                             \
-                                      info->boost_enable,                               \
-                                      boost_tol_device_host,                            \
-                                      boost_val_device_host)
+#define LAUNCH_BSRILU932(dim)                                               \
+    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                      \
+        (rocsparse::bsrilu0_9_32<64, 64, dim>),                             \
+        dim3(mb),                                                           \
+        dim3(dim, 64 / dim),                                                \
+        0,                                                                  \
+        handle->stream,                                                     \
+        dir,                                                                \
+        mb,                                                                 \
+        bsr_row_ptr,                                                        \
+        bsr_col_ind,                                                        \
+        bsr_val,                                                            \
+        (rocsparse_int*)info->bsrilu0_info->trm_diag_ind,                   \
+        block_dim,                                                          \
+        done_array,                                                         \
+        (rocsparse_int*)info->bsrilu0_info->row_map,                        \
+        (rocsparse_int*)info->zero_pivot,                                   \
+        base,                                                               \
+        info->boost_enable,                                                 \
+        info->boost_tol_size,                                               \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32), \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64), \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),    \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
 
-#define LAUNCH_BSRILU3364()                                                             \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrilu0_33_64<64, 64, 64>),           \
-                                      dim3(mb),                                         \
-                                      dim3(64),                                         \
-                                      0,                                                \
-                                      handle->stream,                                   \
-                                      dir,                                              \
-                                      mb,                                               \
-                                      bsr_row_ptr,                                      \
-                                      bsr_col_ind,                                      \
-                                      bsr_val,                                          \
-                                      (rocsparse_int*)info->bsrilu0_info->trm_diag_ind, \
-                                      block_dim,                                        \
-                                      done_array,                                       \
-                                      (rocsparse_int*)info->bsrilu0_info->row_map,      \
-                                      (rocsparse_int*)info->zero_pivot,                 \
-                                      base,                                             \
-                                      info->boost_enable,                               \
-                                      boost_tol_device_host,                            \
-                                      boost_val_device_host)
+#define LAUNCH_BSRILU3364()                                                 \
+    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                      \
+        (rocsparse::bsrilu0_33_64<64, 64, 64>),                             \
+        dim3(mb),                                                           \
+        dim3(64),                                                           \
+        0,                                                                  \
+        handle->stream,                                                     \
+        dir,                                                                \
+        mb,                                                                 \
+        bsr_row_ptr,                                                        \
+        bsr_col_ind,                                                        \
+        bsr_val,                                                            \
+        (rocsparse_int*)info->bsrilu0_info->trm_diag_ind,                   \
+        block_dim,                                                          \
+        done_array,                                                         \
+        (rocsparse_int*)info->bsrilu0_info->row_map,                        \
+        (rocsparse_int*)info->zero_pivot,                                   \
+        base,                                                               \
+        info->boost_enable,                                                 \
+        info->boost_tol_size,                                               \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32), \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64), \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),    \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
 
-#define LAUNCH_BSRILU65inf(sleep, wfsize)                                               \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrilu0_general<128, wfsize, sleep>), \
-                                      dim3((wfsize * mb - 1) / 128 + 1),                \
-                                      dim3(128),                                        \
-                                      0,                                                \
-                                      handle->stream,                                   \
-                                      dir,                                              \
-                                      mb,                                               \
-                                      bsr_row_ptr,                                      \
-                                      bsr_col_ind,                                      \
-                                      bsr_val,                                          \
-                                      (rocsparse_int*)info->bsrilu0_info->trm_diag_ind, \
-                                      block_dim,                                        \
-                                      done_array,                                       \
-                                      (rocsparse_int*)info->bsrilu0_info->row_map,      \
-                                      (rocsparse_int*)info->zero_pivot,                 \
-                                      base,                                             \
-                                      info->boost_enable,                               \
-                                      boost_tol_device_host,                            \
-                                      boost_val_device_host)
+#define LAUNCH_BSRILU65inf(sleep, wfsize)                                   \
+    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                      \
+        (rocsparse::bsrilu0_general<128, wfsize, sleep>),                   \
+        dim3((wfsize * mb - 1) / 128 + 1),                                  \
+        dim3(128),                                                          \
+        0,                                                                  \
+        handle->stream,                                                     \
+        dir,                                                                \
+        mb,                                                                 \
+        bsr_row_ptr,                                                        \
+        bsr_col_ind,                                                        \
+        bsr_val,                                                            \
+        (rocsparse_int*)info->bsrilu0_info->trm_diag_ind,                   \
+        block_dim,                                                          \
+        done_array,                                                         \
+        (rocsparse_int*)info->bsrilu0_info->row_map,                        \
+        (rocsparse_int*)info->zero_pivot,                                   \
+        base,                                                               \
+        info->boost_enable,                                                 \
+        info->boost_tol_size,                                               \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32), \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64), \
+        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),    \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
 namespace rocsparse
 {
-    template <typename T, typename U>
+    template <typename T>
     rocsparse_status bsrilu0_numeric_boost_template(rocsparse_handle   handle,
                                                     rocsparse_mat_info info,
                                                     int                enable_boost,
-                                                    const U*           boost_tol,
+                                                    size_t             boost_tol_size,
+                                                    const void*        boost_tol,
                                                     const T*           boost_val)
     {
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
@@ -136,18 +153,17 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_POINTER(1, info);
 
         // Reset boost
-        info->boost_enable        = 0;
-        info->use_double_prec_tol = 0;
+        info->boost_enable = 0;
 
         if(enable_boost)
         {
             ROCSPARSE_CHECKARG_POINTER(3, boost_tol);
             ROCSPARSE_CHECKARG_POINTER(4, boost_val);
 
-            info->boost_enable        = enable_boost;
-            info->use_double_prec_tol = std::is_same<U, double>();
-            info->boost_tol           = reinterpret_cast<const void*>(boost_tol);
-            info->boost_val           = reinterpret_cast<const void*>(boost_val);
+            info->boost_enable   = enable_boost;
+            info->boost_tol_size = boost_tol_size;
+            info->boost_tol      = boost_tol;
+            info->boost_val      = reinterpret_cast<const void*>(boost_val);
         }
 
         return rocsparse_status_success;
@@ -267,12 +283,7 @@ rocsparse_status rocsparse::bsrilu0_analysis_template(rocsparse_handle          
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
-              uint32_t BSRDIM,
-              typename T,
-              typename U,
-              typename V>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t BSRDIM, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrilu0_2_8(rocsparse_direction  dir,
                      rocsparse_int        mb,
@@ -286,15 +297,16 @@ namespace rocsparse
                      rocsparse_int*       zero_pivot,
                      rocsparse_index_base idx_base,
                      int                  enable_boost,
-                     U                    boost_tol_device_host,
-                     V                    boost_val_device_host)
+                     size_t               size_boost_tol,
+                     ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
+                     ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
+                     ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
+                     bool is_host_mode)
     {
-
-        auto boost_tol = (enable_boost) ? rocsparse::load_scalar_device_host(boost_tol_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_tol_device_host);
-
-        auto boost_val = (enable_boost) ? rocsparse::load_scalar_device_host(boost_val_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_val_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_32);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_64);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_val);
+        const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
         rocsparse::bsrilu0_2_8_device<BLOCKSIZE, WFSIZE, BSRDIM>(dir,
                                                                  mb,
@@ -312,12 +324,7 @@ namespace rocsparse
                                                                  boost_val);
     }
 
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
-              uint32_t BSRDIM,
-              typename T,
-              typename U,
-              typename V>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t BSRDIM, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrilu0_9_32(rocsparse_direction  dir,
                       rocsparse_int        mb,
@@ -331,14 +338,16 @@ namespace rocsparse
                       rocsparse_int*       zero_pivot,
                       rocsparse_index_base idx_base,
                       int                  enable_boost,
-                      U                    boost_tol_device_host,
-                      V                    boost_val_device_host)
+                      size_t               size_boost_tol,
+                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
+                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
+                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
+                      bool is_host_mode)
     {
-        auto boost_tol = (enable_boost) ? rocsparse::load_scalar_device_host(boost_tol_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_tol_device_host);
-
-        auto boost_val = (enable_boost) ? rocsparse::load_scalar_device_host(boost_val_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_val_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_32);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_64);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_val);
+        const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
         rocsparse::bsrilu0_9_32_device<BLOCKSIZE, WFSIZE, BSRDIM>(dir,
                                                                   mb,
@@ -356,12 +365,7 @@ namespace rocsparse
                                                                   boost_val);
     }
 
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
-              uint32_t BSRDIM,
-              typename T,
-              typename U,
-              typename V>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t BSRDIM, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrilu0_33_64(rocsparse_direction  dir,
                        rocsparse_int        mb,
@@ -375,14 +379,16 @@ namespace rocsparse
                        rocsparse_int*       zero_pivot,
                        rocsparse_index_base idx_base,
                        int                  enable_boost,
-                       U                    boost_tol_device_host,
-                       V                    boost_val_device_host)
+                       size_t               size_boost_tol,
+                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
+                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
+                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
+                       bool is_host_mode)
     {
-        auto boost_tol = (enable_boost) ? rocsparse::load_scalar_device_host(boost_tol_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_tol_device_host);
-
-        auto boost_val = (enable_boost) ? rocsparse::load_scalar_device_host(boost_val_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_val_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_32);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_64);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_val);
+        const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
         rocsparse::bsrilu0_33_64_device<BLOCKSIZE, WFSIZE, BSRDIM>(dir,
                                                                    mb,
@@ -400,7 +406,7 @@ namespace rocsparse
                                                                    boost_val);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename U, typename V>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrilu0_general(rocsparse_direction  dir,
                          rocsparse_int        mb,
@@ -414,14 +420,16 @@ namespace rocsparse
                          rocsparse_int*       zero_pivot,
                          rocsparse_index_base idx_base,
                          int                  enable_boost,
-                         U                    boost_tol_device_host,
-                         V                    boost_val_device_host)
+                         size_t               size_boost_tol,
+                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
+                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
+                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
+                         bool is_host_mode)
     {
-        auto boost_tol = (enable_boost) ? rocsparse::load_scalar_device_host(boost_tol_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_tol_device_host);
-
-        auto boost_val = (enable_boost) ? rocsparse::load_scalar_device_host(boost_val_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_val_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_32);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_64);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_val);
+        const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
         rocsparse::bsrilu0_general_device<BLOCKSIZE, WFSIZE, SLEEP>(dir,
                                                                     mb,
@@ -441,8 +449,6 @@ namespace rocsparse
 
     template <
         typename T,
-        typename U,
-        typename V,
         typename std::enable_if<std::is_same<T, float>::value || std::is_same<T, double>::value
                                     || std::is_same<T, rocsparse_float_complex>::value,
                                 int>::type
@@ -457,9 +463,11 @@ namespace rocsparse
                                  rocsparse_int        block_dim,
                                  rocsparse_mat_info   info,
                                  int*                 done_array,
-                                 U                    boost_tol_device_host,
-                                 V                    boost_val_device_host)
+                                 const void*          boost_tol,
+                                 const T*             boost_val)
     {
+        const float*      boost_tol_32  = (info->boost_enable) ? (const float*)boost_tol : nullptr;
+        const double*     boost_tol_64  = (info->boost_enable) ? (const double*)boost_tol : nullptr;
         const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
         if(gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2)
         {
@@ -495,8 +503,6 @@ namespace rocsparse
     }
 
     template <typename T,
-              typename U,
-              typename V,
               typename std::enable_if<std::is_same<T, rocsparse_double_complex>::value, int>::type
               = 0>
     inline void bsrilu0_launcher(rocsparse_handle     handle,
@@ -509,10 +515,11 @@ namespace rocsparse
                                  rocsparse_int        block_dim,
                                  rocsparse_mat_info   info,
                                  int*                 done_array,
-                                 U                    boost_tol_device_host,
-                                 V                    boost_val_device_host)
+                                 const void*          boost_tol,
+                                 const T*             boost_val)
     {
-
+        const float*      boost_tol_32  = (info->boost_enable) ? (const float*)boost_tol : nullptr;
+        const double*     boost_tol_64  = (info->boost_enable) ? (const double*)boost_tol : nullptr;
         const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
         if(gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2)
         {
@@ -544,7 +551,7 @@ namespace rocsparse
     }
 }
 
-template <typename T, typename U>
+template <typename T>
 rocsparse_status rocsparse::bsrilu0_template(rocsparse_handle          handle,
                                              rocsparse_direction       dir,
                                              rocsparse_int             mb,
@@ -614,38 +621,18 @@ rocsparse_status rocsparse::bsrilu0_template(rocsparse_handle          handle,
     // Initialize buffers
     RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * mb, stream));
 
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-    {
-        rocsparse::bsrilu0_launcher(handle,
-                                    dir,
-                                    mb,
-                                    descr->base,
-                                    bsr_val,
-                                    bsr_row_ptr,
-                                    bsr_col_ind,
-                                    block_dim,
-                                    info,
-                                    done_array,
-                                    reinterpret_cast<const U*>(info->boost_tol),
-                                    reinterpret_cast<const T*>(info->boost_val));
-    }
-    else
-    {
-        rocsparse::bsrilu0_launcher(
-            handle,
-            dir,
-            mb,
-            descr->base,
-            bsr_val,
-            bsr_row_ptr,
-            bsr_col_ind,
-            block_dim,
-            info,
-            done_array,
-            (info->boost_enable) ? *reinterpret_cast<const U*>(info->boost_tol) : static_cast<U>(0),
-            (info->boost_enable) ? *reinterpret_cast<const T*>(info->boost_val)
-                                 : static_cast<T>(0));
-    }
+    rocsparse::bsrilu0_launcher(handle,
+                                dir,
+                                mb,
+                                descr->base,
+                                bsr_val,
+                                bsr_row_ptr,
+                                bsr_col_ind,
+                                block_dim,
+                                info,
+                                done_array,
+                                info->boost_tol,
+                                reinterpret_cast<const T*>(info->boost_val));
 
     return rocsparse_status_success;
 }
@@ -813,7 +800,7 @@ CIMPL(rocsparse_zbsrilu0_buffer_size, rocsparse_double_complex);
     try                                                                      \
     {                                                                        \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrilu0_numeric_boost_template( \
-            handle, info, enable_boost, boost_tol, boost_val));              \
+            handle, info, enable_boost, sizeof(U), boost_tol, boost_val));   \
         return rocsparse_status_success;                                     \
     }                                                                        \
     catch(...)                                                               \
@@ -885,38 +872,20 @@ extern "C" rocsparse_status rocsparse_sbsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
-    if(info != nullptr && info->use_double_prec_tol)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template<float, double>(handle,
-                                                                              dir,
-                                                                              mb,
-                                                                              nnzb,
-                                                                              descr,
-                                                                              bsr_val,
-                                                                              bsr_row_ptr,
-                                                                              bsr_col_ind,
-                                                                              block_dim,
-                                                                              info,
-                                                                              policy,
-                                                                              temp_buffer)));
-        return rocsparse_status_success;
-    }
-    else
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template<float, float>(handle,
-                                                                             dir,
-                                                                             mb,
-                                                                             nnzb,
-                                                                             descr,
-                                                                             bsr_val,
-                                                                             bsr_row_ptr,
-                                                                             bsr_col_ind,
-                                                                             block_dim,
-                                                                             info,
-                                                                             policy,
-                                                                             temp_buffer)));
-        return rocsparse_status_success;
-    }
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template(handle,
+                                                           dir,
+                                                           mb,
+                                                           nnzb,
+                                                           descr,
+                                                           bsr_val,
+                                                           bsr_row_ptr,
+                                                           bsr_col_ind,
+                                                           block_dim,
+                                                           info,
+                                                           policy,
+                                                           temp_buffer)));
+
+    return rocsparse_status_success;
 }
 catch(...)
 {
@@ -937,18 +906,18 @@ extern "C" rocsparse_status rocsparse_dbsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
-    RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template<double, double>(handle,
-                                                                           dir,
-                                                                           mb,
-                                                                           nnzb,
-                                                                           descr,
-                                                                           bsr_val,
-                                                                           bsr_row_ptr,
-                                                                           bsr_col_ind,
-                                                                           block_dim,
-                                                                           info,
-                                                                           policy,
-                                                                           temp_buffer)));
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template(handle,
+                                                           dir,
+                                                           mb,
+                                                           nnzb,
+                                                           descr,
+                                                           bsr_val,
+                                                           bsr_row_ptr,
+                                                           bsr_col_ind,
+                                                           block_dim,
+                                                           info,
+                                                           policy,
+                                                           temp_buffer)));
     return rocsparse_status_success;
 }
 catch(...)
@@ -970,40 +939,19 @@ extern "C" rocsparse_status rocsparse_cbsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
-    if(info != nullptr && info->use_double_prec_tol)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::bsrilu0_template<rocsparse_float_complex, double>(handle,
-                                                                          dir,
-                                                                          mb,
-                                                                          nnzb,
-                                                                          descr,
-                                                                          bsr_val,
-                                                                          bsr_row_ptr,
-                                                                          bsr_col_ind,
-                                                                          block_dim,
-                                                                          info,
-                                                                          policy,
-                                                                          temp_buffer)));
-        return rocsparse_status_success;
-    }
-    else
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::bsrilu0_template<rocsparse_float_complex, float>(handle,
-                                                                         dir,
-                                                                         mb,
-                                                                         nnzb,
-                                                                         descr,
-                                                                         bsr_val,
-                                                                         bsr_row_ptr,
-                                                                         bsr_col_ind,
-                                                                         block_dim,
-                                                                         info,
-                                                                         policy,
-                                                                         temp_buffer)));
-        return rocsparse_status_success;
-    }
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template(handle,
+                                                           dir,
+                                                           mb,
+                                                           nnzb,
+                                                           descr,
+                                                           bsr_val,
+                                                           bsr_row_ptr,
+                                                           bsr_col_ind,
+                                                           block_dim,
+                                                           info,
+                                                           policy,
+                                                           temp_buffer)));
+    return rocsparse_status_success;
 }
 catch(...)
 {
@@ -1024,19 +972,18 @@ extern "C" rocsparse_status rocsparse_zbsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
-    RETURN_IF_ROCSPARSE_ERROR(
-        (rocsparse::bsrilu0_template<rocsparse_double_complex, double>(handle,
-                                                                       dir,
-                                                                       mb,
-                                                                       nnzb,
-                                                                       descr,
-                                                                       bsr_val,
-                                                                       bsr_row_ptr,
-                                                                       bsr_col_ind,
-                                                                       block_dim,
-                                                                       info,
-                                                                       policy,
-                                                                       temp_buffer)));
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template(handle,
+                                                           dir,
+                                                           mb,
+                                                           nnzb,
+                                                           descr,
+                                                           bsr_val,
+                                                           bsr_row_ptr,
+                                                           bsr_col_ind,
+                                                           block_dim,
+                                                           info,
+                                                           policy,
+                                                           temp_buffer)));
     return rocsparse_status_success;
 }
 catch(...)

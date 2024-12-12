@@ -1037,10 +1037,10 @@ try
             hipMemcpy(dest->singular_pivot, src->singular_pivot, J_size, hipMemcpyDeviceToDevice));
     }
 
-    dest->boost_enable        = src->boost_enable;
-    dest->use_double_prec_tol = src->use_double_prec_tol;
-    dest->boost_tol           = src->boost_tol;
-    dest->boost_val           = src->boost_val;
+    dest->boost_enable   = src->boost_enable;
+    dest->boost_tol_size = src->boost_tol_size;
+    dest->boost_tol      = src->boost_tol;
+    dest->boost_val      = src->boost_val;
 
     return rocsparse_status_success;
 }

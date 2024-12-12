@@ -39,8 +39,7 @@ namespace rocsparse
               rocsparse_int SEGMENTS_PER_BLOCK,
               rocsparse_int SEGMENT_SIZE,
               rocsparse_int WF_SIZE,
-              typename T,
-              typename U>
+              typename T>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void csr2csr_compress_kernel(rocsparse_int        m,
                                  rocsparse_int        n,
@@ -53,9 +52,10 @@ namespace rocsparse
                                  T* __restrict__ csr_val_C,
                                  const rocsparse_int* __restrict__ csr_row_ptr_C,
                                  rocsparse_int* __restrict__ csr_col_ind_C,
-                                 U threshold_device_host)
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, threshold),
+                                 bool is_host_mode)
     {
-        auto threshold = rocsparse::load_scalar_device_host(threshold_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(threshold);
         rocsparse::csr2csr_compress_device<BLOCK_SIZE, SEGMENTS_PER_BLOCK, SEGMENT_SIZE, WF_SIZE>(
             m,
             n,
@@ -92,54 +92,26 @@ namespace rocsparse
         constexpr rocsparse_int SEGMENTS_PER_BLOCK = BLOCK_SIZE / SEGMENT_SIZE;
         rocsparse_int           grid_size = (m + SEGMENTS_PER_BLOCK - 1) / SEGMENTS_PER_BLOCK;
 
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
-        {
-            THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::csr2csr_compress_kernel<BLOCK_SIZE,
-                                                    SEGMENTS_PER_BLOCK,
-                                                    SEGMENT_SIZE,
-                                                    WF_SIZE>),
-                dim3(grid_size),
-                dim3(BLOCK_SIZE),
-                0,
-                handle->stream,
-                m,
-                n,
-                idx_base_A,
-                csr_val_A,
-                csr_row_ptr_A,
-                csr_col_ind_A,
-                nnz_A,
-                idx_base_C,
-                csr_val_C,
-                csr_row_ptr_C,
-                csr_col_ind_C,
-                threshold);
-        }
-        else
-        {
-            THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::csr2csr_compress_kernel<BLOCK_SIZE,
-                                                    SEGMENTS_PER_BLOCK,
-                                                    SEGMENT_SIZE,
-                                                    WF_SIZE>),
-                dim3(grid_size),
-                dim3(BLOCK_SIZE),
-                0,
-                handle->stream,
-                m,
-                n,
-                idx_base_A,
-                csr_val_A,
-                csr_row_ptr_A,
-                csr_col_ind_A,
-                nnz_A,
-                idx_base_C,
-                csr_val_C,
-                csr_row_ptr_C,
-                csr_col_ind_C,
-                *threshold);
-        }
+        THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::
+                 csr2csr_compress_kernel<BLOCK_SIZE, SEGMENTS_PER_BLOCK, SEGMENT_SIZE, WF_SIZE>),
+            dim3(grid_size),
+            dim3(BLOCK_SIZE),
+            0,
+            handle->stream,
+            m,
+            n,
+            idx_base_A,
+            csr_val_A,
+            csr_row_ptr_A,
+            csr_col_ind_A,
+            nnz_A,
+            idx_base_C,
+            csr_val_C,
+            csr_row_ptr_C,
+            csr_col_ind_C,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, threshold),
+            handle->pointer_mode == rocsparse_pointer_mode_host);
     }
 
     template <typename T>

@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    template <typename T, typename U>
+    template <typename T>
     rocsparse_status csrilu0_template(rocsparse_handle          handle,
                                       rocsparse_int             m,
                                       rocsparse_int             nnz,

@@ -219,15 +219,15 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgeam_fill_multipass_kernel(rocsparse_int m,
                                        rocsparse_int n,
-                                       U             alpha_device_host,
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                        const rocsparse_int* __restrict__ csr_row_ptr_A,
                                        const rocsparse_int* __restrict__ csr_col_ind_A,
                                        const T* __restrict__ csr_val_A,
-                                       U beta_device_host,
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                        const rocsparse_int* __restrict__ csr_row_ptr_B,
                                        const rocsparse_int* __restrict__ csr_col_ind_B,
                                        const T* __restrict__ csr_val_B,
@@ -236,10 +236,11 @@ namespace rocsparse
                                        T* __restrict__ csr_val_C,
                                        rocsparse_index_base idx_base_A,
                                        rocsparse_index_base idx_base_B,
-                                       rocsparse_index_base idx_base_C)
+                                       rocsparse_index_base idx_base_C,
+                                       bool                 is_host_mode)
     {
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        const auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         rocsparse::csrgeam_fill_multipass_device<BLOCKSIZE, WFSIZE>(m,
                                                                     n,
                                                                     alpha,
@@ -258,17 +259,17 @@ namespace rocsparse
                                                                     idx_base_C);
     }
 
-    template <typename T, typename U>
+    template <typename T>
     static rocsparse_status csrgeam_dispatch(rocsparse_handle          handle,
                                              rocsparse_int             m,
                                              rocsparse_int             n,
-                                             U                         alpha_device_host,
+                                             const T*                  alpha_device_host,
                                              const rocsparse_mat_descr descr_A,
                                              rocsparse_int             nnz_A,
                                              const T*                  csr_val_A,
                                              const rocsparse_int*      csr_row_ptr_A,
                                              const rocsparse_int*      csr_col_ind_A,
-                                             U                         beta_device_host,
+                                             const T*                  beta_device_host,
                                              const rocsparse_mat_descr descr_B,
                                              rocsparse_int             nnz_B,
                                              const T*                  csr_val_B,
@@ -294,11 +295,11 @@ namespace rocsparse
                 stream,
                 m,
                 n,
-                alpha_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 csr_row_ptr_A,
                 csr_col_ind_A,
                 csr_val_A,
-                beta_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
                 csr_row_ptr_B,
                 csr_col_ind_B,
                 csr_val_B,
@@ -307,7 +308,8 @@ namespace rocsparse
                 csr_val_C,
                 descr_A->base,
                 descr_B->base,
-                descr_C->base);
+                descr_C->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
         }
         else
         {
@@ -319,11 +321,11 @@ namespace rocsparse
                 stream,
                 m,
                 n,
-                alpha_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 csr_row_ptr_A,
                 csr_col_ind_A,
                 csr_val_A,
-                beta_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
                 csr_row_ptr_B,
                 csr_col_ind_B,
                 csr_val_B,
@@ -332,7 +334,8 @@ namespace rocsparse
                 csr_val_C,
                 descr_A->base,
                 descr_B->base,
-                descr_C->base);
+                descr_C->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
         }
 
 #undef CSRGEAM_DIM
@@ -362,53 +365,25 @@ rocsparse_status rocsparse::csrgeam_core(rocsparse_handle          handle,
                                          const rocsparse_int*      csr_row_ptr_C,
                                          rocsparse_int*            csr_col_ind_C)
 {
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_dispatch(handle,
-                                                              m,
-                                                              n,
-                                                              alpha,
-                                                              descr_A,
-                                                              nnz_A,
-                                                              csr_val_A,
-                                                              csr_row_ptr_A,
-                                                              csr_col_ind_A,
-                                                              beta,
-                                                              descr_B,
-                                                              nnz_B,
-                                                              csr_val_B,
-                                                              csr_row_ptr_B,
-                                                              csr_col_ind_B,
-                                                              descr_C,
-                                                              csr_val_C,
-                                                              csr_row_ptr_C,
-                                                              csr_col_ind_C));
-        return rocsparse_status_success;
-    }
-    else
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_dispatch(handle,
-                                                              m,
-                                                              n,
-                                                              *alpha,
-                                                              descr_A,
-                                                              nnz_A,
-                                                              csr_val_A,
-                                                              csr_row_ptr_A,
-                                                              csr_col_ind_A,
-                                                              *beta,
-                                                              descr_B,
-                                                              nnz_B,
-                                                              csr_val_B,
-                                                              csr_row_ptr_B,
-                                                              csr_col_ind_B,
-                                                              descr_C,
-                                                              csr_val_C,
-                                                              csr_row_ptr_C,
-                                                              csr_col_ind_C));
-        return rocsparse_status_success;
-    }
-
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_dispatch(handle,
+                                                          m,
+                                                          n,
+                                                          alpha,
+                                                          descr_A,
+                                                          nnz_A,
+                                                          csr_val_A,
+                                                          csr_row_ptr_A,
+                                                          csr_col_ind_A,
+                                                          beta,
+                                                          descr_B,
+                                                          nnz_B,
+                                                          csr_val_B,
+                                                          csr_row_ptr_B,
+                                                          csr_col_ind_B,
+                                                          descr_C,
+                                                          csr_val_C,
+                                                          csr_row_ptr_C,
+                                                          csr_col_ind_C));
     return rocsparse_status_success;
 }
 

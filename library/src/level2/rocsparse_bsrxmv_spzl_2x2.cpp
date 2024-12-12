@@ -160,25 +160,25 @@ namespace rocsparse
               typename J,
               typename A,
               typename X,
-              typename Y,
-              typename U>
+              typename Y>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrxmvn_2x2_kernel(J                   mb,
                             rocsparse_direction dir,
-                            U                   alpha_device_host,
-                            J                   size_of_mask,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                            J size_of_mask,
                             const J* __restrict__ bsr_mask_ptr,
                             const I* __restrict__ bsr_row_ptr,
                             const I* __restrict__ bsr_end_ptr,
                             const J* __restrict__ bsr_col_ind,
                             const A* __restrict__ bsr_val,
                             const X* __restrict__ x,
-                            U beta_device_host,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                             Y* __restrict__ y,
-                            rocsparse_index_base idx_base)
+                            rocsparse_index_base idx_base,
+                            bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha != static_cast<T>(0) || beta != static_cast<T>(1))
         {
             rocsparse::bsrxmvn_2x2_device<BLOCKSIZE, WFSIZE>(mb,
@@ -198,12 +198,12 @@ namespace rocsparse
     }
 }
 
-template <typename T, typename I, typename J, typename A, typename X, typename Y, typename U>
+template <typename T, typename I, typename J, typename A, typename X, typename Y>
 void rocsparse::bsrxmvn_2x2(rocsparse_handle     handle,
                             rocsparse_direction  dir,
                             J                    mb,
                             I                    nnzb,
-                            U                    alpha_device_host,
+                            const T*             alpha_device_host,
                             J                    size_of_mask,
                             const J*             bsr_mask_ptr,
                             const I*             bsr_row_ptr,
@@ -211,7 +211,7 @@ void rocsparse::bsrxmvn_2x2(rocsparse_handle     handle,
                             const J*             bsr_col_ind,
                             const A*             bsr_val,
                             const X*             x,
-                            U                    beta_device_host,
+                            const T*             beta_device_host,
                             Y*                   y,
                             rocsparse_index_base base)
 {
@@ -221,108 +221,118 @@ void rocsparse::bsrxmvn_2x2(rocsparse_handle     handle,
 #define BSRXMVN_DIM 128
     if(blocks_per_row < 8)
     {
-        THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmvn_2x2_kernel<BSRXMVN_DIM, 4, T>),
-                                          dim3((size - 1) / (BSRXMVN_DIM / 4) + 1),
-                                          dim3(BSRXMVN_DIM),
-                                          0,
-                                          handle->stream,
-                                          mb,
-                                          dir,
-                                          alpha_device_host,
-                                          size_of_mask,
-                                          bsr_mask_ptr,
-                                          bsr_row_ptr,
-                                          bsr_end_ptr,
-                                          bsr_col_ind,
-                                          bsr_val,
-                                          x,
-                                          beta_device_host,
-                                          y,
-                                          base);
+        THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsrxmvn_2x2_kernel<BSRXMVN_DIM, 4, T>),
+            dim3((size - 1) / (BSRXMVN_DIM / 4) + 1),
+            dim3(BSRXMVN_DIM),
+            0,
+            handle->stream,
+            mb,
+            dir,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            size_of_mask,
+            bsr_mask_ptr,
+            bsr_row_ptr,
+            bsr_end_ptr,
+            bsr_col_ind,
+            bsr_val,
+            x,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            y,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
     }
     else if(blocks_per_row < 16)
     {
-        THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmvn_2x2_kernel<BSRXMVN_DIM, 8, T>),
-                                          dim3((size - 1) / (BSRXMVN_DIM / 8) + 1),
-                                          dim3(BSRXMVN_DIM),
-                                          0,
-                                          handle->stream,
-                                          mb,
-                                          dir,
-                                          alpha_device_host,
-                                          size_of_mask,
-                                          bsr_mask_ptr,
-                                          bsr_row_ptr,
-                                          bsr_end_ptr,
-                                          bsr_col_ind,
-                                          bsr_val,
-                                          x,
-                                          beta_device_host,
-                                          y,
-                                          base);
+        THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsrxmvn_2x2_kernel<BSRXMVN_DIM, 8, T>),
+            dim3((size - 1) / (BSRXMVN_DIM / 8) + 1),
+            dim3(BSRXMVN_DIM),
+            0,
+            handle->stream,
+            mb,
+            dir,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            size_of_mask,
+            bsr_mask_ptr,
+            bsr_row_ptr,
+            bsr_end_ptr,
+            bsr_col_ind,
+            bsr_val,
+            x,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            y,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
     }
     else if(blocks_per_row < 32)
     {
-        THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmvn_2x2_kernel<BSRXMVN_DIM, 16, T>),
-                                          dim3((size - 1) / (BSRXMVN_DIM / 16) + 1),
-                                          dim3(BSRXMVN_DIM),
-                                          0,
-                                          handle->stream,
-                                          mb,
-                                          dir,
-                                          alpha_device_host,
-                                          size_of_mask,
-                                          bsr_mask_ptr,
-                                          bsr_row_ptr,
-                                          bsr_end_ptr,
-                                          bsr_col_ind,
-                                          bsr_val,
-                                          x,
-                                          beta_device_host,
-                                          y,
-                                          base);
+        THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsrxmvn_2x2_kernel<BSRXMVN_DIM, 16, T>),
+            dim3((size - 1) / (BSRXMVN_DIM / 16) + 1),
+            dim3(BSRXMVN_DIM),
+            0,
+            handle->stream,
+            mb,
+            dir,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            size_of_mask,
+            bsr_mask_ptr,
+            bsr_row_ptr,
+            bsr_end_ptr,
+            bsr_col_ind,
+            bsr_val,
+            x,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            y,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
     }
     else if(blocks_per_row < 64)
     {
-        THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmvn_2x2_kernel<BSRXMVN_DIM, 32, T>),
-                                          dim3((size - 1) / (BSRXMVN_DIM / 32) + 1),
-                                          dim3(BSRXMVN_DIM),
-                                          0,
-                                          handle->stream,
-                                          mb,
-                                          dir,
-                                          alpha_device_host,
-                                          size_of_mask,
-                                          bsr_mask_ptr,
-                                          bsr_row_ptr,
-                                          bsr_end_ptr,
-                                          bsr_col_ind,
-                                          bsr_val,
-                                          x,
-                                          beta_device_host,
-                                          y,
-                                          base);
+        THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsrxmvn_2x2_kernel<BSRXMVN_DIM, 32, T>),
+            dim3((size - 1) / (BSRXMVN_DIM / 32) + 1),
+            dim3(BSRXMVN_DIM),
+            0,
+            handle->stream,
+            mb,
+            dir,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            size_of_mask,
+            bsr_mask_ptr,
+            bsr_row_ptr,
+            bsr_end_ptr,
+            bsr_col_ind,
+            bsr_val,
+            x,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            y,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
     }
     else
     {
-        THROW_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmvn_2x2_kernel<BSRXMVN_DIM, 64, T>),
-                                          dim3((size - 1) / (BSRXMVN_DIM / 64) + 1),
-                                          dim3(BSRXMVN_DIM),
-                                          0,
-                                          handle->stream,
-                                          mb,
-                                          dir,
-                                          alpha_device_host,
-                                          size_of_mask,
-                                          bsr_mask_ptr,
-                                          bsr_row_ptr,
-                                          bsr_end_ptr,
-                                          bsr_col_ind,
-                                          bsr_val,
-                                          x,
-                                          beta_device_host,
-                                          y,
-                                          base);
+        THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsrxmvn_2x2_kernel<BSRXMVN_DIM, 64, T>),
+            dim3((size - 1) / (BSRXMVN_DIM / 64) + 1),
+            dim3(BSRXMVN_DIM),
+            0,
+            handle->stream,
+            mb,
+            dir,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            size_of_mask,
+            bsr_mask_ptr,
+            bsr_row_ptr,
+            bsr_end_ptr,
+            bsr_col_ind,
+            bsr_val,
+            x,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            y,
+            base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
     }
 
 #undef BSRXMVN_DIM
@@ -331,37 +341,22 @@ void rocsparse::bsrxmvn_2x2(rocsparse_handle     handle,
 //
 // INSTANTIATE.
 //
-#define INSTANTIATE(T, I, J)                                                        \
-    template void rocsparse::bsrxmvn_2x2<T>(rocsparse_handle     handle,            \
-                                            rocsparse_direction  dir,               \
-                                            J                    mb,                \
-                                            I                    nnzb,              \
-                                            const T*             alpha_device_host, \
-                                            J                    size_of_mask,      \
-                                            const J*             bsr_mask_ptr,      \
-                                            const I*             bsr_row_ptr,       \
-                                            const I*             bsr_end_ptr,       \
-                                            const J*             bsr_col_ind,       \
-                                            const T*             bsr_val,           \
-                                            const T*             x,                 \
-                                            const T*             beta_device_host,  \
-                                            T*                   y,                 \
-                                            rocsparse_index_base base);             \
-    template void rocsparse::bsrxmvn_2x2<T>(rocsparse_handle     handle,            \
-                                            rocsparse_direction  dir,               \
-                                            J                    mb,                \
-                                            I                    nnzb,              \
-                                            T                    alpha_device_host, \
-                                            J                    size_of_mask,      \
-                                            const J*             bsr_mask_ptr,      \
-                                            const I*             bsr_row_ptr,       \
-                                            const I*             bsr_end_ptr,       \
-                                            const J*             bsr_col_ind,       \
-                                            const T*             bsr_val,           \
-                                            const T*             x,                 \
-                                            T                    beta_device_host,  \
-                                            T*                   y,                 \
-                                            rocsparse_index_base base)
+#define INSTANTIATE(T, I, J)                                                     \
+    template void rocsparse::bsrxmvn_2x2(rocsparse_handle     handle,            \
+                                         rocsparse_direction  dir,               \
+                                         J                    mb,                \
+                                         I                    nnzb,              \
+                                         const T*             alpha_device_host, \
+                                         J                    size_of_mask,      \
+                                         const J*             bsr_mask_ptr,      \
+                                         const I*             bsr_row_ptr,       \
+                                         const I*             bsr_end_ptr,       \
+                                         const J*             bsr_col_ind,       \
+                                         const T*             bsr_val,           \
+                                         const T*             x,                 \
+                                         const T*             beta_device_host,  \
+                                         T*                   y,                 \
+                                         rocsparse_index_base base)
 
 INSTANTIATE(float, int32_t, int32_t);
 INSTANTIATE(double, int32_t, int32_t);
@@ -379,37 +374,22 @@ INSTANTIATE(rocsparse_float_complex, int64_t, int64_t);
 INSTANTIATE(rocsparse_double_complex, int64_t, int64_t);
 #undef INSTANTIATE
 
-#define INSTANTIATE_MIXED(T, I, J, A, X, Y)                                         \
-    template void rocsparse::bsrxmvn_2x2<T>(rocsparse_handle     handle,            \
-                                            rocsparse_direction  dir,               \
-                                            J                    mb,                \
-                                            I                    nnzb,              \
-                                            const T*             alpha_device_host, \
-                                            J                    size_of_mask,      \
-                                            const J*             bsr_mask_ptr,      \
-                                            const I*             bsr_row_ptr,       \
-                                            const I*             bsr_end_ptr,       \
-                                            const J*             bsr_col_ind,       \
-                                            const A*             bsr_val,           \
-                                            const X*             x,                 \
-                                            const T*             beta_device_host,  \
-                                            Y*                   y,                 \
-                                            rocsparse_index_base base);             \
-    template void rocsparse::bsrxmvn_2x2<T>(rocsparse_handle     handle,            \
-                                            rocsparse_direction  dir,               \
-                                            J                    mb,                \
-                                            I                    nnzb,              \
-                                            T                    alpha_device_host, \
-                                            J                    size_of_mask,      \
-                                            const J*             bsr_mask_ptr,      \
-                                            const I*             bsr_row_ptr,       \
-                                            const I*             bsr_end_ptr,       \
-                                            const J*             bsr_col_ind,       \
-                                            const A*             bsr_val,           \
-                                            const X*             x,                 \
-                                            T                    beta_device_host,  \
-                                            Y*                   y,                 \
-                                            rocsparse_index_base base)
+#define INSTANTIATE_MIXED(T, I, J, A, X, Y)                                      \
+    template void rocsparse::bsrxmvn_2x2(rocsparse_handle     handle,            \
+                                         rocsparse_direction  dir,               \
+                                         J                    mb,                \
+                                         I                    nnzb,              \
+                                         const T*             alpha_device_host, \
+                                         J                    size_of_mask,      \
+                                         const J*             bsr_mask_ptr,      \
+                                         const I*             bsr_row_ptr,       \
+                                         const I*             bsr_end_ptr,       \
+                                         const J*             bsr_col_ind,       \
+                                         const A*             bsr_val,           \
+                                         const X*             x,                 \
+                                         const T*             beta_device_host,  \
+                                         Y*                   y,                 \
+                                         rocsparse_index_base base)
 
 INSTANTIATE_MIXED(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t);
 INSTANTIATE_MIXED(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t);

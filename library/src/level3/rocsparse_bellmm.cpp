@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    template <typename T, typename I, typename A, typename B, typename C, typename U>
+    template <typename T, typename I, typename A, typename B, typename C>
     rocsparse_status bellmm_template_general(rocsparse_handle          handle,
                                              rocsparse_operation       trans_A,
                                              rocsparse_operation       trans_B,
@@ -38,19 +38,19 @@ namespace rocsparse
                                              I                         kb,
                                              I                         bell_cols,
                                              I                         bell_block_dim,
-                                             U                         alpha,
+                                             const T*                  alpha,
                                              const rocsparse_mat_descr descr,
                                              const I*                  bell_col_ind,
                                              const A*                  bell_val,
                                              const B*                  dense_B,
                                              int64_t                   ldb,
                                              rocsparse_order           order_B,
-                                             U                         beta,
+                                             const T*                  beta,
                                              C*                        dense_C,
                                              int64_t                   ldc,
                                              rocsparse_order           order_C);
 
-    template <typename T, typename I, typename A, typename B, typename C, typename U>
+    template <typename T, typename I, typename A, typename B, typename C>
     rocsparse_status bellmm_template_dispatch(rocsparse_handle          handle,
                                               rocsparse_operation       trans_A,
                                               rocsparse_operation       trans_B,
@@ -60,38 +60,38 @@ namespace rocsparse
                                               I                         kb,
                                               I                         bell_cols,
                                               I                         bell_block_dim,
-                                              U                         alpha_device_host,
+                                              const T*                  alpha_device_host,
                                               const rocsparse_mat_descr descr,
                                               const I*                  bell_col_ind,
                                               const A*                  bell_val,
                                               const B*                  dense_B,
                                               int64_t                   ldb,
                                               rocsparse_order           order_B,
-                                              U                         beta_device_host,
+                                              const T*                  beta_device_host,
                                               C*                        dense_C,
                                               int64_t                   ldc,
                                               rocsparse_order           order_C)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bellmm_template_general<T>(handle,
-                                                                        trans_A,
-                                                                        trans_B,
-                                                                        dir_A,
-                                                                        mb,
-                                                                        n,
-                                                                        kb,
-                                                                        bell_cols,
-                                                                        bell_block_dim,
-                                                                        alpha_device_host,
-                                                                        descr,
-                                                                        bell_col_ind,
-                                                                        bell_val,
-                                                                        dense_B,
-                                                                        ldb,
-                                                                        order_B,
-                                                                        beta_device_host,
-                                                                        dense_C,
-                                                                        ldc,
-                                                                        order_C));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bellmm_template_general(handle,
+                                                                     trans_A,
+                                                                     trans_B,
+                                                                     dir_A,
+                                                                     mb,
+                                                                     n,
+                                                                     kb,
+                                                                     bell_cols,
+                                                                     bell_block_dim,
+                                                                     alpha_device_host,
+                                                                     descr,
+                                                                     bell_col_ind,
+                                                                     bell_val,
+                                                                     dense_B,
+                                                                     ldb,
+                                                                     order_B,
+                                                                     beta_device_host,
+                                                                     dense_C,
+                                                                     ldc,
+                                                                     order_C));
         return rocsparse_status_success;
     }
 }
@@ -406,54 +406,27 @@ rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
         return rocsparse_status_success;
     }
 
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bellmm_template_dispatch<T>(handle,
-                                                                         trans_A,
-                                                                         trans_B,
-                                                                         dir_A,
-                                                                         mb,
-                                                                         n,
-                                                                         kb,
-                                                                         bell_cols,
-                                                                         block_dim,
-                                                                         alpha,
-                                                                         descr,
-                                                                         bell_col_ind,
-                                                                         bell_val,
-                                                                         dense_B,
-                                                                         ldb,
-                                                                         order_B,
-                                                                         beta,
-                                                                         dense_C,
-                                                                         ldc,
-                                                                         order_C));
-        return rocsparse_status_success;
-    }
-    else
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bellmm_template_dispatch<T>(handle,
-                                                                         trans_A,
-                                                                         trans_B,
-                                                                         dir_A,
-                                                                         mb,
-                                                                         n,
-                                                                         kb,
-                                                                         bell_cols,
-                                                                         block_dim,
-                                                                         *alpha,
-                                                                         descr,
-                                                                         bell_col_ind,
-                                                                         bell_val,
-                                                                         dense_B,
-                                                                         ldb,
-                                                                         order_B,
-                                                                         *beta,
-                                                                         dense_C,
-                                                                         ldc,
-                                                                         order_C));
-        return rocsparse_status_success;
-    }
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::bellmm_template_dispatch(handle,
+                                                                  trans_A,
+                                                                  trans_B,
+                                                                  dir_A,
+                                                                  mb,
+                                                                  n,
+                                                                  kb,
+                                                                  bell_cols,
+                                                                  block_dim,
+                                                                  alpha,
+                                                                  descr,
+                                                                  bell_col_ind,
+                                                                  bell_val,
+                                                                  dense_B,
+                                                                  ldb,
+                                                                  order_B,
+                                                                  beta,
+                                                                  dense_C,
+                                                                  ldc,
+                                                                  order_C));
+    return rocsparse_status_success;
 }
 
 #define INSTANTIATE(TTYPE, ITYPE, ATYPE, BTYPE, CTYPE)                                             \

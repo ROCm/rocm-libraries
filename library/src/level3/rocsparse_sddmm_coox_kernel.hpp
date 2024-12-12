@@ -36,8 +36,7 @@ namespace rocsparse
               bool          AOS,
               typename I,
               typename J,
-              typename T,
-              typename U>
+              typename T>
     ROCSPARSE_KERNEL_W(BLOCKSIZE, 1)
     void sddmm_coox_kernel(rocsparse_operation transA,
                            rocsparse_operation transB,
@@ -47,20 +46,21 @@ namespace rocsparse
                            J                   N,
                            J                   K,
                            I                   nnz,
-                           U                   alpha_device_host,
+                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                            const T* __restrict__ A,
                            J lda,
                            const T* __restrict__ B,
                            J ldb,
-                           U beta_device_host,
+                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                            T* __restrict__ coo_val,
                            const I* __restrict__ coo_row_ind,
                            const I* __restrict__ coo_col_ind,
                            rocsparse_index_base coo_base,
-                           T* __restrict__ workspace)
+                           T* __restrict__ workspace,
+                           bool is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha == static_cast<T>(0) && beta == static_cast<T>(1))
         {
             return;

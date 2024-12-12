@@ -43,7 +43,7 @@ namespace rocsparse
                                                rocsparse_solve_policy    solve,
                                                void*                     temp_buffer);
 
-    template <typename T, typename U>
+    template <typename T>
     rocsparse_status bsrilu0_template(rocsparse_handle          handle,
                                       rocsparse_direction       dir,
                                       rocsparse_int             mb,

@@ -26,7 +26,7 @@
 #include "rocsparse_bsrxmv.hpp"
 #include "rocsparse_bsrxmv_spzl.hpp"
 
-template <typename T, typename I, typename J, typename U>
+template <typename T, typename I, typename J>
 rocsparse_status rocsparse::bsrxmv_template_dispatch(rocsparse_handle          handle,
                                                      rocsparse_direction       dir,
                                                      rocsparse_operation       trans,
@@ -34,7 +34,7 @@ rocsparse_status rocsparse::bsrxmv_template_dispatch(rocsparse_handle          h
                                                      J                         mb,
                                                      J                         nb,
                                                      I                         nnzb,
-                                                     U                         alpha_device_host,
+                                                     const T*                  alpha_device_host,
                                                      const rocsparse_mat_descr descr,
                                                      const T*                  bsr_val,
                                                      const J*                  bsr_mask_ptr,
@@ -43,176 +43,176 @@ rocsparse_status rocsparse::bsrxmv_template_dispatch(rocsparse_handle          h
                                                      const J*                  bsr_col_ind,
                                                      J                         block_dim,
                                                      const T*                  x,
-                                                     U                         beta_device_host,
+                                                     const T*                  beta_device_host,
                                                      T*                        y)
 {
     // LCOV_EXCL_START
     // Run different bsrxmv kernels
     if(handle->wavefront_size == 32)
     {
-        rocsparse::bsrxmvn_general<T>(handle,
-                                      dir,
-                                      mb,
-                                      alpha_device_host,
-                                      size_of_mask,
-                                      bsr_mask_ptr,
-                                      bsr_row_ptr,
-                                      bsr_end_ptr,
-                                      bsr_col_ind,
-                                      bsr_val,
-                                      block_dim,
-                                      x,
-                                      beta_device_host,
-                                      y,
-                                      descr->base);
+        rocsparse::bsrxmvn_general(handle,
+                                   dir,
+                                   mb,
+                                   alpha_device_host,
+                                   size_of_mask,
+                                   bsr_mask_ptr,
+                                   bsr_row_ptr,
+                                   bsr_end_ptr,
+                                   bsr_col_ind,
+                                   bsr_val,
+                                   block_dim,
+                                   x,
+                                   beta_device_host,
+                                   y,
+                                   descr->base);
         return rocsparse_status_success;
     }
     // LCOV_EXCL_STOP
 
     if(block_dim == 2)
     {
-        rocsparse::bsrxmvn_2x2<T>(handle,
-                                  dir,
-                                  mb,
-                                  nnzb,
-                                  alpha_device_host,
-                                  size_of_mask,
-                                  bsr_mask_ptr,
-                                  bsr_row_ptr,
-                                  bsr_end_ptr,
-                                  bsr_col_ind,
-                                  bsr_val,
-                                  x,
-                                  beta_device_host,
-                                  y,
-                                  descr->base);
+        rocsparse::bsrxmvn_2x2(handle,
+                               dir,
+                               mb,
+                               nnzb,
+                               alpha_device_host,
+                               size_of_mask,
+                               bsr_mask_ptr,
+                               bsr_row_ptr,
+                               bsr_end_ptr,
+                               bsr_col_ind,
+                               bsr_val,
+                               x,
+                               beta_device_host,
+                               y,
+                               descr->base);
     }
     else if(block_dim == 3)
     {
-        rocsparse::bsrxmvn_3x3<T>(handle,
-                                  dir,
-                                  mb,
-                                  nnzb,
-                                  alpha_device_host,
-                                  size_of_mask,
-                                  bsr_mask_ptr,
-                                  bsr_row_ptr,
-                                  bsr_end_ptr,
-                                  bsr_col_ind,
-                                  bsr_val,
-                                  x,
-                                  beta_device_host,
-                                  y,
-                                  descr->base);
+        rocsparse::bsrxmvn_3x3(handle,
+                               dir,
+                               mb,
+                               nnzb,
+                               alpha_device_host,
+                               size_of_mask,
+                               bsr_mask_ptr,
+                               bsr_row_ptr,
+                               bsr_end_ptr,
+                               bsr_col_ind,
+                               bsr_val,
+                               x,
+                               beta_device_host,
+                               y,
+                               descr->base);
     }
     else if(block_dim == 4)
     {
-        rocsparse::bsrxmvn_4x4<T>(handle,
-                                  dir,
-                                  mb,
-                                  nnzb,
-                                  alpha_device_host,
-                                  size_of_mask,
-                                  bsr_mask_ptr,
-                                  bsr_row_ptr,
-                                  bsr_end_ptr,
-                                  bsr_col_ind,
-                                  bsr_val,
-                                  x,
-                                  beta_device_host,
-                                  y,
-                                  descr->base);
+        rocsparse::bsrxmvn_4x4(handle,
+                               dir,
+                               mb,
+                               nnzb,
+                               alpha_device_host,
+                               size_of_mask,
+                               bsr_mask_ptr,
+                               bsr_row_ptr,
+                               bsr_end_ptr,
+                               bsr_col_ind,
+                               bsr_val,
+                               x,
+                               beta_device_host,
+                               y,
+                               descr->base);
     }
     else if(block_dim == 5)
     {
-        rocsparse::bsrxmvn_5x5<T>(handle,
-                                  dir,
-                                  mb,
-                                  nnzb,
-                                  alpha_device_host,
-                                  size_of_mask,
-                                  bsr_mask_ptr,
-                                  bsr_row_ptr,
-                                  bsr_end_ptr,
-                                  bsr_col_ind,
-                                  bsr_val,
-                                  x,
-                                  beta_device_host,
-                                  y,
-                                  descr->base);
+        rocsparse::bsrxmvn_5x5(handle,
+                               dir,
+                               mb,
+                               nnzb,
+                               alpha_device_host,
+                               size_of_mask,
+                               bsr_mask_ptr,
+                               bsr_row_ptr,
+                               bsr_end_ptr,
+                               bsr_col_ind,
+                               bsr_val,
+                               x,
+                               beta_device_host,
+                               y,
+                               descr->base);
     }
     else if(block_dim == 8)
     {
-        rocsparse::bsrxmvn_8x8<T>(handle,
-                                  dir,
-                                  mb,
-                                  nnzb,
-                                  alpha_device_host,
-                                  size_of_mask,
-                                  bsr_mask_ptr,
-                                  bsr_row_ptr,
-                                  bsr_end_ptr,
-                                  bsr_col_ind,
-                                  bsr_val,
-                                  x,
-                                  beta_device_host,
-                                  y,
-                                  descr->base);
+        rocsparse::bsrxmvn_8x8(handle,
+                               dir,
+                               mb,
+                               nnzb,
+                               alpha_device_host,
+                               size_of_mask,
+                               bsr_mask_ptr,
+                               bsr_row_ptr,
+                               bsr_end_ptr,
+                               bsr_col_ind,
+                               bsr_val,
+                               x,
+                               beta_device_host,
+                               y,
+                               descr->base);
     }
     else if(block_dim == 16)
     {
-        rocsparse::bsrxmvn_16x16<T>(handle,
-                                    dir,
-                                    mb,
-                                    nnzb,
-                                    alpha_device_host,
-                                    size_of_mask,
-                                    bsr_mask_ptr,
-                                    bsr_row_ptr,
-                                    bsr_end_ptr,
-                                    bsr_col_ind,
-                                    bsr_val,
-                                    x,
-                                    beta_device_host,
-                                    y,
-                                    descr->base);
+        rocsparse::bsrxmvn_16x16(handle,
+                                 dir,
+                                 mb,
+                                 nnzb,
+                                 alpha_device_host,
+                                 size_of_mask,
+                                 bsr_mask_ptr,
+                                 bsr_row_ptr,
+                                 bsr_end_ptr,
+                                 bsr_col_ind,
+                                 bsr_val,
+                                 x,
+                                 beta_device_host,
+                                 y,
+                                 descr->base);
     }
     else if(block_dim > 16 && block_dim <= 32)
     {
-        rocsparse::bsrxmvn_17_32<T>(handle,
-                                    dir,
-                                    mb,
-                                    nnzb,
-                                    alpha_device_host,
-                                    size_of_mask,
-                                    bsr_mask_ptr,
-                                    bsr_row_ptr,
-                                    bsr_end_ptr,
-                                    bsr_col_ind,
-                                    bsr_val,
-                                    block_dim,
-                                    x,
-                                    beta_device_host,
-                                    y,
-                                    descr->base);
+        rocsparse::bsrxmvn_17_32(handle,
+                                 dir,
+                                 mb,
+                                 nnzb,
+                                 alpha_device_host,
+                                 size_of_mask,
+                                 bsr_mask_ptr,
+                                 bsr_row_ptr,
+                                 bsr_end_ptr,
+                                 bsr_col_ind,
+                                 bsr_val,
+                                 block_dim,
+                                 x,
+                                 beta_device_host,
+                                 y,
+                                 descr->base);
     }
     else
     {
-        rocsparse::bsrxmvn_general<T>(handle,
-                                      dir,
-                                      mb,
-                                      alpha_device_host,
-                                      size_of_mask,
-                                      bsr_mask_ptr,
-                                      bsr_row_ptr,
-                                      bsr_end_ptr,
-                                      bsr_col_ind,
-                                      bsr_val,
-                                      block_dim,
-                                      x,
-                                      beta_device_host,
-                                      y,
-                                      descr->base);
+        rocsparse::bsrxmvn_general(handle,
+                                   dir,
+                                   mb,
+                                   alpha_device_host,
+                                   size_of_mask,
+                                   bsr_mask_ptr,
+                                   bsr_row_ptr,
+                                   bsr_end_ptr,
+                                   bsr_col_ind,
+                                   bsr_val,
+                                   block_dim,
+                                   x,
+                                   beta_device_host,
+                                   y,
+                                   descr->base);
     }
     return rocsparse_status_success;
 }
@@ -312,36 +312,18 @@ rocsparse_status rocsparse::bsrxmv_template(rocsparse_handle          handle,
                 return rocsparse_status_invalid_pointer;
             }
 
-            if(handle->pointer_mode == rocsparse_pointer_mode_device)
-            {
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmv_scale_array<256>),
-                                                   dim3((ysize - 1) / 256 + 1),
-                                                   dim3(256),
-                                                   0,
-                                                   handle->stream,
-                                                   mb,
-                                                   size_of_mask,
-                                                   block_dim,
-                                                   bsr_mask_ptr,
-                                                   y,
-                                                   beta_device_host,
-                                                   descr->base);
-            }
-            else
-            {
-                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmv_scale_array<256>),
-                                                   dim3((ysize - 1) / 256 + 1),
-                                                   dim3(256),
-                                                   0,
-                                                   handle->stream,
-                                                   mb,
-                                                   size_of_mask,
-                                                   block_dim,
-                                                   bsr_mask_ptr,
-                                                   y,
-                                                   *beta_device_host,
-                                                   descr->base);
-            }
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bsrxmv_scale_array<256>),
+                                               dim3((ysize - 1) / 256 + 1),
+                                               dim3(256),
+                                               0,
+                                               handle->stream,
+                                               mb,
+                                               size_of_mask,
+                                               block_dim,
+                                               bsr_mask_ptr,
+                                               y,
+                                               beta_device_host,
+                                               descr->base);
         }
 
         return rocsparse_status_success;
@@ -376,50 +358,25 @@ rocsparse_status rocsparse::bsrxmv_template(rocsparse_handle          handle,
     ROCSPARSE_CHECKARG_ARRAY(9, nnzb, bsr_val);
     ROCSPARSE_CHECKARG_ARRAY(13, nnzb, bsr_col_ind);
 
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrxmv_template_dispatch(handle,
-                                                                      dir,
-                                                                      trans,
-                                                                      size_of_mask,
-                                                                      mb,
-                                                                      nb,
-                                                                      nnzb,
-                                                                      alpha_device_host,
-                                                                      descr,
-                                                                      bsr_val,
-                                                                      bsr_mask_ptr,
-                                                                      bsr_row_ptr,
-                                                                      bsr_end_ptr,
-                                                                      bsr_col_ind,
-                                                                      block_dim,
-                                                                      x,
-                                                                      beta_device_host,
-                                                                      y));
-        return rocsparse_status_success;
-    }
-    else
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrxmv_template_dispatch(handle,
-                                                                      dir,
-                                                                      trans,
-                                                                      size_of_mask,
-                                                                      mb,
-                                                                      nb,
-                                                                      nnzb,
-                                                                      *alpha_device_host,
-                                                                      descr,
-                                                                      bsr_val,
-                                                                      bsr_mask_ptr,
-                                                                      bsr_row_ptr,
-                                                                      bsr_end_ptr,
-                                                                      bsr_col_ind,
-                                                                      block_dim,
-                                                                      x,
-                                                                      *beta_device_host,
-                                                                      y));
-        return rocsparse_status_success;
-    }
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrxmv_template_dispatch(handle,
+                                                                  dir,
+                                                                  trans,
+                                                                  size_of_mask,
+                                                                  mb,
+                                                                  nb,
+                                                                  nnzb,
+                                                                  alpha_device_host,
+                                                                  descr,
+                                                                  bsr_val,
+                                                                  bsr_mask_ptr,
+                                                                  bsr_row_ptr,
+                                                                  bsr_end_ptr,
+                                                                  bsr_col_ind,
+                                                                  block_dim,
+                                                                  x,
+                                                                  beta_device_host,
+                                                                  y));
+    return rocsparse_status_success;
 }
 
 /*

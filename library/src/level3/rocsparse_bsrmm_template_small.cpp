@@ -35,29 +35,30 @@ namespace rocsparse
               typename A,
               typename B,
               typename C,
-              typename U>
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrmmnn_small_blockdim_kernel(rocsparse_direction direction,
                                        J                   mb,
                                        J                   n,
                                        int64_t             offsets_batch_stride_A,
                                        int64_t             columns_values_batch_stride_A,
-                                       U                   alpha_device_host,
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                        const I* __restrict__ bsr_row_ptr,
                                        const J* __restrict__ bsr_col_ind,
                                        const A* __restrict__ bsr_val,
                                        const B* __restrict__ dense_B,
                                        int64_t ldb,
                                        int64_t batch_stride_B,
-                                       U       beta_device_host,
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                        C* __restrict__ dense_C,
                                        int64_t              ldc,
                                        int64_t              batch_stride_C,
                                        rocsparse_order      order_C,
-                                       rocsparse_index_base idx_base)
+                                       rocsparse_index_base idx_base,
+                                       bool                 is_host_mode)
     {
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        const auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
         if(alpha == 0 && beta == 1)
         {
@@ -93,29 +94,30 @@ namespace rocsparse
               typename A,
               typename B,
               typename C,
-              typename U>
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrmmnt_small_blockdim_kernel(rocsparse_direction direction,
                                        J                   mb,
                                        J                   n,
                                        int64_t             offsets_batch_stride_A,
                                        int64_t             columns_values_batch_stride_A,
-                                       U                   alpha_device_host,
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                        const I* __restrict__ bsr_row_ptr,
                                        const J* __restrict__ bsr_col_ind,
                                        const A* __restrict__ bsr_val,
                                        const B* __restrict__ dense_B,
                                        int64_t ldb,
                                        int64_t batch_stride_B,
-                                       U       beta_device_host,
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                        C* __restrict__ dense_C,
                                        int64_t              ldc,
                                        int64_t              batch_stride_C,
                                        rocsparse_order      order_C,
-                                       rocsparse_index_base idx_base)
+                                       rocsparse_index_base idx_base,
+                                       bool                 is_host_mode)
     {
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        const auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
         if(alpha == 0 && beta == 1)
         {
@@ -143,7 +145,7 @@ namespace rocsparse
             idx_base);
     }
 
-    template <typename T, typename I, typename J, typename A, typename B, typename C, typename U>
+    template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmmnn_template_small(rocsparse_handle          handle,
                                             rocsparse_direction       dir,
                                             rocsparse_operation       trans_A,
@@ -155,7 +157,7 @@ namespace rocsparse
                                             J                         batch_count_A,
                                             int64_t                   offsets_batch_stride_A,
                                             int64_t                   columns_values_batch_stride_A,
-                                            U                         alpha,
+                                            const T*                  alpha,
                                             const rocsparse_mat_descr descr,
                                             const A*                  bsr_val,
                                             const I*                  bsr_row_ptr,
@@ -166,7 +168,7 @@ namespace rocsparse
                                             J                         batch_count_B,
                                             int64_t                   batch_stride_B,
                                             rocsparse_order           order_B,
-                                            U                         beta,
+                                            const T*                  beta,
                                             C*                        dense_C,
                                             int64_t                   ldc,
                                             J                         batch_count_C,
@@ -195,19 +197,20 @@ namespace rocsparse
             n,
             offsets_batch_stride_A,
             columns_values_batch_stride_A,
-            alpha,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
             bsr_row_ptr,
             bsr_col_ind,
             bsr_val,
             dense_B,
             ldb,
             batch_stride_B,
-            beta,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),
             dense_C,
             ldc,
             batch_stride_C,
             order_C,
-            descr->base);
+            descr->base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
 
         return rocsparse_status_success;
     }
@@ -226,21 +229,22 @@ namespace rocsparse
         n,                                                              \
         offsets_batch_stride_A,                                         \
         columns_values_batch_stride_A,                                  \
-        alpha,                                                          \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),               \
         bsr_row_ptr,                                                    \
         bsr_col_ind,                                                    \
         bsr_val,                                                        \
         dense_B,                                                        \
         ldb,                                                            \
         batch_count_B,                                                  \
-        beta,                                                           \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),                \
         dense_C,                                                        \
         ldc,                                                            \
         batch_stride_C,                                                 \
         order_C,                                                        \
-        descr->base)
+        descr->base,                                                    \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
 
-    template <typename T, typename I, typename J, typename A, typename B, typename C, typename U>
+    template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status bsrmmnt_template_small(rocsparse_handle          handle,
                                             rocsparse_direction       dir,
                                             rocsparse_operation       trans_A,
@@ -252,7 +256,7 @@ namespace rocsparse
                                             J                         batch_count_A,
                                             int64_t                   offsets_batch_stride_A,
                                             int64_t                   columns_values_batch_stride_A,
-                                            U                         alpha,
+                                            const T*                  alpha,
                                             const rocsparse_mat_descr descr,
                                             const A*                  bsr_val,
                                             const I*                  bsr_row_ptr,
@@ -263,7 +267,7 @@ namespace rocsparse
                                             J                         batch_count_B,
                                             int64_t                   batch_stride_B,
                                             rocsparse_order           order_B,
-                                            U                         beta,
+                                            const T*                  beta,
                                             C*                        dense_C,
                                             int64_t                   ldc,
                                             J                         batch_count_C,
@@ -306,48 +310,47 @@ namespace rocsparse
     }
 }
 
-#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE, UTYPE)    \
-    template rocsparse_status rocsparse::bsrmmnn_template_small<TTYPE>( \
-        rocsparse_handle          handle,                               \
-        rocsparse_direction       dir,                                  \
-        rocsparse_operation       trans_A,                              \
-        rocsparse_operation       trans_B,                              \
-        JTYPE                     mb,                                   \
-        JTYPE                     n,                                    \
-        JTYPE                     kb,                                   \
-        ITYPE                     nnzb,                                 \
-        JTYPE                     batch_count_A,                        \
-        int64_t                   offsets_batch_stride_A,               \
-        int64_t                   columns_values_batch_stride_A,        \
-        UTYPE                     alpha,                                \
-        const rocsparse_mat_descr descr,                                \
-        const ATYPE*              bsr_val,                              \
-        const ITYPE*              bsr_row_ptr,                          \
-        const JTYPE*              bsr_col_ind,                          \
-        JTYPE                     block_dim,                            \
-        const BTYPE*              dense_B,                              \
-        int64_t                   ldb,                                  \
-        JTYPE                     batch_count_B,                        \
-        int64_t                   batch_stride_B,                       \
-        rocsparse_order           order_B,                              \
-        UTYPE                     beta,                                 \
-        CTYPE*                    dense_C,                              \
-        int64_t                   ldc,                                  \
-        JTYPE                     batch_count_C,                        \
-        int64_t                   batch_stride_C,                       \
+#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE)    \
+    template rocsparse_status rocsparse::bsrmmnn_template_small( \
+        rocsparse_handle          handle,                        \
+        rocsparse_direction       dir,                           \
+        rocsparse_operation       trans_A,                       \
+        rocsparse_operation       trans_B,                       \
+        JTYPE                     mb,                            \
+        JTYPE                     n,                             \
+        JTYPE                     kb,                            \
+        ITYPE                     nnzb,                          \
+        JTYPE                     batch_count_A,                 \
+        int64_t                   offsets_batch_stride_A,        \
+        int64_t                   columns_values_batch_stride_A, \
+        const TTYPE*              alpha,                         \
+        const rocsparse_mat_descr descr,                         \
+        const ATYPE*              bsr_val,                       \
+        const ITYPE*              bsr_row_ptr,                   \
+        const JTYPE*              bsr_col_ind,                   \
+        JTYPE                     block_dim,                     \
+        const BTYPE*              dense_B,                       \
+        int64_t                   ldb,                           \
+        JTYPE                     batch_count_B,                 \
+        int64_t                   batch_stride_B,                \
+        rocsparse_order           order_B,                       \
+        const TTYPE*              beta,                          \
+        CTYPE*                    dense_C,                       \
+        int64_t                   ldc,                           \
+        JTYPE                     batch_count_C,                 \
+        int64_t                   batch_stride_C,                \
         rocsparse_order           order_C)
 
 // Uniform precisions
-INSTANTIATE(float, int32_t, int32_t, float, float, float, float);
-INSTANTIATE(float, int64_t, int32_t, float, float, float, float);
-INSTANTIATE(float, int64_t, int64_t, float, float, float, float);
-INSTANTIATE(double, int32_t, int32_t, double, double, double, double);
-INSTANTIATE(double, int64_t, int32_t, double, double, double, double);
-INSTANTIATE(double, int64_t, int64_t, double, double, double, double);
+INSTANTIATE(float, int32_t, int32_t, float, float, float);
+INSTANTIATE(float, int64_t, int32_t, float, float, float);
+INSTANTIATE(float, int64_t, int64_t, float, float, float);
+INSTANTIATE(double, int32_t, int32_t, double, double, double);
+INSTANTIATE(double, int64_t, int32_t, double, double, double);
+INSTANTIATE(double, int64_t, int64_t, double, double, double);
 INSTANTIATE(rocsparse_float_complex,
             int32_t,
             int32_t,
-            rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex);
@@ -356,12 +359,10 @@ INSTANTIATE(rocsparse_float_complex,
             int32_t,
             rocsparse_float_complex,
             rocsparse_float_complex,
-            rocsparse_float_complex,
             rocsparse_float_complex);
 INSTANTIATE(rocsparse_float_complex,
             int64_t,
             int64_t,
-            rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex);
@@ -370,130 +371,71 @@ INSTANTIATE(rocsparse_double_complex,
             int32_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
 INSTANTIATE(rocsparse_double_complex,
             int64_t,
             int32_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
 INSTANTIATE(rocsparse_double_complex,
             int64_t,
             int64_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
-
-INSTANTIATE(float, int32_t, int32_t, float, float, float, const float*);
-INSTANTIATE(float, int64_t, int32_t, float, float, float, const float*);
-INSTANTIATE(float, int64_t, int64_t, float, float, float, const float*);
-INSTANTIATE(double, int32_t, int32_t, double, double, double, const double*);
-INSTANTIATE(double, int64_t, int32_t, double, double, double, const double*);
-INSTANTIATE(double, int64_t, int64_t, double, double, double, const double*);
-INSTANTIATE(rocsparse_float_complex,
-            int32_t,
-            int32_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
-INSTANTIATE(rocsparse_float_complex,
-            int64_t,
-            int32_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
-INSTANTIATE(rocsparse_float_complex,
-            int64_t,
-            int64_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
-INSTANTIATE(rocsparse_double_complex,
-            int32_t,
-            int32_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
-INSTANTIATE(rocsparse_double_complex,
-            int64_t,
-            int32_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
-INSTANTIATE(rocsparse_double_complex,
-            int64_t,
-            int64_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
 
 // Mixed Precisions
-INSTANTIATE(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t, int32_t);
-INSTANTIATE(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t, int32_t);
-INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t, int32_t);
-INSTANTIATE(float, int32_t, int32_t, int8_t, int8_t, float, float);
-INSTANTIATE(float, int64_t, int32_t, int8_t, int8_t, float, float);
-INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float, float);
+INSTANTIATE(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t);
+INSTANTIATE(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t);
+INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t);
+INSTANTIATE(float, int32_t, int32_t, int8_t, int8_t, float);
+INSTANTIATE(float, int64_t, int32_t, int8_t, int8_t, float);
+INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
 
-INSTANTIATE(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t, const int32_t*);
-INSTANTIATE(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t, const int32_t*);
-INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t, const int32_t*);
-INSTANTIATE(float, int32_t, int32_t, int8_t, int8_t, float, const float*);
-INSTANTIATE(float, int64_t, int32_t, int8_t, int8_t, float, const float*);
-INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float, const float*);
 #undef INSTANTIATE
 
-#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE, UTYPE)    \
-    template rocsparse_status rocsparse::bsrmmnt_template_small<TTYPE>( \
-        rocsparse_handle          handle,                               \
-        rocsparse_direction       dir,                                  \
-        rocsparse_operation       trans_A,                              \
-        rocsparse_operation       trans_B,                              \
-        JTYPE                     mb,                                   \
-        JTYPE                     n,                                    \
-        JTYPE                     kb,                                   \
-        ITYPE                     nnzb,                                 \
-        JTYPE                     batch_count_A,                        \
-        int64_t                   offsets_batch_stride_A,               \
-        int64_t                   columns_values_batch_stride_A,        \
-        UTYPE                     alpha,                                \
-        const rocsparse_mat_descr descr,                                \
-        const ATYPE*              bsr_val,                              \
-        const ITYPE*              bsr_row_ptr,                          \
-        const JTYPE*              bsr_col_ind,                          \
-        JTYPE                     block_dim,                            \
-        const BTYPE*              dense_B,                              \
-        int64_t                   ldb,                                  \
-        JTYPE                     batch_count_B,                        \
-        int64_t                   batch_stride_B,                       \
-        rocsparse_order           order_B,                              \
-        UTYPE                     beta,                                 \
-        CTYPE*                    dense_C,                              \
-        int64_t                   ldc,                                  \
-        JTYPE                     batch_count_C,                        \
-        int64_t                   batch_stride_C,                       \
+#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE)    \
+    template rocsparse_status rocsparse::bsrmmnt_template_small( \
+        rocsparse_handle          handle,                        \
+        rocsparse_direction       dir,                           \
+        rocsparse_operation       trans_A,                       \
+        rocsparse_operation       trans_B,                       \
+        JTYPE                     mb,                            \
+        JTYPE                     n,                             \
+        JTYPE                     kb,                            \
+        ITYPE                     nnzb,                          \
+        JTYPE                     batch_count_A,                 \
+        int64_t                   offsets_batch_stride_A,        \
+        int64_t                   columns_values_batch_stride_A, \
+        const TTYPE*              alpha,                         \
+        const rocsparse_mat_descr descr,                         \
+        const ATYPE*              bsr_val,                       \
+        const ITYPE*              bsr_row_ptr,                   \
+        const JTYPE*              bsr_col_ind,                   \
+        JTYPE                     block_dim,                     \
+        const BTYPE*              dense_B,                       \
+        int64_t                   ldb,                           \
+        JTYPE                     batch_count_B,                 \
+        int64_t                   batch_stride_B,                \
+        rocsparse_order           order_B,                       \
+        const TTYPE*              beta,                          \
+        CTYPE*                    dense_C,                       \
+        int64_t                   ldc,                           \
+        JTYPE                     batch_count_C,                 \
+        int64_t                   batch_stride_C,                \
         rocsparse_order           order_C)
 
 // Uniform precisions
-INSTANTIATE(float, int32_t, int32_t, float, float, float, float);
-INSTANTIATE(float, int64_t, int32_t, float, float, float, float);
-INSTANTIATE(float, int64_t, int64_t, float, float, float, float);
-INSTANTIATE(double, int32_t, int32_t, double, double, double, double);
-INSTANTIATE(double, int64_t, int32_t, double, double, double, double);
-INSTANTIATE(double, int64_t, int64_t, double, double, double, double);
+INSTANTIATE(float, int32_t, int32_t, float, float, float);
+INSTANTIATE(float, int64_t, int32_t, float, float, float);
+INSTANTIATE(float, int64_t, int64_t, float, float, float);
+INSTANTIATE(double, int32_t, int32_t, double, double, double);
+INSTANTIATE(double, int64_t, int32_t, double, double, double);
+INSTANTIATE(double, int64_t, int64_t, double, double, double);
 INSTANTIATE(rocsparse_float_complex,
             int32_t,
             int32_t,
-            rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex);
@@ -502,12 +444,10 @@ INSTANTIATE(rocsparse_float_complex,
             int32_t,
             rocsparse_float_complex,
             rocsparse_float_complex,
-            rocsparse_float_complex,
             rocsparse_float_complex);
 INSTANTIATE(rocsparse_float_complex,
             int64_t,
             int64_t,
-            rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex);
@@ -516,84 +456,26 @@ INSTANTIATE(rocsparse_double_complex,
             int32_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
 INSTANTIATE(rocsparse_double_complex,
             int64_t,
             int32_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
 INSTANTIATE(rocsparse_double_complex,
             int64_t,
             int64_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
-
-INSTANTIATE(float, int32_t, int32_t, float, float, float, const float*);
-INSTANTIATE(float, int64_t, int32_t, float, float, float, const float*);
-INSTANTIATE(float, int64_t, int64_t, float, float, float, const float*);
-INSTANTIATE(double, int32_t, int32_t, double, double, double, const double*);
-INSTANTIATE(double, int64_t, int32_t, double, double, double, const double*);
-INSTANTIATE(double, int64_t, int64_t, double, double, double, const double*);
-INSTANTIATE(rocsparse_float_complex,
-            int32_t,
-            int32_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
-INSTANTIATE(rocsparse_float_complex,
-            int64_t,
-            int32_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
-INSTANTIATE(rocsparse_float_complex,
-            int64_t,
-            int64_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
-INSTANTIATE(rocsparse_double_complex,
-            int32_t,
-            int32_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
-INSTANTIATE(rocsparse_double_complex,
-            int64_t,
-            int32_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
-INSTANTIATE(rocsparse_double_complex,
-            int64_t,
-            int64_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
 
 // Mixed Precisions
-INSTANTIATE(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t, int32_t);
-INSTANTIATE(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t, int32_t);
-INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t, int32_t);
-INSTANTIATE(float, int32_t, int32_t, int8_t, int8_t, float, float);
-INSTANTIATE(float, int64_t, int32_t, int8_t, int8_t, float, float);
-INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float, float);
+INSTANTIATE(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t);
+INSTANTIATE(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t);
+INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t);
+INSTANTIATE(float, int32_t, int32_t, int8_t, int8_t, float);
+INSTANTIATE(float, int64_t, int32_t, int8_t, int8_t, float);
+INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
 
-INSTANTIATE(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t, const int32_t*);
-INSTANTIATE(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t, const int32_t*);
-INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t, const int32_t*);
-INSTANTIATE(float, int32_t, int32_t, int8_t, int8_t, float, const float*);
-INSTANTIATE(float, int64_t, int32_t, int8_t, int8_t, float, const float*);
-INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float, const float*);
 #undef INSTANTIATE

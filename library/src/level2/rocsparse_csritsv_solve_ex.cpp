@@ -247,16 +247,8 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 //
                 // Scale.
                 //
-                if(handle->pointer_mode == rocsparse_pointer_mode_device)
-                {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        rocsparse::scale_array(handle, m, alpha_device_host, y_p));
-                }
-                else
-                {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        rocsparse::scale_array(handle, m, *alpha_device_host, y_p));
-                }
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::scale_array(handle, m, alpha_device_host, y_p));
                 rocsparse::floating_data_t<T>* device_nrm
                     = (rocsparse::floating_data_t<T>*)(y_p + m);
                 RETURN_IF_ROCSPARSE_ERROR(
@@ -291,16 +283,8 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                     //
                     // Scale.
                     //
-                    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-                    {
-                        RETURN_IF_ROCSPARSE_ERROR(
-                            rocsparse::scale_array(handle, m, alpha_device_host, y));
-                    }
-                    else
-                    {
-                        RETURN_IF_ROCSPARSE_ERROR(
-                            rocsparse::scale_array(handle, m, *alpha_device_host, y));
-                    }
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        rocsparse::scale_array(handle, m, alpha_device_host, y));
                 }
                 host_nmaxiter[0] = 1;
             }

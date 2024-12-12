@@ -28,16 +28,18 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename U, typename... P>
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename... P>
     ROCSPARSE_KERNEL(BLOCKSIZE)
 #if defined(__gfx908__)
     __attribute__((amdgpu_waves_per_eu(6, 6)))
 #endif
-    void csrmmnn_row_split_shared_kernel(U alpha_device_host, U beta_device_host, P... p)
+    void csrmmnn_row_split_shared_kernel(ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                         bool is_host_mode,
+                                         P... p)
     {
-
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        const auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha == 0 && beta == 1)
         {
             return;
@@ -46,12 +48,15 @@ namespace rocsparse
         rocsparse::csrmmnn_row_split_shared_device<BLOCKSIZE, WF_SIZE>(alpha, beta, p...);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t LOOPS, typename U, typename... P>
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t LOOPS, typename T, typename... P>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnn_row_split_kernel(U alpha_device_host, U beta_device_host, P... p)
+    void csrmmnn_row_split_kernel(ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                  ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                  bool is_host_mode,
+                                  P... p)
     {
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        const auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha == 0 && beta == 1)
         {
             return;
@@ -63,16 +68,17 @@ namespace rocsparse
               uint32_t WF_SIZE,
               uint32_t SUB_WF_SIZE,
               uint32_t LOOPS,
-              typename U,
+              typename T,
               typename... P>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnt_row_split_shared_subwfsize_x_loop_columns_kernel(U alpha_device_host,
-                                                                  U beta_device_host,
-                                                                  P... p)
+    void csrmmnt_row_split_shared_subwfsize_x_loop_columns_kernel(
+        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+        bool is_host_mode,
+        P... p)
     {
-
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        const auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha == 0 && beta == 1)
         {
             return;
@@ -90,15 +96,18 @@ namespace rocsparse
               uint32_t SUBWFSIZE,
               uint32_t LOOPS,
               uint32_t... SUBWFSIZES_LIST,
-              typename U,
+              typename T,
               typename... P>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnt_row_split_subwfsize_x_loop_plus_swfs_columns_kernel(U alpha_device_host,
-                                                                     U beta_device_host,
-                                                                     P... p)
+    void csrmmnt_row_split_subwfsize_x_loop_plus_swfs_columns_kernel(
+        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+        bool is_host_mode,
+
+        P... p)
     {
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        const auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha == 0 && beta == 1)
         {
             return;
@@ -111,12 +120,15 @@ namespace rocsparse
             alpha, beta, p...);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t SUB_WF_SIZE, typename U, typename... P>
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t SUB_WF_SIZE, typename T, typename... P>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnt_row_split_shared_remainder_kernel(U alpha_device_host, U beta_device_host, P... p)
+    void csrmmnt_row_split_shared_remainder_kernel(ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                                   bool is_host_mode,
+                                                   P... p)
     {
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        const auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha == 0 && beta == 1)
         {
             return;
@@ -126,13 +138,15 @@ namespace rocsparse
             alpha, beta, p...);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename U, typename... P>
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename... P>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmtn_row_split_kernel(U alpha_device_host, U beta_device_host, P... p)
+    void csrmmtn_row_split_kernel(ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                  ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                  bool is_host_mode,
+                                  P... p)
     {
-
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        const auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
         if(alpha == 0 && beta == 1)
         {
@@ -141,14 +155,15 @@ namespace rocsparse
         rocsparse::csrmmtn_row_split_device<BLOCKSIZE, WF_SIZE>(alpha, p...);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename U, typename... P>
+    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename... P>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmtt_row_split_kernel(U alpha_device_host, U beta_device_host, P... p)
+    void csrmmtt_row_split_kernel(ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                  ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                  bool is_host_mode,
+                                  P... p)
     {
-
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        const auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
-
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha == 0 && beta == 1)
         {
             return;
@@ -167,8 +182,9 @@ namespace rocsparse
         dim3(CSRMMNT_DIM),                                                                \
         0,                                                                                \
         handle->stream,                                                                   \
-        alpha_device_host,                                                                \
-        beta_device_host,                                                                 \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                     \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                      \
+        handle->pointer_mode == rocsparse_pointer_mode_host,                              \
         start,                                                                            \
         end,                                                                              \
         m,                                                                                \
@@ -201,8 +217,9 @@ namespace rocsparse
         dim3(CSRMMNT_DIM),                                                                     \
         0,                                                                                     \
         handle->stream,                                                                        \
-        alpha_device_host,                                                                     \
-        beta_device_host,                                                                      \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                          \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                           \
+        handle->pointer_mode == rocsparse_pointer_mode_host,                                   \
         start,                                                                                 \
         end,                                                                                   \
         m,                                                                                     \
@@ -230,8 +247,9 @@ namespace rocsparse
         dim3(CSRMMNT_DIM),                                                                         \
         0,                                                                                         \
         handle->stream,                                                                            \
-        alpha_device_host,                                                                         \
-        beta_device_host,                                                                          \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                              \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                               \
+        handle->pointer_mode == rocsparse_pointer_mode_host,                                       \
         conj_A,                                                                                    \
         conj_B,                                                                                    \
         start,                                                                                     \
@@ -252,7 +270,7 @@ namespace rocsparse
         order_C,                                                                                   \
         descr->base);
 
-    template <typename I, typename J, typename A, typename B, typename C, typename U>
+    template <typename I, typename J, typename A, typename B, typename C, typename T>
     rocsparse_status csrmmnn_template_row_split(rocsparse_handle handle,
                                                 bool             conj_A,
                                                 bool             conj_B,
@@ -263,7 +281,7 @@ namespace rocsparse
                                                 J                batch_count_A,
                                                 int64_t          offsets_batch_stride_A,
                                                 int64_t          columns_values_batch_stride_A,
-                                                U                alpha_device_host,
+                                                const T*         alpha_device_host,
                                                 const rocsparse_mat_descr descr,
                                                 const A*                  csr_val,
                                                 const I*                  csr_row_ptr,
@@ -272,7 +290,7 @@ namespace rocsparse
                                                 int64_t                   ldb,
                                                 J                         batch_count_B,
                                                 int64_t                   batch_stride_B,
-                                                U                         beta_device_host,
+                                                const T*                  beta_device_host,
                                                 C*                        dense_C,
                                                 int64_t                   ldc,
                                                 J                         batch_count_C,
@@ -289,8 +307,9 @@ namespace rocsparse
                 dim3(CSRMMNN_DIM),
                 0,
                 handle->stream,
-                alpha_device_host,
-                beta_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                handle->pointer_mode == rocsparse_pointer_mode_host,
                 conj_A,
                 conj_B,
                 m,
@@ -329,8 +348,9 @@ namespace rocsparse
                     csrmmnn_threads,
                     0,
                     handle->stream,
-                    alpha_device_host,
-                    beta_device_host,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                    handle->pointer_mode == rocsparse_pointer_mode_host,
                     conj_A,
                     conj_B,
                     (J)0,
@@ -363,8 +383,9 @@ namespace rocsparse
                     csrmmnn_threads,
                     0,
                     handle->stream,
-                    alpha_device_host,
-                    beta_device_host,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                    handle->pointer_mode == rocsparse_pointer_mode_host,
                     conj_A,
                     conj_B,
                     main,
@@ -391,7 +412,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename I, typename J, typename A, typename B, typename C, typename U>
+    template <typename I, typename J, typename A, typename B, typename C, typename T>
     rocsparse_status csrmmnt_template_row_split(rocsparse_handle handle,
                                                 bool             conj_A,
                                                 bool             conj_B,
@@ -402,7 +423,7 @@ namespace rocsparse
                                                 J                batch_count_A,
                                                 int64_t          offsets_batch_stride_A,
                                                 int64_t          columns_values_batch_stride_A,
-                                                U                alpha_device_host,
+                                                const T*         alpha_device_host,
                                                 const rocsparse_mat_descr descr,
                                                 const A*                  csr_val,
                                                 const I*                  csr_row_ptr,
@@ -411,7 +432,7 @@ namespace rocsparse
                                                 int64_t                   ldb,
                                                 J                         batch_count_B,
                                                 int64_t                   batch_stride_B,
-                                                U                         beta_device_host,
+                                                const T*                  beta_device_host,
                                                 C*                        dense_C,
                                                 int64_t                   ldc,
                                                 J                         batch_count_C,
@@ -739,7 +760,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename I, typename J, typename A, typename B, typename C, typename U>
+    template <typename I, typename J, typename A, typename B, typename C, typename T>
     rocsparse_status csrmmtn_template_row_split(rocsparse_handle handle,
                                                 bool             conj_A,
                                                 bool             conj_B,
@@ -750,7 +771,7 @@ namespace rocsparse
                                                 J                batch_count_A,
                                                 int64_t          offsets_batch_stride_A,
                                                 int64_t          columns_values_batch_stride_A,
-                                                U                alpha_device_host,
+                                                const T*         alpha_device_host,
                                                 const rocsparse_mat_descr descr,
                                                 const A*                  csr_val,
                                                 const I*                  csr_row_ptr,
@@ -759,7 +780,7 @@ namespace rocsparse
                                                 int64_t                   ldb,
                                                 J                         batch_count_B,
                                                 int64_t                   batch_stride_B,
-                                                U                         beta_device_host,
+                                                const T*                  beta_device_host,
                                                 C*                        dense_C,
                                                 int64_t                   ldc,
                                                 J                         batch_count_C,
@@ -778,8 +799,9 @@ namespace rocsparse
             dim3(CSRMMTN_DIM),
             0,
             handle->stream,
-            alpha_device_host,
-            beta_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            handle->pointer_mode == rocsparse_pointer_mode_host,
             conj_A,
             conj_B,
             m,
@@ -804,7 +826,7 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename I, typename J, typename A, typename B, typename C, typename U>
+    template <typename I, typename J, typename A, typename B, typename C, typename T>
     rocsparse_status csrmmtt_template_row_split(rocsparse_handle handle,
                                                 bool             conj_A,
                                                 bool             conj_B,
@@ -815,7 +837,7 @@ namespace rocsparse
                                                 J                batch_count_A,
                                                 int64_t          offsets_batch_stride_A,
                                                 int64_t          columns_values_batch_stride_A,
-                                                U                alpha_device_host,
+                                                const T*         alpha_device_host,
                                                 const rocsparse_mat_descr descr,
                                                 const A*                  csr_val,
                                                 const I*                  csr_row_ptr,
@@ -824,7 +846,7 @@ namespace rocsparse
                                                 int64_t                   ldb,
                                                 J                         batch_count_B,
                                                 int64_t                   batch_stride_B,
-                                                U                         beta_device_host,
+                                                const T*                  beta_device_host,
                                                 C*                        dense_C,
                                                 int64_t                   ldc,
                                                 J                         batch_count_C,
@@ -843,8 +865,9 @@ namespace rocsparse
             dim3(CSRMMTT_DIM),
             0,
             handle->stream,
-            alpha_device_host,
-            beta_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            handle->pointer_mode == rocsparse_pointer_mode_host,
             conj_A,
             conj_B,
             m,
@@ -896,7 +919,7 @@ namespace rocsparse
          batch_stride_C,                              \
          order_C);
 
-    template <typename T, typename I, typename J, typename A, typename B, typename C, typename U>
+    template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status csrmm_template_row_split(rocsparse_handle    handle,
                                               rocsparse_operation trans_A,
                                               rocsparse_operation trans_B,
@@ -907,7 +930,7 @@ namespace rocsparse
                                               J                   batch_count_A,
                                               int64_t             offsets_batch_stride_A,
                                               int64_t             columns_values_batch_stride_A,
-                                              U                   alpha_device_host,
+                                              const T*            alpha_device_host,
                                               const rocsparse_mat_descr descr,
                                               const A*                  csr_val,
                                               const I*                  csr_row_ptr,
@@ -917,7 +940,7 @@ namespace rocsparse
                                               J                         batch_count_B,
                                               int64_t                   batch_stride_B,
                                               rocsparse_order           order_B,
-                                              U                         beta_device_host,
+                                              const T*                  beta_device_host,
                                               C*                        dense_C,
                                               int64_t                   ldc,
                                               J                         batch_count_C,
@@ -969,47 +992,46 @@ namespace rocsparse
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
 }
-#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE, UTYPE)      \
-    template rocsparse_status rocsparse::csrmm_template_row_split<TTYPE>( \
-        rocsparse_handle          handle,                                 \
-        rocsparse_operation       trans_A,                                \
-        rocsparse_operation       trans_B,                                \
-        JTYPE                     m,                                      \
-        JTYPE                     n,                                      \
-        JTYPE                     k,                                      \
-        ITYPE                     nnz,                                    \
-        JTYPE                     batch_count_A,                          \
-        int64_t                   offsets_batch_stride_A,                 \
-        int64_t                   columns_values_batch_stride_A,          \
-        UTYPE                     alpha_device_host,                      \
-        const rocsparse_mat_descr descr,                                  \
-        const ATYPE*              csr_val,                                \
-        const ITYPE*              csr_row_ptr,                            \
-        const JTYPE*              csr_col_ind,                            \
-        const BTYPE*              dense_B,                                \
-        int64_t                   ldb,                                    \
-        JTYPE                     batch_count_B,                          \
-        int64_t                   batch_stride_B,                         \
-        rocsparse_order           order_B,                                \
-        UTYPE                     beta_device_host,                       \
-        CTYPE*                    dense_C,                                \
-        int64_t                   ldc,                                    \
-        JTYPE                     batch_count_C,                          \
-        int64_t                   batch_stride_C,                         \
-        rocsparse_order           order_C,                                \
+#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE)      \
+    template rocsparse_status rocsparse::csrmm_template_row_split( \
+        rocsparse_handle          handle,                          \
+        rocsparse_operation       trans_A,                         \
+        rocsparse_operation       trans_B,                         \
+        JTYPE                     m,                               \
+        JTYPE                     n,                               \
+        JTYPE                     k,                               \
+        ITYPE                     nnz,                             \
+        JTYPE                     batch_count_A,                   \
+        int64_t                   offsets_batch_stride_A,          \
+        int64_t                   columns_values_batch_stride_A,   \
+        const TTYPE*              alpha_device_host,               \
+        const rocsparse_mat_descr descr,                           \
+        const ATYPE*              csr_val,                         \
+        const ITYPE*              csr_row_ptr,                     \
+        const JTYPE*              csr_col_ind,                     \
+        const BTYPE*              dense_B,                         \
+        int64_t                   ldb,                             \
+        JTYPE                     batch_count_B,                   \
+        int64_t                   batch_stride_B,                  \
+        rocsparse_order           order_B,                         \
+        const TTYPE*              beta_device_host,                \
+        CTYPE*                    dense_C,                         \
+        int64_t                   ldc,                             \
+        JTYPE                     batch_count_C,                   \
+        int64_t                   batch_stride_C,                  \
+        rocsparse_order           order_C,                         \
         bool                      force_conj_A)
 
 // Uniform precisions
-INSTANTIATE(float, int32_t, int32_t, float, float, float, float);
-INSTANTIATE(float, int64_t, int32_t, float, float, float, float);
-INSTANTIATE(float, int64_t, int64_t, float, float, float, float);
-INSTANTIATE(double, int32_t, int32_t, double, double, double, double);
-INSTANTIATE(double, int64_t, int32_t, double, double, double, double);
-INSTANTIATE(double, int64_t, int64_t, double, double, double, double);
+INSTANTIATE(float, int32_t, int32_t, float, float, float);
+INSTANTIATE(float, int64_t, int32_t, float, float, float);
+INSTANTIATE(float, int64_t, int64_t, float, float, float);
+INSTANTIATE(double, int32_t, int32_t, double, double, double);
+INSTANTIATE(double, int64_t, int32_t, double, double, double);
+INSTANTIATE(double, int64_t, int64_t, double, double, double);
 INSTANTIATE(rocsparse_float_complex,
             int32_t,
             int32_t,
-            rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex);
@@ -1018,12 +1040,10 @@ INSTANTIATE(rocsparse_float_complex,
             int32_t,
             rocsparse_float_complex,
             rocsparse_float_complex,
-            rocsparse_float_complex,
             rocsparse_float_complex);
 INSTANTIATE(rocsparse_float_complex,
             int64_t,
             int64_t,
-            rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex);
@@ -1032,81 +1052,24 @@ INSTANTIATE(rocsparse_double_complex,
             int32_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
 INSTANTIATE(rocsparse_double_complex,
             int64_t,
             int32_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
 INSTANTIATE(rocsparse_double_complex,
             int64_t,
             int64_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
-INSTANTIATE(float, int32_t, int32_t, float, float, float, const float*);
-INSTANTIATE(float, int64_t, int32_t, float, float, float, const float*);
-INSTANTIATE(float, int64_t, int64_t, float, float, float, const float*);
-INSTANTIATE(double, int32_t, int32_t, double, double, double, const double*);
-INSTANTIATE(double, int64_t, int32_t, double, double, double, const double*);
-INSTANTIATE(double, int64_t, int64_t, double, double, double, const double*);
-INSTANTIATE(rocsparse_float_complex,
-            int32_t,
-            int32_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
-INSTANTIATE(rocsparse_float_complex,
-            int64_t,
-            int32_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
-INSTANTIATE(rocsparse_float_complex,
-            int64_t,
-            int64_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
-INSTANTIATE(rocsparse_double_complex,
-            int32_t,
-            int32_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
-INSTANTIATE(rocsparse_double_complex,
-            int64_t,
-            int32_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
-INSTANTIATE(rocsparse_double_complex,
-            int64_t,
-            int64_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
 // Mixed Precisions
-INSTANTIATE(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t, int32_t);
-INSTANTIATE(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t, int32_t);
-INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t, int32_t);
-INSTANTIATE(float, int32_t, int32_t, int8_t, int8_t, float, float);
-INSTANTIATE(float, int64_t, int32_t, int8_t, int8_t, float, float);
-INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float, float);
-INSTANTIATE(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t, const int32_t*);
-INSTANTIATE(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t, const int32_t*);
-INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t, const int32_t*);
-INSTANTIATE(float, int32_t, int32_t, int8_t, int8_t, float, const float*);
-INSTANTIATE(float, int64_t, int32_t, int8_t, int8_t, float, const float*);
-INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float, const float*);
+INSTANTIATE(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t);
+INSTANTIATE(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t);
+INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t);
+INSTANTIATE(float, int32_t, int32_t, int8_t, int8_t, float);
+INSTANTIATE(float, int64_t, int32_t, int8_t, int8_t, float);
+INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
 #undef INSTANTIATE

@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t HASH, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t HASH, typename T>
     ROCSPARSE_DEVICE_ILF void csrilu0_hash_kernel(rocsparse_int m,
                                                   const rocsparse_int* __restrict__ csr_row_ptr,
                                                   const rocsparse_int* __restrict__ csr_col_ind,
@@ -41,7 +41,7 @@ namespace rocsparse
                                                   double               tol,
                                                   rocsparse_index_base idx_base,
                                                   int                  boost,
-                                                  U                    boost_tol,
+                                                  double               boost_tol,
                                                   T                    boost_val)
     {
         int lid = hipThreadIdx_x & (WFSIZE - 1);
@@ -245,7 +245,7 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T>
     ROCSPARSE_DEVICE_ILF void
         csrilu0_binsearch_kernel(rocsparse_int m_,
                                  const rocsparse_int* __restrict__ csr_row_ptr,
@@ -259,7 +259,7 @@ namespace rocsparse
                                  double               tol,
                                  rocsparse_index_base idx_base,
                                  int                  boost,
-                                 U                    boost_tol,
+                                 double               boost_tol,
                                  T                    boost_val)
     {
         int lid = hipThreadIdx_x & (WFSIZE - 1);

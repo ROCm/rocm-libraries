@@ -62,22 +62,22 @@ namespace rocsparse
         LAUNCH_BSRSM_GTHR_DIM(bsize, 64, 8);  \
     }
 
-    template <uint32_t BLOCKSIZE, typename T, typename U>
+    template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrsm_copy_scale(rocsparse_int m,
                           rocsparse_int n,
-                          U             alpha_device_host,
-                          const T*      B,
-                          int64_t       ldb,
-                          T*            X,
-                          int64_t       ldx)
+                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                          const T* B,
+                          int64_t  ldb,
+                          T*       X,
+                          int64_t  ldx,
+                          bool     is_host_mode)
     {
-
-        const auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         rocsparse::bsrsm_copy_scale_device(m, n, alpha, B, ldb, X, ldx);
     }
 
-    template <typename T, typename U>
+    template <typename T>
     rocsparse_status bsrsm_solve_template_large(rocsparse_handle          handle,
                                                 rocsparse_direction       dir,
                                                 rocsparse_operation       trans_A,
@@ -85,7 +85,7 @@ namespace rocsparse
                                                 rocsparse_int             mb,
                                                 rocsparse_int             nrhs,
                                                 rocsparse_int             nnzb,
-                                                U                         alpha,
+                                                const T*                  alpha,
                                                 const rocsparse_mat_descr descr,
                                                 const T*                  bsr_val,
                                                 const rocsparse_int*      bsr_row_ptr,
@@ -185,11 +185,12 @@ namespace rocsparse
                                                stream,
                                                mb * block_dim,
                                                nrhs,
-                                               alpha,
+                                               ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
                                                B,
                                                ldb,
                                                X,
-                                               ldx);
+                                               ldx,
+                                               handle->pointer_mode == rocsparse_pointer_mode_host);
         }
 
         // Pointers to differentiate between transpose mode
@@ -278,7 +279,7 @@ namespace rocsparse
     }
 }
 
-#define INSTANTIATE(real_type_, scalar_type_)                        \
+#define INSTANTIATE(T)                                               \
     template rocsparse_status rocsparse::bsrsm_solve_template_large( \
         rocsparse_handle          handle,                            \
         rocsparse_direction       dir,                               \
@@ -287,28 +288,22 @@ namespace rocsparse
         rocsparse_int             mb,                                \
         rocsparse_int             nrhs,                              \
         rocsparse_int             nnzb,                              \
-        scalar_type_              alpha,                             \
+        const T*                  alpha,                             \
         const rocsparse_mat_descr descr,                             \
-        const real_type_*         bsr_val,                           \
+        const T*                  bsr_val,                           \
         const rocsparse_int*      bsr_row_ptr,                       \
         const rocsparse_int*      bsr_col_ind,                       \
         rocsparse_int             block_dim,                         \
         rocsparse_mat_info        info,                              \
-        const real_type_*         B,                                 \
+        const T*                  B,                                 \
         int64_t                   ldb,                               \
-        real_type_*               X,                                 \
+        T*                        X,                                 \
         int64_t                   ldx,                               \
         void*                     temp_buffer)
 
-INSTANTIATE(float, float);
-INSTANTIATE(float, const float*);
+INSTANTIATE(float);
+INSTANTIATE(double);
+INSTANTIATE(rocsparse_float_complex);
+INSTANTIATE(rocsparse_double_complex);
 
-INSTANTIATE(double, double);
-INSTANTIATE(double, const double*);
-
-INSTANTIATE(rocsparse_float_complex, rocsparse_float_complex);
-INSTANTIATE(rocsparse_float_complex, const rocsparse_float_complex*);
-
-INSTANTIATE(rocsparse_double_complex, rocsparse_double_complex);
-INSTANTIATE(rocsparse_double_complex, const rocsparse_double_complex*);
 #undef INSTANTIATE

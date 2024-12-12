@@ -67,27 +67,15 @@ namespace rocsparse
         out[idx] = alpha * in[idx];
     }
 
-    template <typename T>
-    __forceinline__ __device__ __host__ T load_scalar_device_host_permissive(T x)
-    {
-        return x;
-    }
-
-    // For device scalars
-    template <typename T>
-    __forceinline__ __device__ __host__ T load_scalar_device_host_permissive(const T* xp)
-    {
-        return (xp) ? *xp : static_cast<T>(0);
-    }
-
-    template <uint32_t BLOCKSIZE, typename I, typename T, typename U>
+    template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_numeric_copy_scale_kernel(I size,
-                                           U alpha_device_host,
+                                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                            const T* __restrict__ in,
-                                           T* __restrict__ out)
+                                           T* __restrict__ out,
+                                           bool is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host_permissive(alpha_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         rocsparse::csrgemm_numeric_copy_scale_device<BLOCKSIZE>(size, alpha, in, out);
     }
 }
@@ -157,40 +145,18 @@ inline rocsparse_status rocsparse::csrgemm_numeric_scal_core(rocsparse_handle ha
 #define CSRGEMM_DIM 1024
         dim3 csrgemm_numeric_blocks((nnz_D - 1) / CSRGEMM_DIM + 1);
         dim3 csrgemm_numeric_threads(CSRGEMM_DIM);
-        switch(handle->pointer_mode)
-        {
-        case rocsparse_pointer_mode_device:
-        {
-            // Scale the matrix
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::csrgemm_numeric_copy_scale_kernel<CSRGEMM_DIM>),
-                csrgemm_numeric_blocks,
-                csrgemm_numeric_threads,
-                0,
-                handle->stream,
-                nnz_D,
-                beta_device_host,
-                csr_val_D,
-                csr_val_C);
-            break;
-        }
-
-        case rocsparse_pointer_mode_host:
-        {
-            // Scale the matrix
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::csrgemm_numeric_copy_scale_kernel<CSRGEMM_DIM>),
-                csrgemm_numeric_blocks,
-                csrgemm_numeric_threads,
-                0,
-                handle->stream,
-                nnz_D,
-                *beta_device_host,
-                csr_val_D,
-                csr_val_C);
-            break;
-        }
-        }
+        // Scale the matrix
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgemm_numeric_copy_scale_kernel<CSRGEMM_DIM>),
+            csrgemm_numeric_blocks,
+            csrgemm_numeric_threads,
+            0,
+            handle->stream,
+            nnz_D,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+            csr_val_D,
+            csr_val_C,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef CSRGEMM_DIM
         return rocsparse_status_success;
     }

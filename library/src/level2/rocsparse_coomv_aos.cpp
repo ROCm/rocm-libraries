@@ -46,26 +46,21 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_coomv_aos_alg value_)
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE,
-              typename I,
-              typename A,
-              typename X,
-              typename Y,
-              typename T,
-              typename U>
+    template <uint32_t BLOCKSIZE, typename I, typename A, typename X, typename Y, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void coomvn_aos_segmented_loops(int64_t nnz,
                                     I       nloops,
-                                    U       alpha_device_host,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                     const I* __restrict__ coo_ind,
                                     const A* __restrict__ coo_val,
                                     const X* __restrict__ x,
                                     Y* __restrict__ y,
                                     I* __restrict__ row_block_red,
                                     T* __restrict__ val_block_red,
-                                    rocsparse_index_base idx_base)
+                                    rocsparse_index_base idx_base,
+                                    bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != 0)
         {
             rocsparse::coomvn_aos_segmented_loops_device<BLOCKSIZE>(
@@ -73,15 +68,16 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename Y, typename T, typename U>
+    template <uint32_t BLOCKSIZE, typename I, typename Y, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void coomvn_segmented_loops_reduce(I nblocks,
-                                       U alpha_device_host,
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                        const I* __restrict__ row_block_red,
                                        const T* __restrict__ val_block_red,
-                                       Y* __restrict__ y)
+                                       Y* __restrict__ y,
+                                       bool is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != 0)
         {
             rocsparse::coomvn_segmented_loops_reduce_device<BLOCKSIZE>(
@@ -95,17 +91,18 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y,
-              typename U>
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void coomvn_aos_atomic_loops(int64_t nnz,
-                                 U       alpha_device_host,
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                  const I* __restrict__ coo_ind,
                                  const A* __restrict__ coo_val,
                                  const X* __restrict__ x,
                                  Y* __restrict__ y,
-                                 rocsparse_index_base idx_base)
+                                 rocsparse_index_base idx_base,
+                                 bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != 0)
         {
             rocsparse::coomvn_aos_atomic_loops_device<BLOCKSIZE, LOOPS>(
@@ -113,36 +110,37 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename A, typename X, typename Y, typename U>
+    template <uint32_t BLOCKSIZE, typename I, typename A, typename X, typename Y, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void coomvt_aos_kernel(rocsparse_operation trans,
                            int64_t             nnz,
-                           U                   alpha_device_host,
+                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                            const I* __restrict__ coo_ind,
                            const A* __restrict__ coo_val,
                            const X* __restrict__ x,
                            Y* __restrict__ y,
-                           rocsparse_index_base idx_base)
+                           rocsparse_index_base idx_base,
+                           bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != 0)
         {
             rocsparse::coomvt_aos_device(trans, nnz, alpha, coo_ind, coo_val, x, y, idx_base);
         }
     }
 
-    template <typename I, typename A, typename X, typename Y, typename U>
+    template <typename I, typename A, typename X, typename Y, typename T>
     rocsparse_status coomv_aos_atomic_dispatch(rocsparse_handle          handle,
                                                rocsparse_operation       trans,
                                                I                         m,
                                                I                         n,
                                                int64_t                   nnz,
-                                               U                         alpha_device_host,
+                                               const T*                  alpha_device_host,
                                                const rocsparse_mat_descr descr,
                                                const A*                  coo_val,
                                                const I*                  coo_ind,
                                                const X*                  x,
-                                               U                         beta_device_host,
+                                               const T*                  beta_device_host,
                                                Y*                        y)
     {
         // Stream
@@ -150,60 +148,47 @@ namespace rocsparse
 
         const I ysize = (trans == rocsparse_operation_none) ? m : n;
 
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
-        {
-            // Scale y with beta
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
-        }
-        else
-        {
-            auto beta = rocsparse::load_scalar_device_host(beta_device_host);
-            // If beta == 0.0 we need to set y to 0
-            if(beta == 0)
-            {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(y, 0, sizeof(Y) * ysize, handle->stream));
-            }
-            else if(beta != 1)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta, y));
-            }
-        }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
 
         // Run different coomv kernels
         switch(trans)
         {
         case rocsparse_operation_none:
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::coomvn_aos_atomic_loops<256, 1>),
-                                               dim3((nnz - 1) / 256 + 1),
-                                               dim3(256),
-                                               0,
-                                               stream,
-                                               nnz,
-                                               alpha_device_host,
-                                               coo_ind,
-                                               coo_val,
-                                               x,
-                                               y,
-                                               descr->base);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::coomvn_aos_atomic_loops<256, 1>),
+                dim3((nnz - 1) / 256 + 1),
+                dim3(256),
+                0,
+                stream,
+                nnz,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                coo_ind,
+                coo_val,
+                x,
+                y,
+                descr->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
             break;
         }
         case rocsparse_operation_transpose:
         case rocsparse_operation_conjugate_transpose:
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::coomvt_aos_kernel<1024>),
-                                               dim3((nnz - 1) / 1024 + 1),
-                                               dim3(1024),
-                                               0,
-                                               handle->stream,
-                                               trans,
-                                               nnz,
-                                               alpha_device_host,
-                                               coo_ind,
-                                               coo_val,
-                                               x,
-                                               y,
-                                               descr->base);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::coomvt_aos_kernel<1024>),
+                dim3((nnz - 1) / 1024 + 1),
+                dim3(1024),
+                0,
+                handle->stream,
+                trans,
+                nnz,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                coo_ind,
+                coo_val,
+                x,
+                y,
+                descr->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
             break;
         }
         }
@@ -211,18 +196,18 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename T, typename I, typename A, typename X, typename Y, typename U>
+    template <typename T, typename I, typename A, typename X, typename Y>
     rocsparse_status coomv_aos_segmented_dispatch(rocsparse_handle          handle,
                                                   rocsparse_operation       trans,
                                                   I                         m,
                                                   I                         n,
                                                   int64_t                   nnz,
-                                                  U                         alpha_device_host,
+                                                  const T*                  alpha_device_host,
                                                   const rocsparse_mat_descr descr,
                                                   const A*                  coo_val,
                                                   const I*                  coo_ind,
                                                   const X*                  x,
-                                                  U                         beta_device_host,
+                                                  const T*                  beta_device_host,
                                                   Y*                        y)
     {
         // Stream
@@ -230,24 +215,8 @@ namespace rocsparse
 
         const I ysize = (trans == rocsparse_operation_none) ? m : n;
 
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
-        {
-            // Scale y with beta
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
-        }
-        else
-        {
-            auto beta = rocsparse::load_scalar_device_host(beta_device_host);
-            // If beta == 0.0 we need to set y to 0
-            if(beta == static_cast<T>(0))
-            {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(y, 0, sizeof(Y) * ysize, handle->stream));
-            }
-            else if(beta != static_cast<T>(1))
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta, y));
-            }
-        }
+        // Scale y with beta
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
 
         // Run different coomv kernels
         switch(trans)
@@ -274,21 +243,23 @@ namespace rocsparse
             // val block reduction buffer
             T* val_block_red = reinterpret_cast<T*>(ptr);
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::coomvn_aos_segmented_loops<COOMVN_DIM>),
-                                               dim3(nblocks),
-                                               dim3(COOMVN_DIM),
-                                               0,
-                                               stream,
-                                               nnz,
-                                               nloops,
-                                               alpha_device_host,
-                                               coo_ind,
-                                               coo_val,
-                                               x,
-                                               y,
-                                               row_block_red,
-                                               val_block_red,
-                                               descr->base);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::coomvn_aos_segmented_loops<COOMVN_DIM>),
+                dim3(nblocks),
+                dim3(COOMVN_DIM),
+                0,
+                stream,
+                nnz,
+                nloops,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                coo_ind,
+                coo_val,
+                x,
+                y,
+                row_block_red,
+                val_block_red,
+                descr->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::coomvn_segmented_loops_reduce<COOMVN_DIM>),
@@ -297,29 +268,32 @@ namespace rocsparse
                 0,
                 stream,
                 nblocks,
-                alpha_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 row_block_red,
                 val_block_red,
-                y);
+                y,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef COOMVN_DIM
             break;
         }
         case rocsparse_operation_transpose:
         case rocsparse_operation_conjugate_transpose:
         {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::coomvt_aos_kernel<1024>),
-                                               dim3((nnz - 1) / 1024 + 1),
-                                               dim3(1024),
-                                               0,
-                                               handle->stream,
-                                               trans,
-                                               nnz,
-                                               alpha_device_host,
-                                               coo_ind,
-                                               coo_val,
-                                               x,
-                                               y,
-                                               descr->base);
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::coomvt_aos_kernel<1024>),
+                dim3((nnz - 1) / 1024 + 1),
+                dim3(1024),
+                0,
+                handle->stream,
+                trans,
+                nnz,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                coo_ind,
+                coo_val,
+                x,
+                y,
+                descr->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
             break;
         }
         }
@@ -327,19 +301,19 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-    template <typename T, typename I, typename A, typename X, typename Y, typename U>
+    template <typename T, typename I, typename A, typename X, typename Y>
     rocsparse_status coomv_aos_dispatch(rocsparse_handle          handle,
                                         rocsparse_operation       trans,
                                         rocsparse_coomv_aos_alg   alg,
                                         I                         m,
                                         I                         n,
                                         int64_t                   nnz,
-                                        U                         alpha_device_host,
+                                        const T*                  alpha_device_host,
                                         const rocsparse_mat_descr descr,
                                         const A*                  coo_val,
                                         const I*                  coo_ind,
                                         const X*                  x,
-                                        U                         beta_device_host,
+                                        const T*                  beta_device_host,
                                         Y*                        y)
     {
         switch(alg)
@@ -364,18 +338,18 @@ namespace rocsparse
 
         case rocsparse_coomv_aos_alg_segmented:
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomv_aos_segmented_dispatch<T>(handle,
-                                                                                 trans,
-                                                                                 m,
-                                                                                 n,
-                                                                                 nnz,
-                                                                                 alpha_device_host,
-                                                                                 descr,
-                                                                                 coo_val,
-                                                                                 coo_ind,
-                                                                                 x,
-                                                                                 beta_device_host,
-                                                                                 y));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomv_aos_segmented_dispatch(handle,
+                                                                              trans,
+                                                                              m,
+                                                                              n,
+                                                                              nnz,
+                                                                              alpha_device_host,
+                                                                              descr,
+                                                                              coo_val,
+                                                                              coo_ind,
+                                                                              x,
+                                                                              beta_device_host,
+                                                                              y));
             return rocsparse_status_success;
         }
         }
@@ -443,16 +417,7 @@ rocsparse_status rocsparse::coomv_aos_template(rocsparse_handle          handle,
             ROCSPARSE_CHECKARG_ARRAY(12, ysize, y);
             ROCSPARSE_CHECKARG_POINTER(11, beta_device_host);
 
-            if(handle->pointer_mode == rocsparse_pointer_mode_device)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_array(handle, ysize, beta_device_host, y));
-            }
-            else
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_array(handle, ysize, *beta_device_host, y));
-            }
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
         }
 
         return rocsparse_status_success;
@@ -474,41 +439,19 @@ rocsparse_status rocsparse::coomv_aos_template(rocsparse_handle          handle,
     ROCSPARSE_CHECKARG_ARRAY(10, xsize, x);
     ROCSPARSE_CHECKARG_ARRAY(12, ysize, y);
 
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomv_aos_dispatch<T>(handle,
-                                                                   trans,
-                                                                   alg,
-                                                                   m,
-                                                                   n,
-                                                                   nnz,
-                                                                   alpha_device_host,
-                                                                   descr,
-                                                                   coo_val,
-                                                                   coo_ind,
-                                                                   x,
-                                                                   beta_device_host,
-                                                                   y));
-        return rocsparse_status_success;
-    }
-    else
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomv_aos_dispatch<T>(handle,
-                                                                   trans,
-                                                                   alg,
-                                                                   m,
-                                                                   n,
-                                                                   nnz,
-                                                                   *alpha_device_host,
-                                                                   descr,
-                                                                   coo_val,
-                                                                   coo_ind,
-                                                                   x,
-                                                                   *beta_device_host,
-                                                                   y));
-        return rocsparse_status_success;
-    }
-
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomv_aos_dispatch(handle,
+                                                            trans,
+                                                            alg,
+                                                            m,
+                                                            n,
+                                                            nnz,
+                                                            alpha_device_host,
+                                                            descr,
+                                                            coo_val,
+                                                            coo_ind,
+                                                            x,
+                                                            beta_device_host,
+                                                            y));
     return rocsparse_status_success;
 }
 

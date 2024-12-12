@@ -30,17 +30,17 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, uint32_t WFSIZE, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, uint32_t WFSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrgeam_wf_per_row_multipass_2_3_kernel(rocsparse_direction dir,
                                                  rocsparse_int       mb,
                                                  rocsparse_int       nb,
                                                  rocsparse_int       block_dim,
-                                                 U                   alpha_device_host,
+                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                                  const rocsparse_int* __restrict__ bsr_row_ptr_A,
                                                  const rocsparse_int* __restrict__ bsr_col_ind_A,
                                                  const T* __restrict__ bsr_val_A,
-                                                 U beta_device_host,
+                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                                  const rocsparse_int* __restrict__ bsr_row_ptr_B,
                                                  const rocsparse_int* __restrict__ bsr_col_ind_B,
                                                  const T* __restrict__ bsr_val_B,
@@ -49,10 +49,11 @@ namespace rocsparse
                                                  T* __restrict__ bsr_val_C,
                                                  rocsparse_index_base idx_base_A,
                                                  rocsparse_index_base idx_base_B,
-                                                 rocsparse_index_base idx_base_C)
+                                                 rocsparse_index_base idx_base_C,
+                                                 bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         rocsparse::bsrgeam_wf_per_row_multipass_2_3_device<BLOCKSIZE, BLOCKDIM, WFSIZE>(
             dir,
             mb,
@@ -74,17 +75,17 @@ namespace rocsparse
             idx_base_C);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrgeam_wf_per_row_multipass_kernel(rocsparse_direction dir,
                                              rocsparse_int       mb,
                                              rocsparse_int       nb,
                                              rocsparse_int       block_dim,
-                                             U                   alpha_device_host,
+                                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                              const rocsparse_int* __restrict__ bsr_row_ptr_A,
                                              const rocsparse_int* __restrict__ bsr_col_ind_A,
                                              const T* __restrict__ bsr_val_A,
-                                             U beta_device_host,
+                                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                              const rocsparse_int* __restrict__ bsr_row_ptr_B,
                                              const rocsparse_int* __restrict__ bsr_col_ind_B,
                                              const T* __restrict__ bsr_val_B,
@@ -93,10 +94,11 @@ namespace rocsparse
                                              T* __restrict__ bsr_val_C,
                                              rocsparse_index_base idx_base_A,
                                              rocsparse_index_base idx_base_B,
-                                             rocsparse_index_base idx_base_C)
+                                             rocsparse_index_base idx_base_C,
+                                             bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         rocsparse::bsrgeam_wf_per_row_multipass_device<BLOCKSIZE, BLOCKDIM>(dir,
                                                                             mb,
                                                                             nb,
@@ -117,17 +119,17 @@ namespace rocsparse
                                                                             idx_base_C);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrgeam_block_per_row_multipass_kernel(rocsparse_direction dir,
                                                 rocsparse_int       mb,
                                                 rocsparse_int       nb,
                                                 rocsparse_int       block_dim,
-                                                U                   alpha_device_host,
+                                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                                 const rocsparse_int* __restrict__ bsr_row_ptr_A,
                                                 const rocsparse_int* __restrict__ bsr_col_ind_A,
                                                 const T* __restrict__ bsr_val_A,
-                                                U beta_device_host,
+                                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                                 const rocsparse_int* __restrict__ bsr_row_ptr_B,
                                                 const rocsparse_int* __restrict__ bsr_col_ind_B,
                                                 const T* __restrict__ bsr_val_B,
@@ -136,10 +138,11 @@ namespace rocsparse
                                                 T* __restrict__ bsr_val_C,
                                                 rocsparse_index_base idx_base_A,
                                                 rocsparse_index_base idx_base_B,
-                                                rocsparse_index_base idx_base_C)
+                                                rocsparse_index_base idx_base_C,
+                                                bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         rocsparse::bsrgeam_block_per_row_multipass_device<BLOCKSIZE, BLOCKDIM>(dir,
                                                                                mb,
                                                                                nb,
@@ -160,17 +163,17 @@ namespace rocsparse
                                                                                idx_base_C);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void bsrgeam_block_per_row_multipass_kernel2(rocsparse_direction dir,
                                                  rocsparse_int       mb,
                                                  rocsparse_int       nb,
                                                  rocsparse_int       block_dim,
-                                                 U                   alpha_device_host,
+                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                                  const rocsparse_int* __restrict__ bsr_row_ptr_A,
                                                  const rocsparse_int* __restrict__ bsr_col_ind_A,
                                                  const T* __restrict__ bsr_val_A,
-                                                 U beta_device_host,
+                                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                                  const rocsparse_int* __restrict__ bsr_row_ptr_B,
                                                  const rocsparse_int* __restrict__ bsr_col_ind_B,
                                                  const T* __restrict__ bsr_val_B,
@@ -179,10 +182,11 @@ namespace rocsparse
                                                  T* __restrict__ bsr_val_C,
                                                  rocsparse_index_base idx_base_A,
                                                  rocsparse_index_base idx_base_B,
-                                                 rocsparse_index_base idx_base_C)
+                                                 rocsparse_index_base idx_base_C,
+                                                 bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         rocsparse::bsrgeam_block_per_row_multipass_device2<BLOCKSIZE, BLOCKDIM>(dir,
                                                                                 mb,
                                                                                 nb,
@@ -203,19 +207,19 @@ namespace rocsparse
                                                                                 idx_base_C);
     }
 
-    template <typename T, typename U>
+    template <typename T>
     static rocsparse_status bsrgeam_dispatch(rocsparse_handle          handle,
                                              rocsparse_direction       dir,
                                              rocsparse_int             mb,
                                              rocsparse_int             nb,
                                              rocsparse_int             block_dim,
-                                             U                         alpha_device_host,
+                                             const T*                  alpha_device_host,
                                              const rocsparse_mat_descr descr_A,
                                              rocsparse_int             nnzb_A,
                                              const T*                  bsr_val_A,
                                              const rocsparse_int*      bsr_row_ptr_A,
                                              const rocsparse_int*      bsr_col_ind_A,
-                                             U                         beta_device_host,
+                                             const T*                  beta_device_host,
                                              const rocsparse_mat_descr descr_B,
                                              rocsparse_int             nnzb_B,
                                              const T*                  bsr_val_B,
@@ -247,11 +251,11 @@ namespace rocsparse
                     mb,
                     nb,
                     block_dim,
-                    alpha_device_host,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                     bsr_row_ptr_A,
                     bsr_col_ind_A,
                     bsr_val_A,
-                    beta_device_host,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
                     bsr_row_ptr_B,
                     bsr_col_ind_B,
                     bsr_val_B,
@@ -260,7 +264,8 @@ namespace rocsparse
                     bsr_val_C,
                     descr_A->base,
                     descr_B->base,
-                    descr_C->base);
+                    descr_C->base,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
             }
             else
             {
@@ -274,11 +279,11 @@ namespace rocsparse
                     mb,
                     nb,
                     block_dim,
-                    alpha_device_host,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                     bsr_row_ptr_A,
                     bsr_col_ind_A,
                     bsr_val_A,
-                    beta_device_host,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
                     bsr_row_ptr_B,
                     bsr_col_ind_B,
                     bsr_val_B,
@@ -287,7 +292,8 @@ namespace rocsparse
                     bsr_val_C,
                     descr_A->base,
                     descr_B->base,
-                    descr_C->base);
+                    descr_C->base,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
             }
 #undef BSRGEAM_DIM
         }
@@ -306,11 +312,11 @@ namespace rocsparse
                     mb,
                     nb,
                     block_dim,
-                    alpha_device_host,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                     bsr_row_ptr_A,
                     bsr_col_ind_A,
                     bsr_val_A,
-                    beta_device_host,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
                     bsr_row_ptr_B,
                     bsr_col_ind_B,
                     bsr_val_B,
@@ -319,7 +325,8 @@ namespace rocsparse
                     bsr_val_C,
                     descr_A->base,
                     descr_B->base,
-                    descr_C->base);
+                    descr_C->base,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
             }
             else
             {
@@ -333,11 +340,11 @@ namespace rocsparse
                     mb,
                     nb,
                     block_dim,
-                    alpha_device_host,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                     bsr_row_ptr_A,
                     bsr_col_ind_A,
                     bsr_val_A,
-                    beta_device_host,
+                    ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
                     bsr_row_ptr_B,
                     bsr_col_ind_B,
                     bsr_val_B,
@@ -346,7 +353,8 @@ namespace rocsparse
                     bsr_val_C,
                     descr_A->base,
                     descr_B->base,
-                    descr_C->base);
+                    descr_C->base,
+                    handle->pointer_mode == rocsparse_pointer_mode_host);
             }
 #undef BSRGEAM_DIM
         }
@@ -363,11 +371,11 @@ namespace rocsparse
                 mb,
                 nb,
                 block_dim,
-                alpha_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 bsr_row_ptr_A,
                 bsr_col_ind_A,
                 bsr_val_A,
-                beta_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
                 bsr_row_ptr_B,
                 bsr_col_ind_B,
                 bsr_val_B,
@@ -376,7 +384,8 @@ namespace rocsparse
                 bsr_val_C,
                 descr_A->base,
                 descr_B->base,
-                descr_C->base);
+                descr_C->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef BSRGEAM_DIM
         }
         else if(block_dim <= 8)
@@ -392,11 +401,11 @@ namespace rocsparse
                 mb,
                 nb,
                 block_dim,
-                alpha_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 bsr_row_ptr_A,
                 bsr_col_ind_A,
                 bsr_val_A,
-                beta_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
                 bsr_row_ptr_B,
                 bsr_col_ind_B,
                 bsr_val_B,
@@ -405,7 +414,8 @@ namespace rocsparse
                 bsr_val_C,
                 descr_A->base,
                 descr_B->base,
-                descr_C->base);
+                descr_C->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef BSRGEAM_DIM
         }
         else if(block_dim <= 16)
@@ -421,11 +431,11 @@ namespace rocsparse
                 mb,
                 nb,
                 block_dim,
-                alpha_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 bsr_row_ptr_A,
                 bsr_col_ind_A,
                 bsr_val_A,
-                beta_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
                 bsr_row_ptr_B,
                 bsr_col_ind_B,
                 bsr_val_B,
@@ -434,7 +444,8 @@ namespace rocsparse
                 bsr_val_C,
                 descr_A->base,
                 descr_B->base,
-                descr_C->base);
+                descr_C->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef BSRGEAM_DIM
         }
         else if(block_dim <= 32)
@@ -450,11 +461,11 @@ namespace rocsparse
                 mb,
                 nb,
                 block_dim,
-                alpha_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 bsr_row_ptr_A,
                 bsr_col_ind_A,
                 bsr_val_A,
-                beta_device_host,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
                 bsr_row_ptr_B,
                 bsr_col_ind_B,
                 bsr_val_B,
@@ -463,7 +474,8 @@ namespace rocsparse
                 bsr_val_C,
                 descr_A->base,
                 descr_B->base,
-                descr_C->base);
+                descr_C->base,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef BSRGEAM_DIM
         }
         else
@@ -522,56 +534,28 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrgeam_dispatch(handle,
-                                                                  dir,
-                                                                  mb,
-                                                                  nb,
-                                                                  block_dim,
-                                                                  alpha_device_host,
-                                                                  descr_A,
-                                                                  nnzb_A,
-                                                                  bsr_val_A,
-                                                                  bsr_row_ptr_A,
-                                                                  bsr_col_ind_A,
-                                                                  beta_device_host,
-                                                                  descr_B,
-                                                                  nnzb_B,
-                                                                  bsr_val_B,
-                                                                  bsr_row_ptr_B,
-                                                                  bsr_col_ind_B,
-                                                                  descr_C,
-                                                                  bsr_val_C,
-                                                                  bsr_row_ptr_C,
-                                                                  bsr_col_ind_C));
-            return rocsparse_status_success;
-        }
-        else
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrgeam_dispatch(handle,
-                                                                  dir,
-                                                                  mb,
-                                                                  nb,
-                                                                  block_dim,
-                                                                  *alpha_device_host,
-                                                                  descr_A,
-                                                                  nnzb_A,
-                                                                  bsr_val_A,
-                                                                  bsr_row_ptr_A,
-                                                                  bsr_col_ind_A,
-                                                                  *beta_device_host,
-                                                                  descr_B,
-                                                                  nnzb_B,
-                                                                  bsr_val_B,
-                                                                  bsr_row_ptr_B,
-                                                                  bsr_col_ind_B,
-                                                                  descr_C,
-                                                                  bsr_val_C,
-                                                                  bsr_row_ptr_C,
-                                                                  bsr_col_ind_C));
-            return rocsparse_status_success;
-        }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrgeam_dispatch(handle,
+                                                              dir,
+                                                              mb,
+                                                              nb,
+                                                              block_dim,
+                                                              alpha_device_host,
+                                                              descr_A,
+                                                              nnzb_A,
+                                                              bsr_val_A,
+                                                              bsr_row_ptr_A,
+                                                              bsr_col_ind_A,
+                                                              beta_device_host,
+                                                              descr_B,
+                                                              nnzb_B,
+                                                              bsr_val_B,
+                                                              bsr_row_ptr_B,
+                                                              bsr_col_ind_B,
+                                                              descr_C,
+                                                              bsr_val_C,
+                                                              bsr_row_ptr_C,
+                                                              bsr_col_ind_C));
+        return rocsparse_status_success;
     }
 
     static rocsparse_status bsrgeam_quickreturn(rocsparse_handle          handle,

@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t BSRDIM, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t BSRDIM, typename T>
     ROCSPARSE_DEVICE_ILF void bsrilu0_2_8_device(rocsparse_direction  dir,
                                                  rocsparse_int        mb,
                                                  const rocsparse_int* bsr_row_ptr,
@@ -41,7 +41,7 @@ namespace rocsparse
                                                  rocsparse_int*       zero_pivot,
                                                  rocsparse_index_base idx_base,
                                                  int                  boost,
-                                                 U                    boost_tol,
+                                                 double               boost_tol,
                                                  T                    boost_val)
     {
         // Current row this wavefront is working on
@@ -322,7 +322,7 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t BSRDIM, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t BSRDIM, typename T>
     ROCSPARSE_DEVICE_ILF void bsrilu0_9_32_device(rocsparse_direction  dir,
                                                   rocsparse_int        mb,
                                                   const rocsparse_int* bsr_row_ptr,
@@ -335,7 +335,7 @@ namespace rocsparse
                                                   rocsparse_int*       zero_pivot,
                                                   rocsparse_index_base idx_base,
                                                   int                  boost,
-                                                  U                    boost_tol,
+                                                  double               boost_tol,
                                                   T                    boost_val)
     {
         constexpr static uint32_t DIMX = BSRDIM;
@@ -647,7 +647,7 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t BSRDIM, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t BSRDIM, typename T>
     ROCSPARSE_DEVICE_ILF void bsrilu0_33_64_device(rocsparse_direction  dir,
                                                    rocsparse_int        mb,
                                                    const rocsparse_int* bsr_row_ptr,
@@ -660,7 +660,7 @@ namespace rocsparse
                                                    rocsparse_int*       zero_pivot,
                                                    rocsparse_index_base idx_base,
                                                    int                  boost,
-                                                   U                    boost_tol,
+                                                   double               boost_tol,
                                                    T                    boost_val)
     {
         constexpr static uint32_t DIMX = BSRDIM;
@@ -953,7 +953,7 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T>
     ROCSPARSE_DEVICE_ILF void bsrilu0_general_device(rocsparse_direction  dir,
                                                      rocsparse_int        mb,
                                                      const rocsparse_int* bsr_row_ptr,
@@ -966,7 +966,7 @@ namespace rocsparse
                                                      rocsparse_int*       zero_pivot,
                                                      rocsparse_index_base idx_base,
                                                      int                  boost,
-                                                     U                    boost_tol,
+                                                     double               boost_tol,
                                                      T                    boost_val)
     {
         int lid = hipThreadIdx_x & (WFSIZE - 1);

@@ -196,7 +196,7 @@ struct _rocsparse_mat_info
 
     // numeric boost for ilu0
     int         boost_enable{};
-    int         use_double_prec_tol{};
+    size_t      boost_tol_size{};
     const void* boost_tol{};
     const void* boost_val{};
 };

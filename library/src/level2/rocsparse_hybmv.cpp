@@ -107,16 +107,7 @@ rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,
                 return rocsparse_status_invalid_pointer;
             }
 
-            if(handle->pointer_mode == rocsparse_pointer_mode_device)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_array(handle, ysize, beta_device_host, y));
-            }
-            else
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_array(handle, ysize, *beta_device_host, y));
-            }
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
         }
 
         return rocsparse_status_success;

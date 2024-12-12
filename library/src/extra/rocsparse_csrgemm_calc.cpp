@@ -40,21 +40,20 @@ namespace rocsparse
               uint32_t HASHVAL,
               typename I,
               typename J,
-              typename T,
-              typename U>
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_fill_wf_per_row(J m,
                                  J nk,
                                  const J* __restrict__ offset,
                                  const J* __restrict__ perm,
-                                 U alpha_device_host,
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                  const I* __restrict__ csr_row_ptr_A,
                                  const J* __restrict__ csr_col_ind_A,
                                  const T* __restrict__ csr_val_A,
                                  const I* __restrict__ csr_row_ptr_B,
                                  const J* __restrict__ csr_col_ind_B,
                                  const T* __restrict__ csr_val_B,
-                                 U beta_device_host,
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                  const I* __restrict__ csr_row_ptr_D,
                                  const J* __restrict__ csr_col_ind_D,
                                  const T* __restrict__ csr_val_D,
@@ -66,23 +65,25 @@ namespace rocsparse
                                  rocsparse_index_base idx_base_C,
                                  rocsparse_index_base idx_base_D,
                                  bool                 mul,
-                                 bool                 add)
+                                 bool                 add,
+                                 bool                 is_host_mode)
     {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
+
         rocsparse::csrgemm_fill_wf_per_row_device<BLOCKSIZE, WFSIZE, HASHSIZE, HASHVAL>(
             m,
             nk,
             offset,
             perm,
-            (mul == true) ? rocsparse::load_scalar_device_host(alpha_device_host)
-                          : static_cast<T>(0),
+            alpha,
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            (add == true) ? rocsparse::load_scalar_device_host(beta_device_host)
-                          : static_cast<T>(0),
+            beta,
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -103,20 +104,19 @@ namespace rocsparse
               uint32_t HASHVAL,
               typename I,
               typename J,
-              typename T,
-              typename U>
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_fill_block_per_row(J nk,
                                     const J* __restrict__ offset,
                                     const J* __restrict__ perm,
-                                    U alpha_device_host,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                     const I* __restrict__ csr_row_ptr_A,
                                     const J* __restrict__ csr_col_ind_A,
                                     const T* __restrict__ csr_val_A,
                                     const I* __restrict__ csr_row_ptr_B,
                                     const J* __restrict__ csr_col_ind_B,
                                     const T* __restrict__ csr_val_B,
-                                    U beta_device_host,
+                                    ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                     const I* __restrict__ csr_row_ptr_D,
                                     const J* __restrict__ csr_col_ind_D,
                                     const T* __restrict__ csr_val_D,
@@ -128,22 +128,24 @@ namespace rocsparse
                                     rocsparse_index_base idx_base_C,
                                     rocsparse_index_base idx_base_D,
                                     bool                 mul,
-                                    bool                 add)
+                                    bool                 add,
+                                    bool                 is_host_mode)
     {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
+
         rocsparse::csrgemm_fill_block_per_row_device<BLOCKSIZE, WFSIZE, HASHSIZE, HASHVAL>(
             nk,
             offset,
             perm,
-            (mul == true) ? rocsparse::load_scalar_device_host(alpha_device_host)
-                          : static_cast<T>(0),
+            alpha,
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            (add == true) ? rocsparse::load_scalar_device_host(beta_device_host)
-                          : static_cast<T>(0),
+            beta,
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -163,20 +165,19 @@ namespace rocsparse
               uint32_t CHUNKSIZE,
               typename I,
               typename J,
-              typename T,
-              typename U>
+              typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_fill_block_per_row_multipass(J n,
                                               const J* __restrict__ offset,
                                               const J* __restrict__ perm,
-                                              U alpha_device_host,
+                                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                               const I* __restrict__ csr_row_ptr_A,
                                               const J* __restrict__ csr_col_ind_A,
                                               const T* __restrict__ csr_val_A,
                                               const I* __restrict__ csr_row_ptr_B,
                                               const J* __restrict__ csr_col_ind_B,
                                               const T* __restrict__ csr_val_B,
-                                              U beta_device_host,
+                                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                               const I* __restrict__ csr_row_ptr_D,
                                               const J* __restrict__ csr_col_ind_D,
                                               const T* __restrict__ csr_val_D,
@@ -189,22 +190,23 @@ namespace rocsparse
                                               rocsparse_index_base idx_base_C,
                                               rocsparse_index_base idx_base_D,
                                               bool                 mul,
-                                              bool                 add)
+                                              bool                 add,
+                                              bool                 is_host_mode)
     {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         rocsparse::csrgemm_fill_block_per_row_multipass_device<BLOCKSIZE, WFSIZE, CHUNKSIZE>(
             n,
             offset,
             perm,
-            (mul == true) ? rocsparse::load_scalar_device_host(alpha_device_host)
-                          : static_cast<T>(0),
+            alpha,
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            (add == true) ? rocsparse::load_scalar_device_host(beta_device_host)
-                          : static_cast<T>(0),
+            beta,
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -225,7 +227,6 @@ namespace rocsparse
     template <typename I,
               typename J,
               typename T,
-              typename U,
               typename std::enable_if<
                   std::is_same<T, rocsparse_double_complex>::value
                       || (std::is_same<T, double>::value && std::is_same<I, int64_t>::value
@@ -241,14 +242,14 @@ namespace rocsparse
                                                     J                    m,
                                                     J                    n,
                                                     J                    k,
-                                                    U                    alpha_device_host,
+                                                    const T*             alpha_device_host,
                                                     const I*             csr_row_ptr_A,
                                                     const J*             csr_col_ind_A,
                                                     const T*             csr_val_A,
                                                     const I*             csr_row_ptr_B,
                                                     const J*             csr_col_ind_B,
                                                     const T*             csr_val_B,
-                                                    U                    beta_device_host,
+                                                    const T*             beta_device_host,
                                                     const I*             csr_row_ptr_D,
                                                     const J*             csr_col_ind_D,
                                                     const T*             csr_val_D,
@@ -268,7 +269,6 @@ namespace rocsparse
     template <typename I,
               typename J,
               typename T,
-              typename U,
               typename std::enable_if<
                   std::is_same<T, float>::value
                       || (std::is_same<T, double>::value
@@ -284,14 +284,14 @@ namespace rocsparse
                                                     J                    m,
                                                     J                    n,
                                                     J                    k,
-                                                    U                    alpha_device_host,
+                                                    const T*             alpha_device_host,
                                                     const I*             csr_row_ptr_A,
                                                     const J*             csr_col_ind_A,
                                                     const T*             csr_val_A,
                                                     const I*             csr_row_ptr_B,
                                                     const J*             csr_col_ind_B,
                                                     const T*             csr_val_B,
-                                                    U                    beta_device_host,
+                                                    const T*             beta_device_host,
                                                     const I*             csr_row_ptr_D,
                                                     const J*             csr_col_ind_D,
                                                     const T*             csr_val_D,
@@ -320,14 +320,14 @@ namespace rocsparse
             rocsparse::max(k, n),
             group_offset,
             perm,
-            alpha_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            beta_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -339,7 +339,8 @@ namespace rocsparse
             base_C,
             base_D,
             mul,
-            add);
+            add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef CSRGEMM_HASHSIZE
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
@@ -348,14 +349,14 @@ namespace rocsparse
     }
 }
 
-template <typename I, typename J, typename T, typename U>
+template <typename I, typename J, typename T>
 rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          handle,
                                                   rocsparse_operation       trans_A,
                                                   rocsparse_operation       trans_B,
                                                   J                         m,
                                                   J                         n,
                                                   J                         k,
-                                                  U                         alpha_device_host,
+                                                  const T*                  alpha_device_host,
                                                   const rocsparse_mat_descr descr_A,
                                                   I                         nnz_A,
                                                   const T*                  csr_val_A,
@@ -366,7 +367,7 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                   const T*                  csr_val_B,
                                                   const I*                  csr_row_ptr_B,
                                                   const J*                  csr_col_ind_B,
-                                                  U                         beta_device_host,
+                                                  const T*                  beta_device_host,
                                                   const rocsparse_mat_descr descr_D,
                                                   I                         nnz_D,
                                                   const T*                  csr_val_D,
@@ -560,14 +561,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             rocsparse::max(k, n),
             &d_group_offset[0],
             d_perm,
-            alpha_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            beta_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -579,7 +580,8 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             descr_C->base,
             base_D,
             info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add);
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef CSRGEMM_HASHSIZE
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
@@ -604,14 +606,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             rocsparse::max(k, n),
             &d_group_offset[1],
             d_perm,
-            alpha_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            beta_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -623,7 +625,8 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             descr_C->base,
             base_D,
             info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add);
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef CSRGEMM_HASHSIZE
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
@@ -647,14 +650,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             rocsparse::max(k, n),
             &d_group_offset[2],
             d_perm,
-            alpha_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            beta_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -666,7 +669,8 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             descr_C->base,
             base_D,
             info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add);
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef CSRGEMM_HASHSIZE
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
@@ -690,14 +694,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             rocsparse::max(k, n),
             &d_group_offset[3],
             d_perm,
-            alpha_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            beta_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -709,7 +713,8 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             descr_C->base,
             base_D,
             info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add);
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef CSRGEMM_HASHSIZE
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
@@ -733,14 +738,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             rocsparse::max(k, n),
             &d_group_offset[4],
             d_perm,
-            alpha_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            beta_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -752,7 +757,8 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             descr_C->base,
             base_D,
             info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add);
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef CSRGEMM_HASHSIZE
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
@@ -776,14 +782,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             rocsparse::max(k, n),
             &d_group_offset[5],
             d_perm,
-            alpha_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            beta_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -795,7 +801,8 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             descr_C->base,
             base_D,
             info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add);
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef CSRGEMM_HASHSIZE
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
@@ -866,14 +873,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             n,
             &d_group_offset[7],
             d_perm,
-            alpha_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
             csr_row_ptr_A,
             csr_col_ind_A,
             csr_val_A,
             csr_row_ptr_B,
             csr_col_ind_B,
             csr_val_B,
-            beta_device_host,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
             csr_row_ptr_D,
             csr_col_ind_D,
             csr_val_D,
@@ -886,7 +893,8 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             descr_C->base,
             base_D,
             info_C->csrgemm_info->mul,
-            info_C->csrgemm_info->add);
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef CSRGEMM_CHUNKSIZE
 #undef CSRGEMM_SUB
 #undef CSRGEMM_DIM
@@ -900,14 +908,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
     return rocsparse_status_success;
 }
 
-#define INSTANTIATE(I, J, T, U)                                                                     \
+#define INSTANTIATE(I, J, T)                                                                        \
     template rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle    handle,          \
                                                                rocsparse_operation trans_A,         \
                                                                rocsparse_operation trans_B,         \
                                                                J                   m,               \
                                                                J                   n,               \
                                                                J                   k,               \
-                                                               U alpha_device_host,                 \
+                                                               const T* alpha_device_host,          \
                                                                const rocsparse_mat_descr descr_A,   \
                                                                I                         nnz_A,     \
                                                                const T*                  csr_val_A, \
@@ -918,7 +926,7 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                                const T*                  csr_val_B, \
                                                                const I* csr_row_ptr_B,              \
                                                                const J* csr_col_ind_B,              \
-                                                               U        beta_device_host,           \
+                                                               const T* beta_device_host,           \
                                                                const rocsparse_mat_descr descr_D,   \
                                                                I                         nnz_D,     \
                                                                const T*                  csr_val_D, \
@@ -931,34 +939,19 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                                const rocsparse_mat_info info_C,     \
                                                                void*                    temp_buffer)
 
-INSTANTIATE(int32_t, int32_t, float, float);
-INSTANTIATE(int32_t, int32_t, double, double);
-INSTANTIATE(int32_t, int32_t, rocsparse_float_complex, rocsparse_float_complex);
-INSTANTIATE(int32_t, int32_t, rocsparse_double_complex, rocsparse_double_complex);
+INSTANTIATE(int32_t, int32_t, float);
+INSTANTIATE(int32_t, int32_t, double);
+INSTANTIATE(int32_t, int32_t, rocsparse_float_complex);
+INSTANTIATE(int32_t, int32_t, rocsparse_double_complex);
 
-INSTANTIATE(int64_t, int64_t, float, float);
-INSTANTIATE(int64_t, int64_t, double, double);
-INSTANTIATE(int64_t, int64_t, rocsparse_float_complex, rocsparse_float_complex);
-INSTANTIATE(int64_t, int64_t, rocsparse_double_complex, rocsparse_double_complex);
+INSTANTIATE(int64_t, int64_t, float);
+INSTANTIATE(int64_t, int64_t, double);
+INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
+INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
 
-INSTANTIATE(int64_t, int32_t, float, float);
-INSTANTIATE(int64_t, int32_t, double, double);
-INSTANTIATE(int64_t, int32_t, rocsparse_float_complex, rocsparse_float_complex);
-INSTANTIATE(int64_t, int32_t, rocsparse_double_complex, rocsparse_double_complex);
-
-INSTANTIATE(int32_t, int32_t, float, const float*);
-INSTANTIATE(int32_t, int32_t, double, const double*);
-INSTANTIATE(int32_t, int32_t, rocsparse_float_complex, const rocsparse_float_complex*);
-INSTANTIATE(int32_t, int32_t, rocsparse_double_complex, const rocsparse_double_complex*);
-
-INSTANTIATE(int64_t, int64_t, float, const float*);
-INSTANTIATE(int64_t, int64_t, double, const double*);
-INSTANTIATE(int64_t, int64_t, rocsparse_float_complex, const rocsparse_float_complex*);
-INSTANTIATE(int64_t, int64_t, rocsparse_double_complex, const rocsparse_double_complex*);
-
-INSTANTIATE(int64_t, int32_t, float, const float*);
-INSTANTIATE(int64_t, int32_t, double, const double*);
-INSTANTIATE(int64_t, int32_t, rocsparse_float_complex, const rocsparse_float_complex*);
-INSTANTIATE(int64_t, int32_t, rocsparse_double_complex, const rocsparse_double_complex*);
+INSTANTIATE(int64_t, int32_t, float);
+INSTANTIATE(int64_t, int32_t, double);
+INSTANTIATE(int64_t, int32_t, rocsparse_float_complex);
+INSTANTIATE(int64_t, int32_t, rocsparse_double_complex);
 
 #undef INSTANTIATE

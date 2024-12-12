@@ -143,78 +143,37 @@ rocsparse_status rocsparse::csrgemm_numeric_mult_core(rocsparse_handle          
                 " failed on condition (trans_B != rocsparse_operation_none)");
         }
 
-        switch(handle->pointer_mode)
-        {
-        case rocsparse_pointer_mode_host:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csrgemm_numeric_calc_template(handle,
-                                                         trans_A,
-                                                         trans_B,
-                                                         m,
-                                                         n,
-                                                         k,
-                                                         *alpha_device_host,
-                                                         descr_A,
-                                                         nnz_A,
-                                                         csr_val_A,
-                                                         csr_row_ptr_A,
-                                                         csr_col_ind_A,
-                                                         descr_B,
-                                                         nnz_B,
-                                                         csr_val_B,
-                                                         csr_row_ptr_B,
-                                                         csr_col_ind_B,
-                                                         T(0), //*beta_device_host,
-                                                         nullptr,
-                                                         (I)0,
-                                                         (const T*)nullptr,
-                                                         (const I*)nullptr,
-                                                         (const J*)nullptr,
-                                                         descr_C,
-                                                         nnz_C,
-                                                         csr_val_C,
-                                                         csr_row_ptr_C,
-                                                         csr_col_ind_C,
-                                                         info_C,
-                                                         temp_buffer));
-            return rocsparse_status_success;
-        }
-        case rocsparse_pointer_mode_device:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgemm_numeric_calc_template(handle,
-                                                                               trans_A,
-                                                                               trans_B,
-                                                                               m,
-                                                                               n,
-                                                                               k,
-                                                                               alpha_device_host,
-                                                                               descr_A,
-                                                                               nnz_A,
-                                                                               csr_val_A,
-                                                                               csr_row_ptr_A,
-                                                                               csr_col_ind_A,
-                                                                               descr_B,
-                                                                               nnz_B,
-                                                                               csr_val_B,
-                                                                               csr_row_ptr_B,
-                                                                               csr_col_ind_B,
-                                                                               (const T*)nullptr,
-                                                                               nullptr,
-                                                                               (I)0,
-                                                                               (const T*)nullptr,
-                                                                               (const I*)nullptr,
-                                                                               (const J*)nullptr,
-                                                                               descr_C,
-                                                                               nnz_C,
-                                                                               csr_val_C,
-                                                                               csr_row_ptr_C,
-                                                                               csr_col_ind_C,
-                                                                               info_C,
-                                                                               temp_buffer));
-            return rocsparse_status_success;
-        }
-        }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgemm_numeric_calc_template(handle,
+                                                                           trans_A,
+                                                                           trans_B,
+                                                                           m,
+                                                                           n,
+                                                                           k,
+                                                                           alpha_device_host,
+                                                                           descr_A,
+                                                                           nnz_A,
+                                                                           csr_val_A,
+                                                                           csr_row_ptr_A,
+                                                                           csr_col_ind_A,
+                                                                           descr_B,
+                                                                           nnz_B,
+                                                                           csr_val_B,
+                                                                           csr_row_ptr_B,
+                                                                           csr_col_ind_B,
+                                                                           (const T*)nullptr,
+                                                                           nullptr,
+                                                                           (I)0,
+                                                                           (const T*)nullptr,
+                                                                           (const I*)nullptr,
+                                                                           (const J*)nullptr,
+                                                                           descr_C,
+                                                                           nnz_C,
+                                                                           csr_val_C,
+                                                                           csr_row_ptr_C,
+                                                                           csr_col_ind_C,
+                                                                           info_C,
+                                                                           temp_buffer));
+        return rocsparse_status_success;
     }
     else
     {

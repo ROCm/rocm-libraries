@@ -29,16 +29,17 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, typename I, typename T, typename U>
+    template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void axpyi_kernel(I                    nnz,
-                      U                    alpha_device_host,
-                      const T*             x_val,
-                      const I*             x_ind,
+    void axpyi_kernel(I nnz,
+                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                      const T* __restrict__ x_val,
+                      const I* __restrict__ x_ind,
                       T*                   y,
-                      rocsparse_index_base idx_base)
+                      rocsparse_index_base idx_base,
+                      bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != static_cast<T>(0))
         {
             rocsparse::axpyi_device<BLOCKSIZE>(nnz, alpha, x_val, x_ind, y, idx_base);
@@ -98,39 +99,18 @@ rocsparse_status rocsparse::axpyi_template(rocsparse_handle     handle,
     dim3 axpyi_blocks((nnz - 1) / AXPYI_DIM + 1);
     dim3 axpyi_threads(AXPYI_DIM);
 
-    if(handle->pointer_mode == rocsparse_pointer_mode_device)
-    {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::axpyi_kernel<AXPYI_DIM>),
-                                           axpyi_blocks,
-                                           axpyi_threads,
-                                           0,
-                                           stream,
-                                           nnz,
-                                           alpha,
-                                           x_val,
-                                           x_ind,
-                                           y,
-                                           idx_base);
-    }
-    else
-    {
-        if(*alpha == static_cast<T>(0))
-        {
-            return rocsparse_status_success;
-        }
-
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::axpyi_kernel<AXPYI_DIM>),
-                                           axpyi_blocks,
-                                           axpyi_threads,
-                                           0,
-                                           stream,
-                                           nnz,
-                                           *alpha,
-                                           x_val,
-                                           x_ind,
-                                           y,
-                                           idx_base);
-    }
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::axpyi_kernel<AXPYI_DIM>),
+                                       axpyi_blocks,
+                                       axpyi_threads,
+                                       0,
+                                       stream,
+                                       nnz,
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
+                                       x_val,
+                                       x_ind,
+                                       y,
+                                       idx_base,
+                                       handle->pointer_mode == rocsparse_pointer_mode_host);
 #undef AXPYI_DIM
     return rocsparse_status_success;
 }

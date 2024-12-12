@@ -33,30 +33,30 @@ namespace rocsparse
               typename I,
               typename A,
               typename B,
-              typename C,
-              typename U>
+              typename C>
     ROCSPARSE_KERNEL(BELL_BLOCK_DIM* BLK_SIZE_Y)
     void bellmm_general_blockdim_kernel(rocsparse_operation trans_A,
                                         rocsparse_operation trans_B,
                                         rocsparse_direction dir_A,
                                         I                   Mb,
                                         I                   N,
-                                        U                   alpha_device_host,
-                                        I                   bell_cols,
-                                        I                   block_dim,
+                                        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                        I bell_cols,
+                                        I block_dim,
                                         const I* __restrict__ bell_col_ind,
                                         const A* __restrict__ bell_val,
                                         const B* __restrict__ dense_B,
                                         int64_t         ldb,
                                         rocsparse_order order_B,
-                                        U               beta_device_host,
+                                        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                         C* __restrict__ dense_C,
                                         int64_t              ldc,
                                         rocsparse_order      order_C,
-                                        rocsparse_index_base idx_base)
+                                        rocsparse_index_base idx_base,
+                                        bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
         if(alpha == static_cast<T>(0) && beta == static_cast<T>(1))
         {
@@ -83,7 +83,7 @@ namespace rocsparse
                                                                                  idx_base);
     }
 
-    template <typename T, typename I, typename A, typename B, typename C, typename U>
+    template <typename T, typename I, typename A, typename B, typename C>
     rocsparse_status bellmm_template_general(rocsparse_handle          handle,
                                              rocsparse_operation       trans_A,
                                              rocsparse_operation       trans_B,
@@ -93,14 +93,14 @@ namespace rocsparse
                                              I                         kb,
                                              I                         bell_cols,
                                              I                         block_dim,
-                                             U                         alpha,
+                                             const T*                  alpha,
                                              const rocsparse_mat_descr descr,
                                              const I*                  bell_col_ind,
                                              const A*                  bell_val,
                                              const B*                  dense_B,
                                              int64_t                   ldb,
                                              rocsparse_order           order_B,
-                                             U                         beta,
+                                             const T*                  beta,
                                              C*                        dense_C,
                                              int64_t                   ldc,
                                              rocsparse_order           order_C)
@@ -129,7 +129,7 @@ namespace rocsparse
                                            dir_A,
                                            mb,
                                            n,
-                                           alpha,
+                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
                                            bell_cols,
                                            block_dim,
                                            bell_col_ind,
@@ -137,102 +137,70 @@ namespace rocsparse
                                            dense_B,
                                            ldb,
                                            order_B,
-                                           beta,
+                                           ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),
                                            dense_C,
                                            ldc,
                                            order_C,
-                                           descr->base);
+                                           descr->base,
+                                           handle->pointer_mode == rocsparse_pointer_mode_host);
 
         return rocsparse_status_success;
     }
 }
 
-#define INSTANTIATE(TTYPE, ITYPE, ATYPE, BTYPE, CTYPE, UTYPE)            \
-    template rocsparse_status rocsparse::bellmm_template_general<TTYPE>( \
-        rocsparse_handle          handle,                                \
-        rocsparse_operation       trans_A,                               \
-        rocsparse_operation       trans_B,                               \
-        rocsparse_direction       dir_A,                                 \
-        ITYPE                     mb,                                    \
-        ITYPE                     n,                                     \
-        ITYPE                     kb,                                    \
-        ITYPE                     bell_cols,                             \
-        ITYPE                     bell_block_dim,                        \
-        UTYPE                     alpha,                                 \
-        const rocsparse_mat_descr descr,                                 \
-        const ITYPE*              bell_col_ind,                          \
-        const ATYPE*              bell_val,                              \
-        const BTYPE*              dense_B,                               \
-        int64_t                   ldb,                                   \
-        rocsparse_order           order_B,                               \
-        UTYPE                     beta,                                  \
-        CTYPE*                    dense_C,                               \
-        int64_t                   ldc,                                   \
-        rocsparse_order           order_C)
+#define INSTANTIATE(TTYPE, ITYPE, ATYPE, BTYPE, CTYPE)                                               \
+    template rocsparse_status rocsparse::bellmm_template_general(rocsparse_handle    handle,         \
+                                                                 rocsparse_operation trans_A,        \
+                                                                 rocsparse_operation trans_B,        \
+                                                                 rocsparse_direction dir_A,          \
+                                                                 ITYPE               mb,             \
+                                                                 ITYPE               n,              \
+                                                                 ITYPE               kb,             \
+                                                                 ITYPE               bell_cols,      \
+                                                                 ITYPE               bell_block_dim, \
+                                                                 const TTYPE*        alpha,          \
+                                                                 const rocsparse_mat_descr descr,    \
+                                                                 const ITYPE*    bell_col_ind,       \
+                                                                 const ATYPE*    bell_val,           \
+                                                                 const BTYPE*    dense_B,            \
+                                                                 int64_t         ldb,                \
+                                                                 rocsparse_order order_B,            \
+                                                                 const TTYPE*    beta,               \
+                                                                 CTYPE*          dense_C,            \
+                                                                 int64_t         ldc,                \
+                                                                 rocsparse_order order_C)
 
-INSTANTIATE(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t);
-INSTANTIATE(int32_t, int64_t, int32_t, int32_t, int32_t, int32_t);
-INSTANTIATE(int32_t, int32_t, int32_t, int32_t, int32_t, const int32_t*);
-INSTANTIATE(int32_t, int64_t, int32_t, int32_t, int32_t, const int32_t*);
+INSTANTIATE(int32_t, int32_t, int32_t, int32_t, int32_t);
+INSTANTIATE(int32_t, int64_t, int32_t, int32_t, int32_t);
 
-INSTANTIATE(float, int32_t, float, float, float, float);
-INSTANTIATE(float, int64_t, float, float, float, float);
-INSTANTIATE(float, int32_t, float, float, float, const float*);
-INSTANTIATE(float, int64_t, float, float, float, const float*);
+INSTANTIATE(float, int32_t, float, float, float);
+INSTANTIATE(float, int64_t, float, float, float);
 
-INSTANTIATE(double, int32_t, double, double, double, double);
-INSTANTIATE(double, int64_t, double, double, double, double);
-INSTANTIATE(double, int32_t, double, double, double, const double*);
-INSTANTIATE(double, int64_t, double, double, double, const double*);
+INSTANTIATE(double, int32_t, double, double, double);
+INSTANTIATE(double, int64_t, double, double, double);
 
 INSTANTIATE(rocsparse_float_complex,
             int32_t,
-            rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex);
+
 INSTANTIATE(rocsparse_float_complex,
             int64_t,
-            rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex,
             rocsparse_float_complex);
-INSTANTIATE(rocsparse_float_complex,
-            int32_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
-INSTANTIATE(rocsparse_float_complex,
-            int64_t,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            rocsparse_float_complex,
-            const rocsparse_float_complex*);
 
 INSTANTIATE(rocsparse_double_complex,
             int32_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
+
 INSTANTIATE(rocsparse_double_complex,
             int64_t,
             rocsparse_double_complex,
             rocsparse_double_complex,
-            rocsparse_double_complex,
             rocsparse_double_complex);
-INSTANTIATE(rocsparse_double_complex,
-            int32_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
-INSTANTIATE(rocsparse_double_complex,
-            int64_t,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            rocsparse_double_complex,
-            const rocsparse_double_complex*);
 
 #undef INSTANTIATE

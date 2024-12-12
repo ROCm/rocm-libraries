@@ -31,61 +31,66 @@
 
 namespace rocsparse
 {
-#define LAUNCH_GEBSRMV_GENERAL_KERNEL(BLOCKSIZE, WFSIZE)                            \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR((gebsrmvn_general_kernel<BLOCKSIZE, WFSIZE>), \
-                                      dim3(mb),                                     \
-                                      dim3(BLOCKSIZE),                              \
-                                      0,                                            \
-                                      handle->stream,                               \
-                                      mb,                                           \
-                                      dir,                                          \
-                                      alpha,                                        \
-                                      bsr_row_ptr,                                  \
-                                      bsr_col_ind,                                  \
-                                      bsr_val,                                      \
-                                      row_block_dim,                                \
-                                      col_block_dim,                                \
-                                      x,                                            \
-                                      beta,                                         \
-                                      y,                                            \
-                                      base);
+#define LAUNCH_GEBSRMV_GENERAL_KERNEL(BLOCKSIZE, WFSIZE)              \
+    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                \
+        (gebsrmvn_general_kernel<BLOCKSIZE, WFSIZE>),                 \
+        dim3(mb),                                                     \
+        dim3(BLOCKSIZE),                                              \
+        0,                                                            \
+        handle->stream,                                               \
+        mb,                                                           \
+        dir,                                                          \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+        bsr_row_ptr,                                                  \
+        bsr_col_ind,                                                  \
+        bsr_val,                                                      \
+        row_block_dim,                                                \
+        col_block_dim,                                                \
+        x,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
+        y,                                                            \
+        base,                                                         \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
 
-#define LAUNCH_GEBSRMV_MXN_16_KERNEL(BLOCKSIZE, ROWBSRDIM, COLBSRDIM)                            \
-    THROW_IF_HIPLAUNCHKERNELGGL_ERROR((gebsrmvn_mxn_16_kernel<BLOCKSIZE, ROWBSRDIM, COLBSRDIM>), \
-                                      dim3(mb),                                                  \
-                                      dim3(BLOCKSIZE),                                           \
-                                      0,                                                         \
-                                      handle->stream,                                            \
-                                      mb,                                                        \
-                                      dir,                                                       \
-                                      alpha,                                                     \
-                                      bsr_row_ptr,                                               \
-                                      bsr_col_ind,                                               \
-                                      bsr_val,                                                   \
-                                      row_block_dim,                                             \
-                                      col_block_dim,                                             \
-                                      x,                                                         \
-                                      beta,                                                      \
-                                      y,                                                         \
-                                      base);
+#define LAUNCH_GEBSRMV_MXN_16_KERNEL(BLOCKSIZE, ROWBSRDIM, COLBSRDIM) \
+    THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                \
+        (gebsrmvn_mxn_16_kernel<BLOCKSIZE, ROWBSRDIM, COLBSRDIM>),    \
+        dim3(mb),                                                     \
+        dim3(BLOCKSIZE),                                              \
+        0,                                                            \
+        handle->stream,                                               \
+        mb,                                                           \
+        dir,                                                          \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
+        bsr_row_ptr,                                                  \
+        bsr_col_ind,                                                  \
+        bsr_val,                                                      \
+        row_block_dim,                                                \
+        col_block_dim,                                                \
+        x,                                                            \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),  \
+        y,                                                            \
+        base,                                                         \
+        handle->pointer_mode == rocsparse_pointer_mode_host)
 
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gebsrmvn_general_kernel(rocsparse_int       mb,
                                  rocsparse_direction dir,
-                                 U                   alpha_device_host,
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                  const rocsparse_int* __restrict__ bsr_row_ptr,
                                  const rocsparse_int* __restrict__ bsr_col_ind,
                                  const T* __restrict__ bsr_val,
                                  rocsparse_int row_block_dim,
                                  rocsparse_int col_block_dim,
                                  const T* __restrict__ x,
-                                 U beta_device_host,
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                  T* __restrict__ y,
-                                 rocsparse_index_base idx_base)
+                                 rocsparse_index_base idx_base,
+                                 bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
         if(alpha == static_cast<T>(0) && beta == static_cast<T>(1))
         {
@@ -105,23 +110,24 @@ namespace rocsparse
                                                               idx_base);
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t ROWBSRDIM, uint32_t COLBSRDIM, typename T, typename U>
+    template <uint32_t BLOCKSIZE, uint32_t ROWBSRDIM, uint32_t COLBSRDIM, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gebsrmvn_mxn_16_kernel(rocsparse_int       mb,
                                 rocsparse_direction dir,
-                                U                   alpha_device_host,
+                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                 const rocsparse_int* __restrict__ bsr_row_ptr,
                                 const rocsparse_int* __restrict__ bsr_col_ind,
                                 const T* __restrict__ bsr_val,
                                 rocsparse_int row_block_dim,
                                 rocsparse_int col_block_dim,
                                 const T* __restrict__ x,
-                                U beta_device_host,
+                                ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                 T* __restrict__ y,
-                                rocsparse_index_base idx_base)
+                                rocsparse_index_base idx_base,
+                                bool                 is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
 
         if(alpha == static_cast<T>(0) && beta == static_cast<T>(1))
         {
@@ -132,19 +138,19 @@ namespace rocsparse
             mb, dir, alpha, bsr_row_ptr, bsr_col_ind, bsr_val, x, beta, y, idx_base);
     }
 
-    template <typename T, typename U>
+    template <typename T>
     void launch_gebsrmvn_row_block_dim_9_12(rocsparse_handle     handle,
                                             rocsparse_direction  dir,
                                             rocsparse_int        mb,
                                             rocsparse_int        nnzb,
-                                            U                    alpha,
+                                            const T*             alpha_device_host,
                                             const rocsparse_int* bsr_row_ptr,
                                             const rocsparse_int* bsr_col_ind,
                                             const T*             bsr_val,
                                             rocsparse_int        row_block_dim,
                                             rocsparse_int        col_block_dim,
                                             const T*             x,
-                                            U                    beta,
+                                            const T*             beta_device_host,
                                             T*                   y,
                                             rocsparse_index_base base)
     {
@@ -322,14 +328,14 @@ namespace rocsparse
         }
     }
 
-    template <typename T, typename U>
+    template <typename T>
     rocsparse_status gebsrmv_template_row_block_dim_9_12(rocsparse_handle          handle,
                                                          rocsparse_direction       dir,
                                                          rocsparse_operation       trans,
                                                          rocsparse_int             mb,
                                                          rocsparse_int             nb,
                                                          rocsparse_int             nnzb,
-                                                         U                         alpha,
+                                                         const T*                  alpha,
                                                          const rocsparse_mat_descr descr,
                                                          const T*                  bsr_val,
                                                          const rocsparse_int*      bsr_row_ptr,
@@ -337,7 +343,7 @@ namespace rocsparse
                                                          rocsparse_int             row_block_dim,
                                                          rocsparse_int             col_block_dim,
                                                          const T*                  x,
-                                                         U                         beta,
+                                                         const T*                  beta,
                                                          T*                        y)
     {
         rocsparse_host_assert(
@@ -371,7 +377,7 @@ namespace rocsparse
     }
 }
 
-#define INSTANTIATE(T, U)                                                     \
+#define INSTANTIATE(T)                                                        \
                                                                               \
     template rocsparse_status rocsparse::gebsrmv_template_row_block_dim_9_12( \
         rocsparse_handle          handle,                                     \
@@ -380,7 +386,7 @@ namespace rocsparse
         rocsparse_int             mb,                                         \
         rocsparse_int             nb,                                         \
         rocsparse_int             nnzb,                                       \
-        U                         alpha,                                      \
+        const T*                  alpha,                                      \
         const rocsparse_mat_descr descr,                                      \
         const T*                  bsr_val,                                    \
         const rocsparse_int*      bsr_row_ptr,                                \
@@ -388,19 +394,12 @@ namespace rocsparse
         rocsparse_int             row_block_dim,                              \
         rocsparse_int             col_block_dim,                              \
         const T*                  x,                                          \
-        U                         beta,                                       \
+        const T*                  beta,                                       \
         T*                        y)
 
-INSTANTIATE(float, float);
-INSTANTIATE(float, const float*);
-
-INSTANTIATE(double, double);
-INSTANTIATE(double, const double*);
-
-INSTANTIATE(rocsparse_float_complex, rocsparse_float_complex);
-INSTANTIATE(rocsparse_float_complex, const rocsparse_float_complex*);
-
-INSTANTIATE(rocsparse_double_complex, rocsparse_double_complex);
-INSTANTIATE(rocsparse_double_complex, const rocsparse_double_complex*);
+INSTANTIATE(float);
+INSTANTIATE(double);
+INSTANTIATE(rocsparse_float_complex);
+INSTANTIATE(rocsparse_double_complex);
 
 #undef INSTANTIATE

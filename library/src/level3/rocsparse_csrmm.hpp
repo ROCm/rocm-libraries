@@ -64,7 +64,7 @@ namespace rocsparse
                                              const J*                  csr_col_ind,
                                              void*                     temp_buffer);
 
-    template <typename T, typename I, typename J, typename A, typename B, typename C, typename U>
+    template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status csrmm_template_dispatch(rocsparse_handle    handle,
                                              rocsparse_operation trans_A,
                                              rocsparse_operation trans_B,
@@ -76,7 +76,7 @@ namespace rocsparse
                                              J                   batch_count_A,
                                              int64_t             offsets_batch_stride_A,
                                              int64_t             columns_values_batch_stride_A,
-                                             U                   alpha_device_host,
+                                             const T*            alpha_device_host,
                                              const rocsparse_mat_descr descr,
                                              const A*                  csr_val,
                                              const I*                  csr_row_ptr,
@@ -86,7 +86,7 @@ namespace rocsparse
                                              J                         batch_count_B,
                                              int64_t                   batch_stride_B,
                                              rocsparse_order           order_B,
-                                             U                         beta_device_host,
+                                             const T*                  beta_device_host,
                                              C*                        dense_C,
                                              int64_t                   ldc,
                                              J                         batch_count_C,

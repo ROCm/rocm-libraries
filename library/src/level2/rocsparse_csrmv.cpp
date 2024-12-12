@@ -115,20 +115,7 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
     if(m == 0 || n == 0 || nnz == 0)
     {
         // matrix never accessed however still need to update y vector
-        if(ysize > 0)
-        {
-            if(handle->pointer_mode == rocsparse_pointer_mode_device)
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_array(handle, ysize, beta_device_host, y));
-            }
-            else
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_array(handle, ysize, *beta_device_host, y));
-            }
-        }
-
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
         return rocsparse_status_success;
     }
 
@@ -141,47 +128,22 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
     if(info == nullptr || info->csrmv_info == nullptr || trans != rocsparse_operation_none
        || (alg == rocsparse::csrmv_alg_lrb && descr->type == rocsparse_matrix_type_symmetric))
     {
-        // If csrmv info is not available, call csrmv general
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csrmv_stream_template_dispatch<T>(handle,
-                                                             trans,
-                                                             m,
-                                                             n,
-                                                             nnz,
-                                                             alpha_device_host,
-                                                             descr,
-                                                             csr_val,
-                                                             csr_row_ptr_begin,
-                                                             csr_row_ptr_end,
-                                                             csr_col_ind,
-                                                             x,
-                                                             beta_device_host,
-                                                             y,
-                                                             force_conj));
-            return rocsparse_status_success;
-        }
-        else
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csrmv_stream_template_dispatch<T>(handle,
-                                                             trans,
-                                                             m,
-                                                             n,
-                                                             nnz,
-                                                             *alpha_device_host,
-                                                             descr,
-                                                             csr_val,
-                                                             csr_row_ptr_begin,
-                                                             csr_row_ptr_end,
-                                                             csr_col_ind,
-                                                             x,
-                                                             *beta_device_host,
-                                                             y,
-                                                             force_conj));
-            return rocsparse_status_success;
-        }
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_stream_template_dispatch(handle,
+                                                                            trans,
+                                                                            m,
+                                                                            n,
+                                                                            nnz,
+                                                                            alpha_device_host,
+                                                                            descr,
+                                                                            csr_val,
+                                                                            csr_row_ptr_begin,
+                                                                            csr_row_ptr_end,
+                                                                            csr_col_ind,
+                                                                            x,
+                                                                            beta_device_host,
+                                                                            y,
+                                                                            force_conj));
+        return rocsparse_status_success;
     }
     else
     {
@@ -195,137 +157,65 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
         }
 
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
+        switch(alg)
         {
-            switch(alg)
-            {
-            case rocsparse::csrmv_alg_stream:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrmv_stream_template_dispatch<T>(handle,
-                                                                 trans,
-                                                                 m,
-                                                                 n,
-                                                                 nnz,
-                                                                 alpha_device_host,
-                                                                 descr,
-                                                                 csr_val,
-                                                                 csr_row_ptr_begin,
-                                                                 csr_row_ptr_end,
-                                                                 csr_col_ind,
-                                                                 x,
-                                                                 beta_device_host,
-                                                                 y,
-                                                                 force_conj));
-                return rocsparse_status_success;
-            }
-            case rocsparse::csrmv_alg_adaptive:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrmv_adaptive_template_dispatch<T>(handle,
-                                                                   trans,
-                                                                   m,
-                                                                   n,
-                                                                   nnz,
-                                                                   alpha_device_host,
-                                                                   descr,
-                                                                   csr_val,
-                                                                   csr_row_ptr_begin,
-                                                                   csr_col_ind,
-                                                                   info->csrmv_info,
-                                                                   x,
-                                                                   beta_device_host,
-                                                                   y,
-                                                                   force_conj));
-                return rocsparse_status_success;
-            }
-            case rocsparse::csrmv_alg_lrb:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrmv_lrb_template_dispatch<T>(handle,
-                                                              trans,
-                                                              m,
-                                                              n,
-                                                              nnz,
-                                                              alpha_device_host,
-                                                              descr,
-                                                              csr_val,
-                                                              csr_row_ptr_begin,
-                                                              csr_col_ind,
-                                                              info->csrmv_info,
-                                                              x,
-                                                              beta_device_host,
-                                                              y,
-                                                              force_conj));
-                return rocsparse_status_success;
-            }
-            }
+        case rocsparse::csrmv_alg_stream:
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_stream_template_dispatch(handle,
+                                                                                trans,
+                                                                                m,
+                                                                                n,
+                                                                                nnz,
+                                                                                alpha_device_host,
+                                                                                descr,
+                                                                                csr_val,
+                                                                                csr_row_ptr_begin,
+                                                                                csr_row_ptr_end,
+                                                                                csr_col_ind,
+                                                                                x,
+                                                                                beta_device_host,
+                                                                                y,
+                                                                                force_conj));
+            return rocsparse_status_success;
         }
-        else
+        case rocsparse::csrmv_alg_adaptive:
         {
-            switch(alg)
-            {
-            case rocsparse::csrmv_alg_adaptive:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrmv_adaptive_template_dispatch<T>(handle,
-                                                                   trans,
-                                                                   m,
-                                                                   n,
-                                                                   nnz,
-                                                                   *alpha_device_host,
-                                                                   descr,
-                                                                   csr_val,
-                                                                   csr_row_ptr_begin,
-                                                                   csr_col_ind,
-                                                                   info->csrmv_info,
-                                                                   x,
-                                                                   *beta_device_host,
-                                                                   y,
-                                                                   force_conj));
-                return rocsparse_status_success;
-            }
-            case rocsparse::csrmv_alg_lrb:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrmv_lrb_template_dispatch<T>(handle,
-                                                              trans,
-                                                              m,
-                                                              n,
-                                                              nnz,
-                                                              *alpha_device_host,
-                                                              descr,
-                                                              csr_val,
-                                                              csr_row_ptr_begin,
-                                                              csr_col_ind,
-                                                              info->csrmv_info,
-                                                              x,
-                                                              *beta_device_host,
-                                                              y,
-                                                              force_conj));
-                return rocsparse_status_success;
-            }
-            case rocsparse::csrmv_alg_stream:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrmv_stream_template_dispatch<T>(handle,
-                                                                 trans,
-                                                                 m,
-                                                                 n,
-                                                                 nnz,
-                                                                 *alpha_device_host,
-                                                                 descr,
-                                                                 csr_val,
-                                                                 csr_row_ptr_begin,
-                                                                 csr_row_ptr_end,
-                                                                 csr_col_ind,
-                                                                 x,
-                                                                 *beta_device_host,
-                                                                 y,
-                                                                 force_conj));
-                return rocsparse_status_success;
-            }
-            }
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_adaptive_template_dispatch(handle,
+                                                                                  trans,
+                                                                                  m,
+                                                                                  n,
+                                                                                  nnz,
+                                                                                  alpha_device_host,
+                                                                                  descr,
+                                                                                  csr_val,
+                                                                                  csr_row_ptr_begin,
+                                                                                  csr_col_ind,
+                                                                                  info->csrmv_info,
+                                                                                  x,
+                                                                                  beta_device_host,
+                                                                                  y,
+                                                                                  force_conj));
+            return rocsparse_status_success;
+        }
+        case rocsparse::csrmv_alg_lrb:
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_lrb_template_dispatch(handle,
+                                                                             trans,
+                                                                             m,
+                                                                             n,
+                                                                             nnz,
+                                                                             alpha_device_host,
+                                                                             descr,
+                                                                             csr_val,
+                                                                             csr_row_ptr_begin,
+                                                                             csr_col_ind,
+                                                                             info->csrmv_info,
+                                                                             x,
+                                                                             beta_device_host,
+                                                                             y,
+                                                                             force_conj));
+            return rocsparse_status_success;
+        }
         }
     }
 }

@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    template <typename T, typename I, typename J, typename U>
+    template <typename T, typename I, typename J>
     rocsparse_status bsrxmv_template_dispatch(rocsparse_handle          handle,
                                               rocsparse_direction       dir,
                                               rocsparse_operation       trans,
@@ -36,7 +36,7 @@ namespace rocsparse
                                               J                         mb,
                                               J                         nb,
                                               I                         nnzb,
-                                              U                         alpha_device_host,
+                                              const T*                  alpha_device_host,
                                               const rocsparse_mat_descr descr,
                                               const T*                  bsr_val,
                                               const J*                  bsr_mask_ptr,
@@ -45,7 +45,7 @@ namespace rocsparse
                                               const J*                  bsr_col_ind,
                                               J                         block_dim,
                                               const T*                  x,
-                                              U                         beta_device_host,
+                                              const T*                  beta_device_host,
                                               T*                        y);
 
     template <typename T, typename I, typename J>

@@ -72,54 +72,54 @@ namespace rocsparse
                                              const J*                  csr_col_ind,
                                              rocsparse_mat_info        info);
 
-    template <typename T, typename I, typename J, typename A, typename X, typename Y, typename U>
+    template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status csrmv_stream_template_dispatch(rocsparse_handle          handle,
                                                     rocsparse_operation       trans,
                                                     J                         m,
                                                     J                         n,
                                                     I                         nnz,
-                                                    U                         alpha_device_host,
+                                                    const T*                  alpha_device_host,
                                                     const rocsparse_mat_descr descr,
                                                     const A*                  csr_val,
                                                     const I*                  csr_row_ptr_begin,
                                                     const I*                  csr_row_ptr_end,
                                                     const J*                  csr_col_ind,
                                                     const X*                  x,
-                                                    U                         beta_device_host,
+                                                    const T*                  beta_device_host,
                                                     Y*                        y,
                                                     bool                      force_conj);
 
-    template <typename T, typename I, typename J, typename A, typename X, typename Y, typename U>
+    template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status csrmv_adaptive_template_dispatch(rocsparse_handle          handle,
                                                       rocsparse_operation       trans,
                                                       J                         m,
                                                       J                         n,
                                                       I                         nnz,
-                                                      U                         alpha_device_host,
+                                                      const T*                  alpha_device_host,
                                                       const rocsparse_mat_descr descr,
                                                       const A*                  csr_val,
                                                       const I*                  csr_row_ptr,
                                                       const J*                  csr_col_ind,
                                                       rocsparse_csrmv_info      info,
                                                       const X*                  x,
-                                                      U                         beta_device_host,
+                                                      const T*                  beta_device_host,
                                                       Y*                        y,
                                                       bool                      force_conj);
 
-    template <typename T, typename I, typename J, typename A, typename X, typename Y, typename U>
+    template <typename T, typename I, typename J, typename A, typename X, typename Y>
     rocsparse_status csrmv_lrb_template_dispatch(rocsparse_handle          handle,
                                                  rocsparse_operation       trans,
                                                  J                         m,
                                                  J                         n,
                                                  I                         nnz,
-                                                 U                         alpha_device_host,
+                                                 const T*                  alpha_device_host,
                                                  const rocsparse_mat_descr descr,
                                                  const A*                  csr_val,
                                                  const I*                  csr_row_ptr,
                                                  const J*                  csr_col_ind,
                                                  rocsparse_csrmv_info      info,
                                                  const X*                  x,
-                                                 U                         beta_device_host,
+                                                 const T*                  beta_device_host,
                                                  Y*                        y,
                                                  bool                      force_conj);
 

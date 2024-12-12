@@ -37,8 +37,7 @@ namespace rocsparse
               rocsparse_int NTHREADS_PER_DOTPRODUCT,
               typename I,
               typename J,
-              typename T,
-              typename U>
+              typename T>
     ROCSPARSE_KERNEL_W(BLOCKSIZE, 1)
     void sddmm_ell_kernel(rocsparse_operation transA,
                           rocsparse_operation transB,
@@ -48,19 +47,20 @@ namespace rocsparse
                           J                   N,
                           J                   K,
                           I                   nnz,
-                          U                   alpha_device_host,
+                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                           const T* __restrict__ A,
                           int64_t lda,
                           const T* __restrict__ B,
                           int64_t ldb,
-                          U       beta_device_host,
+                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                           T* __restrict__ val,
                           const J* __restrict__ ind,
                           rocsparse_index_base base,
-                          T* __restrict__ workspace)
+                          T* __restrict__ workspace,
+                          bool is_host_mode)
     {
-        auto alpha = rocsparse::load_scalar_device_host(alpha_device_host);
-        auto beta  = rocsparse::load_scalar_device_host(beta_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
         if(alpha == static_cast<T>(0) && beta == static_cast<T>(1))
         {
             return;
@@ -245,61 +245,35 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, rocsparse_sddmm_alg_d
     {
 
         static constexpr int NB = 512;
-#define HLAUNCH(K_)                                                                    \
-    int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                  \
-    dim3    blocks(num_blocks_x);                                                      \
-    dim3    threads(NB);                                                               \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_ell_kernel<NB, K_, I, J, T>), \
-                                       blocks,                                         \
-                                       threads,                                        \
-                                       0,                                              \
-                                       handle->stream,                                 \
-                                       trans_A,                                        \
-                                       trans_B,                                        \
-                                       order_A,                                        \
-                                       order_B,                                        \
-                                       m,                                              \
-                                       n,                                              \
-                                       k,                                              \
-                                       nnz,                                            \
-                                       *(const T*)alpha,                               \
-                                       A_val,                                          \
-                                       A_ld,                                           \
-                                       B_val,                                          \
-                                       B_ld,                                           \
-                                       *(const T*)beta,                                \
-                                       (T*)C_val_data,                                 \
-                                       (const J*)C_col_data,                           \
-                                       C_base,                                         \
-                                       (T*)buffer)
 
-#define DLAUNCH(K_)                                                                    \
-    int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                  \
-    dim3    blocks(num_blocks_x);                                                      \
-    dim3    threads(NB);                                                               \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_ell_kernel<NB, K_, I, J, T>), \
-                                       blocks,                                         \
-                                       threads,                                        \
-                                       0,                                              \
-                                       handle->stream,                                 \
-                                       trans_A,                                        \
-                                       trans_B,                                        \
-                                       order_A,                                        \
-                                       order_B,                                        \
-                                       m,                                              \
-                                       n,                                              \
-                                       k,                                              \
-                                       nnz,                                            \
-                                       alpha,                                          \
-                                       A_val,                                          \
-                                       A_ld,                                           \
-                                       B_val,                                          \
-                                       B_ld,                                           \
-                                       beta,                                           \
-                                       (T*)C_val_data,                                 \
-                                       (const J*)C_col_data,                           \
-                                       C_base,                                         \
-                                       (T*)buffer)
+#define LAUNCH(K_)                                                                       \
+    int64_t num_blocks_x = (nnz - 1) / (NB / K_) + 1;                                    \
+    dim3    blocks(num_blocks_x);                                                        \
+    dim3    threads(NB);                                                                 \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::sddmm_ell_kernel<NB, K_, I, J, T>),   \
+                                       blocks,                                           \
+                                       threads,                                          \
+                                       0,                                                \
+                                       handle->stream,                                   \
+                                       trans_A,                                          \
+                                       trans_B,                                          \
+                                       order_A,                                          \
+                                       order_B,                                          \
+                                       m,                                                \
+                                       n,                                                \
+                                       k,                                                \
+                                       nnz,                                              \
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha), \
+                                       A_val,                                            \
+                                       A_ld,                                             \
+                                       B_val,                                            \
+                                       B_ld,                                             \
+                                       ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta),  \
+                                       (T*)C_val_data,                                   \
+                                       (const J*)C_col_data,                             \
+                                       C_base,                                           \
+                                       (T*)buffer,                                       \
+                                       handle->pointer_mode == rocsparse_pointer_mode_host)
 
         if(handle->pointer_mode == rocsparse_pointer_mode_host)
         {
@@ -307,41 +281,22 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, rocsparse_sddmm_alg_d
             {
                 return rocsparse_status_success;
             }
-            if(k > 4)
-            {
-                HLAUNCH(8);
-            }
-            else if(k > 2)
-            {
-                HLAUNCH(4);
-            }
-            else if(k > 1)
-            {
-                HLAUNCH(2);
-            }
-            else
-            {
-                HLAUNCH(1);
-            }
+        }
+        if(k > 4)
+        {
+            LAUNCH(8);
+        }
+        else if(k > 2)
+        {
+            LAUNCH(4);
+        }
+        else if(k > 1)
+        {
+            LAUNCH(2);
         }
         else
         {
-            if(k > 4)
-            {
-                DLAUNCH(8);
-            }
-            else if(k > 2)
-            {
-                DLAUNCH(4);
-            }
-            else if(k > 1)
-            {
-                DLAUNCH(2);
-            }
-            else
-            {
-                DLAUNCH(1);
-            }
+            LAUNCH(1);
         }
         return rocsparse_status_success;
     }

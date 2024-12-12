@@ -201,6 +201,20 @@ namespace rocsparse
         }
     }
 
+    // For host scalars
+    template <typename T>
+    static __forceinline__ __device__ __host__ T load_scalar_device_host(T x)
+    {
+        return x;
+    }
+
+    // For device scalars
+    template <typename T>
+    static __forceinline__ __device__ __host__ T load_scalar_device_host(const T* xp)
+    {
+        return *xp;
+    }
+
     template <uint32_t DIM_X, uint32_t DIM_Y, typename I, typename T, typename U>
     ROCSPARSE_KERNEL(DIM_X* DIM_Y)
     void dense_transpose_kernel(
@@ -238,24 +252,32 @@ namespace rocsparse
         rocsparse::valset_2d_device<BLOCKSIZE>(m, n, ld, value, array, order);
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename T, typename U>
+    template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void scale_kernel(I length, U scalar_device_host, T* array)
+    void scale_kernel(I length,
+                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, scalar),
+                      T* __restrict__ array,
+                      bool is_host_mode)
     {
-        auto scalar = rocsparse::load_scalar_device_host(scalar_device_host);
-
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(scalar);
         if(scalar != static_cast<T>(1))
         {
             rocsparse::scale_device<BLOCKSIZE>(length, scalar, array);
         }
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename T, typename U>
+    template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void scale_2d_kernel(
-        I m, I n, int64_t ld, int64_t stride, U scalar_device_host, T* array, rocsparse_order order)
+    void scale_2d_kernel(I       m,
+                         I       n,
+                         int64_t ld,
+                         int64_t stride,
+                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, scalar),
+                         T* __restrict__ array,
+                         rocsparse_order order,
+                         bool            is_host_mode)
     {
-        auto scalar = rocsparse::load_scalar_device_host(scalar_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(scalar);
 
         if(scalar != static_cast<T>(1))
         {
@@ -274,6 +296,7 @@ rocsparse_status rocsparse::dense_transpose(rocsparse_handle handle,
                                             T*               B,
                                             int64_t          ldb)
 {
+
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense_transpose_kernel<32, 8>),
                                        dim3((m - 1) / 32 + 1),
                                        dim3(32 * 8),
@@ -357,46 +380,63 @@ rocsparse_status rocsparse::valset_2d(
     return rocsparse_status_success;
 }
 
-template <typename I, typename T, typename U>
+template <typename I, typename T>
 rocsparse_status
-    rocsparse::scale_array(rocsparse_handle handle, I length, U scalar_device_host, T* array)
+    rocsparse::scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, T* array)
 {
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::scale_kernel<256>),
-                                       dim3((length - 1) / 256 + 1),
-                                       dim3(256),
-                                       0,
-                                       handle->stream,
-                                       length,
-                                       scalar_device_host,
-                                       array);
-
+    if(length > 0)
+    {
+        const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
+        if(on_host && *scalar_device_host == 0)
+        {
+            RETURN_IF_HIP_ERROR(hipMemsetAsync(array, 0, sizeof(T) * length, handle->stream));
+        }
+        else if((on_host && *scalar_device_host != 1) || on_host == false)
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::scale_kernel<256>),
+                dim3((length - 1) / 256 + 1),
+                dim3(256),
+                0,
+                handle->stream,
+                length,
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, scalar_device_host),
+                array,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
+        }
+    }
     return rocsparse_status_success;
 }
 
-template <typename I, typename T, typename U>
+template <typename I, typename T>
 rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
                                            I                m,
                                            I                n,
                                            int64_t          ld,
                                            int64_t          batch_count,
                                            int64_t          stride,
-                                           U                scalar_device_host,
+                                           const T*         scalar_device_host,
                                            T*               array,
                                            rocsparse_order  order)
 {
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::scale_2d_kernel<256>),
-                                       dim3((int64_t(m) * n - 1) / 256 + 1, batch_count),
-                                       dim3(256),
-                                       0,
-                                       handle->stream,
-                                       m,
-                                       n,
-                                       ld,
-                                       stride,
-                                       scalar_device_host,
-                                       array,
-                                       order);
-
+    const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
+    if((on_host && *scalar_device_host != 1) || on_host == false)
+    {
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::scale_2d_kernel<256>),
+            dim3((int64_t(m) * n - 1) / 256 + 1, batch_count),
+            dim3(256),
+            0,
+            handle->stream,
+            m,
+            n,
+            ld,
+            stride,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, scalar_device_host),
+            array,
+            order,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+    }
     return rocsparse_status_success;
 }
 
@@ -493,63 +533,43 @@ INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, TTYPE, UTYPE)              \
+#define INSTANTIATE(ITYPE, TTYPE)                     \
     template rocsparse_status rocsparse::scale_array( \
-        rocsparse_handle handle, ITYPE length, UTYPE scalar_device_host, TTYPE* array);
+        rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, TTYPE* array);
 
-INSTANTIATE(int32_t, int32_t, int32_t);
-INSTANTIATE(int32_t, int32_t, const int32_t*);
-INSTANTIATE(int32_t, float, float);
-INSTANTIATE(int32_t, float, const float*);
-INSTANTIATE(int32_t, double, double);
-INSTANTIATE(int32_t, double, const double*);
-INSTANTIATE(int32_t, rocsparse_float_complex, rocsparse_float_complex);
-INSTANTIATE(int32_t, rocsparse_float_complex, const rocsparse_float_complex*);
-INSTANTIATE(int32_t, rocsparse_double_complex, rocsparse_double_complex);
-INSTANTIATE(int32_t, rocsparse_double_complex, const rocsparse_double_complex*);
+INSTANTIATE(int32_t, int32_t);
+INSTANTIATE(int32_t, float);
+INSTANTIATE(int32_t, double);
+INSTANTIATE(int32_t, rocsparse_float_complex);
+INSTANTIATE(int32_t, rocsparse_double_complex);
 
-INSTANTIATE(int64_t, int32_t, int32_t);
-INSTANTIATE(int64_t, int32_t, const int32_t*);
-INSTANTIATE(int64_t, float, float);
-INSTANTIATE(int64_t, float, const float*);
-INSTANTIATE(int64_t, double, double);
-INSTANTIATE(int64_t, double, const double*);
-INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex);
-INSTANTIATE(int64_t, rocsparse_float_complex, const rocsparse_float_complex*);
-INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
-INSTANTIATE(int64_t, rocsparse_double_complex, const rocsparse_double_complex*);
+INSTANTIATE(int64_t, int32_t);
+INSTANTIATE(int64_t, float);
+INSTANTIATE(int64_t, double);
+INSTANTIATE(int64_t, rocsparse_float_complex);
+INSTANTIATE(int64_t, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, TTYPE, UTYPE)                                                     \
+#define INSTANTIATE(ITYPE, TTYPE)                                                            \
     template rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,             \
                                                         ITYPE            m,                  \
                                                         ITYPE            n,                  \
                                                         int64_t          ld,                 \
                                                         int64_t          batch_count,        \
                                                         int64_t          stride,             \
-                                                        UTYPE            scalar_device_host, \
+                                                        const TTYPE*     scalar_device_host, \
                                                         TTYPE*           array,              \
                                                         rocsparse_order  order);
 
-INSTANTIATE(int32_t, int32_t, int32_t);
-INSTANTIATE(int32_t, int32_t, const int32_t*);
-INSTANTIATE(int32_t, float, float);
-INSTANTIATE(int32_t, float, const float*);
-INSTANTIATE(int32_t, double, double);
-INSTANTIATE(int32_t, double, const double*);
-INSTANTIATE(int32_t, rocsparse_float_complex, rocsparse_float_complex);
-INSTANTIATE(int32_t, rocsparse_float_complex, const rocsparse_float_complex*);
-INSTANTIATE(int32_t, rocsparse_double_complex, rocsparse_double_complex);
-INSTANTIATE(int32_t, rocsparse_double_complex, const rocsparse_double_complex*);
+INSTANTIATE(int32_t, int32_t);
+INSTANTIATE(int32_t, float);
+INSTANTIATE(int32_t, double);
+INSTANTIATE(int32_t, rocsparse_float_complex);
+INSTANTIATE(int32_t, rocsparse_double_complex);
 
-INSTANTIATE(int64_t, int32_t, int32_t);
-INSTANTIATE(int64_t, int32_t, const int32_t*);
-INSTANTIATE(int64_t, float, float);
-INSTANTIATE(int64_t, float, const float*);
-INSTANTIATE(int64_t, double, double);
-INSTANTIATE(int64_t, double, const double*);
-INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex);
-INSTANTIATE(int64_t, rocsparse_float_complex, const rocsparse_float_complex*);
-INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
-INSTANTIATE(int64_t, rocsparse_double_complex, const rocsparse_double_complex*);
+INSTANTIATE(int64_t, int32_t);
+INSTANTIATE(int64_t, float);
+INSTANTIATE(int64_t, double);
+INSTANTIATE(int64_t, rocsparse_float_complex);
+INSTANTIATE(int64_t, rocsparse_double_complex);
 #undef INSTANTIATE

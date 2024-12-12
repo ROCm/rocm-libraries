@@ -43,21 +43,8 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::scale_array(handle, (I)y->size, (const T*)beta, (T*)y->values));
-        }
-        else
-        {
-            const T* beta_ptr = (const T*)beta;
-
-            if(*beta_ptr != static_cast<T>(1))
-            {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_array(handle, (I)y->size, *beta_ptr, (T*)y->values));
-            }
-        }
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::scale_array(handle, (I)y->size, (const T*)beta, (T*)y->values));
 
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::axpyi_template<I, T>)(handle,
                                                                     (I)x->nnz,

@@ -32,28 +32,19 @@
 
 namespace rocsparse
 {
-    template <typename T, typename U>
+    template <typename T>
     static rocsparse_status csrilu0_numeric_boost_template(rocsparse_handle   handle,
                                                            rocsparse_mat_info info,
                                                            int                enable_boost,
-                                                           const U*           boost_tol,
+                                                           size_t             boost_tol_size,
+                                                           const void*        boost_tol,
                                                            const T*           boost_val)
     {
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
-
-        // Logging
-        rocsparse::log_trace(handle,
-                             rocsparse::replaceX<T>("rocsparse_Xcsrilu0_numeric_boost"),
-                             (const void*&)info,
-                             enable_boost,
-                             (const void*&)boost_tol,
-                             (const void*&)boost_val);
-
         ROCSPARSE_CHECKARG_POINTER(1, info);
 
         // Reset boost
-        info->boost_enable        = 0;
-        info->use_double_prec_tol = 0;
+        info->boost_enable = 0;
 
         // Numeric boost
         if(enable_boost)
@@ -62,16 +53,16 @@ namespace rocsparse
             ROCSPARSE_CHECKARG_POINTER(3, boost_tol);
             ROCSPARSE_CHECKARG_POINTER(4, boost_val);
 
-            info->boost_enable        = enable_boost;
-            info->use_double_prec_tol = std::is_same<U, double>();
-            info->boost_tol           = reinterpret_cast<const void*>(boost_tol);
-            info->boost_val           = reinterpret_cast<const void*>(boost_val);
+            info->boost_enable   = enable_boost;
+            info->boost_tol_size = boost_tol_size;
+            info->boost_tol      = boost_tol;
+            info->boost_val      = reinterpret_cast<const void*>(boost_val);
         }
 
         return rocsparse_status_success;
     }
 
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename U, typename V>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrilu0_binsearch(rocsparse_int        m,
                            const rocsparse_int* csr_row_ptr,
@@ -85,14 +76,16 @@ namespace rocsparse
                            double               tol,
                            rocsparse_index_base idx_base,
                            int                  enable_boost,
-                           U                    boost_tol_device_host,
-                           V                    boost_val_device_host)
+                           size_t               size_boost_tol,
+                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
+                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
+                           ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
+                           bool is_host_mode)
     {
-        auto boost_tol = (enable_boost) ? rocsparse::load_scalar_device_host(boost_tol_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_tol_device_host);
-
-        auto boost_val = (enable_boost) ? rocsparse::load_scalar_device_host(boost_val_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_val_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_32);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_64);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_val);
+        const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
 
         rocsparse::csrilu0_binsearch_kernel<BLOCKSIZE, WFSIZE, SLEEP>(m,
                                                                       csr_row_ptr,
@@ -110,12 +103,7 @@ namespace rocsparse
                                                                       boost_val);
     }
 
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
-              uint32_t HASH,
-              typename T,
-              typename U,
-              typename V>
+    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t HASH, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrilu0_hash(rocsparse_int        m,
                       const rocsparse_int* csr_row_ptr,
@@ -129,14 +117,18 @@ namespace rocsparse
                       double               tol,
                       rocsparse_index_base idx_base,
                       int                  enable_boost,
-                      U                    boost_tol_device_host,
-                      V                    boost_val_device_host)
+                      size_t               size_boost_tol,
+                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, boost_tol_32),
+                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, boost_tol_64),
+                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
+                      bool is_host_mode)
     {
-        auto boost_tol = (enable_boost) ? rocsparse::load_scalar_device_host(boost_tol_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_tol_device_host);
 
-        auto boost_val = (enable_boost) ? rocsparse::load_scalar_device_host(boost_val_device_host)
-                                        : rocsparse::zero_scalar_device_host(boost_val_device_host);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_32);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_64);
+        const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
+
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_val);
 
         rocsparse::csrilu0_hash_kernel<BLOCKSIZE, WFSIZE, HASH>(m,
                                                                 csr_row_ptr,
@@ -154,7 +146,7 @@ namespace rocsparse
                                                                 boost_val);
     }
 
-    template <typename T, typename U, typename V>
+    template <typename T>
     static rocsparse_status csrilu0_dispatch(rocsparse_handle          handle,
                                              rocsparse_int             m,
                                              rocsparse_int             nnz,
@@ -165,8 +157,8 @@ namespace rocsparse
                                              rocsparse_mat_info        info,
                                              rocsparse_solve_policy    policy,
                                              void*                     temp_buffer,
-                                             U                         boost_tol_device_host,
-                                             V                         boost_val_device_host)
+                                             const void*               boost_tol,
+                                             const T*                  boost_val)
     {
         // Check for valid handle and matrix descriptor
         // Stream
@@ -192,6 +184,9 @@ namespace rocsparse
         dim3 csrilu0_blocks((m * handle->wavefront_size - 1) / CSRILU0_DIM + 1);
         dim3 csrilu0_threads(CSRILU0_DIM);
 
+        const float*  boost_tol_32 = (info->boost_enable) ? (const float*)boost_tol : nullptr;
+        const double* boost_tol_64 = (info->boost_enable) ? (const double*)boost_tol : nullptr;
+
         if(gcn_arch_name == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2)
         {
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
@@ -212,8 +207,11 @@ namespace rocsparse
                 info->singular_tol,
                 descr->base,
                 info->boost_enable,
-                boost_tol_device_host,
-                boost_val_device_host);
+                info->boost_tol_size,
+                ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                handle->pointer_mode == rocsparse_pointer_mode_host);
         }
         else
         {
@@ -239,8 +237,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
                 else if(max_nnz < 64)
                 {
@@ -262,8 +263,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
                 else if(max_nnz < 128)
                 {
@@ -285,8 +289,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
                 else if(max_nnz < 256)
                 {
@@ -308,8 +315,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
                 else if(max_nnz < 512)
                 {
@@ -331,8 +341,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
                 else
                 {
@@ -354,8 +367,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
             }
             else if(handle->wavefront_size == 64)
@@ -380,8 +396,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
                 else if(max_nnz < 128)
                 {
@@ -403,8 +422,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
                 else if(max_nnz < 256)
                 {
@@ -426,8 +448,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
                 else if(max_nnz < 512)
                 {
@@ -449,8 +474,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
                 else if(max_nnz < 1024)
                 {
@@ -472,8 +500,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
                 else
                 {
@@ -495,8 +526,11 @@ namespace rocsparse
                         info->singular_tol,
                         descr->base,
                         info->boost_enable,
-                        boost_tol_device_host,
-                        boost_val_device_host);
+                        info->boost_tol_size,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
                 }
             }
             else
@@ -573,7 +607,7 @@ namespace rocsparse
         return rocsparse_status_continue;
     }
 
-    template <typename T, typename U>
+    template <typename T>
     static rocsparse_status csrilu0_core(rocsparse_handle          handle,
                                          rocsparse_int             m,
                                          rocsparse_int             nnz,
@@ -585,47 +619,24 @@ namespace rocsparse
                                          rocsparse_solve_policy    policy,
                                          void*                     temp_buffer)
     {
-
-        if(handle->pointer_mode == rocsparse_pointer_mode_device)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::csrilu0_dispatch(handle,
-                                            m,
-                                            nnz,
-                                            descr,
-                                            csr_val,
-                                            csr_row_ptr,
-                                            csr_col_ind,
-                                            info,
-                                            policy,
-                                            temp_buffer,
-                                            reinterpret_cast<const U*>(info->boost_tol),
-                                            reinterpret_cast<const T*>(info->boost_val)));
-            return rocsparse_status_success;
-        }
-        else
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_dispatch(
-                handle,
-                m,
-                nnz,
-                descr,
-                csr_val,
-                csr_row_ptr,
-                csr_col_ind,
-                info,
-                policy,
-                temp_buffer,
-                (info->boost_enable != 0) ? *reinterpret_cast<const U*>(info->boost_tol)
-                                          : static_cast<U>(0),
-                (info->boost_enable != 0) ? *reinterpret_cast<const T*>(info->boost_val)
-                                          : static_cast<T>(0)));
-            return rocsparse_status_success;
-        }
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrilu0_dispatch(handle,
+                                        m,
+                                        nnz,
+                                        descr,
+                                        csr_val,
+                                        csr_row_ptr,
+                                        csr_col_ind,
+                                        info,
+                                        policy,
+                                        temp_buffer,
+                                        info->boost_tol,
+                                        reinterpret_cast<const T*>(info->boost_val)));
+        return rocsparse_status_success;
     }
 }
 
-template <typename T, typename U>
+template <typename T>
 rocsparse_status rocsparse::csrilu0_template(rocsparse_handle          handle,
                                              rocsparse_int             m,
                                              rocsparse_int             nnz,
@@ -658,7 +669,7 @@ rocsparse_status rocsparse::csrilu0_template(rocsparse_handle          handle,
         return rocsparse_status_success;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_core<T, U>(
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_core(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
     return rocsparse_status_success;
 }
@@ -677,7 +688,7 @@ extern "C" rocsparse_status rocsparse_scsrilu0_numeric_boost(rocsparse_handle   
 try
 {
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, boost_tol, boost_val));
+        handle, info, enable_boost, sizeof(float), boost_tol, boost_val));
     return rocsparse_status_success;
 }
 catch(...)
@@ -693,7 +704,7 @@ extern "C" rocsparse_status rocsparse_dcsrilu0_numeric_boost(rocsparse_handle   
 try
 {
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, boost_tol, boost_val));
+        handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
     return rocsparse_status_success;
 }
 catch(...)
@@ -710,7 +721,7 @@ extern "C" rocsparse_status
 try
 {
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, boost_tol, boost_val));
+        handle, info, enable_boost, sizeof(float), boost_tol, boost_val));
     return rocsparse_status_success;
 }
 catch(...)
@@ -727,7 +738,7 @@ extern "C" rocsparse_status
 try
 {
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, boost_tol, boost_val));
+        handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
     return rocsparse_status_success;
 }
 catch(...)
@@ -743,7 +754,7 @@ extern "C" rocsparse_status rocsparse_dscsrilu0_numeric_boost(rocsparse_handle  
 try
 {
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, boost_tol, boost_val));
+        handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
     return rocsparse_status_success;
 }
 catch(...)
@@ -760,7 +771,7 @@ extern "C" rocsparse_status
 try
 {
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
-        handle, info, enable_boost, boost_tol, boost_val));
+        handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
     return rocsparse_status_success;
 }
 catch(...)
@@ -805,18 +816,10 @@ extern "C" rocsparse_status rocsparse_scsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
-    if(info != nullptr && info->use_double_prec_tol)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template<float, double>(
-            handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
-        return rocsparse_status_success;
-    }
-    else
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template<float, float>(
-            handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
-        return rocsparse_status_success;
-    }
+
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template(
+        handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
+    return rocsparse_status_success;
 }
 catch(...)
 {
@@ -835,7 +838,7 @@ extern "C" rocsparse_status rocsparse_dcsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
-    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template<double, double>(
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
     return rocsparse_status_success;
 }
@@ -856,18 +859,9 @@ extern "C" rocsparse_status rocsparse_ccsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
-    if(info != nullptr && info->use_double_prec_tol)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template<rocsparse_float_complex, double>(
-            handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
-        return rocsparse_status_success;
-    }
-    else
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template<rocsparse_float_complex, float>(
-            handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
-        return rocsparse_status_success;
-    }
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template(
+        handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
+    return rocsparse_status_success;
 }
 catch(...)
 {
@@ -886,7 +880,7 @@ extern "C" rocsparse_status rocsparse_zcsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
-    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template<rocsparse_double_complex, double>(
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
     return rocsparse_status_success;
 }
@@ -1062,21 +1056,9 @@ extern "C" rocsparse_status
     rocsparse_csrilu0_set_tolerance(rocsparse_handle handle, rocsparse_mat_info info, double tol)
 try
 {
-    // Check for valid handle and matrix descriptor
-    if(handle == nullptr)
-    {
-        return rocsparse_status_invalid_handle;
-    }
-
-    if(info == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-
-    if(tol < 0)
-    {
-        return rocsparse_status_invalid_value;
-    }
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, info);
+    ROCSPARSE_CHECKARG(2, tol, (tol < 0), rocsparse_status_invalid_value);
 
     // Logging
     rocsparse::log_trace(handle, "rocsparse_csrilu0_set_tolerance", (const void*&)info, tol);
@@ -1094,21 +1076,9 @@ extern "C" rocsparse_status
     rocsparse_csrilu0_get_tolerance(rocsparse_handle handle, rocsparse_mat_info info, double* tol)
 try
 {
-    // Check for valid handle and matrix descriptor
-    if(handle == nullptr)
-    {
-        return rocsparse_status_invalid_handle;
-    }
-
-    if(info == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-
-    if(tol == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, info);
+    ROCSPARSE_CHECKARG_POINTER(2, tol);
 
     // Logging
     rocsparse::log_trace(handle, "rocsparse_csrilu0_get_tolerance", (const void*&)info, tol);

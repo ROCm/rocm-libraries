@@ -65,7 +65,7 @@ namespace rocsparse
                                              const I*                  coo_col_ind,
                                              void*                     temp_buffer);
 
-    template <typename T, typename I, typename A, typename B, typename C, typename U>
+    template <typename T, typename I, typename A, typename B, typename C>
     rocsparse_status coomm_template_dispatch(rocsparse_handle          handle,
                                              rocsparse_operation       trans_A,
                                              rocsparse_operation       trans_B,
@@ -76,7 +76,7 @@ namespace rocsparse
                                              int64_t                   nnz,
                                              I                         batch_count_A,
                                              int64_t                   batch_stride_A,
-                                             U                         alpha_device_host,
+                                             const T*                  alpha_device_host,
                                              const rocsparse_mat_descr descr,
                                              const A*                  coo_val,
                                              const I*                  coo_row_ind,
@@ -86,7 +86,7 @@ namespace rocsparse
                                              I                         batch_count_B,
                                              int64_t                   batch_stride_B,
                                              rocsparse_order           order_B,
-                                             U                         beta_device_host,
+                                             const T*                  beta_device_host,
                                              C*                        dense_C,
                                              int64_t                   ldc,
                                              I                         batch_count_C,
