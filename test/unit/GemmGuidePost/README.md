@@ -37,7 +37,7 @@ The following steps are needed to generate a kernel from Tensile that can be run
 
 ## Generating A C++ Version
 
-6. Run the [remove_unused_macros](../../../scripts/remove_unused_macros.py) script and [assembly_to_instructions](../../../scripts/assembly_to_instructions.py) script on the assembly file to generate C++ for testing.  Don't forget to add the C++ file to the [CMakeLists.txt](../../../CMakeLists.txt).
+6. Run the [remove_unused_macros](../../../scripts/remove_unused_macros.py) script and [assembly_to_instructions](../../../scripts/assembly_to_instructions.py) script on the assembly file to generate C++ for testing.  Don't forget to add the C++ file to the [test/CMakeLists.txt](../../../test/CMakeLists.txt).
 
     ```bash
     ./scripts/remove_unused_macros.py ./input.s > tmp.s && ./scripts/assembly_to_instructions.py --leave_comments --instruction_list --ignore_registers --remove_name_label --function_name="kernel" tmp.s > out.cpp
