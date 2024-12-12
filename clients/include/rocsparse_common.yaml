@@ -444,7 +444,7 @@ All rocsparse_gtsv_interleaved_alg: &all_rocsparse_gtsv_interleaved_alg
 
 All rocsparse_gpsv_interleaved_alg: &all_rocsparse_gpsv_interleaved_alg
         [rocsparse_gpsv_interleaved_alg_default,
-	 rocsparse_gpsv_interleaved_alg_qr]
+         rocsparse_gpsv_interleaved_alg_qr]
 
 # The Arguments struct passed directly to C++. See rocsparse_arguments.hpp.
 # The order of the entries is significant, so it can't simply be a dictionary.
