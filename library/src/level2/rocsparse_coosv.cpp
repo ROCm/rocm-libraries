@@ -62,8 +62,11 @@ rocsparse_status rocsparse::coosv_buffer_size_template(rocsparse_handle         
     ROCSPARSE_CHECKARG_ENUM(1, trans);
 
     // Check matrix type
-    ROCSPARSE_CHECKARG(
-        4, descr, (descr->type != rocsparse_matrix_type_general), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4,
+                       descr,
+                       (descr->type != rocsparse_matrix_type_general
+                        && descr->type != rocsparse_matrix_type_triangular),
+                       rocsparse_status_not_implemented);
 
     // Check matrix sorting mode
     ROCSPARSE_CHECKARG(4,
@@ -179,8 +182,11 @@ rocsparse_status rocsparse::coosv_analysis_template(rocsparse_handle          ha
     ROCSPARSE_CHECKARG_ENUM(10, solve);
 
     // Check matrix type
-    ROCSPARSE_CHECKARG(
-        4, descr, (descr->type != rocsparse_matrix_type_general), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4,
+                       descr,
+                       (descr->type != rocsparse_matrix_type_general
+                        && descr->type != rocsparse_matrix_type_triangular),
+                       rocsparse_status_not_implemented);
     // Check matrix sorting mode
     ROCSPARSE_CHECKARG(4,
                        descr,
@@ -333,8 +339,11 @@ rocsparse_status rocsparse::coosv_solve_template(rocsparse_handle          handl
     ROCSPARSE_CHECKARG_ENUM(12, policy);
 
     // Check matrix type
-    ROCSPARSE_CHECKARG(
-        5, descr, (descr->type != rocsparse_matrix_type_general), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(5,
+                       descr,
+                       (descr->type != rocsparse_matrix_type_general
+                        && descr->type != rocsparse_matrix_type_triangular),
+                       rocsparse_status_not_implemented);
 
     // Check matrix sorting mode
     ROCSPARSE_CHECKARG(5,

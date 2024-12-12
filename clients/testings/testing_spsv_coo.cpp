@@ -89,13 +89,14 @@ void testing_spsv_coo_bad_arg(const Arguments& arg)
 template <typename I, typename T>
 void testing_spsv_coo(const Arguments& arg)
 {
-    I                    M       = arg.M;
-    I                    N       = arg.N;
-    rocsparse_operation  trans_A = arg.transA;
-    rocsparse_index_base base    = arg.baseA;
-    rocsparse_spsv_alg   alg     = arg.spsv_alg;
-    rocsparse_diag_type  diag    = arg.diag;
-    rocsparse_fill_mode  uplo    = arg.uplo;
+    I                     M           = arg.M;
+    I                     N           = arg.N;
+    rocsparse_operation   trans_A     = arg.transA;
+    rocsparse_index_base  base        = arg.baseA;
+    rocsparse_spsv_alg    alg         = arg.spsv_alg;
+    rocsparse_diag_type   diag        = arg.diag;
+    rocsparse_fill_mode   uplo        = arg.uplo;
+    rocsparse_matrix_type matrix_type = arg.matrix_type;
 
     rocsparse_spsv_stage buffersize = rocsparse_spsv_stage_buffer_size;
     rocsparse_spsv_stage preprocess = rocsparse_spsv_stage_preprocess;
@@ -171,6 +172,9 @@ void testing_spsv_coo(const Arguments& arg)
 
     CHECK_ROCSPARSE_ERROR(
         rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag, sizeof(diag)));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(
+        A, rocsparse_spmat_matrix_type, &matrix_type, sizeof(matrix_type)));
 
     // Query SpSV buffer
     size_t buffer_size;

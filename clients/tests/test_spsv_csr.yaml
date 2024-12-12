@@ -74,6 +74,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
 
 
 - name: spsv_csr_file
@@ -90,6 +91,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
   filename: [rma10,
              nos1,
              nos3,
@@ -110,6 +112,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
   filename: [mplate,
              mc2depi]
 
@@ -127,6 +130,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
 
 
 - name: spsv_csr_file
@@ -143,6 +147,7 @@ Tests:
   baseA: [rocsparse_index_base_one]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
   filename: [mac_econ_fwd500,
              nos2,
              nos4,
@@ -163,6 +168,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
   filename: [Chevron2]
 
 - name: spsv_csr
@@ -178,6 +184,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
 
 - name: spsv_csr
   category: nightly
@@ -192,6 +199,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
 
 - name: spsv_csr_file
   category: nightly
@@ -207,6 +215,7 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
   filename: [bmwcra_1,
              amazon0312,
              sme3Dc,
@@ -227,6 +236,7 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
+  matrix_type: [rocsparse_matrix_type_general]
   filename: [Chevron4]
 
 - name: spsv_csr_graph_test
@@ -242,4 +252,5 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   spsv_alg: [rocsparse_spsv_alg_default]
   matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
   graph_test: true

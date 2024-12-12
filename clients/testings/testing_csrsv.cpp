@@ -75,7 +75,8 @@ void testing_csrsv_bad_arg(const Arguments& arg)
 
     for(auto matrix_type : rocsparse_matrix_type_t::values)
     {
-        if(matrix_type != rocsparse_matrix_type_general)
+        if(matrix_type != rocsparse_matrix_type_general
+           && matrix_type != rocsparse_matrix_type_triangular)
         {
             CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_type(descr, matrix_type));
             EXPECT_ROCSPARSE_STATUS(rocsparse_csrsv_buffer_size<T>(PARAMS_BUFFER_SIZE),

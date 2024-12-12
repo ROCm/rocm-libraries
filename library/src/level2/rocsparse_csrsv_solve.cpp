@@ -300,8 +300,11 @@ rocsparse_status rocsparse::csrsv_solve_template(rocsparse_handle          handl
     ROCSPARSE_CHECKARG_ENUM(12, policy);
 
     // Check matrix type
-    ROCSPARSE_CHECKARG(
-        5, descr, (descr->type != rocsparse_matrix_type_general), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(5,
+                       descr,
+                       (descr->type != rocsparse_matrix_type_general
+                        && descr->type != rocsparse_matrix_type_triangular),
+                       rocsparse_status_not_implemented);
 
     // Check matrix sorting mode
 
