@@ -159,7 +159,15 @@ rocsparse_status rocsparse_zcheck_matrix_gebsr_buffer_size(rocsparse_handle    h
 *  \brief Check matrix to see if it is valid.
 *
 *  \details
-*  \p rocsparse_check_matrix_gebsr checks if the input GEBSR matrix is valid.
+*  \p rocsparse_check_matrix_gebsr checks if the input GEBSR matrix is valid. It performs basic sanity checks on the input 
+*  matrix and tries to detect issues in the data. This includes looking for 'nan' or 'inf' values in the data arrays,
+*  invalid column indices and row offsets, whether the matrix is triangular or not, whether there are duplicate 
+*  indices or whether the column indices are not sorted when they should be. If an issue is found, it is written to the 
+*  \p data_status parameter. 
+*
+*  Performing the above checks involves two steps. First the user calls \p rocsparse_Xcheck_matrix_gebsr_buffer_size in order
+*  to determine the required buffer size. The user then allocates this buffer and passes it to \p rocsparse_Xcheck_matrix_gebsr.
+*  Any issues detected will be written to the \p data_status parameter which is always a host variable regardless of pointer mode.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -206,6 +214,68 @@ rocsparse_status rocsparse_zcheck_matrix_gebsr_buffer_size(rocsparse_handle    h
 *  \retval rocsparse_status_invalid_size \p mb \p nb \p nnzb \p row_block_dim or \p col_block_dim is invalid.
 *  \retval rocsparse_status_invalid_pointer \p bsr_val, \p bsr_row_ptr, \p bsr_col_ind, \p temp_buffer or \p data_status pointer
 *          is invalid.
+*
+*  \par Example
+*  In this example we want to check whether a GEBSR matrix has valid values. The matrix passed
+*  is invalid because it contains a nan entry in the values array.
+*
+*  \code{.c}
+*   // 1 2 | 0 0
+*   // 0 3 | 0 0
+*   // ---------
+*   // 4 5 | 7 8
+*   // 0 6 | 0 9
+*   std::vector<int> hbsr_row_ptr = {0, 1, 3};
+*   std::vector<int> hbsr_col_ind = {0, 0, 1};
+*   std::vector<float> hbsr_val = {1, 2, 0, 3, 4, 5, 0, 6, 7, 8, std::numeric_limits<double>::quiet_NaN(), 9}; //<---contains nan
+*
+*   int mb = 2;
+*   int nb = 2;
+*   int nnzb = 3;
+*   int block_dim = 2;
+*
+*   int* dbsr_row_ptr = nullptr;
+*   int* dbsr_col_ind = nullptr;
+*   float* dbsr_val = nullptr;
+*   hipMalloc((void**)&dbsr_row_ptr, sizeof(int) * (mb + 1));
+*   hipMalloc((void**)&dbsr_col_ind, sizeof(int) * nnzb);
+*   hipMalloc((void**)&dbsr_val, sizeof(float) * nnzb * block_dim * block_dim);
+*
+*   hipMemcpy(dbsr_row_ptr, hbsr_row_ptr.data(), sizeof(int) * (mb + 1), hipMemcpyHostToDevice);
+*   hipMemcpy(dbsr_col_ind, hbsr_col_ind.data(), sizeof(int) * nnzb, hipMemcpyHostToDevice);
+*   hipMemcpy(dbsr_val, hbsr_val.data(), sizeof(float) * nnzb * block_dim * block_dim, hipMemcpyHostToDevice);
+*
+*   rocsparse_handle handle;
+*   rocsparse_create_handle(&handle);
+*
+*   const rocsparse_direction direction = rocsparse_direction_row;
+*   const rocsparse_index_base idx_base = rocsparse_index_base_zero;
+*   const rocsparse_fill_mode fill_mode = rocsparse_fill_mode_upper;
+*   const rocsparse_matrix_type matrix_type = rocsparse_matrix_type_triangular;
+*   const rocsparse_storage_mode storage_mode = rocsparse_storage_mode_sorted;
+*
+*   rocsparse_data_status data_status;
+*
+*   size_t buffer_size;
+*   rocsparse_scheck_matrix_gebsr_buffer_size(handle, direction, mb, nb, nnzb, block_dim, block_dim,
+*       dbsr_val, dbsr_row_ptr, dbsr_col_ind, idx_base, matrix_type, fill_mode, storage_mode, &buffer_size);
+*   
+*   void* dbuffer = nullptr;
+*   hipMalloc((void**)&dbuffer, buffer_size);
+*
+*   rocsparse_scheck_matrix_gebsr(handle, direction, mb, nb, nnzb, block_dim, block_dim, dbsr_val, dbsr_row_ptr, 
+*       dbsr_col_ind, idx_base, matrix_type, fill_mode, storage_mode, &data_status, dbuffer);
+*
+*   std::cout << "data_status: " << data_status << std::endl;
+*
+*   hipFree(dbuffer);
+*
+*   rocsparse_destroy_handle(handle);
+*
+*   hipFree(dbsr_row_ptr);
+*   hipFree(dbsr_col_ind);
+*   hipFree(dbsr_val);
+*  \endcode
 */
 /**@{*/
 ROCSPARSE_EXPORT

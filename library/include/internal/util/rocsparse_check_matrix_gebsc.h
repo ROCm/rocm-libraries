@@ -159,7 +159,15 @@ rocsparse_status rocsparse_zcheck_matrix_gebsc_buffer_size(rocsparse_handle    h
 *  \brief Check matrix to see if it is valid.
 *
 *  \details
-*  \p rocsparse_check_matrix_gebsc checks if the input GEBSC matrix is valid.
+*  \p rocsparse_check_matrix_gebsc checks if the input GEBSC matrix is valid. It performs basic sanity checks on the input 
+*  matrix and tries to detect issues in the data. This includes looking for 'nan' or 'inf' values in the data arrays,
+*  invalid row indices or column offsets, whether the matrix is triangular or not, whether there are duplicate 
+*  indices or whether the row indices are not sorted when they should be. If an issue is found, it is written to the 
+*  \p data_status parameter. 
+*
+*  Performing the above checks involves two steps. First the user calls \p rocsparse_Xcheck_matrix_gebsr_buffer_size in order
+*  to determine the required buffer size. The user then allocates this buffer and passes it to \p rocsparse_Xcheck_matrix_gebsr.
+*  Any issues detected will be written to the \p data_status parameter which is always a host variable regardless of pointer mode.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.

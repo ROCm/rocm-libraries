@@ -140,7 +140,15 @@ rocsparse_status rocsparse_zcheck_matrix_csr_buffer_size(rocsparse_handle       
 *  \brief Check matrix to see if it is valid.
 *
 *  \details
-*  \p rocsparse_check_matrix_csr checks if the input CSR matrix is valid.
+*  \p rocsparse_check_matrix_csr checks if the input CSR matrix is valid. It performs basic sanity checks on the input 
+*  matrix and tries to detect issues in the data. This includes looking for 'nan' or 'inf' values in the data arrays,
+*  invalid column indices or row offsets, whether the matrix is triangular or not, whether there are duplicate 
+*  indices or whether the column indices are not sorted when they should be. If an issue is found, it is written to the 
+*  \p data_status parameter. 
+*
+*  Performing the above checks involves two steps. First the user calls \p rocsparse_Xcheck_matrix_csr_buffer_size in order
+*  to determine the required buffer size. The user then allocates this buffer and passes it to \p rocsparse_Xcheck_matrix_csr.
+*  Any issues detected will be written to the \p data_status parameter which is always a host variable regardless of pointer mode.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -181,6 +189,65 @@ rocsparse_status rocsparse_zcheck_matrix_csr_buffer_size(rocsparse_handle       
 *  \retval rocsparse_status_invalid_size \p m \p n or \p nnz is invalid.
 *  \retval rocsparse_status_invalid_pointer \p csr_val, \p csr_row_ptr, \p csr_col_ind, \p temp_buffer or \p data_status pointer
 *          is invalid.
+*
+*  \par Example
+*  In this example we want to check whether a CSR matrix has correct row pointer array. The matrix passed
+*  is invalid because it contains a -1 entry in the row pointer array.
+*
+*  \code{.c}
+*   // 1 2 0 0
+*   // 0 3 4 0
+*   // 2 0 1 1
+*   // 0 3 0 2
+*   std::vector<int> hcsr_row_ptr = {0, 2, -1, 7, 9}; // <---- invalid ptr array
+*   std::vector<int> hcsr_col_ind = {0, 1, 1, 2, 0, 2, 3, 1, 3};
+*   std::vector<float> hcsr_val = {1, 2, 3, 4, 2, 1, 1, 3, 2};
+*
+*   int m = 4;
+*   int n = 4;
+*   int nnz = 9;
+*
+*   int* dcsr_row_ptr = nullptr;
+*   int* dcsr_col_ind = nullptr;
+*   float* dcsr_val = nullptr;
+*   hipMalloc((void**)&dcsr_row_ptr, sizeof(int) * (m + 1));
+*   hipMalloc((void**)&dcsr_col_ind, sizeof(int) * nnz);
+*   hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
+*
+*   hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
+*   hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
+*   hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
+*
+*   rocsparse_handle handle;
+*   rocsparse_create_handle(&handle);
+*
+*   const rocsparse_index_base idx_base = rocsparse_index_base_zero;
+*   const rocsparse_fill_mode fill_mode = rocsparse_fill_mode_upper;
+*   const rocsparse_matrix_type matrix_type = rocsparse_matrix_type_general;
+*   const rocsparse_storage_mode storage_mode = rocsparse_storage_mode_sorted;
+*
+*   rocsparse_data_status data_status;
+*
+*   size_t buffer_size;
+*   rocsparse_scheck_matrix_csr_buffer_size(handle, m, n, nnz, dcsr_val, dcsr_row_ptr, dcsr_col_ind,
+*       idx_base, matrix_type, fill_mode, storage_mode, &buffer_size);
+*   
+*   void* dbuffer = nullptr;
+*   hipMalloc((void**)&dbuffer, buffer_size);
+*
+*   rocsparse_scheck_matrix_csr(handle, m, n, nnz, dcsr_val, dcsr_row_ptr, dcsr_col_ind, idx_base,
+*       matrix_type, fill_mode, storage_mode, &data_status, dbuffer);
+*
+*   std::cout << "data_status: " << data_status << std::endl;
+*
+*   hipFree(dbuffer);
+*
+*   rocsparse_destroy_handle(handle);
+*
+*   hipFree(dcsr_row_ptr);
+*   hipFree(dcsr_col_ind);
+*   hipFree(dcsr_val);
+*  \endcode
 */
 /**@{*/
 ROCSPARSE_EXPORT

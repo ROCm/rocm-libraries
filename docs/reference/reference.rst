@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocFFT documentation and API reference library
-  :keywords: rocFFT, ROCm, API, documentation
+  :description: rocSPARSE documentation and API reference library
+  :keywords: rocSPARSE, ROCm, API, documentation
 
 .. _api-index:
 
