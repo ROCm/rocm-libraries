@@ -217,11 +217,9 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
     HIP_CHECK(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
-    hipGraph_t graph;
-    if(TestFixture::use_graphs)
-    {
-        graph = test_utils::createGraphHelper(stream);
-    }
+    test_utils::GraphHelper gHelper;
+    if (TestFixture::use_graphs)
+        gHelper.startStreamCapture(stream);
 
     HIP_CHECK(hipcub::DeviceSpmv::CsrMV(d_temp_storage,
                                         temp_storage_bytes,
@@ -235,11 +233,8 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
                                         params.num_nonzeros,
                                         stream));
 
-    hipGraphExec_t graph_instance;
-    if(TestFixture::use_graphs)
-    {
-        graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-    }
+    if (TestFixture::use_graphs)
+        gHelper.createAndLaunchGraph(stream);
 
     HIP_CHECK(hipMemcpy(vector_y_in, params.d_vector_y, sizeof(T) * params.num_rows, hipMemcpyDeviceToHost));
 
@@ -257,7 +252,7 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
 
     if(TestFixture::use_graphs)
     {
-        test_utils::cleanupGraphHelper(graph, graph_instance);
+        gHelper.cleanupGraphHelper();
         HIP_CHECK(hipStreamDestroy(stream));
     }
 }

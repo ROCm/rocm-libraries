@@ -288,11 +288,9 @@ void sort_keys()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            hipGraph_t graph;
-            if(TestFixture::params::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::params::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             HIP_CHECK(invoke_sort_keys<descending>(d_temporary_storage,
                                                    temporary_storage_bytes,
@@ -303,11 +301,8 @@ void sort_keys()
                                                    end_bit,
                                                    stream));
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::params::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::params::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipFree(d_temporary_storage));
             HIP_CHECK(hipFree(d_keys_input));
@@ -323,16 +318,12 @@ void sort_keys()
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, expected));
 
             if(TestFixture::params::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
         }
     }
 
     if(TestFixture::params::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 template<bool Descending, class Key, class Value>
@@ -560,11 +551,9 @@ void sort_pairs()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            hipGraph_t graph;
-            if(TestFixture::params::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::params::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             HIP_CHECK(invoke_sort_pairs<descending>(d_temporary_storage,
                                                     temporary_storage_bytes,
@@ -577,11 +566,8 @@ void sort_pairs()
                                                     end_bit,
                                                     stream));
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::params::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::params::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipFree(d_temporary_storage));
             HIP_CHECK(hipFree(d_keys_input));
@@ -614,16 +600,12 @@ void sort_pairs()
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
 
             if(TestFixture::params::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
         }
     }
 
     if(TestFixture::params::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 template<bool Descending, class Key>
@@ -798,11 +780,9 @@ void sort_keys_double_buffer()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            hipGraph_t graph;
-            if(TestFixture::params::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::params::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             HIP_CHECK(invoke_sort_keys<descending>(d_temporary_storage,
                                                    temporary_storage_bytes,
@@ -812,11 +792,8 @@ void sort_keys_double_buffer()
                                                    end_bit,
                                                    stream));
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::params::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::params::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipFree(d_temporary_storage));
 
@@ -832,16 +809,12 @@ void sort_keys_double_buffer()
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, expected));
 
             if(TestFixture::params::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
         }
     }
 
     if(TestFixture::params::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 template<bool Descending, class Key, class Value>
@@ -1050,11 +1023,9 @@ void sort_pairs_double_buffer()
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            hipGraph_t graph;
-            if(TestFixture::params::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::params::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             HIP_CHECK(invoke_sort_pairs<descending>(d_temporary_storage,
                                                     temporary_storage_bytes,
@@ -1065,11 +1036,8 @@ void sort_pairs_double_buffer()
                                                     end_bit,
                                                     stream));
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::params::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::params::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipFree(d_temporary_storage));
 
@@ -1102,16 +1070,12 @@ void sort_pairs_double_buffer()
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
 
             if(TestFixture::params::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
         }
     }
 
     if(TestFixture::params::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 inline void sort_keys_over_4g()

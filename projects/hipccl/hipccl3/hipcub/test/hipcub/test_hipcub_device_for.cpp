@@ -115,20 +115,15 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
             std::vector<T> expected(input);
             std::for_each(expected.begin(), expected.end(), plus<T>());
 
-            hipGraph_t graph;
-            if(TestFixture::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             // Run
             HIP_CHECK(hipcub::ForEach(d_input, d_input + size, plus<T>(), stream));
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
@@ -144,18 +139,14 @@ TYPED_TEST(HipcubDeviceForTests, ForEach)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
             if(TestFixture::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
         }
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 template<class T>
@@ -283,20 +274,15 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
             std::vector<T> expected(input);
             std::for_each(expected.begin(), expected.begin() + n, plus<T>());
 
-            hipGraph_t graph;
-            if(TestFixture::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             // Run
             HIP_CHECK(hipcub::ForEachN(d_input, n, plus<T>(), stream));
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
@@ -312,18 +298,14 @@ TYPED_TEST(HipcubDeviceForTests, ForEachN)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
             if(TestFixture::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
         }
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 template<class T>

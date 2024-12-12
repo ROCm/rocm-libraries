@@ -215,11 +215,9 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            hipGraph_t graph;
-            if(TestFixture::params::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::params::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             HIP_CHECK(dispatch_adjacent_difference(left_constant,
                                                    copy_constant,
@@ -231,11 +229,8 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
                                                    op,
                                                    stream));
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::params::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::params::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             std::vector<output_type> output(size);
             HIP_CHECK(hipMemcpy(output.data(),
@@ -253,16 +248,12 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(output, expected));
 
             if(TestFixture::params::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
         }
     }
 
     if(TestFixture::params::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 // Params for tests

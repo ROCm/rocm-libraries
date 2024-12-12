@@ -170,20 +170,15 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             // allocate temporary storage
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
-            hipGraph_t graph;
-            if(TestFixture::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -215,9 +210,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
             if(TestFixture::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_flags));
@@ -231,9 +224,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 TEST(HipcubDeviceSelectTests, FlagNormalization)
@@ -436,20 +427,15 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             // allocate temporary storage
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
-            hipGraph_t graph;
-            if(TestFixture::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -481,9 +467,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
             if(TestFixture::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
             if(!inplace)
@@ -496,9 +480,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
@@ -610,20 +592,15 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
             // allocate temporary storage
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
-            hipGraph_t graph;
-            if(TestFixture::use_graphs)
-            {
-                graph = test_utils::createGraphHelper(stream);
-            }
+            test_utils::GraphHelper gHelper;
+            if (TestFixture::use_graphs)
+                gHelper.startStreamCapture(stream);
 
             // Run
             call(d_temp_storage, temp_storage_size_bytes);
 
-            hipGraphExec_t graph_instance;
-            if(TestFixture::use_graphs)
-            {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-            }
+            if (TestFixture::use_graphs)
+                gHelper.createAndLaunchGraph(stream);
 
             HIP_CHECK(hipDeviceSynchronize());
 
@@ -655,9 +632,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
             if(TestFixture::use_graphs)
-            {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
-            }
+                gHelper.cleanupGraphHelper();
 
             HIP_CHECK(hipFree(d_input));
             HIP_CHECK(hipFree(d_flags));
@@ -671,9 +646,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 std::vector<float> get_discontinuity_probabilities()
@@ -770,11 +743,9 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                     test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
                 HIP_CHECK(hipDeviceSynchronize());
 
-                hipGraph_t graph;
-                if(TestFixture::use_graphs)
-                {
-                    graph = test_utils::createGraphHelper(stream);
-                }
+                test_utils::GraphHelper gHelper;
+                if (TestFixture::use_graphs)
+                    gHelper.startStreamCapture(stream);
 
                 // Run
                 HIP_CHECK(hipcub::DeviceSelect::Unique(d_temp_storage,
@@ -785,11 +756,8 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                                                        input.size(),
                                                        stream));
 
-                hipGraphExec_t graph_instance;
-                if(TestFixture::use_graphs)
-                {
-                    graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-                }
+                if (TestFixture::use_graphs)
+                    gHelper.createAndLaunchGraph(stream);
 
                 HIP_CHECK(hipDeviceSynchronize());
 
@@ -813,9 +781,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                 ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
                 if(TestFixture::use_graphs)
-                {
-                    test_utils::cleanupGraphHelper(graph, graph_instance);
-                }
+                    gHelper.cleanupGraphHelper();
 
                 HIP_CHECK(hipFree(d_input));
                 HIP_CHECK(hipFree(d_output));
@@ -826,9 +792,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 TEST(HipcubDeviceSelectTests, UniqueDiscardOutputIterator)
@@ -1188,11 +1152,9 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
                 HIP_CHECK(
                     test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
-                hipGraph_t graph;
-                if(TestFixture::use_graphs)
-                {
-                    graph = test_utils::createGraphHelper(stream);
-                }
+                test_utils::GraphHelper gHelper;
+                if (TestFixture::use_graphs)
+                    gHelper.startStreamCapture(stream);
 
                 // run
                 HIP_CHECK(hipcub::DeviceSelect::UniqueByKey(d_temp_storage,
@@ -1206,11 +1168,8 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
                                                             equality_op,
                                                             stream));
 
-                hipGraphExec_t graph_instance;
-                if(TestFixture::use_graphs)
-                {
-                    graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
-                }
+                if (TestFixture::use_graphs)
+                    gHelper.createAndLaunchGraph(stream);
 
                 // Check if number of selected value is as expected
                 selected_count_type selected_count_output = 0;
@@ -1242,9 +1201,7 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
                     test_utils::assert_eq(output_values, expected_values, expected_values.size()));
 
                 if(TestFixture::use_graphs)
-                {
-                    test_utils::cleanupGraphHelper(graph, graph_instance);
-                }
+                    gHelper.cleanupGraphHelper();
 
                 HIP_CHECK(hipFree(d_keys_input));
                 HIP_CHECK(hipFree(d_values_input));
@@ -1257,9 +1214,7 @@ TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
     }
 
     if(TestFixture::use_graphs)
-    {
         HIP_CHECK(hipStreamDestroy(stream));
-    }
 }
 
 TEST(HipcubDeviceUniqueByKeyTests, LargeIndicesUniqueByKey)
