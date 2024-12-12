@@ -184,14 +184,17 @@ namespace rocsparse
         // Loop until pair has been inserted
         while(true)
         {
-            if(table[hash] == key)
+            // Load table[hash] exactly once in case it gets set by another thread
+            const I temp = table[hash];
+
+            if(temp == key)
             {
                 // Element already present, add value to exsiting entry
                 rocsparse::atomic_add(&data[BLOCKDIM * BLOCKDIM * hash + BLOCKDIM * row + col],
                                       val);
                 break;
             }
-            else if(table[hash] == empty)
+            else if(temp == empty)
             {
                 // If empty, add element with atomic
                 if(rocsparse::atomic_cas(&table[hash], empty, key) == empty)

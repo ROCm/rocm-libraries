@@ -337,21 +337,26 @@ namespace rocsparse
     template <uint32_t HASHVAL, uint32_t HASHSIZE, typename I>
     ROCSPARSE_DEVICE_ILF bool insert_key(I key, I* __restrict__ table)
     {
+        constexpr I empty = -1;
+
         // Compute hash
         I hash = (key * HASHVAL) & (HASHSIZE - 1);
 
         // Loop until key has been inserted
         while(true)
         {
-            if(table[hash] == key)
+            // Load table[hash] exactly once in case it gets set by another thread
+            const I temp = table[hash];
+
+            if(temp == key)
             {
                 // Element already present
                 return false;
             }
-            else if(table[hash] == -1)
+            else if(temp == empty)
             {
                 // If empty, add element with atomic
-                if(rocsparse::atomic_cas<I>(&table[hash], -1, key) == -1)
+                if(rocsparse::atomic_cas<I>(&table[hash], empty, key) == empty)
                 {
                     // Increment number of insertions
                     return true;
@@ -378,13 +383,16 @@ namespace rocsparse
         // Loop until pair has been inserted
         while(true)
         {
-            if(table[hash] == key)
+            // Load table[hash] exactly once in case it gets set by another thread
+            const I temp = table[hash];
+
+            if(temp == key)
             {
                 // Element already present, add value to exsiting entry
                 rocsparse::atomic_add(&data[hash], val);
                 break;
             }
-            else if(table[hash] == empty)
+            else if(temp == empty)
             {
                 // If empty, add element with atomic
                 if(rocsparse::atomic_cas<I>(&table[hash], empty, key) == empty)
