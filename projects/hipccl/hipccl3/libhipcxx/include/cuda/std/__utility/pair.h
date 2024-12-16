@@ -78,7 +78,7 @@
 #include <cuda/std/__utility/piecewise_construct.h>
 #include <cuda/std/cstddef>
 
-// Provide compatability between `std::pair` and `cuda::std::pair`
+// Provide compatibility between `std::pair` and `cuda::std::pair`
 #if !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <utility>
 #endif // !_CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
@@ -346,7 +346,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
       : __base(_CUDA_VSTD::forward<_U1>(__p.first), _CUDA_VSTD::forward<_U2>(__p.second))
   {}
 
-  // std compatability
+  // std compatibility
 #if !_CCCL_COMPILER(NVRTC)  && !defined(_CCCL_COMPILER_HIPRTC)
   template <class _U1,
             class _U2,

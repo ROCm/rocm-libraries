@@ -99,7 +99,7 @@ public:
    *
    * This constructor provides implicit conversion from `hipStream_t`.
    *
-   * \note: It is the callers responsibilty to ensure the `stream_ref` does not
+   * \note: It is the callers responsibility to ensure the `stream_ref` does not
    * outlive the stream identified by the `hipStream_t` handle.
    *
    */
