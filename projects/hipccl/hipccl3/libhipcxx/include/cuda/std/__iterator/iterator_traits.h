@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX___ITERATOR_ITERATOR_TRAITS_H
 #define _LIBCUDACXX___ITERATOR_ITERATOR_TRAITS_H
 
@@ -582,8 +599,10 @@ _LIBCUDACXX_INLINE_VAR constexpr bool __has_member_iterator_category<_Tp, void_t
 template <class _Ip>
 _LIBCUDACXX_CONCEPT __specifies_members =
   __has_member_value_type<_Ip> && __has_member_difference_type<_Ip> && __has_member_reference<_Ip>
-  && __has_member_iterator_category<_Ip>;
-
+  && __has_member_iterator_category<_Ip> && __has_member_pointer<_Ip>;
+// NOTE(HIP/AMD): In C++17, all member types including pointer must be present.
+// "If Iter does not have any of the five nested types above, then this template has no members 
+// by any of those names (std::iterator_traits is SFINAE-friendly)."
 template <class, class = void>
 struct __iterator_traits_member_pointer_or_void
 {

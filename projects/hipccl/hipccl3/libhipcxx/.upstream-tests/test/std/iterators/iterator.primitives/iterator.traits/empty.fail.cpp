@@ -127,7 +127,7 @@ int main(int, char**)
     typedef T::iterator_category CT; // expected-error-re {{no type named 'iterator_category' in
                                      // 'cuda::std::iterator_traits<{{.+}}>}}
   }
-
+#if TEST_STD_VER <= 17
   {
     typedef cuda::std::iterator_traits<NotAnIteratorNoPointer> T;
     typedef T::difference_type DT; // expected-error-re {{no type named 'difference_type' in
@@ -141,7 +141,7 @@ int main(int, char**)
     typedef T::iterator_category CT; // expected-error-re {{no type named 'iterator_category' in
                                      // 'cuda::std::iterator_traits<{{.+}}>}}
   }
-
+#endif
   {
     typedef cuda::std::iterator_traits<NotAnIteratorNoReference> T;
     typedef T::difference_type DT; // expected-error-re {{no type named 'difference_type' in

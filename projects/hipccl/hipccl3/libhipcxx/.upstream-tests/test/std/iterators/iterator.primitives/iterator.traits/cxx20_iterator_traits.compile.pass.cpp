@@ -7,6 +7,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 // UNSUPPORTED: c++03, c++11, c++14
 
 // template<class T>
@@ -122,12 +139,14 @@ struct NoPointerMember
   __host__ __device__ value_type* operator->() const;
 };
 using NoPointerMemberTraits = cuda::std::iterator_traits<NoPointerMember>;
+#if TEST_STD_VER >= 20
 static_assert(cuda::std::same_as<NoPointerMemberTraits::iterator_category, NoPointerMember::iterator_category>);
 static_assert(cuda::std::same_as<NoPointerMemberTraits::value_type, NoPointerMember::value_type>);
 static_assert(cuda::std::same_as<NoPointerMemberTraits::difference_type, NoPointerMember::difference_type>);
 static_assert(cuda::std::same_as<NoPointerMemberTraits::reference, NoPointerMember::reference>);
 static_assert(cuda::std::same_as<NoPointerMemberTraits::pointer, void>);
 static_assert(!has_iterator_concept_v<NoPointerMemberTraits>);
+#endif
 
 struct IterConcept
 {
