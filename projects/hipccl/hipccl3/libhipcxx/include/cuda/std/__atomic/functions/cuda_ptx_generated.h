@@ -53,6 +53,7 @@
 #include <cuda/std/__atomic/order.h>
 #include <cuda/std/__atomic/functions/common.h>
 #include <cuda/std/__atomic/functions/cuda_ptx_generated_helper.h>
+#include <cuda/std/__atomic/functions/cuda_local.h>
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
@@ -853,6 +854,7 @@ static inline _CCCL_DEVICE void __atomic_load_cuda(const _Type* __ptr, _Type& __
   using __proxy_tag      = typename __atomic_cuda_deduce_bitwise<_Type>::__tag;
   const __proxy_t* __ptr_proxy = reinterpret_cast<const __proxy_t*>(__ptr);
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
+  if (__cuda_load_weak_if_local(__ptr_proxy, __dst_proxy, sizeof(__proxy_t))) {{return;}}
   __cuda_atomic_bind_load<__proxy_t, __proxy_tag, _Sco, __atomic_cuda_mmio_disable> __bound_load{__ptr_proxy, __dst_proxy};
   __cuda_atomic_load_memory_order_dispatch(__bound_load, __memorder, _Sco{});
 }
@@ -863,6 +865,7 @@ static inline _CCCL_DEVICE void __atomic_load_cuda(const _Type volatile* __ptr, 
   using __proxy_tag      = typename __atomic_cuda_deduce_bitwise<_Type>::__tag;
   const __proxy_t* __ptr_proxy = reinterpret_cast<const __proxy_t*>(const_cast<_Type*>(__ptr));
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
+  if (__cuda_load_weak_if_local(__ptr_proxy, __dst_proxy, sizeof(__proxy_t))) {{return;}}
   __cuda_atomic_bind_load<__proxy_t, __proxy_tag, _Sco, __atomic_cuda_mmio_disable> __bound_load{__ptr_proxy, __dst_proxy};
   __cuda_atomic_load_memory_order_dispatch(__bound_load, __memorder, _Sco{});
 }
@@ -1193,6 +1196,7 @@ static inline _CCCL_DEVICE void __atomic_store_cuda(_Type* __ptr, _Type& __val, 
   using __proxy_tag      = typename __atomic_cuda_deduce_bitwise<_Type>::__tag;
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(__ptr);
   __proxy_t* __val_proxy = reinterpret_cast<__proxy_t*>(&__val);
+  if (__cuda_store_weak_if_local(__ptr_proxy, __val_proxy, sizeof(__proxy_t))) {{return;}}
   __cuda_atomic_bind_store<__proxy_t, __proxy_tag, _Sco, __atomic_cuda_mmio_disable> __bound_store{__ptr_proxy, __val_proxy};
   __cuda_atomic_store_memory_order_dispatch(__bound_store, __memorder, _Sco{});
 }
@@ -1203,6 +1207,7 @@ static inline _CCCL_DEVICE void __atomic_store_cuda(volatile _Type* __ptr, _Type
   using __proxy_tag      = typename __atomic_cuda_deduce_bitwise<_Type>::__tag;
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(const_cast<_Type*>(__ptr));
   __proxy_t* __val_proxy = reinterpret_cast<__proxy_t*>(&__val);
+  if (__cuda_store_weak_if_local(__ptr_proxy, __val_proxy, sizeof(__proxy_t))) {{return;}}
   __cuda_atomic_bind_store<__proxy_t, __proxy_tag, _Sco, __atomic_cuda_mmio_disable> __bound_store{__ptr_proxy, __val_proxy};
   __cuda_atomic_store_memory_order_dispatch(__bound_store, __memorder, _Sco{});
 }
@@ -1657,6 +1662,8 @@ static inline _CCCL_DEVICE bool __atomic_compare_exchange_cuda(_Type* __ptr, _Ty
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(__ptr);
   __proxy_t* __exp_proxy = reinterpret_cast<__proxy_t*>(__exp);
   __proxy_t* __des_proxy  = reinterpret_cast<__proxy_t*>(&__des);
+  bool __res = false;
+  if (__cuda_compare_exchange_weak_if_local(__ptr_proxy, __exp_proxy, __des_proxy, &__res)) {return __res;}
   __cuda_atomic_bind_compare_exchange<__proxy_t, __proxy_tag, _Sco> __bound_compare_swap{__ptr_proxy, __exp_proxy, __des_proxy};
   return __cuda_atomic_compare_swap_memory_order_dispatch(__bound_compare_swap, __success_memorder, __failure_memorder, _Sco{});
 }
@@ -1668,6 +1675,8 @@ static inline _CCCL_DEVICE bool __atomic_compare_exchange_cuda(_Type volatile* _
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(const_cast<_Type*>(__ptr));
   __proxy_t* __exp_proxy = reinterpret_cast<__proxy_t*>(__exp);
   __proxy_t* __des_proxy  = reinterpret_cast<__proxy_t*>(&__des);
+  bool __res = false;
+  if (__cuda_compare_exchange_weak_if_local(__ptr_proxy, __exp_proxy, __des_proxy, &__res)) {return __res;}
   __cuda_atomic_bind_compare_exchange<__proxy_t, __proxy_tag, _Sco> __bound_compare_swap{__ptr_proxy, __exp_proxy, __des_proxy};
   return __cuda_atomic_compare_swap_memory_order_dispatch(__bound_compare_swap, __success_memorder, __failure_memorder, _Sco{});
 }
@@ -2120,6 +2129,7 @@ static inline _CCCL_DEVICE void __atomic_exchange_cuda(_Type* __ptr, _Type& __ol
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(__ptr);
   __proxy_t* __old_proxy = reinterpret_cast<__proxy_t*>(&__old);
   __proxy_t* __new_proxy  = reinterpret_cast<__proxy_t*>(&__new);
+  if(__cuda_exchange_weak_if_local(__ptr_proxy, __new_proxy, __old_proxy)) {{return;}}
   __cuda_atomic_bind_exchange<__proxy_t, __proxy_tag, _Sco> __bound_swap{__ptr_proxy, __old_proxy, __new_proxy};
   __cuda_atomic_exchange_memory_order_dispatch(__bound_swap, __memorder, _Sco{});
 }
@@ -2131,6 +2141,7 @@ static inline _CCCL_DEVICE void __atomic_exchange_cuda(_Type volatile* __ptr, _T
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(const_cast<_Type*>(__ptr));
   __proxy_t* __old_proxy = reinterpret_cast<__proxy_t*>(&__old);
   __proxy_t* __new_proxy  = reinterpret_cast<__proxy_t*>(&__new);
+  if(__cuda_exchange_weak_if_local(__ptr_proxy, __new_proxy, __old_proxy)) {{return;}}
   __cuda_atomic_bind_exchange<__proxy_t, __proxy_tag, _Sco> __bound_swap{__ptr_proxy, __old_proxy, __new_proxy};
   __cuda_atomic_exchange_memory_order_dispatch(__bound_swap, __memorder, _Sco{});
 }
@@ -2586,6 +2597,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_add_cuda(_Type* __ptr, _Up __op,
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(__ptr);
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_add_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_add<__proxy_t, __proxy_tag, _Sco> __bound_add{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_add, __memorder, _Sco{});
   return __dst;
@@ -2601,6 +2613,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_add_cuda(_Type volatile* __ptr, 
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(const_cast<_Type*>(__ptr));
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_add_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_add<__proxy_t, __proxy_tag, _Sco> __bound_add{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_add, __memorder, _Sco{});
   return __dst;
@@ -2789,6 +2802,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_and_cuda(_Type* __ptr, _Up __op,
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(__ptr);
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_and_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_and<__proxy_t, __proxy_tag, _Sco> __bound_and{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_and, __memorder, _Sco{});
   return __dst;
@@ -2804,6 +2818,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_and_cuda(_Type volatile* __ptr, 
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(const_cast<_Type*>(__ptr));
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_and_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_and<__proxy_t, __proxy_tag, _Sco> __bound_and{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_and, __memorder, _Sco{});
   return __dst;
@@ -3152,6 +3167,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_max_cuda(_Type* __ptr, _Up __op,
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(__ptr);
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_max_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_max<__proxy_t, __proxy_tag, _Sco> __bound_max{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_max, __memorder, _Sco{});
   return __dst;
@@ -3167,6 +3183,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_max_cuda(_Type volatile* __ptr, 
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(const_cast<_Type*>(__ptr));
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_max_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_max<__proxy_t, __proxy_tag, _Sco> __bound_max{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_max, __memorder, _Sco{});
   return __dst;
@@ -3515,6 +3532,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_min_cuda(_Type* __ptr, _Up __op,
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(__ptr);
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_min_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_min<__proxy_t, __proxy_tag, _Sco> __bound_min{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_min, __memorder, _Sco{});
   return __dst;
@@ -3530,6 +3548,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_min_cuda(_Type volatile* __ptr, 
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(const_cast<_Type*>(__ptr));
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_min_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_min<__proxy_t, __proxy_tag, _Sco> __bound_min{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_min, __memorder, _Sco{});
   return __dst;
@@ -3718,6 +3737,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_or_cuda(_Type* __ptr, _Up __op, 
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(__ptr);
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_or_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_or<__proxy_t, __proxy_tag, _Sco> __bound_or{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_or, __memorder, _Sco{});
   return __dst;
@@ -3733,6 +3753,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_or_cuda(_Type volatile* __ptr, _
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(const_cast<_Type*>(__ptr));
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_or_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_or<__proxy_t, __proxy_tag, _Sco> __bound_or{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_or, __memorder, _Sco{});
   return __dst;
@@ -3921,6 +3942,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_xor_cuda(_Type* __ptr, _Up __op,
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(__ptr);
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_xor_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_xor<__proxy_t, __proxy_tag, _Sco> __bound_xor{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_xor, __memorder, _Sco{});
   return __dst;
@@ -3936,6 +3958,7 @@ static inline _CCCL_DEVICE _Type __atomic_fetch_xor_cuda(_Type volatile* __ptr, 
   __proxy_t* __ptr_proxy = reinterpret_cast<__proxy_t*>(const_cast<_Type*>(__ptr));
   __proxy_t* __dst_proxy = reinterpret_cast<__proxy_t*>(&__dst);
   __proxy_t* __op_proxy  = reinterpret_cast<__proxy_t*>(&__op);
+  if (__cuda_fetch_xor_weak_if_local(__ptr_proxy, *__op_proxy, __dst_proxy)) {return __dst;}
   __cuda_atomic_bind_fetch_xor<__proxy_t, __proxy_tag, _Sco> __bound_xor{__ptr_proxy, __dst_proxy, __op_proxy};
   __cuda_atomic_fetch_memory_order_dispatch(__bound_xor, __memorder, _Sco{});
   return __dst;
