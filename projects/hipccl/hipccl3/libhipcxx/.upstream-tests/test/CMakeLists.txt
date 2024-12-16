@@ -48,18 +48,18 @@ if (LIBCUDACXX_TEST_WITH_NVRTC)
   set(LIBCUDACXX_CUDA_COMPILER "${CMAKE_BINARY_DIR}/libcudacxx/test/utils/nvidia/nvrtc/nvrtcc")
   set(LIBCUDACXX_CUDA_COMPILER_ARG1 "")
   set(LIBCUDACXX_CUDA_TEST_WITH_NVRTC "True")
-  set(LIBCUDACXX_FORCE_INCLUDE "-include '${libcudacxx_SOURCE_DIR}/test/support/nvrtc_limit_macros.h'")
+  set(LIBCUDACXX_FORCE_INCLUDE "-include '${libhipcxx_SOURCE_DIR}/test/support/nvrtc_limit_macros.h'")
   set(LIBCUDACXX_TEST_COMPILER_FLAGS "-I'${CUDA_INCLUDE_DIR}'")
   # Use the NVRTCC utility to run the built test outputs
   set(LIBCUDACXX_EXECUTOR "PrefixExecutor(['${LIBCUDACXX_CUDA_COMPILER}'], LocalExecutor())")
 else() # NOT LIBCUDACXX_TEST_WITH_NVRTC
   if (LIBCUDACXX_ENABLE_CUDA)
-    set(LIBCUDACXX_FORCE_INCLUDE "-include ${libcudacxx_SOURCE_DIR}/test/force_include_cuda.h")
+    set(LIBCUDACXX_FORCE_INCLUDE "-include ${libhipcxx_SOURCE_DIR}/test/force_include_cuda.h")
     set(LIBCUDACXX_CUDA_COMPILER "${CMAKE_CUDA_COMPILER}")
     set(LIBCUDACXX_CUDA_TEST_WITH_NVRTC "False")
     set(LIBCUDACXX_TEST_COMPILER_FLAGS "-DLIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE")
   elseif(LIBCUDACXX_ENABLE_HIP)
-    set(LIBCUDACXX_FORCE_INCLUDE "-include ${libcudacxx_SOURCE_DIR}/test/force_include_hip.h")
+    set(LIBCUDACXX_FORCE_INCLUDE "-include ${libhipcxx_SOURCE_DIR}/test/force_include_hip.h")
     #temporary workaround until we've found a way to make cmake find hipcc
     set(LIBCUDACXX_CUDA_COMPILER "${HIP_HIPCC_EXECUTABLE}")
     set(CMAKE_CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
@@ -89,7 +89,7 @@ if (${CMAKE_CUDA_COMPILER_ID} STREQUAL "Clang")
     " -Xclang -Wno-unused-parameter"
     " -Wno-unknown-cuda-version"
     " ${LIBCUDACXX_FORCE_INCLUDE}"
-    " -I${libcudacxx_SOURCE_DIR}/include"
+    " -I${libhipcxx_SOURCE_DIR}/include"
     " ${LIBCUDACXX_WARNING_LEVEL}")
 
   string(APPEND LIBCUDACXX_TEST_LINKER_FLAGS
@@ -150,7 +150,7 @@ if (NOT LIBCUDACXX_TEST_WITH_NVRTC)
   add_custom_target(libcudacxx.test.lit.precompile
     DEPENDS libcudacxx.test.public_headers libcudacxx.test.internal_headers libcudacxx.test.public_headers_host_only
     COMMAND "${CMAKE_COMMAND}" -E env "LIBCUDACXX_SITE_CONFIG=${lit_site_cfg_path}"
-    "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS} "-Dexecutor=\"NoopExecutor()\"" "${libcudacxx_SOURCE_DIR}/test/libcudacxx"
+    "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS} "-Dexecutor=\"NoopExecutor()\"" "${libhipcxx_SOURCE_DIR}/test/libcudacxx"
   )
 
 endif()
@@ -165,7 +165,7 @@ add_test(NAME libcudacxx.test.lit COMMAND
     "LIBCUDACXX_SITE_CONFIG=${lit_site_cfg_path}"
   "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS}
     -j "${libcudacxx_LIT_PARALLEL_LEVEL}"
-      "${libcudacxx_SOURCE_DIR}/test/libcudacxx"
+      "${libhipcxx_SOURCE_DIR}/test/libcudacxx"
 )
 
 set_tests_properties(libcudacxx.test.lit PROPERTIES
