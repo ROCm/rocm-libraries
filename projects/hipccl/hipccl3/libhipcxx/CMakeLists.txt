@@ -34,7 +34,20 @@ endif()
 set(PACKAGE_NAME libhipcxx)
 set(PACKAGE_VERSION 11.0)
 set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
-project(libhipcxx LANGUAGES CXX)
+
+project(libhipcxx LANGUAGES CXX VERSION 2.2.0)
+
+# rocm-cmake contains common cmake code for rocm projects to help
+# setup and install
+include(cmake/FindROCMCmake.cmake)
+include(ROCMSetupVersion)
+include(ROCMCreatePackage)
+include(ROCMInstallTargets)
+# include(ROCMPackageConfigHelpers)
+# include(ROCMInstallSymlinks)
+# include(ROCMHeaderWrapper)
+# include(ROCMCheckTargetIds)
+# include(ROCMClients)
 
 option(libhipcxx_ENABLE_INSTALL_RULES "Enable installation of libcu++" ${LIBCUDACXX_TOPLEVEL_PROJECT})
 if (libhipcxx_ENABLE_INSTALL_RULES)
@@ -133,3 +146,25 @@ if (LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS)
     ARGS ${LLVM_LIT_EXTRA_ARGS}
   )
 endif ()
+
+# Package configuration
+set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
+
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.TXT")
+set(CPACK_RPM_PACKAGE_LICENSE "ASL 2.0 AND MIT")
+
+if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+  set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+endif()
+
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
+
+rocm_create_package(
+  NAME libhipcxx
+  DESCRIPTION "ROCm libhipcxx library"
+  # FIXME(HIP/AMD): A maintainer string is required
+  # Set to the following when available: 
+  # MAINTAINER "libhipcxx-maintainer@amd.com"
+  MAINTAINER "AMD, Inc."
+  HEADER_ONLY
+)

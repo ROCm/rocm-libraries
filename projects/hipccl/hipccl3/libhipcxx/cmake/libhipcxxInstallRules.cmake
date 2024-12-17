@@ -26,13 +26,21 @@ endif()
 # Bring in CMAKE_INSTALL_LIBDIR
 include(GNUInstallDirs)
 
+# NOTE(HIP): We explicitly specify FILES_MATCHING with PATTERN *, as otherwise
+# ROCm-cmake may generate an invalid install(*) command where COMPONENT comes
+# after PATTERN, which is not valid in CMake
+
 # Libhipcxx headers
-install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/cuda"
+rocm_install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/cuda"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING  
+  PATTERN *
   PATTERN CMakeLists.txt EXCLUDE
 )
-install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/nv"
+rocm_install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/nv"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  FILES_MATCHING  
+  PATTERN *
   PATTERN CMakeLists.txt EXCLUDE
 )
 
@@ -41,14 +49,18 @@ install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/nv"
 # Note: we can't use symlinks here, as this would
 # break builds of packages like hipDF which
 # create a Python wheel with setuptools.
-install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/cuda/"
+rocm_install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/cuda/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hip"
+  FILES_MATCHING
+  PATTERN *
   PATTERN CMakeLists.txt EXCLUDE
 )
 
 # Libcudacxx cmake package
-install(DIRECTORY "${libhipcxx_SOURCE_DIR}/lib/cmake/libhipcxx"
+rocm_install(DIRECTORY "${libhipcxx_SOURCE_DIR}/lib/cmake/libhipcxx"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake"
+  FILES_MATCHING
+  PATTERN *
   PATTERN *.cmake.in EXCLUDE
 )
 
@@ -66,6 +78,6 @@ configure_file("${libhipcxx_SOURCE_DIR}/lib/cmake/libhipcxx/libhipcxx-header-sea
   "${libhipcxx_BINARY_DIR}/lib/cmake/libhipcxx/libhipcxx-header-search.cmake"
   @ONLY
 )
-install(FILES "${libhipcxx_BINARY_DIR}/lib/cmake/libhipcxx/libhipcxx-header-search.cmake"
+rocm_install(FILES "${libhipcxx_BINARY_DIR}/lib/cmake/libhipcxx/libhipcxx-header-search.cmake"
   DESTINATION "${install_location}"
 )
