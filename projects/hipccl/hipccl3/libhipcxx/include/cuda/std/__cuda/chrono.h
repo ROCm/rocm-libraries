@@ -55,9 +55,8 @@ namespace chrono
 
 #if defined(__HIP__) || defined(__HIPCC_RTC__)
 #if _LIBCUDACXX_STD_VER>17 && defined(_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP)
-// FIXME: fix this header path
 // Workaround for system_clock on AMD GPUs for c++20, please see documentation in the below header file
-#include "detail/libcxx/include/support/hip/chrono_hip_extension.h"
+#include "../support/hip/chrono_hip_extension.h"
 #endif
 #endif
 
@@ -71,15 +70,19 @@ _LIBCUDACXX_HIDE_FROM_ABI system_clock::time_point system_clock::now() noexcept
 #elif defined(__HIP_DEVICE_COMPILE__) || defined(__HIPCC_RTC__)
 #if _LIBCUDACXX_STD_VER>17 
 #if defined(_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP)
-    if(!(hip_gpu_ext::__unix_sysclock0>=0)) {
+    if(!(hip_gpu_ext::__unix_sysclock0_host_ticks>=0)) {
         // FIXME(HIP): As this function needs to be NOEXCEPT, we can't throw an exception at this point.
         printf("ERROR: Using sysclock on AMD GPUs requires a prior initialization call on the host side (cuda::std::chrono::hip_gpu_ext::initialize_amdgpu_sysclock_on_current_device())."
              "The returned time point will not be a UNIX timestamp.\n");
     }
     // FIXME(HIP): This compilation path uses a workaround to make a UNIX timestamp counter available on the device.
-    // see header "deatil/libcxx/include/support/hip/chrono_hip_extension.h" for more details. 
-    assert(hip_gpu_ext::__unix_sysclock0>=0);
-    long long __time = hip_gpu_ext::__unix_sysclock0 
+    // see header "detail/libcxx/include/support/hip/chrono_hip_extension.h" for more details. 
+    assert(hip_gpu_ext::__unix_sysclock0_host_ticks>=0);
+
+    // convert host ticks to device ticks
+    long long __unix_sysclock0_device_ticks = hip_gpu_ext::__unix_sysclock0_host_ticks / _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE; 
+
+    long long __time = __unix_sysclock0_device_ticks 
                     + (wall_clock64()-hip_gpu_ext::__offset_devclock0);
     return time_point(duration_cast<duration>(chrono::duration<long long, ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>(__time)));
 #else

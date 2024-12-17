@@ -40,8 +40,8 @@ LIBCUDACXX_HIP_DEFINE_SYSCLOCK_VARS
   }                                                                          \
 }
 
-__global__ void sysclock_kernel() {
-    using namespace hip::std::chrono;
+__global__ void print_sysclock() {
+    using namespace cuda::std::chrono;
    
     auto time = system_clock::now();
     printf("current (UNIX) time stamp on device %lld\n", duration_cast<nanoseconds>(time.time_since_epoch()).count());
@@ -54,8 +54,8 @@ __global__ void sysclock_kernel() {
 
 int main(){
     HIP_CHECK(hipSetDevice(0));
-    HIP_CHECK(hip::std::chrono::hip_gpu_ext::initialize_amdgpu_sysclock_on_current_device());
-    sysclock_kernel<<<1, 1>>>();
+    HIP_CHECK(cuda::std::chrono::hip_gpu_ext::initialize_amdgpu_sysclock_on_current_device());
+    print_sysclock<<<1, 1>>>();
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
     return 0;
