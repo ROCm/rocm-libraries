@@ -61,33 +61,6 @@ def UpdateLogic(filename, logicPath, outputPath):
     solutionList = []
     for solution in solutions:
         solutionState = solution.getAttributes()
-        solutionState["ProblemType"] = solutionState["ProblemType"].state
-        solutionState["ProblemType"]["DataType"] = \
-                solutionState["ProblemType"]["DataType"].value
-        solutionState["ProblemType"]["DataTypeA"] = \
-                solutionState["ProblemType"]["DataTypeA"].value
-        solutionState["ProblemType"]["DataTypeB"] = \
-                solutionState["ProblemType"]["DataTypeB"].value
-        solutionState["ProblemType"]["DataTypeE"] = \
-                solutionState["ProblemType"]["DataTypeE"].value
-        solutionState["ProblemType"]["DataTypeAmaxD"] = \
-                solutionState["ProblemType"]["DataTypeAmaxD"].value
-        solutionState["ProblemType"]["DestDataType"] = \
-                solutionState["ProblemType"]["DestDataType"].value
-        solutionState["ProblemType"]["ComputeDataType"] = \
-                solutionState["ProblemType"]["ComputeDataType"].value
-        solutionState["ProblemType"]["BiasDataTypeList"] = \
-                [btype.value for btype in solutionState["ProblemType"]["BiasDataTypeList"]]
-        solutionState["ProblemType"]["ActivationComputeDataType"] = \
-                solutionState["ProblemType"]["ActivationComputeDataType"].value
-        solutionState["ProblemType"]["ActivationType"] = \
-                solutionState["ProblemType"]["ActivationType"].value
-        solutionState["ProblemType"]["F32XdlMathOp"] = \
-            solutionState["ProblemType"]["F32XdlMathOp"].value
-        if "DataTypeMetadata" in solutionState["ProblemType"]:
-            solutionState["ProblemType"]["DataTypeMetadata"] = \
-                solutionState["ProblemType"]["DataTypeMetadata"].value
-
         solutionState["ISA"] = list(solutionState["ISA"])
         solutionList.append(solutionState)
 
