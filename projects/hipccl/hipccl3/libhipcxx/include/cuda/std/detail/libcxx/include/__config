@@ -79,6 +79,11 @@
 # define _LIBCUDACXX_HIPCC
 # define _LIBCUDACXX_COMPILER_HIPCC
 #endif
+
+#ifdef __HIPCC_RTC__
+# define _LIBCUDACXX_COMPILER_HIPRTC
+#endif
+
 #ifdef __cplusplus
 
 // __config may be included in `extern "C"` contexts, switch back to include <nv/target>
@@ -1185,13 +1190,13 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 
 // Thread API
 #  ifndef _LIBCUDACXX_HAS_THREAD_API_EXTERNAL
-#    if defined(_CCCL_COMPILER_NVRTC) || defined(__EMSCRIPTEN__)
+#    if defined(_CCCL_COMPILER_NVRTC) || defined(__EMSCRIPTEN__) || defined(_LIBCUDACXX_COMPILER_HIPRTC)
 #      define _LIBCUDACXX_HAS_THREAD_API_EXTERNAL
 #    endif
 #  endif // _LIBCUDACXX_HAS_THREAD_API_EXTERNAL
 
 #  ifndef _LIBCUDACXX_HAS_THREAD_API_CUDA
-#    if (defined(__CUDA_ARCH__) || defined(__EMSCRIPTEN__)) || defined(__HIP_DEVICE_COMPILE__) || defined(__HIPCC_RTC__))
+#    if (defined(__CUDA_ARCH__) || defined(__EMSCRIPTEN__)) || defined(__HIP_DEVICE_COMPILE__) || defined(__HIPCC_RTC__)
 #      define _LIBCUDACXX_HAS_THREAD_API_CUDA
 #    endif // __cuda_std__
 #  endif // _LIBCUDACXX_HAS_THREAD_API_CUDA

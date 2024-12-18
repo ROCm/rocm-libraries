@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -851,7 +851,7 @@ constexpr chrono::year                                  operator ""y(unsigned lo
 #endif // no system header
 
 #ifdef __cuda_std__
-#  ifndef _CCCL_COMPILER_NVRTC
+#  if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 #    include <chrono>
 #  endif // _CCCL_COMPILER_NVRTC
 #endif // __cuda_std__

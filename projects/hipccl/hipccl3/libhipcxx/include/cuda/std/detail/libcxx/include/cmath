@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -327,7 +327,7 @@ long double    truncl(long double x);
 #  pragma system_header
 #endif // no system header
 
-#if !defined(_CCCL_COMPILER_NVRTC)
+#if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 #  include <math.h>
 #endif // !_CCCL_COMPILER_NVRTC
 
@@ -347,7 +347,7 @@ long double    truncl(long double x);
 #  include <cuda/std/__cuda/cmath_nvbf16.h>
 #endif // _LIBCUDACXX_HAS_NVBF16
 
-#ifdef _CCCL_COMPILER_NVRTC
+#if defined(_CCCL_COMPILER_NVRTC) || defined(_LIBCUDACXX_COMPILER_HIPRTC)
 #  include <cuda/std/climits>
 #  define INFINITY __builtin_huge_val()
 #  define NAN      __builtin_nan()
@@ -413,7 +413,7 @@ using ::hypotf;
 using ::abs;
 #endif
 
-#ifndef _CCCL_COMPILER_NVRTC
+#if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 
 using ::fpclassify;
 using ::isgreater;

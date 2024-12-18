@@ -7,6 +7,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX___UTILITY_PAIR_H
 #define _LIBCUDACXX___UTILITY_PAIR_H
 
@@ -62,9 +79,9 @@
 #include <cuda/std/cstddef>
 
 // Provide compatability between `std::pair` and `cuda::std::pair`
-#if !defined(_CCCL_COMPILER_NVRTC)
+#if  !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 #  include <utility>
-#endif // !defined(_CCCL_COMPILER_NVRTC)
+#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
@@ -332,7 +349,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
   {}
 
   // std compatability
-#if !defined(_CCCL_COMPILER_NVRTC)
+#if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
   template <class _U1,
             class _U2,
             class _Constraints                                         = __pair_constructible<const _U1&, const _U2&>,
@@ -368,7 +385,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     _CCCL_TRAIT(is_nothrow_constructible, _T1, _U1) && _CCCL_TRAIT(is_nothrow_constructible, _T2, _U2))
       : __base(_CUDA_VSTD::forward<_U1>(__p.first), _CUDA_VSTD::forward<_U2>(__p.second))
   {}
-#endif // !defined(_CCCL_COMPILER_NVRTC)
+#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 
   // assignments
   _CCCL_HIDE_FROM_ABI pair& operator=(const pair&) = default;
@@ -399,7 +416,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
   }
 
   // std assignments
-#if !defined(_CCCL_COMPILER_NVRTC)
+#if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
   template <class _UT1 = _T1, __enable_if_t<is_copy_assignable<_UT1>::value && is_copy_assignable<_T2>::value, int> = 0>
   _CCCL_HOST _CCCL_CONSTEXPR_CXX14 pair& operator=(::std::pair<_T1, _T2> const& __p) noexcept(
     _CCCL_TRAIT(is_nothrow_copy_assignable, _T1) && _CCCL_TRAIT(is_nothrow_copy_assignable, _T2))
@@ -417,7 +434,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     this->second = _CUDA_VSTD::forward<_T2>(__p.second);
     return *this;
   }
-#endif // !defined(_CCCL_COMPILER_NVRTC)
+#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 
 #if _CCCL_STD_VER >= 2023
   _LIBCUDACXX_HIDE_FROM_ABI constexpr const pair& operator=(pair const& __p) const
@@ -429,7 +446,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     return *this;
   }
 
-#  if !defined(_CCCL_COMPILER_NVRTC)
+#  if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
   _LIBCUDACXX_HIDE_FROM_ABI _CCCL_HOST constexpr const pair& operator=(::std::pair<_T1, _T2> const& __p) const
     noexcept(_CCCL_TRAIT(is_nothrow_copy_assignable, const _T1) && _CCCL_TRAIT(is_nothrow_copy_assignable, const _T2))
     requires(is_copy_assignable_v<const _T1> && is_copy_assignable_v<const _T2>)
@@ -438,7 +455,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     this->second = __p.second;
     return *this;
   }
-#  endif // !defined(_CCCL_COMPILER_NVRTC)
+#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 
   _LIBCUDACXX_HIDE_FROM_ABI constexpr const pair& operator=(pair&& __p) const
     noexcept(_CCCL_TRAIT(is_nothrow_assignable, const _T1&, _T1) && _CCCL_TRAIT(is_nothrow_assignable, const _T2&, _T2))
@@ -449,7 +466,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     return *this;
   }
 
-#  if !defined(_CCCL_COMPILER_NVRTC)
+#  if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
   _LIBCUDACXX_HIDE_FROM_ABI _CCCL_HOST constexpr const pair& operator=(::std::pair<_T1, _T2>&& __p) const
     noexcept(_CCCL_TRAIT(is_nothrow_assignable, const _T1&, _T1) && _CCCL_TRAIT(is_nothrow_assignable, const _T2&, _T2))
     requires(is_assignable_v<const _T1&, _T1> && is_assignable_v<const _T2&, _T2>)
@@ -458,7 +475,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     this->second = _CUDA_VSTD::forward<_T2>(__p.second);
     return *this;
   }
-#  endif // !defined(_CCCL_COMPILER_NVRTC)
+#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 
   template <class _U1, class _U2>
   _LIBCUDACXX_HIDE_FROM_ABI constexpr const pair& operator=(const pair<_U1, _U2>& __p) const
@@ -469,7 +486,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     return *this;
   }
 
-#  if !defined(_CCCL_COMPILER_NVRTC)
+#  if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
   template <class _U1, class _U2>
   _LIBCUDACXX_HIDE_FROM_ABI _CCCL_HOST constexpr const pair& operator=(const ::std::pair<_U1, _U2>& __p) const
     requires(is_assignable_v<const _T1&, const _U1&> && is_assignable_v<const _T2&, const _U2&>)
@@ -478,7 +495,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     this->second = __p.second;
     return *this;
   }
-#  endif // !defined(_CCCL_COMPILER_NVRTC)
+#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 
   template <class _U1, class _U2>
   _LIBCUDACXX_HIDE_FROM_ABI constexpr const pair& operator=(pair<_U1, _U2>&& __p) const
@@ -489,7 +506,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     return *this;
   }
 
-#  if !defined(_CCCL_COMPILER_NVRTC)
+#  if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
   template <class _U1, class _U2>
   _LIBCUDACXX_HIDE_FROM_ABI _CCCL_HOST constexpr const pair& operator=(::std::pair<_U1, _U2>&& __p) const
     requires(is_assignable_v<const _T1&, _U1> && is_assignable_v<const _T2&, _U2>)
@@ -498,7 +515,7 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
     this->second = _CUDA_VSTD::forward<_U2>(__p.second);
     return *this;
   }
-#  endif // !defined(_CCCL_COMPILER_NVRTC)
+#  endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 #endif // _CCCL_STD_VER >= 2023
 
   _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX20 void
@@ -519,12 +536,12 @@ struct _CCCL_TYPE_VISIBILITY_DEFAULT pair : public __pair_base<_T1, _T2>
   }
 #endif // _CCCL_STD_VER >= 2023
 
-#if !defined(_CCCL_COMPILER_NVRTC)
+#if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
   _CCCL_HOST _CCCL_CONSTEXPR_CXX14 operator ::std::pair<_T1, _T2>() const
   {
     return {this->first, this->second};
   }
-#endif // !defined(_CCCL_COMPILER_NVRTC)
+#endif // !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 };
 
 #if _CCCL_STD_VER > 2014 && !defined(_LIBCUDACXX_HAS_NO_DEDUCTION_GUIDES)
