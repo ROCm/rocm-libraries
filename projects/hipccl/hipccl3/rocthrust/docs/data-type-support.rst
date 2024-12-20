@@ -8,55 +8,17 @@
 Data type support
 ******************************************
 
-Fundamental types
-=================
+rocThrust supports user-defined custom types as long as an interface for them is provided.
+
+rocThrust and Thrust both support the following fundamental types:
+
+* ``int8``
+* ``int16``
+* ``int32``
+* ``int64``
+* ``float``
+* ``double``
 
 
- .. list-table:: Comparison of supported fundamental types of rocThrust and Thrust
-    :header-rows: 1
-    :name: supported-fundamental-types-rocthrust-vs-thrust
+Both rocThrust and Thrust also support ``half`` and ``bfloat16``. However, the host-side HIP implementations of these types are missing some functionality. Because of this, ``half`` and ``bfloat16`` should be used only as storage types to be passed between functions.
 
-    *
-      - Type
-      - rocThrust support
-      - Thrust support
-    *
-      - :code:`int8`
-      - ✅
-      - ✅
-    *
-      - :code:`int16`
-      - ✅
-      - ✅
-    *
-      - :code:`int32`
-      - ✅
-      - ✅
-    *
-      - :code:`int64`
-      - ✅
-      - ✅
-    *
-      - :code:`half` [1]_
-      - ⚠️
-      - ⚠️
-    *
-      - :code:`bfloat16` [1]_
-      - ⚠️
-      - ⚠️
-    *
-      - :code:`float`
-      - ✅
-      - ✅
-    *
-      - :code:`double`
-      - ✅
-      - ✅
-
-Custom types
-============
-
-rocThrust and Thrust support custom, user-defined types, if they provide the interface required by the used functions.
-
-.. rubric:: Footnotes
-.. [1] These types are supported in rocThrust and Thrust, however the host-side hip-implementations of these types miss some functionality, and are mostly intended as storage types to be passed between functions.

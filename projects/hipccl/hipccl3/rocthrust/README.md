@@ -226,7 +226,7 @@ There are two CMake configuration-time options that control random data fed to u
     reproducibility.
 
 * `PRNG_SEEDS`: 1 by default, controls repeatable dataset seeds.
-  * This is a CMake formatted (semicolon delimited) array of 32-bit unsigned integrals. Note that
+  * This is a CMake formatted (semicolon delimited) array of 32-bit unsigned integers. Note that
     semicolons often collide with shell command parsing. We advise escaping the entire CMake CLI
     argument to avoid having the variable pick up quotation marks. For example, pass
     `cmake "-DPRNG_SEEDS=1;2;3;4"` instead of `cmake -DPRNG_SEEDS="1;2;3;4"` (these cases differ in
@@ -270,6 +270,7 @@ make -j4
 ```
 
 ## HIPSTDPAR
+
 rocThrust also hosts the header files for [HIPSTDPAR](https://rocm.blogs.amd.com/software-tools-optimization/hipstdpar/README.html#c-17-parallel-algorithms-and-hipstdpar).
 Within these headers, a great part of the C++ Standard Library parallel algorithms are overloaded so that rocThrust's and rocPRIM's implementations of those algorithms are used when they are invoked with the `parallel_unsequenced_policy` policy.
 When compiling with the proper flags (see [LLVM (AMD's fork) docs](https://github.com/ROCm/llvm-project/blob/rocm-6.2.x/clang/docs/HIPSupport.rst#implementation-driver)[^1] for the complete list), the HIPSTDPAR headers are implicitly included by the compiler, and therefore the execution of these parallel algorithms will be offloaded to AMD devices.
@@ -277,9 +278,11 @@ When compiling with the proper flags (see [LLVM (AMD's fork) docs](https://githu
 [^1]: Altough currently only AMD's fork of LLVM contains the docs for the [C++ Standard Parallelism Offload Support](https://github.com/ROCm/llvm-project/blob/rocm-6.2.x/clang/docs/HIPSupport.rst#c-standard-parallelism-offload-support-compiler-and-runtime), both of them (the upstream LLVM and AMD's fork) do support it.
 
 ### Install
+
 HIPSTDPAR is currently packaged along rocThrust. The `hipstdpar` package is set up as a virtual package provided by `rocthrust`, so the latter needs to be installed entirely for getting HIPSTDPAR's headers. Conversely, installing the `rocthrust` package will also include HIPSTDPAR's headers in the system.
 
 ### Tests
+
 rocThrust also includes some tests for checking the correct building of HIPSTDPAR implementations. These are located under the [tests/hipstdpar](/test/hipstdpar/) folder. When configuring the project with the `BUILD_TEST` option on, these tests will also be enabled. Additionally, one can configure **only** HIPSTDPAR's tests by disabling `BUILD_TEST` and enabling `BUILD_HIPSTDPAR_TEST`. In general, the following steps can be followed for building and running the tests:
 
 ```sh
@@ -300,6 +303,7 @@ ctest --output-on-failure
 ```
 
 #### Requirements
+
 * [rocPRIM](https://github.com/ROCm/rocPRIM) and [rocThrust](https://github.com/ROCm/rocThrust) libraries
 * [TBB](https://www.intel.com/content/www/us/en/developer/tools/oneapi/onetbb.html) library
   * Notice that oneTBB (oneAPI TBB) may fail to compile when libstdc++-9 or -10 is used, due to them using legacy TBB interfaces that are incompatible with the oneTBB ones (see the [release notes](https://www.intel.com/content/www/us/en/developer/articles/release-notes/intel-oneapi-threading-building-blocks-release-notes.html)).
