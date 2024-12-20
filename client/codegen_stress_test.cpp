@@ -7,8 +7,6 @@
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
-#include "../../test/unit/Utilities.hpp"
-
 #include <CLI/CLI.hpp>
 
 using namespace rocRoller;

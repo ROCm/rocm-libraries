@@ -189,46 +189,47 @@ set(rocroller_src
 
  source/Utilities/ReadELF.cpp
  source/Utilities/Utils.cpp
- source/Utilities/Version.cpp
 
- ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE}
  ${ROCROLLER_GIT_VERSION_CPP_FILE}
 )
 
 if(ROCROLLER_USE_HIP)
-  set(rocroller_src
-   ${rocroller_src}
-   source/HIPTimer.cpp
-  )
+  list(APPEND rocroller_src source/HIPTimer.cpp)
 endif()
 
 add_library(rocroller
  ${rocroller_src}
 )
+set_target_properties(rocroller PROPERTIES VERSION ${ROCROLLER_VERSION} SOVERSION ${ROCROLLER_SOVERSION})
 
-add_dependencies(rocroller spdlog)
+target_link_libraries(rocroller PUBLIC spdlog::spdlog_header_only)
+
+if(ROCROLLER_EMBED_ARCH_DEF)
+  target_link_libraries(rocroller PRIVATE rocRoller::GPUArchitecture_def)
+else()
+  target_compile_definitions(rocroller PRIVATE ROCROLLER_NO_EMBED_ARCH_DEF)
+endif()
 
 # Users of rocroller should link with rocroller_interface for GPUArchitecture_def dependency
 add_library(rocroller_interface INTERFACE)
 target_link_libraries(rocroller_interface INTERFACE
-  -Wl,--whole-archive
+  -Wl,--whole-archive # Important for RocRoller Component functionality
   rocroller
   -Wl,--no-whole-archive
 )
 add_dependencies(rocroller_interface GPUArchitecture_def)
 
-target_compile_features(rocroller PUBLIC cxx_std_20)
 target_compile_options(rocroller PUBLIC ${COROUTINES_COMPILE_OPTION} ${EXTRA_COMPILE_OPTIONS})
 target_link_options(rocroller PUBLIC ${EXTRA_LINK_OPTIONS})
+
 #target_compile_options(rocroller PUBLIC -fconcepts-diagnostics-depth=2)
 target_include_directories(rocroller PUBLIC
                            include
                            )
 
-# Using SYSTEM include paths for third party libraries speeds up cppcheck a lot
-target_include_directories(rocroller SYSTEM PUBLIC
-                           ${libdivide_SOURCE_DIR}/
-                           ${spdlog_INCLUDES})
+# Header only, not exposed in any public headers, system package not required
+rocroller_add_dependency(libdivide VERSION 5.1)
+target_link_libraries(rocroller PUBLIC libdivide)
 
 # LLVM has RTTI disabled by default and ROCm's LLVM also has RTTI disabled.
 # RTTI is enabled for rocRoller, except for the compilation units below.
@@ -247,7 +248,8 @@ endif()
 
 target_link_libraries(rocroller PRIVATE ${llvm_libs} lldELF PUBLIC msgpackc-cxx)
 target_include_directories(rocroller SYSTEM PUBLIC
-                            ${LLVM_INCLUDE_DIRS} ${LLD_INCLUDE_DIRS})
+                            ${LLD_INCLUDE_DIRS}
+                            )
 
 if(ROCROLLER_USE_HIP)
   target_link_libraries(rocroller PUBLIC hip::host)

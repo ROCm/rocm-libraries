@@ -13,6 +13,12 @@
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Serialization/msgpack/Msgpack.hpp>
 
+#ifndef ROCROLLER_NO_EMBED_ARCH_DEF
+#include <cmrc/cmrc.hpp>
+
+CMRC_DECLARE(rocRoller);
+#endif
+
 namespace rocRoller
 {
     std::string
@@ -59,6 +65,31 @@ namespace rocRoller
         {
             Throw<FatalError>("GPUArchitecture::readMsgpack(", input, ") failed: ", e.what());
         }
+    }
+
+    std::map<GPUArchitectureTarget, GPUArchitecture> GPUArchitecture::readEmbeddedMsgpack()
+    {
+#ifndef ROCROLLER_NO_EMBED_ARCH_DEF
+        try
+        {
+            auto                   fs = cmrc::rocRoller::get_filesystem();
+            auto                   fd = fs.open("resources/GPUArchitecture_def.msgpack");
+            msgpack::object_handle oh = msgpack::unpack(
+                fd.begin(),
+                reinterpret_cast<uintptr_t>(fd.end()) - reinterpret_cast<uintptr_t>(fd.begin()));
+            msgpack::object const& obj = oh.get();
+
+            auto rv = obj.as<std::map<GPUArchitectureTarget, GPUArchitecture>>();
+            return rv;
+        }
+        catch(const std::exception& e)
+        {
+            Throw<FatalError>("GPUArchitecture::readEmbeddedMsgpack() failed: ", e.what());
+        }
+#else
+        Throw<FatalError>(
+            "GPUArchitecture::readEmbeddedMsgpack() failed: no embedded architecture definitions");
+#endif
     }
 
     bool GPUArchitecture::isSupportedConstantValue(Register::ValuePtr value) const

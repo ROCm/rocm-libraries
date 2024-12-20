@@ -12,7 +12,6 @@
 #include <rocRoller/Scheduling/Costs/Cost_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduler_fwd.hpp>
 #include <rocRoller/Utilities/Concepts.hpp>
-#include <rocRoller/Utilities/DefaultArchitectureFilePath.hpp>
 #include <rocRoller/Utilities/LazySingleton.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -98,11 +97,11 @@ namespace rocRoller
         static inline const SettingsOption<bool> BreakOnThrow{
             "ROCROLLER_BREAK_ON_THROW", "Cause exceptions thrown to cause a segfault", false, 2};
 
+        static inline const SettingsOption<std::string> ROCMPath{
+            "ROCM_PATH", "Path where ROCM is installed", "/opt/rocm", -1};
+
         static inline const SettingsOption<std::string> ArchitectureFile{
-            "ROCROLLER_ARCHITECTURE_FILE",
-            "GPU Architecture file",
-            rocRoller::DefaultArchitectureFilePath,
-            -1};
+            "ROCROLLER_ARCHITECTURE_FILE", "GPU Architecture file", "", -1};
 
         static inline const SettingsOption<std::string> AssemblyFile{
             "ROCROLLER_ASSEMBLY_FILE", "File name to write assembly", "", -1};

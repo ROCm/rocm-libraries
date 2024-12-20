@@ -79,6 +79,7 @@ namespace rocRoller
         static std::map<GPUArchitectureTarget, GPUArchitecture> readYaml(std::string const&);
         static std::string writeMsgpack(std::map<GPUArchitectureTarget, GPUArchitecture> const&);
         static std::map<GPUArchitectureTarget, GPUArchitecture> readMsgpack(std::string const&);
+        static std::map<GPUArchitectureTarget, GPUArchitecture> readEmbeddedMsgpack();
 
         std::map<GPUCapability, int> const&              getAllCapabilities() const;
         std::map<std::string, GPUInstructionInfo> const& getAllIntructionInfo() const;

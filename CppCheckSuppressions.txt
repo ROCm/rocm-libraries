@@ -1,10 +1,9 @@
 #[error id]:[filename]:[line]
 
 
-*:*/googletest-src/*
-*:*/spdlog/*
-*:*/yaml-cpp/*
+*:*/*_cmrc*/*
 *:*/_deps/*
+*:/usr/*
 
 
 # m_coroutine
