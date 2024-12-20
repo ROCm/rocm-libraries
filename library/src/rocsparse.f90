@@ -628,7 +628,7 @@ module rocsparse
 
 !       rocsparse_bsrmv
         function rocsparse_sbsrmv(handle, dir, trans, mb, nb, nnzb, alpha, descr, &
-                bsr_val, bsr_row_ptr, bsr_col_ind, bsr_dim, x, beta, y) &
+                bsr_val, bsr_row_ptr, bsr_col_ind, bsr_dim, info, x, beta, y) &
                 bind(c, name = 'rocsparse_sbsrmv')
             use rocsparse_enums
             use iso_c_binding
@@ -646,13 +646,14 @@ module rocsparse
             type(c_ptr), intent(in), value :: bsr_row_ptr
             type(c_ptr), intent(in), value :: bsr_col_ind
             integer(c_int), value :: bsr_dim
+            type(c_ptr), value :: info
             type(c_ptr), intent(in), value :: x
             type(c_ptr), intent(in), value :: beta
             type(c_ptr), value :: y
         end function rocsparse_sbsrmv
 
         function rocsparse_dbsrmv(handle, dir, trans, mb, nb, nnzb, alpha, descr, &
-                bsr_val, bsr_row_ptr, bsr_col_ind, bsr_dim, x, beta, y) &
+                bsr_val, bsr_row_ptr, bsr_col_ind, bsr_dim, info, x, beta, y) &
                 bind(c, name = 'rocsparse_dbsrmv')
             use rocsparse_enums
             use iso_c_binding
@@ -670,13 +671,14 @@ module rocsparse
             type(c_ptr), intent(in), value :: bsr_row_ptr
             type(c_ptr), intent(in), value :: bsr_col_ind
             integer(c_int), value :: bsr_dim
+            type(c_ptr), value :: info
             type(c_ptr), intent(in), value :: x
             type(c_ptr), intent(in), value :: beta
             type(c_ptr), value :: y
         end function rocsparse_dbsrmv
 
         function rocsparse_cbsrmv(handle, dir, trans, mb, nb, nnzb, alpha, descr, &
-                bsr_val, bsr_row_ptr, bsr_col_ind, bsr_dim, x, beta, y) &
+                bsr_val, bsr_row_ptr, bsr_col_ind, bsr_dim, info, x, beta, y) &
                 bind(c, name = 'rocsparse_cbsrmv')
             use rocsparse_enums
             use iso_c_binding
@@ -694,13 +696,14 @@ module rocsparse
             type(c_ptr), intent(in), value :: bsr_row_ptr
             type(c_ptr), intent(in), value :: bsr_col_ind
             integer(c_int), value :: bsr_dim
+            type(c_ptr), value :: info
             type(c_ptr), intent(in), value :: x
             type(c_ptr), intent(in), value :: beta
             type(c_ptr), value :: y
         end function rocsparse_cbsrmv
 
         function rocsparse_zbsrmv(handle, dir, trans, mb, nb, nnzb, alpha, descr, &
-                bsr_val, bsr_row_ptr, bsr_col_ind, bsr_dim, x, beta, y) &
+                bsr_val, bsr_row_ptr, bsr_col_ind, bsr_dim, info, x, beta, y) &
                 bind(c, name = 'rocsparse_zbsrmv')
             use rocsparse_enums
             use iso_c_binding
@@ -718,6 +721,7 @@ module rocsparse
             type(c_ptr), intent(in), value :: bsr_row_ptr
             type(c_ptr), intent(in), value :: bsr_col_ind
             integer(c_int), value :: bsr_dim
+            type(c_ptr), value :: info
             type(c_ptr), intent(in), value :: x
             type(c_ptr), intent(in), value :: beta
             type(c_ptr), value :: y

@@ -503,8 +503,8 @@ void unit_check_garray(rocsparse_indextype ind_type,
         break;
     }
     }
-    CHECK_HIP_ERROR(rocsparse_hipFree(s));
-    CHECK_HIP_ERROR(rocsparse_hipFree(t));
+    CHECK_HIP_ERROR(rocsparse_hipHostFree(s));
+    CHECK_HIP_ERROR(rocsparse_hipHostFree(t));
 }
 
 void unit_check_garray(rocsparse_datatype val_type,
@@ -565,6 +565,6 @@ void unit_check_garray(rocsparse_datatype val_type,
         break;
     }
     }
-    CHECK_HIP_ERROR(rocsparse_hipFree(s));
-    CHECK_HIP_ERROR(rocsparse_hipFree(t));
+    CHECK_HIP_ERROR(rocsparse_hipHostFree(s));
+    CHECK_HIP_ERROR(rocsparse_hipHostFree(t));
 }

@@ -577,6 +577,7 @@ program example_fortran_spmv
                                           d_bsr_row_ptr, &
                                           d_bsr_col_ind, &
                                           bsr_dim, &
+                                          info, &
                                           d_x, &
                                           d_beta, &
                                           d_y))
@@ -598,6 +599,7 @@ program example_fortran_spmv
                                               d_bsr_row_ptr, &
                                               d_bsr_col_ind, &
                                               bsr_dim, &
+                                              info, &
                                               d_x, &
                                               d_beta, &
                                               d_y))
