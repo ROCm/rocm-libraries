@@ -118,11 +118,12 @@ TEST_CASE("UnrollLoops simple test", "[kernel-graph][unroll]")
 
     SECTION("Create tail loop manually.")
     {
-        int unrollDimension = kgraph.coordinates.addElement(kg::CoordinateGraph::Unroll(4));
+        int forLoopDimension = kgraph.coordinates.addElement(kg::CoordinateGraph::ForLoop());
+        int unrollDimension  = kgraph.coordinates.addElement(kg::CoordinateGraph::Unroll(4));
 
         kg::UnrollLoops unroll(params, ctx.get());
 
-        auto tail = unroll.createTailLoop(kgraph, forOp, 4, unrollDimension);
+        auto tail = unroll.createTailLoop(kgraph, forOp, 4, unrollDimension, forLoopDimension);
 
         CHECK(tail != std::nullopt);
         kgraph = kgraph.transform(std::make_shared<kg::Simplify>());
