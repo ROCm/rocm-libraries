@@ -83,6 +83,7 @@ function(libcudacxx_add_public_header_test header)
     target_compile_definitions(headertest_${header_name} PRIVATE CCCL_SUPPRESS_MSVC2017_DEPRECATION_WARNING)
   endif()
   target_compile_definitions(headertest_${header_name} PRIVATE CCCL_ENABLE_ASSERTIONS)
+  target_compile_definitions(headertest_${header_name} PRIVATE CCCL_IGNORE_DEPRECATED_CPP_DIALECT)
   target_link_libraries(headertest_${header_name} hip::device)
 
   # Ensure that if this is an atomic header, we only include the right architectures
