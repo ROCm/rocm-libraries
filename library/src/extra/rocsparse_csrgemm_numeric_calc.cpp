@@ -946,8 +946,8 @@ namespace rocsparse
         bool                 is_host_mode)
     {
 
-        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_GET_IF(mul, alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_GET_IF(add, beta);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(mul, alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(add, beta);
         rocsparse::csrgemm_numeric_fill_block_per_row_multipass_device<BLOCKSIZE,
                                                                        WFSIZE,
                                                                        CHUNKSIZE>(n,

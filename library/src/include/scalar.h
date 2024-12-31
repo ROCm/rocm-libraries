@@ -45,17 +45,9 @@ namespace rocsparse
         {
             return (fetch_value) ? value : *pointer;
         }
-        __forceinline__ __device__ T permissive_get(bool fetch_value) const
-        {
-            return (fetch_value) ? value : ((pointer) ? *pointer : zero());
-        }
         __forceinline__ __device__ T get_if(bool fetch_value, bool condition) const
         {
             return (condition) ? this->get(fetch_value) : zero();
-        }
-        __forceinline__ __device__ T permissive_get_if(bool fetch_value, bool condition) const
-        {
-            return (condition) ? this->permissive_get(fetch_value) : zero();
         }
     };
 
@@ -91,6 +83,3 @@ namespace rocsparse
 
 #define ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(COND_, NAME_) \
     const auto NAME_ = NAME_##_union.get_if(is_host_mode, (COND_))
-
-#define ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_GET_IF(COND_, NAME_) \
-    const auto NAME_ = NAME_##_union.permissive_get_if(is_host_mode, (COND_))
