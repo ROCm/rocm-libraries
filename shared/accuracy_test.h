@@ -1457,7 +1457,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             << "\tcutoff: " << linf_cutoff << params.str();
 
         EXPECT_TRUE(diff.l_2 / cpu_output_norm.l_2
-                    < sqrt(log2(total_length)) * type_epsilon(params.precision))
+                    <= sqrt(log2(total_length)) * type_epsilon(params.precision))
             << "L2 test failed. L2: " << diff.l_2
             << "\tnormalized L2: " << diff.l_2 / cpu_output_norm.l_2
             << "\tepsilon: " << sqrt(log2(total_length)) * type_epsilon(params.precision)
