@@ -27,12 +27,28 @@
 struct ROCFFT_SKIP
 {
     std::stringstream msg;
+    ROCFFT_SKIP(std::stringstream&& ss)
+        : msg(std::move(ss))
+    {
+    }
+    ROCFFT_SKIP(std::string& s)
+    {
+        msg << s;
+    }
 };
 
 // exception type to throw when we want to consider a problem failed
 struct ROCFFT_FAIL
 {
     std::stringstream msg;
+    ROCFFT_FAIL(std::stringstream&& ss)
+        : msg(std::move(ss))
+    {
+    }
+    ROCFFT_FAIL(std::string& s)
+    {
+        msg << s;
+    }
 };
 
 #endif

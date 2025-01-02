@@ -261,13 +261,15 @@ inline void execute_gpu_fft(Tparams&              params,
         if(hip_status != hipSuccess)
         {
             ++n_hip_failures;
+            std::stringstream ss;
+            ss << "Error occurred when allocating device memory for loading callback";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP();
+                throw ROCFFT_SKIP{std::move(ss)};
             }
             else
             {
-                throw ROCFFT_FAIL();
+                throw ROCFFT_FAIL{std::move(ss)};
             }
         }
         hip_status = hipMemcpy(load_cb_data_dev.data(),
@@ -277,13 +279,15 @@ inline void execute_gpu_fft(Tparams&              params,
         if(hip_status != hipSuccess)
         {
             ++n_hip_failures;
+            std::stringstream ss;
+            ss << "Error occurred when copying data to device for loading callback";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP();
+                throw ROCFFT_SKIP{std::move(ss)};
             }
             else
             {
-                throw ROCFFT_FAIL();
+                throw ROCFFT_FAIL{std::move(ss)};
             }
         }
 
@@ -307,13 +311,15 @@ inline void execute_gpu_fft(Tparams&              params,
         if(hip_status != hipSuccess)
         {
             ++n_hip_failures;
+            std::stringstream ss;
+            ss << "Error occurred when allocating device memory for storing callback";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP();
+                throw ROCFFT_SKIP{std::move(ss)};
             }
             else
             {
-                throw ROCFFT_FAIL();
+                throw ROCFFT_FAIL{std::move(ss)};
             }
         }
 
@@ -324,13 +330,15 @@ inline void execute_gpu_fft(Tparams&              params,
         if(hip_status != hipSuccess)
         {
             ++n_hip_failures;
+            std::stringstream ss;
+            ss << "Error occurred when copying data to device for storing callback";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP();
+                throw ROCFFT_SKIP{std::move(ss)};
             }
             else
             {
-                throw ROCFFT_FAIL();
+                throw ROCFFT_FAIL{std::move(ss)};
             }
         }
 
