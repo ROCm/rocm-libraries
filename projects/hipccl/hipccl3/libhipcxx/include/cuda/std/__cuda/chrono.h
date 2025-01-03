@@ -62,7 +62,7 @@ namespace chrono
 
 _LIBCUDACXX_HIDE_FROM_ABI system_clock::time_point system_clock::now() noexcept
 {
-// FIXME(HIP/AMD): simplify logic and use NV_DISPATCH_TARGET macros
+// FIXME(HIP): simplify logic and use NV_DISPATCH_TARGET macros
 #ifdef __CUDA_ARCH__
     uint64_t __time;
     asm volatile("mov.u64 %0, %%globaltimer;":"=l"(__time)::);

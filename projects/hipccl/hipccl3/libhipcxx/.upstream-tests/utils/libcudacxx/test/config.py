@@ -794,7 +794,7 @@ class Configuration(object):
                 if maj_v < 6:
                     possible_stds.remove('c++14')
             elif self.cxx.type == 'hipcc':
-                # FIXME(HIP/AMD): hipcc does not support new with --std=c++20, --std=cc+2a in device code
+                # FIXME(HIP): hipcc does not support new with --std=c++20, --std=cc+2a in device code
                 # see https://github.com/AMD-AI/libhipcxx/issues/25
                 possible_stds.remove('c++20')
                 possible_stds.remove('c++2a')

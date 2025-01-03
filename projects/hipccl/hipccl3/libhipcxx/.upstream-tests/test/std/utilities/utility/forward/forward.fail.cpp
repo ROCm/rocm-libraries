@@ -47,7 +47,7 @@ int main(int, char**)
     {
     (void) cuda::std::forward<A&>(source());  // expected-note {{requested here}}
     // expected-error-re@.*__utility/forward.h:* {{{{(static_assert|static assertion)}} failed{{.*}} {{"?}}cannot forward an rvalue as an lvalue{{"?}}}}
-#if defined(TEST_COMPILER_CLANG) && __clang_major__ > 14 && !defined(TEST_COMPILER_HIPCC)  // NOTE(HIP/AMD): hipcc does not emit this error message
+#if defined(TEST_COMPILER_CLANG) && __clang_major__ > 14 && !defined(TEST_COMPILER_HIPCC)  // NOTE(HIP): hipcc does not emit this error message
     // expected-error {{ignoring return value of function declared with const attribute}}
 #endif
   }

@@ -25,7 +25,7 @@
 // THE SOFTWARE.
 
 // UNSUPPORTED: hipcc
-// This test is including cuda/std/vector which does not exist.
+// NOTE(HIP): This test includes the header cuda/std/vector which does not exist.
 // HIPCC gives the correct error: cuda/std/string file not found.
 // However, other errors are expected, consider the expected-error. 
 // We found _LIBCUDACXX_HAS_VECTOR guard in other tests that include the header, 

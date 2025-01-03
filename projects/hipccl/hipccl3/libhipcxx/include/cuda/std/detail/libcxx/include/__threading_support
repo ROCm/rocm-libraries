@@ -302,7 +302,7 @@ _LIBCUDACXX_THREAD_ABI_VISIBILITY
 void __libcpp_thread_sleep_for(chrono::nanoseconds __ns)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-// FIXME (HIP): Due to a lack of a clock rate independent nanosleep ISA instruction on gfx90a and gfx908,
+// FIXME(HIP): Due to a lack of a clock rate independent nanosleep ISA instruction on gfx90a and gfx908,
 // we use wall_clock64 that runs at a fixed clock rate of 25 MHz to simulate a nanosleep (only on gfx90a and on gfx908).
 // Each cycle of the 25 MHz clock has a duration of 40 ns, which is the best granularity this method can have.
 // We asked for a __nanosleep builtin in SWDEV-394550.

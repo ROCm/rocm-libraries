@@ -25,7 +25,7 @@
 
 // UNSUPPORTED: hipcc
 // UNSUPPORTED: c++98, c++03, c++11
-// Marking the test as unsupported:
+// NOTE(HIP):
 // This test is including hip/std/string which does not exist.
 // HIPCC gives the correct error: hip/std/string file not found.
 // However, other errors are expected, consider the expected-error and expected-note. 

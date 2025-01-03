@@ -600,7 +600,7 @@ template <class _Ip>
 _LIBCUDACXX_CONCEPT __specifies_members =
   __has_member_value_type<_Ip> && __has_member_difference_type<_Ip> && __has_member_reference<_Ip>
   && __has_member_iterator_category<_Ip> && __has_member_pointer<_Ip>;
-// NOTE(HIP/AMD): In C++17, all member types including pointer must be present.
+// NOTE(HIP): In C++17, all member types including pointer must be present.
 // "If Iter does not have any of the five nested types above, then this template has no members 
 // by any of those names (std::iterator_traits is SFINAE-friendly)."
 template <class, class = void>

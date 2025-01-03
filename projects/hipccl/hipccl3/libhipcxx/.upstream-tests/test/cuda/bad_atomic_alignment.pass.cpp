@@ -28,8 +28,7 @@
 // UNSUPPORTED: windows && pre-sm-70
 
 // UNSUPPORTED: hipcc
-// We made the test unsupported because hip builtin atomics 
-// fail with underaligned types (SWDEV-393058) 
+// NOTE(HIP): HIP builtin atomics do not work with underaligned types (SWDEV-393058). 
 // As a workaround, you need to use alignas(8) 
 // to align the user-defined types manually. 
 

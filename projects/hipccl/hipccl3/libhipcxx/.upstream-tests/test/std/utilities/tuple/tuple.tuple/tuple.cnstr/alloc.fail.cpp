@@ -24,6 +24,7 @@
 // THE SOFTWARE.
 
 // UNSUPPORTED: c++98, c++03
+// FIXME(HIP): fix following compiler error: /usr/lib/gcc/x86_64-linux-gnu/9/../../../../include/c++/9/tuple:699:2: note: candidate constructor template not viable: no known conversion from 'const cuda::std::allocator_arg_t' to 'std::allocator_arg_t' for 1st argument tuple(allocator_arg_t __tag, const _Alloc& __a)
 
 // <cuda/std/tuple>
 

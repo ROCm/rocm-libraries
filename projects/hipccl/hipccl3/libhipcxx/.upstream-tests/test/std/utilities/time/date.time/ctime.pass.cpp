@@ -68,7 +68,7 @@ int main(int, char**)
   unused(tmspec); // Prevent unused warning
 #  endif
 
-//FIXME(hip): clock() is declared as extern clock_t clock (void) __THROW; in <time.h>. clock_t is a typedef to long.
+//FIXME(HIP): clock() is declared as extern clock_t clock (void) __THROW; in <time.h>. clock_t is a typedef to long.
 //The below test doesn't work for HIP, as the clock() function is defined in /opt/rocm/include/hip/amd_detail/amd_device_functions.h
 //as "long long int  clock() { return __clock(); }". Therefore, the decltype expands to long long instead of the expected type long.
 #  if !defined(TEST_COMPILER_CLANG_CUDA) || !defined(__HIP__)

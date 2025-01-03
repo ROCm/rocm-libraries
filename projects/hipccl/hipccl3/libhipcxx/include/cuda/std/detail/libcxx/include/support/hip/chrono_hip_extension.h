@@ -79,7 +79,7 @@ inline hipError_t initialize_amdgpu_sysclock_on_current_device() _NOEXCEPT {
     LIBCUDACXX_HIP_CHECK(hipMalloc(&__d_dev_sysclock_offset, sizeof(long long)));
 
     // get device sysclock offset and host unix timestamp at approximately the same time
-    // FIXME (HIP): There will be some delays, e.g., due to kernel call overhead, so the clocks on the device and on the host will not be fully synchronized
+    // FIXME(HIP): There will be some delays, e.g., due to kernel call overhead, so the clocks on the device and on the host will not be fully synchronized
     get_sysclock_offset_kernel<<<1,1>>>(__d_dev_sysclock_offset);
 
     LIBCUDACXX_HIP_CHECK(hipGetLastError(); assert(__hip_error==hipSuccess));
