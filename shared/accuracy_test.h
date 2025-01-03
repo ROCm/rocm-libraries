@@ -37,18 +37,11 @@
 #include "fftw_transform.h"
 #include "gpubuf.h"
 #include "rocfft_against_fftw.h"
+#include "sys_mem.h"
 #include "test_params.h"
 
-extern int    verbose;
-extern size_t ramgb;
-extern bool   fftw_compare;
-
-static constexpr size_t ONE_GiB = 1 << 30;
-
-inline size_t bytes_to_GiB(const size_t bytes)
-{
-    return bytes == 0 ? 0 : (bytes - 1 + ONE_GiB) / ONE_GiB;
-}
+extern int  verbose;
+extern bool fftw_compare;
 
 // Remember the results of the last FFT we computed with FFTW.  Tests
 // are ordered so that later cases can often reuse this result.
@@ -66,79 +59,6 @@ struct last_cpu_fft_cache
     std::vector<hostbuf> cpu_output;
 };
 extern last_cpu_fft_cache last_cpu_fft_data;
-
-struct system_memory
-{
-    size_t total_bytes = 0;
-    size_t free_bytes  = 0;
-    // Limits the amount of memory used throughout the tests.
-    // Test RAM limit is: total_bytes * percentage_usable_memory.
-    // If the test system has little swap space (or there are many
-    // other processes running concurrently) and we are too
-    // aggressive with host memory usage, then the test process
-    // may get OOM killed.
-    static constexpr double percentage_usable_memory = .85;
-};
-extern system_memory start_memory;
-
-system_memory get_system_memory();
-
-// Estimate the amount of host memory needed for buffers.
-inline size_t needed_ram_buffers(const fft_params& params, const int verbose)
-{
-    // This calculation is assuming contiguous data but noncontiguous buffers
-    // are assumed to require a close enough amount of space for the purposes
-    // of this estimate.
-
-    size_t needed_ram = 6
-                        * std::accumulate(params.length.begin(),
-                                          params.length.end(),
-                                          static_cast<size_t>(1),
-                                          std::multiplies<size_t>());
-
-    // Account for precision and data type:
-    if(params.transform_type != fft_transform_type_real_forward
-       && params.transform_type != fft_transform_type_real_inverse)
-    {
-        needed_ram *= 2;
-    }
-    switch(params.precision)
-    {
-    case fft_precision_half:
-        needed_ram *= 2;
-        break;
-    case fft_precision_single:
-        needed_ram *= 4;
-        break;
-    case fft_precision_double:
-        needed_ram *= 8;
-        break;
-    }
-
-    needed_ram *= params.nbatch;
-
-    if(verbose)
-    {
-        std::cout << "required host memory for buffers (GiB): " << bytes_to_GiB(needed_ram) << "\n";
-    }
-
-    return needed_ram;
-}
-
-// Check if buffers will fit in host memory. Returns the amount of ram needed.
-template <class Tparams>
-inline void
-    check_problem_fits_host_memory(const Tparams& params, const int verbose, size_t& needed_ram)
-{
-    needed_ram = needed_ram_buffers(params, verbose);
-
-    if(ramgb > 0 && needed_ram > ramgb * ONE_GiB)
-    {
-        std::stringstream msg;
-        msg << "needed_ramgb: " << bytes_to_GiB(needed_ram) << ", ramgb limit: " << ramgb << ".\n";
-        throw ROCFFT_SKIP{std::move(msg)};
-    }
-}
 
 // Perform several checks to make sure buffers will fit in device memory
 template <class Tparams>
@@ -224,72 +144,6 @@ bool fftw_plan_uses_bluestein(const typename fftw_trait<Tfloat>::fftw_plan_type&
     // assume worst case (bluestein is always used)
     return true;
 #endif
-}
-
-// Estimate the amount of host memory needed for fftw.
-template <typename Tfloat>
-inline size_t needed_ram_fftw(const fft_params&                                  contiguous_params,
-                              const typename fftw_trait<Tfloat>::fftw_plan_type& cpu_plan,
-                              const int                                          verbose)
-{
-    size_t total_length = std::accumulate(contiguous_params.length.begin(),
-                                          contiguous_params.length.end(),
-                                          static_cast<size_t>(1),
-                                          std::multiplies<size_t>());
-    size_t needed_ram   = 0;
-    // Detect Bluestein in plan
-    if(fftw_plan_uses_bluestein<Tfloat>(cpu_plan))
-    {
-        for(size_t dim : contiguous_params.length)
-        {
-            unsigned int needed_ram_dim = dim;
-
-            // Next-plus-one-power-of-two multiplied any other lengths
-            needed_ram_dim--;
-
-            needed_ram_dim |= needed_ram_dim >> 2;
-            needed_ram_dim |= needed_ram_dim >> 4;
-            needed_ram_dim |= needed_ram_dim >> 8;
-            needed_ram_dim |= needed_ram_dim >> 16;
-
-            needed_ram_dim++;
-
-            needed_ram_dim *= 2 * (total_length / dim);
-
-            if(needed_ram_dim > needed_ram)
-            {
-                needed_ram = needed_ram_dim;
-            }
-        }
-    }
-
-    // Account for precision and data type:
-    if(contiguous_params.transform_type != fft_transform_type_real_forward
-       && contiguous_params.transform_type != fft_transform_type_real_inverse)
-    {
-        needed_ram *= 2;
-    }
-    switch(contiguous_params.precision)
-    {
-    case fft_precision_half:
-        needed_ram *= 2;
-        break;
-    case fft_precision_single:
-        needed_ram *= 4;
-        break;
-    case fft_precision_double:
-        needed_ram *= 8;
-        break;
-    }
-
-    needed_ram *= contiguous_params.nbatch;
-
-    if(verbose)
-    {
-        std::cout << "required host memory for FFTW (GiB): " << bytes_to_GiB(needed_ram) << "\n";
-    }
-
-    return needed_ram;
 }
 
 // Base gtest class for comparison with FFTW.
@@ -891,9 +745,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     auto ibuffer_sizes = params.ibuffer_sizes();
     auto obuffer_sizes = params.obuffer_sizes();
 
-    // Make sure FFT buffers fit in host/device memory
-    size_t needed_ram;
-    check_problem_fits_host_memory(params, verbose, needed_ram);
+    // Make sure FFT buffers fit in device memory
     check_problem_fits_device_memory(params, verbose);
 
     // Create FFT plan - this will also allocate work buffer, but
@@ -1102,18 +954,6 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                                                 contiguous_params.transform_type,
                                                 cpu_input,
                                                 cpu_output);
-
-        needed_ram += needed_ram_fftw<Tfloat>(contiguous_params, cpu_plan, verbose);
-
-        if(ramgb > 0 && needed_ram > ramgb * ONE_GiB)
-        {
-            if(verbose)
-            {
-                std::cout << "Problem exceeds memory limit; skipped [rocfft_transform]."
-                          << std::endl;
-            }
-            throw ROCFFT_SKIP();
-        }
     }
 
     // Host-side buffer used to store input to transfer to GPU, copy GPU input
@@ -1487,10 +1327,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     // Compute the l-infinity and l-2 distance between the CPU and GPU output:
     // wait for cpu FFT so we can compute cutoff
 
-    const auto total_length = std::accumulate(params.length.begin(),
-                                              params.length.end(),
-                                              static_cast<size_t>(1),
-                                              std::multiplies<size_t>());
+    const auto total_length = product(params.length.begin(), params.length.end());
 
     std::unique_ptr<std::vector<std::pair<size_t, size_t>>> linf_failures;
     if(verbose > 1)

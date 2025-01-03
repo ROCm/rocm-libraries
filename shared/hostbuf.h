@@ -22,14 +22,22 @@
 #define ROCFFT_HOSTBUF_H
 
 #include "arithmetic.h"
+#include "sys_mem.h"
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <new>
 
 #ifndef WIN32
 #include <stdlib.h>
 #include <sys/mman.h>
 #endif
+
+struct HOSTBUF_MEM_USAGE
+{
+    std::stringstream msg;
+};
 
 // Simple RAII class for host buffers.  T is the type of pointer that
 // data() returns
@@ -44,12 +52,14 @@ public:
         std::swap(buf, other.buf);
         std::swap(owned, other.owned);
         std::swap(bsize, other.bsize);
+        std::swap(bsize_track, other.bsize_track);
     }
     hostbuf_t& operator=(hostbuf_t&& other)
     {
         std::swap(buf, other.buf);
         std::swap(owned, other.owned);
         std::swap(bsize, other.bsize);
+        std::swap(bsize_track, other.bsize_track);
         return *this;
     }
     hostbuf_t(const hostbuf_t&) = delete;
@@ -60,7 +70,7 @@ public:
         hostbuf_t ret;
         ret.owned = false;
         ret.buf   = p;
-        ret.bsize = size_bytes;
+        ret.bsize = ret.bsize_track = size_bytes;
         return ret;
     }
 
@@ -71,8 +81,19 @@ public:
 
     void alloc(size_t size)
     {
-        bsize = size;
         free();
+
+        bsize = size;
+
+        auto usable_mem = host_mem_info.get_usable_bytes();
+        if(total_used_mem + size > usable_mem)
+        {
+            std::stringstream msg;
+            msg << "Host memory usage limit exceed (used mem: "
+                << bytes_to_GiB(total_used_mem + size)
+                << "GiB, free mem: " << bytes_to_GiB(usable_mem) << " GiB)";
+            throw HOSTBUF_MEM_USAGE{std::move(msg)};
+        }
 
         // we're aligning to multiples of 64 bytes, so round the
         // allocation size up to the nearest 64 to keep ASAN happy
@@ -103,6 +124,9 @@ public:
 #endif
         if(!buf)
             throw std::bad_alloc();
+
+        bsize_track = size;
+        total_used_mem += bsize_track;
     }
 
     size_t size() const
@@ -114,6 +138,8 @@ public:
     {
         if(buf != nullptr)
         {
+            total_used_mem -= bsize_track;
+
             if(owned)
             {
 #ifdef WIN32
@@ -123,7 +149,7 @@ public:
 #endif
             }
             buf   = nullptr;
-            bsize = 0;
+            bsize = bsize_track = 0;
         }
         owned = true;
     }
@@ -180,6 +206,13 @@ private:
     // free it)
     bool   owned = true;
     size_t bsize = 0;
+
+    // Buffer size for tracking total memory usage.
+    // When buffer is shrunk in place, bsize_track is not changed.
+    size_t bsize_track = 0;
+
+    // Keeps track of total used memory for all hostbufs
+    inline static std::atomic<size_t> total_used_mem = 0;
 };
 
 // default hostbuf that gives out void* pointers

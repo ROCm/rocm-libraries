@@ -35,17 +35,13 @@
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
 #include "../../shared/environment.h"
+#include "../../shared/hostbuf.h"
+#include "../../shared/sys_mem.h"
 #include "../../shared/work_queue.h"
 #include "../hipfft_params.h"
 #include "hipfft/hipfft.h"
 #include "hipfft_accuracy_test.h"
 #include "hipfft_test_params.h"
-
-#ifdef WIN32
-#include <windows.h>
-#else
-#include <sys/sysinfo.h>
-#endif
 
 // Control output verbosity:
 int verbose;
@@ -110,65 +106,6 @@ fft_params::fft_mp_lib mp_lib = fft_params::fft_mp_lib_none;
 int mp_ranks = 1;
 // Multi-process launch command (e.g. mpirun --np 4 /path/to/rocfft_mpi_worker)
 std::string mp_launch;
-
-system_memory get_system_memory()
-{
-    system_memory memory_data;
-#ifdef WIN32
-    MEMORYSTATUSEX info;
-    info.dwLength = sizeof(info);
-    if(!GlobalMemoryStatusEx(&info))
-        return memory_data;
-    memory_data.total_bytes = info.ullTotalPhys;
-    memory_data.free_bytes  = info.ullAvailPhys;
-#else
-    struct sysinfo info;
-    if(sysinfo(&info) != 0)
-        return memory_data;
-    memory_data.total_bytes = info.totalram * info.mem_unit;
-    memory_data.free_bytes  = info.freeram * info.mem_unit;
-
-    // top-level memory cgroup may restrict this further
-
-    // check cgroup v1
-    std::ifstream memcg1_limit_file("/sys/fs/cgroup/memory/memory.limit_in_bytes");
-    std::ifstream memcg1_usage_file("/sys/fs/cgroup/memory/memory.usage_in_bytes");
-    size_t        memcg1_limit_bytes;
-    size_t        memcg1_usage_bytes;
-    // use cgroupv1 limit if we can read the cgroup files and it's
-    // smaller
-    if((memcg1_limit_file >> memcg1_limit_bytes) && (memcg1_usage_file >> memcg1_usage_bytes))
-    {
-        memory_data.total_bytes = std::min<size_t>(memory_data.total_bytes, memcg1_limit_bytes);
-        memory_data.free_bytes  = memcg1_limit_bytes - memcg1_usage_bytes;
-    }
-
-    // check cgroup v2
-    std::ifstream memcg2_max_file("/sys/fs/cgroup/memory.max");
-    std::ifstream memcg2_current_file("/sys/fs/cgroup/memory.current");
-    size_t        memcg2_max_bytes;
-    size_t        memcg2_current_bytes;
-    // use cgroupv2 limit if we can read the cgroup files and it's
-    // smaller
-    if((memcg2_max_file >> memcg2_max_bytes) && (memcg2_current_file >> memcg2_current_bytes))
-    {
-        memory_data.total_bytes = std::min<size_t>(memory_data.total_bytes, memcg2_max_bytes);
-        memory_data.free_bytes  = memcg2_max_bytes - memcg2_current_bytes;
-    }
-
-#endif
-
-    auto deviceProp = get_curr_device_prop();
-    // on integrated APU, we can't expect to reuse "device" memory
-    // for "host" things.
-    if(deviceProp.integrated)
-    {
-        memory_data.total_bytes -= deviceProp.totalGlobalMem;
-    }
-    return memory_data;
-}
-
-system_memory start_memory = get_system_memory();
 
 void init_gtest_flags()
 {
@@ -472,10 +409,7 @@ int main(int argc, char* argv[])
     app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
     app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
     app.add_option("--R", ramgb, "RAM limit in GiB for tests")
-        ->default_val(
-            (static_cast<size_t>(start_memory.total_bytes * system_memory::percentage_usable_memory)
-             + ONE_GiB - 1)
-            / ONE_GiB);
+        ->default_val(host_mem_info.get_total_gbytes());
     app.add_option("--V", vramgb, "VRAM limit in GiB for tests")->default_val(0);
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
     app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
@@ -571,6 +505,9 @@ int main(int argc, char* argv[])
     fftw_plan_with_nthreads(rocfft_concurrency());
     fftwf_plan_with_nthreads(rocfft_concurrency());
 #endif
+
+    // Set host memory limit from command-line options
+    host_mem_info.set_limit_gbytes(ramgb);
 
     if(use_fftw_wisdom)
     {
@@ -675,6 +612,12 @@ TEST(manual, vs_fftw)
     try
     {
         fft_vs_reference(params, false);
+    }
+    catch(HOSTBUF_MEM_USAGE& e)
+    {
+        // explicitly clear test cache
+        last_cpu_fft_data = last_cpu_fft_cache();
+        GTEST_SKIP() << e.msg.str();
     }
     catch(ROCFFT_SKIP& e)
     {
