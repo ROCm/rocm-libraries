@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,10 +53,8 @@ namespace rocsparse
         rocsparse_handle handle, I m, I n, int64_t ld, T value, T* array, rocsparse_order order);
 
     template <typename I, typename T>
-    rocsparse_status scale_array(rocsparse_handle handle,
-                                 I                length,
-                                 const T* __restrict__ scalar_device_host,
-                                 T* array);
+    rocsparse_status
+        scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, T* array);
 
     template <typename I, typename T>
     rocsparse_status scale_2d_array(rocsparse_handle handle,
@@ -65,7 +63,7 @@ namespace rocsparse
                                     int64_t          ld,
                                     int64_t          batch_count,
                                     int64_t          stride,
-                                    const T* __restrict__ scalar_device_host,
-                                    T*              array,
-                                    rocsparse_order order);
+                                    const T*         scalar_device_host,
+                                    T*               array,
+                                    rocsparse_order  order);
 }
