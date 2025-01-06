@@ -36,7 +36,7 @@
 
 struct HOSTBUF_MEM_USAGE
 {
-    std::stringstream msg;
+    const std::string msg;
 };
 
 // Simple RAII class for host buffers.  T is the type of pointer that
@@ -92,7 +92,7 @@ public:
             msg << "Host memory usage limit exceed (used mem: "
                 << bytes_to_GiB(total_used_mem + size)
                 << "GiB, free mem: " << bytes_to_GiB(usable_mem) << " GiB)";
-            throw HOSTBUF_MEM_USAGE{std::move(msg)};
+            throw HOSTBUF_MEM_USAGE{msg.str()};
         }
 
         // we're aligning to multiples of 64 bytes, so round the

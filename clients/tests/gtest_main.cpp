@@ -803,15 +803,15 @@ TEST(manual, vs_fftw) // MANUAL TESTS HERE
     {
         // explicitly clear test cache
         last_cpu_fft_data = last_cpu_fft_cache();
-        GTEST_SKIP() << e.msg.str();
+        GTEST_SKIP() << e.msg;
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg.str();
+        GTEST_SKIP() << e.msg;
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg.str();
+        GTEST_FAIL() << e.msg;
     }
 }
 
@@ -845,11 +845,11 @@ TEST(manual, bitwise_reproducibility) // MANUAL TESTS HERE
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg.str();
+        GTEST_SKIP() << e.msg;
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg.str();
+        GTEST_FAIL() << e.msg;
     }
     SUCCEED();
 }

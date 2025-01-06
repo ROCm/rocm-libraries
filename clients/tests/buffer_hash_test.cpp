@@ -366,7 +366,7 @@ TEST(rocfft_UnitTest, buffer_hashing_half)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg.str();
+        GTEST_SKIP() << e.msg;
     }
 }
 
@@ -381,7 +381,7 @@ TEST(rocfft_UnitTest, buffer_hashing_single)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg.str();
+        GTEST_SKIP() << e.msg;
     }
 }
 
@@ -396,6 +396,6 @@ TEST(rocfft_UnitTest, buffer_hashing_double)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg.str();
+        GTEST_SKIP() << e.msg;
     }
 }
