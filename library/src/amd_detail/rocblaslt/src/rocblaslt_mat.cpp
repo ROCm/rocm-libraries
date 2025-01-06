@@ -28,6 +28,7 @@
 #include "handle.h"
 #include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
+#include <array>
 
 #include <hip/hip_runtime_api.h>
 
@@ -405,7 +406,7 @@ rocblaslt_status
     std::vector<int64_t>            ldc_vec, batch_stride_c_vec, num_batches_c_vec;
     std::vector<int64_t>            ldd_vec, batch_stride_d_vec, num_batches_d_vec;
     std::vector<int64_t>            lde_vec, batch_stride_e_vec, num_batches_e_vec;
-    std::vector<int8_t[16]>         alpha_1(matmul_descr.size());
+    std::vector<std::array<int8_t, 16>>         alpha_1(matmul_descr.size());
 
     std::vector<bool> gradient_vec;
 
@@ -505,10 +506,10 @@ rocblaslt_status
             return validArgs;
 
         const void* alphaTmp = nullptr;
-        memset(alpha_1[i], 0, sizeof(int8_t) * 16);
+        memset(alpha_1[i].data(), 0, sizeof(int8_t) * 16);
         if(scaleAlphaVec)
         {
-            setTo1(compute_type, (void*)alpha_1[i], &alphaTmp);
+            setTo1(compute_type, (void*)alpha_1[i].data(), &alphaTmp);
         }
         else
         {
@@ -1218,7 +1219,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
     std::vector<int64_t> lde_vec, batch_stride_e_vec, num_batches_e_vec;
     std::vector<bool>    gradient_vec;
 
-    std::vector<int8_t[16]> alpha_1(m.size());
+    std::vector<std::array<int8_t, 16>> alpha_1(m.size());
 
     for(int i = 0; i < m.size(); i++)
     {
@@ -1312,10 +1313,10 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
             return validArgs;
 
         const void* alphaTmp = nullptr;
-        memset(alpha_1[i], 0, sizeof(int8_t) * 16);
+        memset(alpha_1[i].data(), 0, sizeof(int8_t) * 16);
         if(scaleAlphaVec)
         {
-            setTo1(compute_type, (void*)alpha_1[i], &alphaTmp);
+            setTo1(compute_type, (void*)alpha_1[i].data(), &alphaTmp);
         }
         else
         {
