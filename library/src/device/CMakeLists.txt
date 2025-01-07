@@ -123,7 +123,7 @@ foreach(i RANGE ${LOOP_END})
   list(APPEND FUNCTION_POOLS "function_pool_init_${i}.cpp")
 endforeach()
 
-# stockham_aot will be having relative RUNPATH with respect to package install directory
+# stockham_gen will be having relative RUNPATH with respect to package install directory
 # Set LD_LIBRARY_PATH for running the executable from build directory
 add_custom_command(OUTPUT ${gen_headers}
   OUTPUT ${FUNCTION_POOLS}
@@ -134,8 +134,8 @@ add_custom_command(OUTPUT ${gen_headers}
   --manual-large=${GENERATOR_MANUAL_LARGE_SIZE}
   --runtime-compile-default=${ROCFFT_RUNTIME_COMPILE_DEFAULT}
   --num-files=${ROCFFT_FUNCTION_POOL_N}
-  generate $<TARGET_FILE:stockham_aot>
-  DEPENDS stockham_aot ${kgendeps}
+  generate $<TARGET_FILE:stockham_gen>
+  DEPENDS stockham_gen ${kgendeps}
   COMMENT "Generator producing device kernels for rocfft-device"
 )
 

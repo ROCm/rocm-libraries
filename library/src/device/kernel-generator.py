@@ -21,20 +21,17 @@
 """rocFFT kernel generator.
 
 It accept two sub-commands:
-1. list - lists files that will be generated
+1. list - lists names of kernels that will be generated
 2. generate - generate them!
 
 """
 
 import argparse
-import collections
 import functools
-import itertools
 import subprocess
 import sys
-import os
-import os.path
 import json
+import threading
 
 from copy import deepcopy
 from pathlib import Path
@@ -225,9 +222,9 @@ def generate_cpu_function_pool_pieces(functions, num_files):
 
 
 def list_generated_kernels(kernels):
-    """Return list of kernel filenames."""
+    """Return list of kernel names."""
     return [
-        kernel_file_name(x) for x in kernels
+        kernel_name(x) for x in kernels
         if not x.runtime_compile and not is_aot_rtc(x)
     ]
 
@@ -237,7 +234,7 @@ def list_generated_kernels(kernels):
 #
 
 
-def kernel_file_name(ns):
+def kernel_name(ns):
     """Given kernel info namespace, return reasonable file name."""
 
     assert hasattr(ns, 'length')
@@ -254,7 +251,7 @@ def kernel_file_name(ns):
     elif ns.scheme == 'CS_KERNEL_STOCKHAM_BLOCK_CR':
         postfix = '_sbcr'
 
-    return f'rocfft_len{length}{postfix}.cpp'
+    return f'rocfft_len{length}{postfix}'
 
 
 # yapf: disable
@@ -728,6 +725,7 @@ def list_small_kernels():
 
     return kernels
 
+
 def list_2d_kernels():
     """Return list of fused 2D kernels to generate."""
 
@@ -1036,121 +1034,78 @@ def default_runtime_compile(kernels, default_val):
     ]
 
 
-def generate_kernel(kernel, precisions, stockham_aot):
-    """Generate a single kernel file for 'kernel'.
-
-    The kernel file contains all kernel variations corresponding to
-    the kernel meta data in 'kernel'.
-
-    A list of CPU functions is returned.
+def generate_kernel_functions(kernels, precisions, launchers_json):
+    """Generate CPU functions used to populate function pool with
+    each kernel in `kernels`, and its variations.
     """
-
-    args = [stockham_aot]
-    pre_enum = {'sp': 0, 'dp': 1}
-    # 2D single kernels always specify threads per transform
-    if isinstance(kernel.length, list):
-        args.append(','.join([str(f) for f in kernel.factors[0]]))
-        args.append(','.join([str(f) for f in kernel.factors[1]]))
-        args.append(','.join([str(pre_enum[pre]) for pre in precisions]))
-        args.append(','.join([str(f) for f in kernel.threads_per_transform]))
-    else:
-        args.append(','.join([str(f) for f in kernel.factors]))
-        args.append(','.join([str(pre_enum[pre]) for pre in precisions]))
-        # 1D kernels might not, and need to default to 'uwide'
-        threads_per_transform = getattr(
-            kernel, 'threads_per_transform', {
-                'uwide': kernel.length // min(kernel.factors),
-                'wide': kernel.length // max(kernel.factors),
-                'tall': 0,
-                'consolidated': 0
-            }[getattr(kernel, 'flavour', 'uwide')])
-        args.append(str(threads_per_transform))
-
-    # default half_lds to True only for CS_KERNEL_STOCKHAM
-    half_lds = getattr(kernel, 'half_lds',
-                       kernel.scheme == 'CS_KERNEL_STOCKHAM')
-    # but we don't use LDS for single-radix kernels, so half_lds is meaningless there
-    if len(kernel.factors) == 1:
-        half_lds = False
-
-    # for unspecified direct_to_from_reg, default is True only for CS_KERNEL_STOCKHAM and SBCC
-    direct_to_from_reg = getattr(kernel, 'direct_to_from_reg', True)
-
-    filename = kernel_file_name(kernel)
-
-    args.append(str(kernel.workgroup_size))
-    args.append('1' if half_lds else '0')
-    args.append('1' if direct_to_from_reg else '0')
-    args.append(kernel.scheme)
-    args.append(filename)
-
-    proc = subprocess.Popen(args=args)
-    ret_code = proc.wait()
-    if (ret_code != 0):
-        sys.exit(f"Error executing " + stockham_aot)
-
-    kernel_metadata_file = open(kernel_file_name(kernel) + '.json', 'r')
-    launchers = json.load(kernel_metadata_file)
-
-    # don't format generated source files since they aren't currently used
 
     cpu_functions = []
     data = Variable('data_p', 'const void *')
     back = Variable('back_p', 'void *')
-    for launcher_dict in launchers:
-        launcher = NS(**launcher_dict)
+    # launchers_json has kernel names as keys to a list of launchers for each kernel variant
+    for kernel in kernels:
+        launchers = launchers_json[kernel_name(kernel)]
+        for launcher_dict in launchers:
+            launcher = NS(**launcher_dict)
 
-        factors = launcher.factors
-        length = launcher.lengths[0] if len(
-            launcher.lengths) == 1 else (launcher.lengths[0],
-                                         launcher.lengths[1])
-        transforms_per_block = launcher.transforms_per_block
-        workgroup_size = launcher.workgroup_size
-        threads_per_transform = workgroup_size // transforms_per_block
-        half_lds = launcher.half_lds
-        direct_to_from_reg = launcher.direct_to_from_reg
-        scheme = launcher.scheme
-        sbrc_type = launcher.sbrc_type
-        sbrc_transpose_type = launcher.sbrc_transpose_type
-        precision = 'dp' if launcher.double_precision else 'sp'
-        runtime_compile = kernel.runtime_compile
-        use_3steps_large_twd = getattr(kernel, 'use_3steps_large_twd', None)
+            factors = launcher.factors
+            length = launcher.lengths[0] if len(
+                launcher.lengths) == 1 else (launcher.lengths[0],
+                                             launcher.lengths[1])
+            transforms_per_block = launcher.transforms_per_block
+            workgroup_size = launcher.workgroup_size
+            threads_per_transform = workgroup_size // transforms_per_block
+            half_lds = launcher.half_lds
+            direct_to_from_reg = launcher.direct_to_from_reg
+            scheme = launcher.scheme
+            sbrc_transpose_type = launcher.sbrc_transpose_type
+            precision = 'dp' if launcher.double_precision else 'sp'
+            runtime_compile = kernel.runtime_compile
+            use_3steps_large_twd = getattr(kernel, 'use_3steps_large_twd',
+                                           None)
 
-        params = LaunchParams(transforms_per_block, workgroup_size,
-                              threads_per_transform, half_lds,
-                              direct_to_from_reg)
+            params = LaunchParams(transforms_per_block, workgroup_size,
+                                  threads_per_transform, half_lds,
+                                  direct_to_from_reg)
 
-        # make 2D list of threads_per_transform to populate FFTKernel
-        tpt_list = kernel.threads_per_transform if scheme == 'CS_KERNEL_2D_SINGLE' else [
-            threads_per_transform, 0
-        ]
+            # make 2D list of threads_per_transform to populate FFTKernel
+            tpt_list = kernel.threads_per_transform if scheme == 'CS_KERNEL_2D_SINGLE' else [
+                threads_per_transform, 0
+            ]
 
-        precisions = [precision]
-        if precision == 'sp':
-            precisions.append('half')
-        for p in precisions:
-            f = Function(name=launcher.name,
-                         arguments=ArgumentList(data, back),
-                         meta=NS(
-                             factors=factors,
-                             length=length,
-                             params=params,
-                             precision=p,
-                             runtime_compile=runtime_compile,
-                             scheme=scheme,
-                             workgroup_size=workgroup_size,
-                             transforms_per_block=transforms_per_block,
-                             threads_per_transform=tpt_list,
-                             transpose=sbrc_transpose_type,
-                             use_3steps_large_twd=use_3steps_large_twd,
-                         ))
+            precisions = [precision]
+            if precision == 'sp':
+                precisions.append('half')
+            for p in precisions:
+                f = Function(arguments=ArgumentList(data, back),
+                             meta=NS(
+                                 factors=factors,
+                                 length=length,
+                                 params=params,
+                                 precision=p,
+                                 runtime_compile=runtime_compile,
+                                 scheme=scheme,
+                                 workgroup_size=workgroup_size,
+                                 transforms_per_block=transforms_per_block,
+                                 threads_per_transform=tpt_list,
+                                 transpose=sbrc_transpose_type,
+                                 use_3steps_large_twd=use_3steps_large_twd,
+                             ))
 
-            cpu_functions.append(f)
+                cpu_functions.append(f)
 
     return cpu_functions
 
 
-def generate_kernels(kernels, precisions, stockham_aot):
+def read_subprocess(proc_output, output):
+    """To be run in another thread to keep reading in stdout from a subprocess"""
+    json_string = ""
+    for line in proc_output:
+        json_string += line
+    output[0] = json_string
+
+
+def generate_kernels(kernels, precisions, stockham_gen):
     """Generate and write kernels from the kernel list.
 
     Entries in the kernel list are simple namespaces.  These are
@@ -1159,11 +1114,85 @@ def generate_kernels(kernels, precisions, stockham_aot):
     A list of CPU functions is returned.
     """
 
-    ret = []
-    for k in kernels:
-        ret += generate_kernel(k, precisions, stockham_aot)
+    pre_enum = {'sp': 0, 'dp': 1}
 
-    return ret
+    # run stockham_gen to retrieve JSON output via stdout, used for additional kernel details
+    proc = subprocess.Popen(args=[stockham_gen],
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            text=True)
+
+    # read from subprocess' stdout through another thread
+    json_result = [None]
+    reader = threading.Thread(target=read_subprocess,
+                              args=(proc.stdout, json_result))
+    reader.start()
+
+    kernel_idx = 0
+    done_writing = False
+    num_kernels = len(kernels)
+
+    while True:
+        # Send input if any remaining
+        if kernel_idx < num_kernels:
+            k = kernels[kernel_idx]
+            # 2D single kernels always specify threads per transform
+            if isinstance(k.length, list):
+                proc.stdin.write(','.join([str(f)
+                                           for f in k.factors[0]]) + " ")
+                proc.stdin.write(','.join([str(f)
+                                           for f in k.factors[1]]) + " ")
+                proc.stdin.write(
+                    ','.join([str(pre_enum[pre]) for pre in precisions]) + " ")
+                proc.stdin.write(','.join(
+                    [str(f) for f in k.threads_per_transform]))
+            else:
+                proc.stdin.write(','.join([str(f) for f in k.factors]) + " ")
+                proc.stdin.write(','.join(
+                    [str(pre_enum[pre]) for pre in precisions]))
+                # 1D kernels might not, and need to default to 'uwide'
+                threads_per_transform = getattr(
+                    k, 'threads_per_transform', {
+                        'uwide': k.length // min(k.factors),
+                        'wide': k.length // max(k.factors),
+                        'tall': 0,
+                        'consolidated': 0
+                    }[getattr(k, 'flavour', 'uwide')])
+                proc.stdin.write(f' {str(threads_per_transform)}')
+
+            # default half_lds to True only for CS_KERNEL_STOCKHAM
+            half_lds = getattr(k, 'half_lds', k.scheme == 'CS_KERNEL_STOCKHAM')
+            # but we don't use LDS for single-radix kernels, so half_lds is meaningless there
+            if len(k.factors) == 1:
+                half_lds = False
+
+            # for unspecified direct_to_from_reg, default is True only for CS_KERNEL_STOCKHAM and SBCC
+            direct_to_from_reg = getattr(k, 'direct_to_from_reg', True)
+
+            # Send data over to subprocess
+            proc.stdin.write(f' {str(k.workgroup_size)}')
+            proc.stdin.write(' 1' if half_lds else ' 0')
+            proc.stdin.write(' 1' if direct_to_from_reg else ' 0')
+            proc.stdin.write(f' {k.scheme}')
+            proc.stdin.write(f' {kernel_name(k)}\n')
+
+            kernel_idx += 1
+            proc.stdin.flush()
+        elif not done_writing:
+            proc.stdin.close()
+            done_writing = True
+
+        # Check if subprocess has exited
+        proc.poll()
+        if proc.returncode != None:
+            break
+
+    # Load string from reader thread as json mapping kernel name to list of kernel launchers
+    reader.join()
+    json_string = json_result[0]
+    kernel_launchers = json.loads(json_string)
+
+    return generate_kernel_functions(kernels, precisions, kernel_launchers)
 
 
 def cli():
@@ -1193,13 +1222,13 @@ def cli():
         help='Number of files to generate for parallel compilation.')
 
     list_parser = subparsers.add_parser(
-        'list', help='List kernel files that will be generated.')
+        'list', help='List names of kernels that will be generated.')
 
     generate_parser = subparsers.add_parser('generate',
                                             help='Generate kernels.')
-    generate_parser.add_argument('stockham_aot',
+    generate_parser.add_argument('stockham_gen',
                                  type=str,
-                                 help='Stockham AOT executable.')
+                                 help='Stockham gen executable.')
 
     args = parser.parse_args()
     if args.num_files:
@@ -1289,7 +1318,7 @@ def cli():
 
     if args.command == 'generate':
         cpu_functions = generate_kernels(kernels, precisions,
-                                         args.stockham_aot)
+                                         args.stockham_gen)
         func_files = generate_cpu_function_pool_pieces(cpu_functions,
                                                        args.num_files)
         for i in range(args.num_files):

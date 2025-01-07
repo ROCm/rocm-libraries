@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 #pragma once
 #include "../../../../shared/arithmetic.h"
 #include "rocfft/rocfft.h"
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -68,6 +69,7 @@ struct StockhamGeneratorSpecs
 };
 
 // generate default stockham variants for ahead-of-time compilation
-std::string stockham_variants(const std::string&      filename,
-                              StockhamGeneratorSpecs& specs,
-                              StockhamGeneratorSpecs& specs2d);
+void stockham_variants(const std::vector<std::string>& kernel_name,
+                       const StockhamGeneratorSpecs&   specs,
+                       const StockhamGeneratorSpecs&   specs2d,
+                       std::ostream&                   output);

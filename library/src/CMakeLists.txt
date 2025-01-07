@@ -155,7 +155,6 @@ set( kgen_logic_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/generator.cpp
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/fftgenerator.cpp
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/fftgenerator.h
-     ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_aot.cpp
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen.cpp
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_2d.h
