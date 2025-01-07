@@ -206,7 +206,7 @@ rocm_install(
 )
 
 rocm_install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/performance/
-    DESTINATION bench/scripts
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/bench/scripts"
     COMPONENT tests
     FILE_PERMISSIONS
         OWNER_READ OWNER_EXECUTE OWNER_WRITE
@@ -219,16 +219,16 @@ rocm_install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/performance/
 )
 
 rocm_install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/01_contraction/configs/bench/
-    DESTINATION bench/configs/01_contraction
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/bench/configs/01_contraction"
     COMPONENT tests
 )
 
 rocm_install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/02_permutation/configs/bench/
-    DESTINATION bench/configs/02_permutation
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/bench/configs/02_permutation"
     COMPONENT tests
 )
 
 rocm_install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/03_reduction/configs/bench/
-    DESTINATION bench/configs/03_reduction
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/bench/configs/03_reduction"
     COMPONENT tests
 )
