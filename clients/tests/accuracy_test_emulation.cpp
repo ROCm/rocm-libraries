@@ -42,6 +42,9 @@ const auto emulation_tokens = {
     "complex_forward_len_121_121_single_ip_batch_1_istride_121_1_CI_ostride_121_1_CI_idist_14641_odist_14641_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_216_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_216_odist_216_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_10000_double_ip_batch_1_istride_1_CI_ostride_1_CI_idist_10000_odist_10000_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_128_50_128_single_ip_batch_1_istride_6400_128_1_CI_ostride_6400_128_1_CI_idist_819200_odist_819200_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_16_256_256_single_op_batch_2_istride_65536_256_1_R_ostride_33024_129_1_HI_idist",
+    "real_forward_len_256_128_256_single_op_batch_1_istride_32768_256_1_R_ostride_16512_129_1_HI_idist"
     // clang-format on
 };
 
