@@ -48,11 +48,6 @@ int main()
   major_version = __clang_major__;
   minor_version = __clang_minor__;
   patch_level   = __clang_patchlevel__;
-#elif defined(__INTEL_COMPILER)
-  compiler_type = "icc";
-  major_version = __INTEL_COMPILER / 100;
-  minor_version = (__INTEL_COMPILER % 100) / 10;
-  patch_level   = __INTEL_COMPILER % 10;
 #elif defined(__clang__)
 // Treat Apple's LLVM fork differently.
 #  if defined(__apple_build_version__)
