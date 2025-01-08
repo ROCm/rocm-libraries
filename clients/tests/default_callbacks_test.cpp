@@ -83,6 +83,15 @@ struct is_hip_complex<rocfft_complex<double>>
     static const bool value = true;
 };
 
+// ASAN introduces some problems with mixing library and client
+// callbacks, so skip these tests if it's enabled
+#ifdef ADDRESS_SANITIZER
+#define TEST_CALLBACK_CHECK_ASAN \
+    GTEST_SKIP() << "mixed library/client callbacks not supported for ASAN";
+#else
+#define TEST_CALLBACK_CHECK_ASAN
+#endif
+
 // -------------------------------------
 // test callbacks struct
 // -------------------------------------
@@ -402,6 +411,7 @@ struct Test_Callback
 
 TEST(rocfft_UnitTest, default_load_callback_complex_single)
 {
+    TEST_CALLBACK_CHECK_ASAN;
     Test_Callback test(256,
                        1,
                        rocfft_transform_type_complex_forward,
@@ -412,6 +422,7 @@ TEST(rocfft_UnitTest, default_load_callback_complex_single)
 
 TEST(rocfft_UnitTest, default_load_callback_complex_double)
 {
+    TEST_CALLBACK_CHECK_ASAN;
     Test_Callback test(512,
                        1,
                        rocfft_transform_type_complex_forward,
@@ -422,6 +433,7 @@ TEST(rocfft_UnitTest, default_load_callback_complex_double)
 
 TEST(rocfft_UnitTest, default_load_callback_real_single)
 {
+    TEST_CALLBACK_CHECK_ASAN;
     Test_Callback test(1024,
                        1,
                        rocfft_transform_type_real_forward,
@@ -432,6 +444,7 @@ TEST(rocfft_UnitTest, default_load_callback_real_single)
 
 TEST(rocfft_UnitTest, default_load_callback_real_double)
 {
+    TEST_CALLBACK_CHECK_ASAN;
     Test_Callback test(2048,
                        1,
                        rocfft_transform_type_real_forward,
@@ -447,6 +460,7 @@ TEST(rocfft_UnitTest, default_load_callback_real_double)
 
 TEST(rocfft_UnitTest, default_store_callback_complex_single)
 {
+    TEST_CALLBACK_CHECK_ASAN;
     Test_Callback test(256,
                        1,
                        rocfft_transform_type_complex_forward,
@@ -457,6 +471,7 @@ TEST(rocfft_UnitTest, default_store_callback_complex_single)
 
 TEST(rocfft_UnitTest, default_store_callback_complex_double)
 {
+    TEST_CALLBACK_CHECK_ASAN;
     Test_Callback test(512,
                        1,
                        rocfft_transform_type_complex_forward,
@@ -467,6 +482,7 @@ TEST(rocfft_UnitTest, default_store_callback_complex_double)
 
 TEST(rocfft_UnitTest, default_store_callback_real_single)
 {
+    TEST_CALLBACK_CHECK_ASAN;
     Test_Callback test(1024,
                        1,
                        rocfft_transform_type_real_forward,
@@ -477,6 +493,7 @@ TEST(rocfft_UnitTest, default_store_callback_real_single)
 
 TEST(rocfft_UnitTest, default_store_callback_real_double)
 {
+    TEST_CALLBACK_CHECK_ASAN;
     Test_Callback test(2048,
                        1,
                        rocfft_transform_type_real_forward,
