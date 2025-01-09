@@ -88,8 +88,8 @@ public:
 
     // Conversion from std::complex<T>
     __device__ __host__ rocsparse_complex_num(const std::complex<T>& z)
-        : x(reinterpret_cast<T (&)[2]>(z)[0])
-        , y(reinterpret_cast<T (&)[2]>(z)[1])
+        : x(z.real())
+        , y(z.imag())
     {
     }
 
