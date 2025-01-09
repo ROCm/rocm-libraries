@@ -207,7 +207,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron3]
   skip_hardware: gfx1151
-  req_memory: 12
+  req_memory: 14
 
 - name: spsm_csr_file
   category: pre_checkin
