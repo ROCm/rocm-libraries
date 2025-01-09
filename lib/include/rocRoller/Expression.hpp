@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2021-2024 Advanced Micro Devices, Inc.
+ * Copyright 2021-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -442,13 +442,20 @@ namespace rocRoller
             constexpr static inline int  Complexity = 1;
         };
 
-        template <DataType DATATYPE>
         struct Convert : Unary
         {
-            constexpr static inline auto DestinationType = DATATYPE;
-            constexpr static inline auto Type            = Category::Conversion;
-            constexpr static inline auto EvalTimes       = EvaluationTimes::All();
-            constexpr static inline int  Complexity      = 2;
+            inline Convert& copyParams(const Convert& other)
+            {
+                destinationType = other.destinationType;
+
+                return *this;
+            }
+
+            constexpr static inline auto Type       = Category::Conversion;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 2;
+
+            DataType destinationType = DataType::None;
         };
 
         struct LogicalNot : Unary

@@ -173,7 +173,7 @@ namespace rocRoller
 
             auto toUInt32 = [](ExpressionPtr expr) -> ExpressionPtr {
                 return std::make_shared<Expression::Expression>(
-                    Expression::Convert<DataType::UInt32>{expr});
+                    Expression::Convert{{.arg{expr}}, DataType::UInt32});
             };
 
             return toUInt32(matK / macK);
