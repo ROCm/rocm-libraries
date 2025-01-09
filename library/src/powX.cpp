@@ -567,10 +567,7 @@ void TransformPowX(const ExecPlan&       execPlan,
         data.node          = execPlan.execSeq[i];
         data.rocfft_stream = (info == nullptr) ? 0 : info->rocfft_stream;
         data.deviceProp    = execPlan.deviceProp;
-        if(LOG_PLAN_ENABLED())
-            data.log_func = log_plan;
-        else
-            data.log_func = nullptr;
+        data.log_func      = LOG_PLAN_ENABLED() ? log_plan : nullptr;
 
         // Size of complex type
         const size_t complexTSize = complex_type_size(data.node->precision);
@@ -779,116 +776,111 @@ void TransformPowX(const ExecPlan&       execPlan,
         }
 
         DevFnCall fn = execPlan.devFnCall[i];
-        if(fn || data.node->compiledKernel.get())
+        if(!fn && !data.node->compiledKernel.get())
+            throw std::runtime_error("rocFFT null ptr function call error");
+
+#ifdef REF_DEBUG
+        rocfft_cout << "\n---------------------------------------------\n";
+        rocfft_cout << "\n\nkernel: " << i << std::endl;
+        rocfft_cout << "\tscheme: " << PrintScheme(execPlan.execSeq[i]->scheme) << std::endl;
+        rocfft_cout << "\titype: " << execPlan.execSeq[i]->inArrayType << std::endl;
+        rocfft_cout << "\totype: " << execPlan.execSeq[i]->outArrayType << std::endl;
+        rocfft_cout << "\tlength: ";
+        for(const auto& i : execPlan.execSeq[i]->length)
         {
-#ifdef REF_DEBUG
-            rocfft_cout << "\n---------------------------------------------\n";
-            rocfft_cout << "\n\nkernel: " << i << std::endl;
-            rocfft_cout << "\tscheme: " << PrintScheme(execPlan.execSeq[i]->scheme) << std::endl;
-            rocfft_cout << "\titype: " << execPlan.execSeq[i]->inArrayType << std::endl;
-            rocfft_cout << "\totype: " << execPlan.execSeq[i]->outArrayType << std::endl;
-            rocfft_cout << "\tlength: ";
-            for(const auto& i : execPlan.execSeq[i]->length)
-            {
-                rocfft_cout << i << " ";
-            }
-            rocfft_cout << std::endl;
-            rocfft_cout << "\tbatch:   " << execPlan.execSeq[i]->batch << std::endl;
-            rocfft_cout << "\tidist:   " << execPlan.execSeq[i]->iDist << std::endl;
-            rocfft_cout << "\todist:   " << execPlan.execSeq[i]->oDist << std::endl;
-            rocfft_cout << "\tistride:";
-            for(const auto& i : execPlan.execSeq[i]->inStride)
-            {
-                rocfft_cout << " " << i;
-            }
-            rocfft_cout << std::endl;
-            rocfft_cout << "\tostride:";
-            for(const auto& i : execPlan.execSeq[i]->outStride)
-            {
-                rocfft_cout << " " << i;
-            }
-            rocfft_cout << std::endl;
-
-            RefLibOp refLibOp(&data);
-#endif
-
-            // execution kernel:
-            if(emit_profile_log)
-                if(hipEventRecord(start) != hipSuccess)
-                    throw std::runtime_error("hipEventRecord failure");
-
-            DeviceCallOut back;
-
-            // give callback parameters to kernel launcher
-            data.callbacks = execPlan.execSeq[i]->callbacks;
-
-            // choose which compiled kernel to run
-            RTCKernel* localCompiledKernel
-                = data.get_callback_type() == CallbackType::NONE
-                      ? data.node->compiledKernel.get().get()
-                      : data.node->compiledKernelWithCallbacks.get().get();
-
-            if(localCompiledKernel)
-                localCompiledKernel->launch(data, data.node->deviceProp);
-            else
-                fn(&data, &back);
-
-            if(emit_profile_log)
-                if(hipEventRecord(stop) != hipSuccess)
-                    throw std::runtime_error("hipEventRecord failure");
-
-            // If we were on the null stream, measure elapsed time
-            // and emit profile logging.  If a stream was given, we
-            // can't wait for the transform to finish, so we can't
-            // emit any information.
-            if(emit_profile_log)
-            {
-                if(hipEventSynchronize(stop) != hipSuccess)
-                    throw std::runtime_error("hipEventSynchronize failure");
-                size_t in_size_bytes = data_size_bytes(
-                    data.node->length, data.node->precision, data.node->inArrayType);
-                size_t out_size_bytes = data_size_bytes(
-                    data.node->length, data.node->precision, data.node->outArrayType);
-                size_t total_size_bytes = (in_size_bytes + out_size_bytes) * data.node->batch;
-
-                float duration_ms = 0.0f;
-                if(hipEventElapsedTime(&duration_ms, start, stop) != hipSuccess)
-                    throw std::runtime_error("hipEventElapsedTime failure");
-                auto exec_bw        = execution_bandwidth_GB_per_s(total_size_bytes, duration_ms);
-                auto efficiency_pct = 0.0;
-                if(max_memory_bw != 0.0)
-                    efficiency_pct = 100.0 * exec_bw / max_memory_bw;
-                if(processing_tuning)
-                    tuningPacket->bw_effs[i] = efficiency_pct;
-
-                log_profile(__func__,
-                            "scheme",
-                            PrintScheme(execPlan.execSeq[i]->scheme),
-                            "duration_ms",
-                            duration_ms,
-                            "in_size",
-                            std::make_pair(static_cast<const size_t*>(data.node->length.data()),
-                                           data.node->length.size()),
-                            "total_size_bytes",
-                            total_size_bytes,
-                            "exec_GB_s",
-                            exec_bw,
-                            "max_mem_GB_s",
-                            max_memory_bw,
-                            "bw_efficiency_pct",
-                            efficiency_pct,
-                            "kernel_index",
-                            i);
-            }
-
-#ifdef REF_DEBUG
-            refLibOp.VerifyResult(&data);
-#endif
+            rocfft_cout << i << " ";
         }
+        rocfft_cout << std::endl;
+        rocfft_cout << "\tbatch:   " << execPlan.execSeq[i]->batch << std::endl;
+        rocfft_cout << "\tidist:   " << execPlan.execSeq[i]->iDist << std::endl;
+        rocfft_cout << "\todist:   " << execPlan.execSeq[i]->oDist << std::endl;
+        rocfft_cout << "\tistride:";
+        for(const auto& i : execPlan.execSeq[i]->inStride)
+        {
+            rocfft_cout << " " << i;
+        }
+        rocfft_cout << std::endl;
+        rocfft_cout << "\tostride:";
+        for(const auto& i : execPlan.execSeq[i]->outStride)
+        {
+            rocfft_cout << " " << i;
+        }
+        rocfft_cout << std::endl;
+
+        RefLibOp refLibOp(&data);
+#endif
+
+        // execution kernel:
+        if(emit_profile_log)
+            if(hipEventRecord(start) != hipSuccess)
+                throw std::runtime_error("hipEventRecord failure");
+
+        DeviceCallOut back;
+
+        // give callback parameters to kernel launcher
+        data.callbacks = execPlan.execSeq[i]->callbacks;
+
+        // choose which compiled kernel to run
+        RTCKernel* localCompiledKernel = data.get_callback_type() == CallbackType::NONE
+                                             ? data.node->compiledKernel.get().get()
+                                             : data.node->compiledKernelWithCallbacks.get().get();
+
+        if(localCompiledKernel)
+            localCompiledKernel->launch(data, data.node->deviceProp);
         else
+            fn(&data, &back);
+
+        if(emit_profile_log)
+            if(hipEventRecord(stop) != hipSuccess)
+                throw std::runtime_error("hipEventRecord failure");
+
+        // If we were on the null stream, measure elapsed time
+        // and emit profile logging.  If a stream was given, we
+        // can't wait for the transform to finish, so we can't
+        // emit any information.
+        if(emit_profile_log)
         {
-            rocfft_cout << "null ptr function call error\n";
+            if(hipEventSynchronize(stop) != hipSuccess)
+                throw std::runtime_error("hipEventSynchronize failure");
+            size_t in_size_bytes
+                = data_size_bytes(data.node->length, data.node->precision, data.node->inArrayType);
+            size_t out_size_bytes
+                = data_size_bytes(data.node->length, data.node->precision, data.node->outArrayType);
+            size_t total_size_bytes = (in_size_bytes + out_size_bytes) * data.node->batch;
+
+            float duration_ms = 0.0f;
+            if(hipEventElapsedTime(&duration_ms, start, stop) != hipSuccess)
+                throw std::runtime_error("hipEventElapsedTime failure");
+            auto exec_bw        = execution_bandwidth_GB_per_s(total_size_bytes, duration_ms);
+            auto efficiency_pct = 0.0;
+            if(max_memory_bw != 0.0)
+                efficiency_pct = 100.0 * exec_bw / max_memory_bw;
+            if(processing_tuning)
+                tuningPacket->bw_effs[i] = efficiency_pct;
+
+            log_profile(__func__,
+                        "scheme",
+                        PrintScheme(execPlan.execSeq[i]->scheme),
+                        "duration_ms",
+                        duration_ms,
+                        "in_size",
+                        std::make_pair(static_cast<const size_t*>(data.node->length.data()),
+                                       data.node->length.size()),
+                        "total_size_bytes",
+                        total_size_bytes,
+                        "exec_GB_s",
+                        exec_bw,
+                        "max_mem_GB_s",
+                        max_memory_bw,
+                        "bw_efficiency_pct",
+                        efficiency_pct,
+                        "kernel_index",
+                        i);
         }
+
+#ifdef REF_DEBUG
+        refLibOp.VerifyResult(&data);
+#endif
 
         if(emit_kernelio_log && data.node->scheme != CS_KERNEL_CHIRP)
         {
@@ -897,7 +889,7 @@ void TransformPowX(const ExecPlan&       execPlan,
             {
                 *kernelio_stream << "Error: " << hipGetErrorName(err) << ", "
                                  << hipGetErrorString(err) << std::endl;
-                exit(-1);
+                throw std::runtime_error("hipPeekAtLastError failed");
             }
             if(hipDeviceSynchronize() != hipSuccess)
                 throw std::runtime_error("hipDeviceSynchronize failure");

@@ -319,6 +319,8 @@ size_t rocfft_plan_t::AddMultiPlanItem(std::unique_ptr<MultiPlanItem>&& item,
            antecedents.begin(), antecedents.end(), [=](size_t i) { return i >= multiPlan.size(); }))
         throw std::runtime_error("antecedent does not exist");
 
+    item->local_comm_rank = get_local_comm_rank();
+
     multiPlan.emplace_back(std::move(item));
     multiPlanAntecedents.emplace_back(antecedents);
 
@@ -1983,11 +1985,15 @@ void rocfft_plan_t::GlobalTranspose(size_t                     elem_size,
     std::string itemGroup = "transpose_" + std::to_string(transposeNumber);
     if(rocfft_plan_description_t::multiple_devices_in_rank(inField)
        || rocfft_plan_description_t::multiple_devices_in_rank(outField))
+    {
         GlobalTransposeP2P(
             elem_size, inField, outField, input, output, inputAntecedents, outputItems, itemGroup);
+    }
     else
+    {
         GlobalTransposeA2A(
             elem_size, inField, outField, input, output, inputAntecedents, outputItems, itemGroup);
+    }
 }
 
 void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
@@ -2907,8 +2913,8 @@ rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
 
         if(plan->desc.comm_type == rocfft_comm_mpi)
         {
-            // Each rank needs to know the global data distribution for plan generation, so we gather
-            // all the brick information here.
+            // Each rank needs to know the global data distribution for plan generation, so we
+            // gather all the brick information here.
             rcfft = allgather_brick_params_mpi(plan);
             if(rcfft != rocfft_status_success)
                 throw std::runtime_error("gather brick params failed");
@@ -3703,6 +3709,7 @@ void TreeNode::DetermineBufferMemory(size_t& tmpBufSize,
 
 void TreeNode::Print(rocfft_ostream& os, const int indent) const
 {
+
     std::string indentStr;
     int         i = indent;
     while(i--)

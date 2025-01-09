@@ -265,9 +265,6 @@ private:
     // data between devices.
     std::vector<std::unique_ptr<MultiPlanItem>> multiPlan;
 
-    // Multi-process rank:
-    int local_comm_rank = 0;
-
     // Communicate bricks on all ranks to all other ranks
     rocfft_status allgather_brick_params_mpi(rocfft_plan& plan);
 

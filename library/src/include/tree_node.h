@@ -975,24 +975,28 @@ struct MultiPlanItem
         return 0;
     }
 
-    // print a description of this item to the plan log
+    // Print a description of this item to the plan log
     virtual void Print(rocfft_ostream& os, const int indent) const = 0;
 
     // utility function to print a buffer enum with a description of
     // the pointer and an offset
     static std::string PrintBufferPtrOffset(const BufferPtr& ptr, size_t offset);
 
-    // check if this item writes to the specified BufferPtr
+    // Check if this item writes to the specified BufferPtr
     virtual bool WritesToBuffer(const BufferPtr& ptr) const = 0;
 
-    // check if this the specified rank will execute this item
+    // Check if the specified rank will execute this item
     virtual bool ExecutesOnRank(int rank) const = 0;
+    // Check if local rank will execute this item
+    bool ExecutesOnLocalRank() const
+    {
+        return ExecutesOnRank(local_comm_rank);
+    };
 
-    // high-level description of what this item is doing, displayed
-    // when logging plan graph
+    // High-level description of what this item is doing, displayed when logging plan graph
     std::string description;
-    // group to assign this item to (letters, numbers, underscores).
-    // items in the same group are drawn together in the graph
+    // Group to assign this item to (letters, numbers, underscores).
+    // Items in the same group are drawn together in the graph
     std::string group;
 
     // Compute a communication tag for an operation, for an item with
@@ -1001,6 +1005,9 @@ struct MultiPlanItem
     // single operation in it.  This function produces unique tags for
     // items with multiple operations.
     static int GetOperationCommTag(size_t multiPlanIdx, size_t opIdx);
+
+    // This process's rank relative to the plan communicator.
+    int local_comm_rank;
 };
 
 // Communication operations

@@ -219,69 +219,90 @@ void rocfft_plan_t::LogSortedPlan(const std::vector<size_t>& sortedIdx) const
         return;
     }
 
-    // multi-device plan, log that with dependency graph
-    if(!LOG_GRAPH_ENABLED())
-        return;
-
-    auto& os = *LogSingleton::GetInstance().GetGraphOS();
-    os << "digraph plan {\n";
-    os << "ranksep=2;\n";
-
-    // gather up all of the groups for the nodes so they can turn into clustered subgraphs
-    std::multimap<std::string, size_t> groups;
-
-    for(auto i = sortedIdx.begin(); i != sortedIdx.end(); ++i)
+    if(LOG_PLAN_ENABLED())
     {
-        auto idx = *i;
-
-        const auto& antecedents = multiPlanAntecedents[idx];
-        for(auto antecedentIdx : antecedents)
+        auto& os = *LogSingleton::GetInstance().GetPlanOS();
+        os << "multiPlans: " << multiPlan.size() << "\n";
+        for(size_t midx = 0; midx < multiPlan.size(); ++midx)
         {
-            os << antecedentIdx << " -> " << idx << ";\n";
+            if(multiPlan[midx]->ExecutesOnLocalRank())
+            {
+                os << "multiPlan: " << midx << "\n";
+                os << "\tantecedents:";
+                const auto& antecedents = multiPlanAntecedents[midx];
+                for(auto antecedentIdx : antecedents)
+                {
+                    os << " " << antecedentIdx;
+                }
+                os << "\n";
+                multiPlan[midx]->Print(os, 1);
+            }
         }
+    }
 
-        rocfft_ostream item;
-        if(!multiPlan[idx])
-            item << "(null)";
-        else
-            multiPlan[idx]->Print(item, 1);
-        item << std::endl;
-        std::string itemStr = item.str();
-        // escape \n and "
-        std::string itemStrEscaped;
-        for(auto c : itemStr)
+    if(LOG_GRAPH_ENABLED())
+    {
+        // multi-device plan, log that with dependency graph
+        auto& os = *LogSingleton::GetInstance().GetGraphOS();
+        os << "digraph plan {\n";
+        os << "ranksep=2;\n";
+
+        // gather up all of the groups for the nodes so they can turn into clustered subgraphs
+        std::multimap<std::string, size_t> groups;
+
+        for(auto i = sortedIdx.begin(); i != sortedIdx.end(); ++i)
         {
-            if(c == '\"')
+            auto idx = *i;
+
+            const auto& antecedents = multiPlanAntecedents[idx];
+            for(auto antecedentIdx : antecedents)
             {
-                itemStrEscaped.push_back('\\');
-                itemStrEscaped.push_back('\"');
+                os << antecedentIdx << " -> " << idx << ";\n";
             }
-            else if(c == '\n')
-            {
-                itemStrEscaped.push_back('\\');
-                itemStrEscaped.push_back('n');
-            }
+
+            rocfft_ostream item;
+            if(!multiPlan[idx])
+                item << "(null)";
             else
-                itemStrEscaped.push_back(c);
-        }
-        os << idx << " [label=\"" << idx << "\\n"
-           << multiPlan[idx]->description << "\" tooltip=\"" << itemStrEscaped << "\"];\n";
+                multiPlan[idx]->Print(item, 1);
+            item << std::endl;
+            std::string itemStr = item.str();
+            // escape \n and "
+            std::string itemStrEscaped;
+            for(auto c : itemStr)
+            {
+                if(c == '\"')
+                {
+                    itemStrEscaped.push_back('\\');
+                    itemStrEscaped.push_back('\"');
+                }
+                else if(c == '\n')
+                {
+                    itemStrEscaped.push_back('\\');
+                    itemStrEscaped.push_back('n');
+                }
+                else
+                    itemStrEscaped.push_back(c);
+            }
+            os << idx << " [label=\"" << idx << "\\n"
+               << multiPlan[idx]->description << "\" tooltip=\"" << itemStrEscaped << "\"];\n";
 
-        groups.insert(std::make_pair(multiPlan[idx]->group, idx));
-    }
-    auto giter = groups.begin();
-    while(giter != groups.end())
-    {
-        auto gend = groups.upper_bound(giter->first);
-        os << "subgraph cluster_" << giter->first << " {\n";
-        os << "\nlabel=\"" << giter->first << "\";\n";
-        for(; giter != gend; ++giter)
-        {
-            os << giter->second << ";";
+            groups.insert(std::make_pair(multiPlan[idx]->group, idx));
         }
-        os << "}\n";
+        auto giter = groups.begin();
+        while(giter != groups.end())
+        {
+            auto gend = groups.upper_bound(giter->first);
+            os << "subgraph cluster_" << giter->first << " {\n";
+            os << "\nlabel=\"" << giter->first << "\";\n";
+            for(; giter != gend; ++giter)
+            {
+                os << giter->second << ";";
+            }
+            os << "}\n";
+        }
+        os << "}\n" << std::endl;
     }
-    os << "}\n" << std::endl;
 }
 
 void rocfft_plan_t::Execute(void* in_buffer[], void* out_buffer[], rocfft_execution_info info)
@@ -318,7 +339,7 @@ void rocfft_plan_t::Execute(void* in_buffer[], void* out_buffer[], rocfft_execut
 
     for(auto i = sortedIdx.begin(); i != sortedIdx.end(); ++i)
     {
-        auto idx = *i;
+        const auto idx = *i;
 
         if(!multiPlan[idx])
             continue;
@@ -327,22 +348,28 @@ void rocfft_plan_t::Execute(void* in_buffer[], void* out_buffer[], rocfft_execut
 
         for(auto antecedentIdx : multiPlanAntecedents[idx])
         {
+            // The multiPlan item may not be created on this rank (in which case it's not a
+            // rank-local operation):
             if(!multiPlan[antecedentIdx])
                 continue;
 
-            // check if antecedent involved us
+            // Check if antecedent involved us:
             auto& antecedent = *multiPlan[antecedentIdx];
 
-            // the antecedent involved us somehow, wait for it
+            // The antecedent involved us somehow, wait for it:
             if(antecedent.ExecutesOnRank(local_comm_rank))
+            {
                 antecedent.Wait();
+            }
         }
 
-        // done waiting for all our antecedents, so this item can now proceed
+        // Done waiting for all our antecedents, so this item can now proceed.
 
-        // launch this item async
+        // Launch this item async:
         if(item.ExecutesOnRank(local_comm_rank))
+        {
             item.ExecuteAsync(this, in_buffer, out_buffer, info, idx);
+        }
     }
 
     // finished executing all items, wait for outstanding work to complete
@@ -355,7 +382,9 @@ void rocfft_plan_t::Execute(void* in_buffer[], void* out_buffer[], rocfft_execut
 
         auto& item = *multiPlan[idx];
         if(item.ExecutesOnRank(local_comm_rank))
+        {
             item.Wait();
+        }
     }
 }
 

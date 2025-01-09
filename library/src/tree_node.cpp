@@ -529,7 +529,10 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
     stream.alloc();
     event.alloc();
 
-    auto local_comm_rank = plan->get_local_comm_rank();
+    if(LOG_PLAN_ENABLED())
+    {
+        log_plan("CommPointToPoint\n");
+    }
 
     auto srcWithOffset = ptr_offset(
         srcPtr.get(in_buffer, out_buffer, local_comm_rank), srcOffset, precision, arrayType);
@@ -641,7 +644,10 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
     stream.alloc();
     event.alloc();
 
-    auto local_comm_rank = plan->get_local_comm_rank();
+    if(LOG_PLAN_ENABLED())
+    {
+        log_plan("CommScatter\n");
+    }
 
     for(unsigned int opIdx = 0; opIdx < ops.size(); ++opIdx)
     {
@@ -766,7 +772,10 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
     streams.resize(ops.size());
     events.resize(ops.size());
 
-    auto local_comm_rank = plan->get_local_comm_rank();
+    if(LOG_PLAN_ENABLED())
+    {
+        log_plan("CommGather\n");
+    }
 
     for(unsigned int opIdx = 0; opIdx < ops.size(); ++opIdx)
     {
@@ -906,8 +915,12 @@ void CommAllToAllv::ExecuteAsync(const rocfft_plan     plan,
         throw std::runtime_error(
             "CommAllToAllv: number of counts/offsets does not match number of ranks");
 
+    if(LOG_PLAN_ENABLED())
+    {
+        log_plan("MPI_Ialltoallv\n");
+    }
+
 #ifdef ROCFFT_MPI_ENABLE
-    auto local_comm_rank = plan->get_local_comm_rank();
 
     // MPI takes ints for everything, convert our size_t elements to int bytes
     auto convertToInt = [](const std::vector<size_t>& src, std::vector<int>& dest) {
@@ -981,8 +994,10 @@ void ExecPlan::Print(rocfft_ostream& os, const int indent) const
     int         i = indent;
     while(i--)
         indentStr += "    ";
+    os << indentStr << "MPI rank: " << local_comm_rank << "\n";
     os << indentStr << "ExecPlan:" << std::endl;
     os << indentStr << "  deviceID: " << location.device << std::endl;
+    os << indentStr << "  local_comm_rank:" << local_comm_rank << "\n";
     os << indentStr << "  commRanks:" << location.comm_rank << std::endl;
     if(inputPtr)
         os << indentStr << "  inputPtr: " << inputPtr.str() << std::endl;
