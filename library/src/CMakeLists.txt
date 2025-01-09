@@ -202,7 +202,7 @@ set( solship_py ${CMAKE_SOURCE_DIR}/library/src/device/solution-shipping.py )
 
 # default folder of solution maps that will be built in library,
 # user can specify their own arch and folder
-set( sol_gpu_arch ${AMDGPU_TARGETS} )
+set( sol_gpu_arch ${GPU_TARGETS} )
 if( NOT ROCFFT_SOLUTION_MAP_DIR )
   set( ROCFFT_SOLUTION_MAP_DIR ${CMAKE_SOURCE_DIR}/library/solution_map CACHE STRING "RocFFT solution map directory" )
 endif()
@@ -516,21 +516,21 @@ endif()
 # list and kernels for them are built at runtime instead.
 if ( ROCFFT_KERNEL_CACHE_ENABLE )
 
-  set( AMDGPU_TARGETS_AOT ${AMDGPU_TARGETS} )
-  list( REMOVE_ITEM AMDGPU_TARGETS_AOT gfx803 )
-  list( REMOVE_ITEM AMDGPU_TARGETS_AOT gfx900 )
-  list( REMOVE_ITEM AMDGPU_TARGETS_AOT gfx906 )
-  list( REMOVE_ITEM AMDGPU_TARGETS_AOT gfx940 )
-  list( REMOVE_ITEM AMDGPU_TARGETS_AOT gfx941 )
-  list( REMOVE_ITEM AMDGPU_TARGETS_AOT gfx1101 )
-  list( REMOVE_ITEM AMDGPU_TARGETS_AOT gfx1102 )
-  list( REMOVE_ITEM AMDGPU_TARGETS_AOT gfx1151 )
-  list( REMOVE_ITEM AMDGPU_TARGETS_AOT gfx1200 )
+  set( GPU_TARGETS_AOT ${GPU_TARGETS} )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx803 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx900 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx906 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx940 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx941 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1101 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1102 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1151 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
   # The binary will be having relative RUNPATH with respect to install directory
   # Set LD_LIBRARY_PATH for executing the binary from build directory.
   add_custom_command(
     OUTPUT rocfft_kernel_cache.db
-    COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}" ./rocfft_aot_helper \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${ROCFFT_KERNEL_CACHE_PATH} $<TARGET_FILE:rocfft_rtc_helper> ${AMDGPU_TARGETS_AOT}
+    COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}" ./rocfft_aot_helper \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${ROCFFT_KERNEL_CACHE_PATH} $<TARGET_FILE:rocfft_rtc_helper> ${GPU_TARGETS_AOT}
     DEPENDS rocfft_aot_helper rocfft_rtc_helper
     COMMENT "Compile kernels into shipped cache file"
   )

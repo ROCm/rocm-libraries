@@ -184,9 +184,13 @@ if (BUILD_LOCAL_GPU_TARGET_ONLY)
   endif()
 endif()
 
-
-set(AMDGPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if AMDGPU_TARGETS is not defined.")
+if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
+  message( DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS." )
+endif()
+set(AMDGPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if AMDGPU_TARGETS is not defined. (Deprecated, prefer GPU_TARGETS)")
 rocm_check_target_ids(AMDGPU_TARGETS TARGETS "${AMDGPU_TARGETS}")
+# Don't force, users should be able to override GPU_TARGETS at the command line if desired
+set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
   
 # HIP is required - library and clients use HIP to access the device
 find_package( HIP REQUIRED CONFIG )

@@ -10,6 +10,7 @@ Documentation for rocFFT is available at
 * Building with the address sanitizer option sets xnack+ on relevant GPU
   architectures and adds address-sanitizer support to runtime-compiled
   kernels.
+* The `AMDGPU_TARGETS` build variable should be replaced with `GPU_TARGETS`. `AMDGPU_TARGETS` is deprecated.
 
 ### Removed
 
