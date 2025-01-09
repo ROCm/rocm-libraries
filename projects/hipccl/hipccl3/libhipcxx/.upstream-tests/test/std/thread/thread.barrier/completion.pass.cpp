@@ -42,8 +42,7 @@
 #include "test_macros.h"
 
 template <template <typename> class Barrier,
-          template <typename, typename>
-          class Selector,
+          template <typename, typename> class Selector,
           typename Initializer = constructor_initializer>
 __host__ __device__ void test()
 {
