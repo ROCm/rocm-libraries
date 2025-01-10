@@ -3,31 +3,40 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## (Unreleased) rocSPARSE 3.4.0
+## (Unreleased) rocSPARSE 3.5.0
+
+### Optimized
+
+* Reduced the number of template instantiations in the library to further reduce the shared library binary size and improve compile times
+* Improved the user documentation
+
+## rocSPARSE 3.4.0 for ROCm 6.4.0
 
 ### Added
 
+* Added support for `rocsparse_matrix_type_triangular` in `rocsparse_spsv`
+* Added test filters `smoke`, `regression`, and `extended` for emulation tests.
 * Added `rocsparse_[s|d|c|z]csritilu0_compute_ex` routines for iterative ILU
 * Added `rocsparse_[s|d|c|z]csritsv_solve_ex` routines for iterative triangular solve
-* Added BSR format to SpMM generic routine `rocsparse_spmm`
 * Added `GPU_TARGETS` to replace the now deprecated `AMDGPU_TARGETS` in cmake files
-* Added `azurelinux` OS name for correcting gfortran dependency
-* Added test filters `smoke`, `regression`, and `extended` for emulation tests.
+* Added BSR format to the SpMM generic routine `rocsparse_spmm`
 
 ### Changed
 
 * By default, build rocsparse shared library using `--offload-compress` compiler option which compresses the fat binary. This significantly reduces the shared library binary size.
 
-### Resolved issues
-* Fixed an issue in the routine `rocsparse_spgemm` when using `rocsparse_spgemm_stage_symbolic` and `rocsparse_spgemm_stage_numeric`, where the routine would crash when `alpha` and `beta` were passed as host pointers and where `beta != 0`.
-
 ### Optimized
 
+* Improved the performance of `rocsparse_spmm` when used with row order for `B` and `C` dense matrices and the row split algorithm, `rocsparse_spmm_alg_csr_row_split`.
 * Improved the adaptive CSR sparse matrix-vector multiplication algorithm when the sparse matrix has many empty rows at the beginning or at the end of the matrix. This improves the routines `rocsparse_spmv` and `rocsparse_spmv_ex` when the adaptive algorithm `rocsparse_spmv_alg_csr_adaptive` is used.
 * Improved stream CSR sparse matrix-vector multiplication algorithm when the sparse matrix size (number of rows) decreases. This improves the routines `rocsparse_spmv` and `rocsparse_spmv_ex` when the stream algorithm `rocsparse_spmv_alg_csr_stream` is used.
 * Compared to `rocsparse_[s|d|c|z]csritilu0_compute`, the routines `rocsparse_[s|d|c|z]csritilu0_compute_ex` introduce a number of free iterations. A free iteration is an iteration that does not compute the evaluation of the stopping criteria, if enabled. This allows the user to tune the algorithm for performance improvements.
 * Compared to `rocsparse_[s|d|c|z]csritsv_solve`, the routines `rocsparse_[s|d|c|z]csritsv_solve_ex` introduce a number of free iterations. A free iteration is an iteration that does not compute the evaluation of the stopping criteria. This allows the user to tune the algorithm for performance improvements.
 * Improved user documentation
+
+### Resolved issues
+* Fixed an issue in `rocsparse_spgemm`, `rocsparse_[s|d|c|z]csrgemm`, and `rocsparse_[s|d|c|z]bsrgemm` where incorrect results could be produced when rocSPARSE was built with optimization level `O0`. This was caused by a bug in the hash tables that could allow keys to be inserted twice.
+* Fixed an issue in the routine `rocsparse_spgemm` when using `rocsparse_spgemm_stage_symbolic` and `rocsparse_spgemm_stage_numeric`, where the routine would crash when `alpha` and `beta` were passed as host pointers and where `beta != 0`.
 
 ### Upcoming changes
 
@@ -39,6 +48,7 @@ Documentation for rocSPARSE is available at
 
 ### Added
 
+* Added the `azurelinux` OS name to correct the gfortran dependency
 * Add `rocsparse_create_extract_descr`, `rocsparse_destroy_extract_descr`, `rocsparse_extract_buffer_size`, `rocsparse_extract_nnz`, and `rocsparse_extract` APIs to allow extraction of the upper or lower part of sparse CSR or CSC matrices.
 * Support for the gfx1151, gfx1200, and gfx1201 architectures.
 
