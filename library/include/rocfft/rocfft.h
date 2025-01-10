@@ -356,7 +356,7 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  * One must also provide a stride for the brick data which specifies
  * how the brick's data is arranged in memory.
  *
- * All coordinates and strides include batch dimensions, and are in
+ * All coordinates and strides must include batch dimensions, and are in
  * column-major order (fastest-moving dimension first).
  *
  * A HIP device ID is also provided - each brick may reside on a
@@ -370,8 +370,8 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  * @param[in] field_upper: array of length dim specifying the upper index (exclusive) for the brick in the
  * field's index space.
  * @param[in] brick_stride: array of length dim specifying the brick's stride in memory
- * @param[in] dim length of brick: includes lengths and batch dimension; must match the dimension of
- * the lengths + batch dimension of the transform.
+ * @param[in] dim_with_batch length of the arrays; this must match the dimension of
+ * the FFT plus one for the batch dimension.
  * @param[in] deviceID: HIP device ID for the device on which the brick's data is resident.
  *
  *  @warning Experimental!  This feature is part of an experimental API preview.
@@ -380,7 +380,7 @@ ROCFFT_EXPORT rocfft_status rocfft_brick_create(rocfft_brick* brick,
                                                 const size_t* field_lower,
                                                 const size_t* field_upper,
                                                 const size_t* brick_stride,
-                                                size_t        dim,
+                                                size_t        dim_with_batch,
                                                 int           deviceID);
 
 /*! @brief Deallocate a brick created with rocfft_brick_create.

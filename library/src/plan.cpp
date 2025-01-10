@@ -2789,6 +2789,16 @@ void rocfft_plan_t::ValidateFields() const
                             const std::vector<size_t>& lengths,
                             size_t                     batch,
                             const rocfft_field_t&      field) {
+        // make sure all bricks have enough dimensions (FFT + batch dimensions)
+        for(const auto& b : field.bricks)
+        {
+            if(b.lower.size() != lengths.size() + 1 || b.upper.size() != lengths.size() + 1
+               || b.stride.size() != lengths.size() + 1)
+                throw std::runtime_error(std::string(type)
+                                         + " brick has wrong number of dimensions, expected "
+                                         + std::to_string(lengths.size() + 1));
+        }
+
         // construct a brick that covers the whole field
         rocfft_brick_t whole_field;
         whole_field.lower.resize(lengths.size() + 1);
