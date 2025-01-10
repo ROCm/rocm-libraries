@@ -52,29 +52,30 @@ namespace rocRoller::KernelGraph
         bool needsUpdate;
     };
 
+    using BufferMap = std::map<int, int>;
+
     /**
-     * @brief Return existing Buffer edge between `src` and `dst`, or
-     * create a new one.
+     * @brief Return existing Buffer for load/stores from/to `dst`.
      *
      * Returns -1 if the operation doesn't need a buffer descriptor.
+     *
+     * If a Buffer edge doesn't already exist, we create a new
+     * Workgroup coordinate and attach it with a Buffer edge to the
+     * `dst`.
      */
-    int getBuffer(KernelGraph&                        graph,
-                  int                                 opTag,
-                  int                                 src,
-                  int                                 dst,
-                  int                                 location,
-                  std::map<std::pair<int, int>, int>& bufferMap)
+    int getBuffer(KernelGraph& graph, int opTag, int dst, BufferMap& bufferMap)
     {
         auto op = graph.control.getElement(opTag);
         if(isOperation<LoadLDSTile>(op) || isOperation<StoreLDSTile>(op))
             return -1;
 
-        if(bufferMap.count({location, dst}) == 0)
+        if(!bufferMap.contains(dst))
         {
-            bufferMap[{location, dst}] = graph.coordinates.addElement(Buffer(), {src}, {dst});
+            auto wg        = graph.coordinates.addElement(Workgroup());
+            bufferMap[dst] = graph.coordinates.addElement(Buffer(), {wg}, {dst});
         }
 
-        return bufferMap[{location, dst}];
+        return bufferMap[dst];
     }
 
     /**
@@ -307,11 +308,8 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Add ComputeIndex nodes required for `op`.
      */
-    ComputeIndexChain addComputeIndex(KernelGraph&                        graph,
-                                      int                                 op,
-                                      ExpressionPtr                       step,
-                                      int                                 location,
-                                      std::map<std::pair<int, int>, int>& bufferMap)
+    ComputeIndexChain addComputeIndex(
+        KernelGraph& graph, int op, ExpressionPtr step, int location, BufferMap& bufferMap)
     {
         rocRoller::Log::getLogger()->debug(
             "KernelGraph::AddComputeIndex()::genericComputeIndex(): op {} location {}",
@@ -337,7 +335,7 @@ namespace rocRoller::KernelGraph
                     offset = graph.coordinates.addElement(Offset(), {target}, {info.coord});
                 stride = graph.coordinates.addElement(Stride(), {target}, {info.coord});
                 if(info.base == -1 && offset != -1)
-                    buffer = getBuffer(graph, op, target, info.coord, location, bufferMap);
+                    buffer = getBuffer(graph, op, target, bufferMap);
             }
             else
             {
@@ -345,7 +343,7 @@ namespace rocRoller::KernelGraph
                     offset = graph.coordinates.addElement(Offset(), {info.coord}, {target});
                 stride = graph.coordinates.addElement(Stride(), {info.coord}, {target});
                 if(info.base == -1 && offset != -1)
-                    buffer = getBuffer(graph, op, info.coord, target, location, bufferMap);
+                    buffer = getBuffer(graph, op, target, bufferMap);
             }
 
             offsetOfCoord[info.coord] = offset;
@@ -571,9 +569,9 @@ namespace rocRoller::KernelGraph
 
         KernelGraph commit(KernelGraph const& original) const
         {
-            auto                               kgraph = original;
-            std::map<int, int>                 scopes;
-            std::map<std::pair<int, int>, int> bufferMap;
+            auto               kgraph = original;
+            std::map<int, int> scopes;
+            BufferMap          bufferMap;
 
             for(auto const& [spec, candidates] : m_chains)
             {
