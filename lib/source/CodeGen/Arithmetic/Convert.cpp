@@ -56,7 +56,8 @@ namespace rocRoller
             ConvertCase(Double);
 
         default:
-            Throw<FatalError>("Unsupported datatype conversion: ", ShowValue(expr.destinationType));
+            Throw<FatalError>("Generate - Unsupported datatype conversion: ",
+                              ShowValue(expr.destinationType));
         }
 #undef ConvertCase
     }
@@ -318,27 +319,24 @@ namespace rocRoller
         }
     }
 
-    Generator<Instruction>
-        ConvertGenerator::generateFP6x16(Register::ValuePtr dest,
-                                                     Register::ValuePtr arg)
+    Generator<Instruction> ConvertGenerator::generateFP6x16(Register::ValuePtr dest,
+                                                            Register::ValuePtr arg)
     {
         AssertFatal(arg != nullptr);
         auto dataType = getArithDataType(arg);
         Throw<FatalError>("Unsupported datatype for convert to FP6x16 ", ShowValue(dataType));
     }
 
-    Generator<Instruction>
-        ConvertGenerator::generateBF6x16(Register::ValuePtr dest,
-                                                     Register::ValuePtr arg)
+    Generator<Instruction> ConvertGenerator::generateBF6x16(Register::ValuePtr dest,
+                                                            Register::ValuePtr arg)
     {
         AssertFatal(arg != nullptr);
         auto dataType = getArithDataType(arg);
         Throw<FatalError>("Unsupported datatype for convert to BF6x16 ", ShowValue(dataType));
     }
 
-    Generator<Instruction>
-        ConvertGenerator::generateFP4x8(Register::ValuePtr dest,
-                                                    Register::ValuePtr arg)
+    Generator<Instruction> ConvertGenerator::generateFP4x8(Register::ValuePtr dest,
+                                                           Register::ValuePtr arg)
     {
         AssertFatal(arg != nullptr);
         auto dataType = getArithDataType(arg);
