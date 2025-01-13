@@ -37,6 +37,7 @@ Documentation for rocSPARSE is available at
 ### Resolved issues
 * Fixed an issue in `rocsparse_spgemm`, `rocsparse_[s|d|c|z]csrgemm`, and `rocsparse_[s|d|c|z]bsrgemm` where incorrect results could be produced when rocSPARSE was built with optimization level `O0`. This was caused by a bug in the hash tables that could allow keys to be inserted twice.
 * Fixed an issue in the routine `rocsparse_spgemm` when using `rocsparse_spgemm_stage_symbolic` and `rocsparse_spgemm_stage_numeric`, where the routine would crash when `alpha` and `beta` were passed as host pointers and where `beta != 0`.
+* Fixed compilation error resulting from incorrectly using `reinterpret_cast` to cast away a const qualifier in the `rocsparse_complex_num` constructor. See https://github.com/ROCm/rocSPARSE/issues/434 for more information.
 
 ### Upcoming changes
 
