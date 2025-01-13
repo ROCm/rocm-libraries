@@ -17,7 +17,7 @@ set(HIPFORT_BUILD_TYPE "RELEASE"  CACHE STRING "Set to RELEASE TESTING or DEBUG"
 #  The ROCm release manager and other integrators should build hipfort as follows:
 #     cmake -DHIPFORT_INSTALL_DIR=/opt/rocm-<release>/hipfort -DHIPFORT_VERSION=<release> <githubrepo>
 
-set(HIPFORT_VERSION "0.5.0"  CACHE STRING "Version of HIPFORT to build")
+set(HIPFORT_VERSION "0.5.1"  CACHE STRING "Version of HIPFORT to build")
 set(HIPFORT_INSTALL_DIR  "/usr/local/hipfort-${HIPFORT_VERSION}" CACHE STRING "Install directory for hipfort")
 IF(CMAKE_INSTALL_PREFIX)
   # Make HIPFORT_INSTALL_DIR be the same as CmAKE_INSTALL_PREFIX
@@ -107,15 +107,15 @@ ENDIF(NOT DEFINED CMAKE_Fortran_COMPILER_SUPPORTS_F08)
 #OPTION(USE_MPI "Use the MPI library for parallelization" OFF)
 #OPTION(USE_OPENMP "Use OpenMP for parallelization" OFF)
 
-IF(CMAKE_Fortran_COMPILER_ID MATCHES "Cray")
+IF(CMAKE_Fortran_COMPILER_ID MATCHES "(Cray|LLVMFlang)")
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${HIPFORT_COMPILER_FLAGS}")
-ELSE(CMAKE_Fortran_COMPILER_ID MATCHES "Cray")
+ELSE(CMAKE_Fortran_COMPILER_ID MATCHES "(Cray|LLVMFlang)")
 IF(CMAKE_Fortran_COMPILER_SUPPORTS_F08)
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${HIPFORT_COMPILER_FLAGS} -std=f2008")
 ELSE(CMAKE_Fortran_COMPILER_SUPPORTS_F08)
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} ${HIPFORT_COMPILER_FLAGS} -std=f2003")
 ENDIF(CMAKE_Fortran_COMPILER_SUPPORTS_F08)
-ENDIF(CMAKE_Fortran_COMPILER_ID MATCHES "Cray")
+ENDIF(CMAKE_Fortran_COMPILER_ID MATCHES "(Cray|LLVMFlang)")
  
 # Set compile flags for DEBUG, # RELEASE, or TESTING.  
 INCLUDE(${CMAKE_MODULE_PATH}/SetFortranFlags.cmake) 
