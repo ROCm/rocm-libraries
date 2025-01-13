@@ -2,6 +2,17 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## (Unreleased) hipCUB-x.x.x for ROCm 6.x.x
+
+### Added
+
+* Added single pass operators in `agent/single_pass_scan_operators.hpp` which contains the following API:
+  * `BlockScanRunningPrefixOp`
+  * `ScanTileStatus`
+  * `ScanTileState`
+  * `ReduceByKeyScanTileState`
+  * `TilePrefixCallbackOp`
+
 ## hipCUB-3.4.0 for ROCm 6.4.0
 
 ### Added

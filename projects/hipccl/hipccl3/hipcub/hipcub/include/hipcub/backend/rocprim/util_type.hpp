@@ -38,6 +38,7 @@
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
+#include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
 
 #include <limits>
@@ -248,9 +249,16 @@ struct AlignBytes
 // with device C++ compilers (EDG) on types passed as template parameters through
 // kernel functions
 
-#define __HIPCUB_ALIGN_BYTES(t, b)         \
-    template <> struct AlignBytes<t>    \
-    { enum { ALIGN_BYTES = b }; typedef __align__(b) t Type; };
+    #define __HIPCUB_ALIGN_BYTES(t, b)                  \
+        template<>                                      \
+        struct AlignBytes<t>                            \
+        {                                               \
+            enum                                        \
+            {                                           \
+                ALIGN_BYTES = b,                        \
+            };                                          \
+            typedef __attribute__((aligned(b))) t Type; \
+        };
 
 __HIPCUB_ALIGN_BYTES(short4, 8)
 __HIPCUB_ALIGN_BYTES(ushort4, 8)
