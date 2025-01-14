@@ -94,7 +94,9 @@ namespace rocRoller
                 s << "Tiling:    " << x.macM << "x" << x.macN << "x" << x.macK << std::endl;
                 s << "MI:        " << x.waveM << "x" << x.waveN << "x" << x.waveK << "x" << x.waveB
                   << std::endl;
+                s << "Scaling:   A:" << x.scaleA << " B:" << x.scaleB << std::endl;
                 s << "LDS:       " << x.loadLDSA << x.loadLDSB << x.storeLDSD << std::endl;
+                s << "LSDScale:  " << x.loadLDSScaleA << x.loadLDSScaleB << std::endl;
                 s << "Prefetch:  "
                   << "enabled:" << x.prefetch << " inflight:" << x.prefetchInFlight
                   << " LDS:" << x.prefetchLDSFactor << std::endl;

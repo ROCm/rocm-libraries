@@ -8,6 +8,7 @@
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
+#include <rocRoller/Operations/OperationTag.hpp>
 #include <rocRoller/Serialization/Enum.hpp>
 #include <rocRoller/Serialization/GPUArchitecture.hpp>
 #include <rocRoller/Serialization/YAML.hpp>
@@ -60,6 +61,11 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "type_C", result.solutionParams.typeC);
         iot::mapRequired(io, "type_D", result.solutionParams.typeD);
         iot::mapRequired(io, "type_acc", result.solutionParams.typeAcc);
+
+        iot::mapRequired(io, "scale_A", result.solutionParams.scaleA);
+        iot::mapRequired(io, "scale_B", result.solutionParams.scaleB);
+        iot::mapRequired(io, "loadLDSScale_A", result.solutionParams.loadLDSScaleA);
+        iot::mapRequired(io, "loadLDSScale_B", result.solutionParams.loadLDSScaleB);
 
         iot::mapRequired(io, "mac_m", result.solutionParams.macM);
         iot::mapRequired(io, "mac_n", result.solutionParams.macN);
@@ -135,6 +141,7 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "prefetchLDSFactor", params.prefetchLDSFactor);
         iot::mapRequired(io, "betaInFma", params.betaInFma);
         iot::mapRequired(io, "scheduler", params.scheduler);
+        iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
 
         iot::mapRequired(io, "trans_A", params.transA);
         iot::mapRequired(io, "trans_B", params.transB);
@@ -144,6 +151,11 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "type_C", params.typeC);
         iot::mapRequired(io, "type_D", params.typeD);
         iot::mapRequired(io, "type_acc", params.typeAcc);
+
+        iot::mapRequired(io, "scale_A", params.scaleA);
+        iot::mapRequired(io, "scale_B", params.scaleB);
+        iot::mapRequired(io, "loadScaleLDS_A", params.loadLDSScaleA);
+        iot::mapRequired(io, "loadScaleLDS_B", params.loadLDSScaleB);
 
         iot::mapRequired(io, "streamK", params.streamK);
         iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
@@ -167,6 +179,8 @@ namespace rocRoller::Client::GEMMClient
                  std::vector<typename UnsegmentedTypeOf<B>::type> const& h_B,
                  std::vector<C> const&                                   h_C,
                  std::vector<D> const&                                   h_D,
+                 std::vector<uint8_t> const&                             h_scaleA,
+                 std::vector<uint8_t> const&                             h_scaleB,
                  rocRoller::Client::GEMMClient::ProblemParameters const& problemParams,
                  GPUArchitecture const&                                  arch)
     {
@@ -174,17 +188,37 @@ namespace rocRoller::Client::GEMMClient
 
         // Host result
         std::vector<D> h_result(problemParams.m * problemParams.n, static_cast<D>(0.0));
-        CPUMM(h_result,
-              h_C,
-              h_A,
-              h_B,
-              problemParams.m,
-              problemParams.n,
-              problemParams.k,
-              problemParams.alpha,
-              problemParams.beta,
-              problemParams.transA == TransposeType::T,
-              problemParams.transB == TransposeType::T);
+
+        if(!h_scaleA.empty() && !h_scaleB.empty())
+        {
+            rocRoller::ScaledCPUMM(h_result,
+                                   h_C,
+                                   h_A,
+                                   h_B,
+                                   h_scaleA,
+                                   h_scaleB,
+                                   problemParams.m,
+                                   problemParams.n,
+                                   problemParams.k,
+                                   problemParams.alpha,
+                                   problemParams.beta,
+                                   problemParams.transA == TransposeType::T,
+                                   problemParams.transB == TransposeType::T);
+        }
+        else
+        {
+            CPUMM(h_result,
+                  h_C,
+                  h_A,
+                  h_B,
+                  problemParams.m,
+                  problemParams.n,
+                  problemParams.k,
+                  problemParams.alpha,
+                  problemParams.beta,
+                  problemParams.transA == TransposeType::T,
+                  problemParams.transB == TransposeType::T);
+        }
 
         auto tol = gemmAcceptableError<A, B, D>(
             problemParams.m, problemParams.n, problemParams.k, arch.target());
@@ -229,16 +263,49 @@ namespace rocRoller::Client::GEMMClient
                                 static_cast<unsigned long>(problemParams.n)},
                                "N");
 
-        auto           seed = 31415u;
-        auto           h_A  = DGenVector<A>(descA, -1.0, 1.0, seed + 1);
-        auto           h_B  = DGenVector<B>(descB, -1.0, 1.0, seed + 2);
-        std::vector<C> h_C  = DGenVector<C>(descC, -1.0, 1.0, seed + 3);
-        std::vector<D> h_D(problemParams.m * problemParams.n, static_cast<D>(0.0));
+        using UnsegmentedTypeA = typename UnsegmentedTypeOf<A>::type;
+        using UnsegmentedTypeB = typename UnsegmentedTypeOf<B>::type;
+        std::vector<UnsegmentedTypeA> hostA;
+        std::vector<UnsegmentedTypeB> hostB;
+        std::vector<C>                hostC;
+        std::vector<D>                hostD(problemParams.m * problemParams.n, D{});
+        std::vector<uint8_t>          hostScaleA, hostScaleB;
 
-        auto d_A = make_shared_device(h_A);
-        auto d_B = make_shared_device(h_B);
-        auto d_C = make_shared_device(h_C);
-        auto d_D = make_shared_device(h_D);
+        auto seed = 31415u;
+        DGenInput(seed,
+                  hostA,
+                  descA,
+                  hostB,
+                  descB,
+                  hostC,
+                  descC,
+                  hostScaleA,
+                  hostScaleB,
+                  problemParams.scaleA == Operations::ScaleMode::Separate,
+                  problemParams.scaleB == Operations::ScaleMode::Separate);
+
+        auto deviceA = make_shared_device(hostA);
+        auto deviceB = make_shared_device(hostB);
+        auto deviceC = make_shared_device(hostC);
+        auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
+
+        std::shared_ptr<uint8_t> deviceScaleA, deviceScaleB;
+        AssertFatal(problemParams.scaleA == Operations::ScaleMode::None
+                        || problemParams.scaleA == Operations::ScaleMode::Separate,
+                    "Scale mode not supported!",
+                    ShowValue(problemParams.scaleA));
+        AssertFatal(problemParams.scaleB == Operations::ScaleMode::None
+                        || problemParams.scaleB == Operations::ScaleMode::Separate,
+                    "Scale mode not supported!",
+                    ShowValue(problemParams.scaleB));
+        if(problemParams.scaleA == Operations::ScaleMode::Separate)
+        {
+            deviceScaleA = make_shared_device(hostScaleA);
+        }
+        if(problemParams.scaleB == Operations::ScaleMode::Separate)
+        {
+            deviceScaleB = make_shared_device(hostScaleB);
+        }
 
         std::cout << "Generating lauch parameters and runtime arguments..." << std::endl;
 
@@ -247,10 +314,31 @@ namespace rocRoller::Client::GEMMClient
         auto commandArgs = gemm->commandArguments(command, problemParams, runParams);
 
         auto [aTag, bTag, cTag, dTag] = gemm->getABCDTags();
-        commandArgs.setArgument(aTag, ArgumentType::Value, (A*)d_A.get());
-        commandArgs.setArgument(bTag, ArgumentType::Value, (B*)d_B.get());
-        commandArgs.setArgument(cTag, ArgumentType::Value, (C*)d_C.get());
-        commandArgs.setArgument(dTag, ArgumentType::Value, (D*)d_D.get());
+        commandArgs.setArgument(aTag, ArgumentType::Value, (A*)deviceA.get());
+        commandArgs.setArgument(bTag, ArgumentType::Value, (B*)deviceB.get());
+        commandArgs.setArgument(cTag, ArgumentType::Value, (C*)deviceC.get());
+        commandArgs.setArgument(dTag, ArgumentType::Value, (D*)deviceD.get());
+
+        if(problemParams.scaleA == Operations::ScaleMode::Separate)
+        {
+            auto dataTypeA  = TypeInfo<A>::Var.dataType;
+            auto descAScale = TensorDescriptor(
+                dataTypeA,
+                {size_t(problemParams.m), size_t(problemParams.k / elementsPerMXBlock)},
+                problemParams.transA == TransposeType::T ? "T" : "N");
+            auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
+            setCommandTensorArg(commandArgs, aScaleTag, descAScale, deviceScaleA.get());
+        }
+        if(problemParams.scaleB == Operations::ScaleMode::Separate)
+        {
+            auto dataTypeB  = TypeInfo<A>::Var.dataType;
+            auto descBScale = TensorDescriptor(
+                dataTypeB,
+                {size_t(problemParams.k / elementsPerMXBlock), size_t(problemParams.n)},
+                problemParams.transB == TransposeType::T ? "T" : "N");
+            auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
+            setCommandTensorArg(commandArgs, bScaleTag, descBScale, deviceScaleB.get());
+        }
 
         gemm->validateRunParameters(command, problemParams, runParams, commandKernel);
 
@@ -315,13 +403,14 @@ namespace rocRoller::Client::GEMMClient
 
         if(runParams.check)
         {
-            AssertFatal(hipMemcpy(h_D.data(),
-                                  d_D.get(),
+            AssertFatal(hipMemcpy(hostD.data(),
+                                  deviceD.get(),
                                   problemParams.m * problemParams.n * sizeof(D),
                                   hipMemcpyDeviceToHost)
                         == (hipError_t)HIP_SUCCESS);
 
-            auto [correct, rnorm] = validate<A, B, C, D>(h_A, h_B, h_C, h_D, problemParams, arch);
+            auto [correct, rnorm] = validate<A, B, C, D>(
+                hostA, hostB, hostC, hostD, hostScaleA, hostScaleB, problemParams, arch);
 
             result.checked = true;
             result.correct = correct;
@@ -331,7 +420,6 @@ namespace rocRoller::Client::GEMMClient
         return result;
     }
 
-    // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
     template <typename A, typename C, typename D>
     Client::BenchmarkResults GEMMMixed(CommandPtr               command,
                                        CommandKernelPtr         commandKernel,
@@ -365,7 +453,6 @@ namespace rocRoller::Client::GEMMClient
             Throw<FatalError>("Invalid type for Mixed GEMM.");
     }
 
-    // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
     template <typename C, typename D>
     Client::BenchmarkResults GEMMMixed(CommandPtr               command,
                                        CommandKernelPtr         commandKernel,
@@ -403,6 +490,85 @@ namespace rocRoller::Client::GEMMClient
         }
         else
             Throw<FatalError>("Invalid type for Mixed GEMM.");
+    }
+
+    template <typename AB>
+    Client::BenchmarkResults GEMMUniform(CommandPtr               command,
+                                         CommandKernelPtr         commandKernel,
+                                         GEMMSolutionPtr          gemm,
+                                         ProblemParameters const& problemParams,
+                                         RunParameters const&     runParams,
+                                         GPUArchitecture const&   arch,
+                                         auto                     typeCD)
+    {
+        if(typeCD == "float")
+        {
+            return GEMM<AB, AB, float, float>(
+                command, commandKernel, gemm, problemParams, runParams, arch);
+        }
+        if(typeCD == "half")
+        {
+            return GEMM<AB, AB, Half, Half>(
+                command, commandKernel, gemm, problemParams, runParams, arch);
+        }
+        if(typeCD == "bf16")
+        {
+            return GEMM<AB, AB, BFloat16, BFloat16>(
+                command, commandKernel, gemm, problemParams, runParams, arch);
+        }
+        Throw<FatalError>("Invalid CD type for uniform GEMM.");
+    }
+
+    Client::BenchmarkResults GEMMUniform(CommandPtr               command,
+                                         CommandKernelPtr         commandKernel,
+                                         GEMMSolutionPtr          gemm,
+                                         ProblemParameters const& problemParams,
+                                         RunParameters const&     runParams,
+                                         GPUArchitecture const&   arch,
+                                         auto                     typeAB,
+                                         auto                     typeCD)
+    {
+        if(typeAB == "float")
+        {
+            return GEMMUniform<float>(
+                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+        }
+        if(typeAB == "half")
+        {
+            return GEMMUniform<Half>(
+                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+        }
+        if(typeAB == "bf16")
+        {
+            return GEMMUniform<BFloat16>(
+                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+        }
+        if(typeAB == "fp8")
+        {
+            return GEMMUniform<FP8>(
+                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+        }
+        if(typeAB == "bf8")
+        {
+            return GEMMUniform<BF8>(
+                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+        }
+        if(typeAB == "fp6")
+        {
+            return GEMMUniform<FP6>(
+                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+        }
+        if(typeAB == "bf6")
+        {
+            return GEMMUniform<BF6>(
+                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+        }
+        if(typeAB == "fp4")
+        {
+            return GEMMUniform<FP4>(
+                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+        }
+        Throw<FatalError>("Invalid AB type for uniform GEMM.");
     }
 
     /*
@@ -455,6 +621,9 @@ namespace rocRoller::Client::GEMMClient
 
         Client::GEMMClient::TransposeType transA = Client::GEMMClient::TransposeType::N;
         Client::GEMMClient::TransposeType transB = Client::GEMMClient::TransposeType::N;
+
+        Operations::ScaleMode scaleA = Operations::ScaleMode::None;
+        Operations::ScaleMode scaleB = Operations::ScaleMode::None;
     };
 
     struct IOParameters
@@ -680,59 +849,10 @@ namespace rocRoller::Client::GEMMClient
             result.solutionParams             = solution;
             result.benchmarkResults.runParams = run;
 
-            if(types.typeA == "float" && types.typeB == "float" && types.typeC == "float"
-               && types.typeD == "float")
+            if(types.typeA == types.typeB && types.typeC == types.typeD)
             {
-                result.benchmarkResults = GEMM<float, float, float, float>(
-                    command, commandKernel, gemm, problem, run, arch);
-            }
-            else if(types.typeA == "half" && types.typeB == "half" && types.typeC == "half"
-                    && types.typeD == "half")
-            {
-                result.benchmarkResults = GEMM<Half, Half, Half, Half>(
-                    command, commandKernel, gemm, problem, run, arch);
-            }
-            else if(types.typeA == "bf16" && types.typeB == "bf16" && types.typeC == "float"
-                    && types.typeD == "float")
-            {
-                result.benchmarkResults = GEMM<BFloat16, BFloat16, float, float>(
-                    command, commandKernel, gemm, problem, run, arch);
-            }
-            else if(types.typeA == "bf16" && types.typeB == "bf16" && types.typeC == "bf16"
-                    && types.typeD == "bf16")
-            {
-                result.benchmarkResults = GEMM<BFloat16, BFloat16, BFloat16, BFloat16>(
-                    command, commandKernel, gemm, problem, run, arch);
-            }
-            else if(types.typeA == "fp8" && types.typeB == "fp8" && types.typeC == "float"
-                    && types.typeD == "float")
-            {
-                result.benchmarkResults = GEMM<FP8, FP8, float, float>(
-                    command, commandKernel, gemm, problem, run, arch);
-            }
-            else if(types.typeA == "bf8" && types.typeB == "bf8" && types.typeC == "float"
-                    && types.typeD == "float")
-            {
-                result.benchmarkResults = GEMM<BF8, BF8, float, float>(
-                    command, commandKernel, gemm, problem, run, arch);
-            }
-            else if(problem.typeA == "fp6" && problem.typeB == "fp6" && problem.typeC == "float"
-                    && problem.typeD == "float")
-            {
-                result.benchmarkResults = GEMM<FP6, FP6, float, float>(
-                    command, commandKernel, gemm, problem, run, arch);
-            }
-            else if(problem.typeA == "bf6" && problem.typeB == "bf6" && problem.typeC == "float"
-                    && problem.typeD == "float")
-            {
-                result.benchmarkResults = GEMM<BF6, BF6, float, float>(
-                    command, commandKernel, gemm, problem, run, arch);
-            }
-            else if(problem.typeA == "fp4" && problem.typeB == "fp4" && problem.typeC == "float"
-                    && problem.typeD == "float")
-            {
-                result.benchmarkResults = GEMM<FP4, FP4, float, float>(
-                    command, commandKernel, gemm, problem, run, arch);
+                result.benchmarkResults = GEMMUniform(
+                    command, commandKernel, gemm, problem, run, arch, types.typeA, types.typeC);
             }
             else if((problem.typeA != problem.typeB) && isF8F6F4(problem.typeA)
                     && isF8F6F4(problem.typeB))
@@ -785,6 +905,12 @@ int main(int argc, const char* argv[])
 
         .workgroupSizeX = 128,
         .workgroupSizeY = 2,
+
+        .scaleA = Operations::ScaleMode::None,
+        .scaleB = Operations::ScaleMode::None,
+
+        .loadLDSScaleA = false,
+        .loadLDSScaleB = false,
 
         .loadLDSA  = true,
         .loadLDSB  = true,
@@ -888,6 +1014,22 @@ int main(int argc, const char* argv[])
         },
         "N: B is not to be transposed.  T: B is to be transposed.",
         "N");
+    app.add_option(
+        "--scale_A",
+        [&types](auto res) -> bool {
+            types.scaleA = fromString<Operations::ScaleMode>(res[0]);
+            return true;
+        },
+        "Enable MX scaling of A matrix [None | Separate].",
+        "Default: None.");
+    app.add_option(
+        "--scale_B",
+        [&types](auto res) -> bool {
+            types.scaleB = fromString<Operations::ScaleMode>(res[0]);
+            return true;
+        },
+        "Enable MX scaling of B matrix [None | Separate].",
+        "Default: None.");
 
     //
     // Kernel options
@@ -975,6 +1117,9 @@ int main(int argc, const char* argv[])
                    "Prefetch 1/prefetchLDSFactor of MacroTile from LDS");
     app.add_flag("--streamK", solution.streamK, "Enable StreamK algorithm.");
     app.add_flag("--streamKTwoTile", solution.streamKTwoTile, "Enable two-tile StreamK algorithm.");
+
+    app.add_flag("--loadLDSScale_A", solution.loadLDSScaleA, "Use LDS when loading A scale.");
+    app.add_flag("--loadLDSScale_B", solution.loadLDSScaleB, "Use LDS when loading B scale.");
 
     //
     // Benchmarking options
@@ -1143,6 +1288,12 @@ int main(int argc, const char* argv[])
                          "from solution."
                       << std::endl;
         }
+        if((types.scaleA != solution.scaleA) || (types.scaleA != solution.scaleB))
+        {
+            std::cout << "NOTE: MX Scalings from command line have been superceded by scaling from "
+                         "solution."
+                      << std::endl;
+        }
 
         types.typeA   = solution.typeA;
         types.typeB   = solution.typeB;
@@ -1151,6 +1302,8 @@ int main(int argc, const char* argv[])
         types.typeAcc = solution.typeAcc;
         types.transA  = solution.transA;
         types.transB  = solution.transB;
+        types.scaleA  = solution.scaleA;
+        types.scaleB  = solution.scaleB;
     }
 
     // Currently, we only support F32 accumulation
@@ -1163,6 +1316,8 @@ int main(int argc, const char* argv[])
     problem.typeAcc = types.typeAcc;
     problem.transA  = types.transA;
     problem.transB  = types.transB;
+    problem.scaleA  = types.scaleA;
+    problem.scaleB  = types.scaleB;
 
     solution.typeA   = types.typeA;
     solution.typeB   = types.typeB;
@@ -1171,6 +1326,8 @@ int main(int argc, const char* argv[])
     solution.typeAcc = types.typeAcc;
     solution.transA  = types.transA;
     solution.transB  = types.transB;
+    solution.scaleA  = types.scaleA;
+    solution.scaleB  = types.scaleB;
 
     run.check = !noCheckResult;
 
