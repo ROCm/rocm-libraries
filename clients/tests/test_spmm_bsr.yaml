@@ -132,6 +132,24 @@ Tests:
   orderC: [rocsparse_order_row]
   filename: [Chevron2]
 
+- name: spmm_bsr
+  category: quick
+  function: spmm_bsr
+  indextype: *i32
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [436]
+  N: [16, 23, 51]
+  K: [847]
+  block_dim: [2, 5, 8]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bsr]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
+
 ##############################
 # Precheckin
 ##############################
@@ -314,6 +332,24 @@ Tests:
   orderC: [rocsparse_order_row]
   filename: [Chebyshev4]
 
+- name: spmm_bsr
+  category: pre_checkin
+  function: spmm_bsr
+  indextype: *i32
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [13845]
+  N: [21, 27, 44]
+  K: [13724]
+  block_dim: [3, 4, 5]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bsr]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+
 - name: spmm_bsr_graph_test
   category: pre_checkin
   function: spmm_bsr
@@ -479,3 +515,20 @@ Tests:
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
   filename: [shipsec1]
+
+- name: spmm_bsr
+  category: nightly
+  function: spmm_bsr
+  indextype: *i32
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [42362]
+  N: [29, 39, 60]
+  K: [12943]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bsr]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]

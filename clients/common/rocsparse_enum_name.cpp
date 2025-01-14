@@ -44,6 +44,7 @@ const char* rocsparse_datatype_name(rocsparse_datatype value)
 {
     switch(value)
     {
+        CASE(rocsparse_datatype_f16_r);
         CASE(rocsparse_datatype_f32_r);
         CASE(rocsparse_datatype_f64_r);
         CASE(rocsparse_datatype_f32_c);

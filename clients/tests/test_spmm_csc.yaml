@@ -215,6 +215,23 @@ Tests:
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
 
+- name: spmm_csc
+  category: quick
+  function: spmm_csc
+  indextype: *i32
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [73645]
+  N: [19, 47, 64]
+  K: [48364]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_row_split]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
+
 ##############################
 # Precheckin
 ##############################
@@ -417,6 +434,23 @@ Tests:
   filename: [nos2,
              nos5]
 
+- name: spmm_csc
+  category: pre_checkin
+  function: spmm_csc
+  indextype: *i32
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [56473]
+  N: [27, 51]
+  K: [29856]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
 - name: spmm_csc_graph_test
   category: pre_checkin
   function: spmm_csc
@@ -602,6 +636,23 @@ Tests:
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [scircuit]
+
+- name: spmm_csc
+  category: nightly
+  function: spmm_csc
+  indextype: *i32
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [29405]
+  N: [20, 58]
+  K: [31546]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_merge_path]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
 
 ##############################
 # STRESS

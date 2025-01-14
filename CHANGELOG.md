@@ -5,6 +5,9 @@ Documentation for rocSPARSE is available at
 
 ## (Unreleased) rocSPARSE 3.5.0
 
+### Added
+* Adds half float mixed precision to SpMM where A and B use float16 and C and the compute type use float
+
 ### Optimized
 
 * Reduced the number of template instantiations in the library to further reduce the shared library binary size and improve compile times

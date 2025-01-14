@@ -94,6 +94,22 @@ inline void rocsparse_importer_copy_mixed_arrays(size_t size,
 
 template <>
 inline void rocsparse_importer_copy_mixed_arrays(size_t size,
+                                                 _Float16* __restrict__ x,
+                                                 const rocsparse_float_complex* __restrict__ y)
+{
+    throw rocsparse_status_not_implemented;
+}
+
+template <>
+inline void rocsparse_importer_copy_mixed_arrays(size_t size,
+                                                 _Float16* __restrict__ x,
+                                                 const rocsparse_double_complex* __restrict__ y)
+{
+    throw rocsparse_status_not_implemented;
+}
+
+template <>
+inline void rocsparse_importer_copy_mixed_arrays(size_t size,
                                                  float* __restrict__ x,
                                                  const rocsparse_float_complex* __restrict__ y)
 {

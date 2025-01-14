@@ -9514,7 +9514,8 @@ INSTANTIATE_IABCT(int32_t, int8_t, int8_t, int32_t, int32_t);
 INSTANTIATE_IABCT(int64_t, int8_t, int8_t, int32_t, int32_t);
 INSTANTIATE_IABCT(int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_IABCT(int64_t, int8_t, int8_t, float, float);
-
+INSTANTIATE_IABCT(int32_t, _Float16, _Float16, float, float);
+INSTANTIATE_IABCT(int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_IABCT(int32_t, float, float, float, float);
 INSTANTIATE_IABCT(int64_t, float, float, float, float);
 INSTANTIATE_IABCT(int32_t, double, double, double, double);
@@ -9546,7 +9547,9 @@ INSTANTIATE_IJABCT(int64_t, int64_t, int8_t, int8_t, int32_t, int32_t);
 INSTANTIATE_IJABCT(int32_t, int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_IJABCT(int64_t, int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_IJABCT(int64_t, int64_t, int8_t, int8_t, float, float);
-
+INSTANTIATE_IJABCT(int32_t, int32_t, _Float16, _Float16, float, float);
+INSTANTIATE_IJABCT(int64_t, int32_t, _Float16, _Float16, float, float);
+INSTANTIATE_IJABCT(int64_t, int64_t, _Float16, _Float16, float, float);
 INSTANTIATE_IJABCT(int32_t, int32_t, float, float, float, float);
 INSTANTIATE_IJABCT(int64_t, int32_t, float, float, float, float);
 INSTANTIATE_IJABCT(int64_t, int64_t, float, float, float, float);

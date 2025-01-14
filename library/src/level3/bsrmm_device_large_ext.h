@@ -166,12 +166,12 @@ namespace rocsparse
                     {
                         if(order_C == rocsparse_order_column)
                         {
-                            dense_C[global_row + ldc * cols[l]] = rocsparse::fma(
+                            dense_C[global_row + ldc * cols[l]] = rocsparse::fma<T>(
                                 beta, dense_C[global_row + ldc * cols[l]], alpha * sum[l]);
                         }
                         else
                         {
-                            dense_C[global_row * ldc + cols[l]] = rocsparse::fma(
+                            dense_C[global_row * ldc + cols[l]] = rocsparse::fma<T>(
                                 beta, dense_C[global_row * ldc + cols[l]], alpha * sum[l]);
                         }
                     }

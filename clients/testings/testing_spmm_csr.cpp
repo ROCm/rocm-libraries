@@ -102,6 +102,12 @@ void testing_spmm_csr_bad_arg(const Arguments& arg)
 #undef PARAMS
 }
 
+inline std::ostream& operator<<(std::ostream& os_, const _Float16& that_)
+{
+    os_ << (float)that_;
+    return os_;
+}
+
 template <typename I, typename J, typename A, typename B, typename C, typename T>
 void testing_spmm_csr(const Arguments& arg)
 {
@@ -433,5 +439,8 @@ INSTANTIATE_MIXED(int64_t, int64_t, int8_t, int8_t, int32_t, int32_t);
 INSTANTIATE_MIXED(int32_t, int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int64_t, int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int64_t, int64_t, int8_t, int8_t, float, float);
+INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, float, float);
 
 void testing_spmm_csr_extra(const Arguments& arg) {}

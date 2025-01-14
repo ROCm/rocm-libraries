@@ -211,6 +211,23 @@ Tests:
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
 
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [6758]
+  N: [21, 38]
+  K: [4860]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_row_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
 ##############################
 # Precheckin
 ##############################
@@ -414,6 +431,23 @@ Tests:
              nos4,
              mac_econ_fwd500]
 
+- name: spmm_csr
+  category: pre_checkin
+  function: spmm_csr
+  indextype: *i32
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [23956]
+  N: [25, 56]
+  K: [47586]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+
 - name: spmm_csr_graph_test
   category: pre_checkin
   function: spmm_csr
@@ -598,6 +632,23 @@ Tests:
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
   filename: [Chevron2]
+
+- name: spmm_csr
+  category: nightly
+  function: spmm_csr
+  indextype: *i32
+  precision: *float16_float16_float32_float32_abct_precision
+  M: [42690]
+  N: [19, 49]
+  K: [54678]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_merge_path]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
 
 ##############################
 # STRESS

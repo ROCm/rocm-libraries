@@ -157,7 +157,7 @@ namespace rocsparse
                         {
                             rocsparse::atomic_add(
                                 &dense_C[prevrow + (col_offset + p) * ldc + batch_stride_C * batch],
-                                shared_val[p][WF_SIZE - 1]);
+                                static_cast<C>(shared_val[p][WF_SIZE - 1]));
                         }
                     }
                     else
@@ -166,7 +166,7 @@ namespace rocsparse
                         {
                             rocsparse::atomic_add(
                                 &dense_C[(col_offset + p) + prevrow * ldc + batch_stride_C * batch],
-                                shared_val[p][WF_SIZE - 1]);
+                                static_cast<C>(shared_val[p][WF_SIZE - 1]));
                         }
                     }
                 }
@@ -218,7 +218,7 @@ namespace rocsparse
                         {
                             rocsparse::atomic_add(
                                 &dense_C[row + (col_offset + p) * ldc + batch_stride_C * batch],
-                                val[p]);
+                                static_cast<C>(val[p]));
                         }
                     }
                     else
@@ -227,7 +227,7 @@ namespace rocsparse
                         {
                             rocsparse::atomic_add(
                                 &dense_C[(col_offset + p) + row * ldc + batch_stride_C * batch],
-                                val[p]);
+                                static_cast<C>(val[p]));
                         }
                     }
                 }
@@ -242,7 +242,8 @@ namespace rocsparse
                 for(uint32_t p = 0; p < COLS; p++)
                 {
                     rocsparse::atomic_add(
-                        &dense_C[row + (col_offset + p) * ldc + batch_stride_C * batch], val[p]);
+                        &dense_C[row + (col_offset + p) * ldc + batch_stride_C * batch],
+                        static_cast<C>(val[p]));
                 }
             }
             else
@@ -250,7 +251,8 @@ namespace rocsparse
                 for(uint32_t p = 0; p < COLS; p++)
                 {
                     rocsparse::atomic_add(
-                        &dense_C[(col_offset + p) + row * ldc + batch_stride_C * batch], val[p]);
+                        &dense_C[(col_offset + p) + row * ldc + batch_stride_C * batch],
+                        static_cast<C>(val[p]));
                 }
             }
         }
@@ -697,6 +699,8 @@ INSTANTIATE(rocsparse_double_complex,
             rocsparse_double_complex);
 
 // Mixed Precisions
+INSTANTIATE(float, int32_t, _Float16, _Float16, float);
+INSTANTIATE(float, int64_t, _Float16, _Float16, float);
 INSTANTIATE(int32_t, int32_t, int8_t, int8_t, int32_t);
 INSTANTIATE(int32_t, int64_t, int8_t, int8_t, int32_t);
 INSTANTIATE(float, int32_t, int8_t, int8_t, float);

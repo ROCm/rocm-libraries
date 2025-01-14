@@ -296,6 +296,9 @@ namespace rocsparse
         void*                     temp_buffer);
 
 // Uniform precisions
+INSTANTIATE_ANALYSIS(float, int32_t, int32_t, _Float16);
+INSTANTIATE_ANALYSIS(float, int64_t, int32_t, _Float16);
+INSTANTIATE_ANALYSIS(float, int64_t, int64_t, _Float16);
 INSTANTIATE_ANALYSIS(float, int32_t, int32_t, float);
 INSTANTIATE_ANALYSIS(float, int64_t, int32_t, float);
 INSTANTIATE_ANALYSIS(float, int64_t, int64_t, float);

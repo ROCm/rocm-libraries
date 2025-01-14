@@ -57,7 +57,7 @@ namespace rocsparse
 {
 
 // find next power of 2
-__device__ __host__ __forceinline__ uint32_t fnp2(uint32_t x)
+    __device__ __host__ __forceinline__ uint32_t fnp2(uint32_t x)
 {
     x--;
     x |= x >> 1;
@@ -70,6 +70,7 @@ __device__ __host__ __forceinline__ uint32_t fnp2(uint32_t x)
     return x;
 }
 
+__device__ __forceinline__ _Float16 ldg(const _Float16* ptr) { return *ptr; }
 __device__ __forceinline__ int8_t ldg(const int8_t* ptr) { return __ldg(ptr); }
 __device__ __forceinline__ int32_t ldg(const int32_t* ptr) { return __ldg(ptr); }
 __device__ __forceinline__ int64_t ldg(const int64_t* ptr) { return __ldg(ptr); }
@@ -81,6 +82,9 @@ __device__ __forceinline__ rocsparse_double_complex ldg(const rocsparse_double_c
 
 template <typename T>
 __device__ __forceinline__ T fma(T p, T q, T r);
+
+template <>
+__device__ __forceinline__ _Float16 fma(_Float16 p, _Float16 q, _Float16 r) { return std::fma(p, q, r); }
 
 template <>
 __device__ __forceinline__ int32_t fma(int32_t p, int32_t q, int32_t r) { return p * q + r; }
@@ -155,6 +159,7 @@ __device__ __forceinline__ rocsparse_double_complex sqrt(rocsparse_double_comple
     return rocsparse_double_complex(std::sqrt((absz + x) * 0.5), sgnp * std::sqrt((absz - x) * 0.5));
 }
 
+__device__ __forceinline__ _Float16 conj(const _Float16& x) { return x; }
 __device__ __forceinline__ int32_t conj(const int32_t& x) { return x; }
 __device__ __forceinline__ float conj(const float& x) { return x; }
 __device__ __forceinline__ double conj(const double& x) { return x; }
@@ -194,6 +199,7 @@ __device__ __forceinline__ double imag(const rocsparse_double_complex& x) { retu
     return std::real(x) > std::real(y);
 }
 
+__device__ __forceinline__ _Float16 nontemporal_load(const _Float16* ptr) { return *ptr; }
 __device__ __forceinline__ float nontemporal_load(const float* ptr) { return __builtin_nontemporal_load(ptr); }
 __device__ __forceinline__ double nontemporal_load(const double* ptr) { return __builtin_nontemporal_load(ptr); }
 __device__ __forceinline__ rocsparse_float_complex nontemporal_load(const rocsparse_float_complex* ptr) { return rocsparse_float_complex(__builtin_nontemporal_load((const float*)ptr), __builtin_nontemporal_load((const float*)ptr + 1)); }
@@ -255,11 +261,10 @@ __device__ __forceinline__ int64_t atomic_max<int64_t>(int64_t * ptr, int64_t va
   return atomicMax((uint64_t*)ptr, val);
 }
 
-
 template <>
 __device__ __forceinline__ int64_t atomic_add<int64_t>(int64_t * ptr, int64_t val)
 {
-  return atomicAdd((uint64_t*)ptr, val);
+    return atomicAdd((uint64_t*)ptr, val);
 }
 
 template <>
@@ -890,7 +895,7 @@ __device__ __forceinline__ int64_t wfreduce_partial_sum(int64_t sum)
             temp_sum.i64 += __shfl_xor(temp_sum.i64, 32);
         }
         sum = temp_sum.i64;
-        return sum;   
+        return sum;
     }
     if(SUB_WFSIZE == 4)
     {
@@ -915,7 +920,7 @@ __device__ __forceinline__ int64_t wfreduce_partial_sum(int64_t sum)
             temp_sum.i64 += __shfl_xor(temp_sum.i64, 32);
         }
         sum = temp_sum.i64;
-        return sum;   
+        return sum;
     }
     if(SUB_WFSIZE == 8)
     {
@@ -934,7 +939,7 @@ __device__ __forceinline__ int64_t wfreduce_partial_sum(int64_t sum)
             temp_sum.i64 += __shfl_xor(temp_sum.i64, 32);
         }
         sum = temp_sum.i64;
-        return sum;   
+        return sum;
     }
     if(SUB_WFSIZE == 16)
     {
@@ -947,7 +952,7 @@ __device__ __forceinline__ int64_t wfreduce_partial_sum(int64_t sum)
             temp_sum.i64 += __shfl_xor(temp_sum.i64, 32);
         }
         sum = temp_sum.i64;
-        return sum;   
+        return sum;
     }
     if(SUB_WFSIZE == 32)
     {
@@ -956,10 +961,10 @@ __device__ __forceinline__ int64_t wfreduce_partial_sum(int64_t sum)
             temp_sum.i64 += __shfl_xor(temp_sum.i64, 32);
         }
         sum = temp_sum.i64;
-        return sum;   
+        return sum;
     }
     sum = temp_sum.i64;
-    return sum;   
+    return sum;
 }
 // DPP-based float wavefront partial reduction sum
 template <uint32_t WFSIZE, uint32_t SUB_WFSIZE>

@@ -110,6 +110,7 @@ typedef rocsparseio_enum_t rocsparseio_index_base_t;
 #define ROCSPARSEIO_TYPE_COMPLEX32 4
 #define ROCSPARSEIO_TYPE_COMPLEX64 5
 #define ROCSPARSEIO_TYPE_INT8 6
+#define ROCSPARSEIO_TYPE_FLOAT16 7
 
 #define ROCSPARSEIO_FORMAT_DENSE_VECTOR 0
 #define ROCSPARSEIO_FORMAT_DENSE_MATRIX 1
@@ -137,6 +138,7 @@ typedef enum rocsparseio_type_
 {
     rocsparseio_type_int32     = ROCSPARSEIO_TYPE_INT32,
     rocsparseio_type_int64     = ROCSPARSEIO_TYPE_INT64,
+    rocsparseio_type_float16   = ROCSPARSEIO_TYPE_FLOAT16,
     rocsparseio_type_float32   = ROCSPARSEIO_TYPE_FLOAT32,
     rocsparseio_type_float64   = ROCSPARSEIO_TYPE_FLOAT64,
     rocsparseio_type_complex32 = ROCSPARSEIO_TYPE_COMPLEX32,

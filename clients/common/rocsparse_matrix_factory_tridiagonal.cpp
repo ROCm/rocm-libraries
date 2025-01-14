@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -197,6 +197,10 @@ void rocsparse_matrix_factory_tridiagonal<T, I, J>::init_gebsr(std::vector<I>&  
 template struct rocsparse_matrix_factory_tridiagonal<int8_t, int32_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<int8_t, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<int8_t, int64_t, int64_t>;
+
+template struct rocsparse_matrix_factory_tridiagonal<_Float16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<_Float16, int64_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<_Float16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_tridiagonal<float, int32_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<float, int64_t, int32_t>;

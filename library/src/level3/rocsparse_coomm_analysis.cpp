@@ -266,6 +266,8 @@ INSTANTIATE_ANALYSIS(rocsparse_double_complex, int32_t, rocsparse_double_complex
 INSTANTIATE_ANALYSIS(rocsparse_double_complex, int64_t, rocsparse_double_complex);
 
 // Mixed precisions
+INSTANTIATE_ANALYSIS(float, int32_t, _Float16);
+INSTANTIATE_ANALYSIS(float, int64_t, _Float16);
 INSTANTIATE_ANALYSIS(int32_t, int32_t, int8_t);
 INSTANTIATE_ANALYSIS(int32_t, int64_t, int8_t);
 INSTANTIATE_ANALYSIS(float, int32_t, int8_t);

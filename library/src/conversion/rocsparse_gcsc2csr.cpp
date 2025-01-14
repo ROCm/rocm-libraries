@@ -189,6 +189,10 @@ rocsparse_status rocsparse::gcsc2csr(rocsparse_handle     handle,
     {
         DISPATCH_INDEX_TYPE_PTR(int8_t);
     }
+    case rocsparse_datatype_f16_r:
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    }
     case rocsparse_datatype_u32_r:
     {
         DISPATCH_INDEX_TYPE_PTR(uint32_t);

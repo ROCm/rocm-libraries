@@ -680,6 +680,14 @@ namespace rocsparse
             (rocsparse::spmm_template<COMPUTETYPE, ITYPE, JTYPE, int8_t, int8_t, float>(ts...))); \
         return rocsparse_status_success;                                                          \
     }                                                                                             \
+    else if(atype == rocsparse_datatype_f16_r && btype == rocsparse_datatype_f16_r                \
+            && ctype == rocsparse_datatype_f32_r)                                                 \
+    {                                                                                             \
+        RETURN_IF_ROCSPARSE_ERROR(                                                                \
+            (rocsparse::spmm_template<COMPUTETYPE, ITYPE, JTYPE, _Float16, _Float16, float>(      \
+                ts...)));                                                                         \
+        return rocsparse_status_success;                                                          \
+    }                                                                                             \
     else                                                                                          \
     {                                                                                             \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);                              \
@@ -755,6 +763,7 @@ namespace rocsparse
     case rocsparse_datatype_i8_r:                                                               \
     case rocsparse_datatype_u8_r:                                                               \
     case rocsparse_datatype_u32_r:                                                              \
+    case rocsparse_datatype_f16_r:                                                              \
     {                                                                                           \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);                            \
     }                                                                                           \

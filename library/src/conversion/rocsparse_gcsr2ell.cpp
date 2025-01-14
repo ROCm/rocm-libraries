@@ -196,6 +196,10 @@ rocsparse_status rocsparse::gcsr2ell(rocsparse_handle          handle,
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
+    case rocsparse_datatype_f16_r:
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    }
 
 #define CASE(VAL, TYPE)                                                        \
     case VAL:                                                                  \

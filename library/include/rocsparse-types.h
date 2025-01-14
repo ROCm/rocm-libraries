@@ -30,6 +30,7 @@
 
 #include "rocsparse-complex-types.h"
 
+#include <float.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -499,6 +500,7 @@ typedef enum rocsparse_indextype_
  */
 typedef enum rocsparse_datatype_
 {
+    rocsparse_datatype_f16_r = 150, /**< 16 bit floating point, real. */
     rocsparse_datatype_f32_r = 151, /**< 32 bit floating point, real. */
     rocsparse_datatype_f64_r = 152, /**< 64 bit floating point, real. */
     rocsparse_datatype_f32_c = 154, /**< 32 bit floating point, complex. */

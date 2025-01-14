@@ -108,16 +108,22 @@ public:
             rocsparse_rng_nan_get());
     }
 
-    // Random NaN double
-    explicit operator double()
+    // Random NaN half
+    explicit operator _Float16()
     {
-        return random_nan_data<double, uint64_t, 52, 11>();
+        return random_nan_data<_Float16, uint16_t, 10, 5>();
     }
 
     // Random NaN float
     explicit operator float()
     {
         return random_nan_data<float, uint32_t, 23, 8>();
+    }
+
+    // Random NaN double
+    explicit operator double()
+    {
+        return random_nan_data<double, uint64_t, 52, 11>();
     }
 
     explicit operator rocsparse_float_complex()

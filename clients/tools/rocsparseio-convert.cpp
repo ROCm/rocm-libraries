@@ -33,7 +33,6 @@
 
 namespace rocsparseio
 {
-
     ///
     ///
     ///
@@ -166,6 +165,12 @@ namespace rocsparseio
 inline std::ostream& operator<<(std::ostream& os, const rocsparseio::file_format_t& that_)
 {
     os << that_.to_string();
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const _Float16& that_)
+{
+    os << (float)that_;
     return os;
 }
 
@@ -680,6 +685,10 @@ rocsparseio_status write_ascii_sparse_coo_dispatch_t(rocsparseio_type t, P... pa
 {
     switch(t)
     {
+    case rocsparseio_type_float16:
+    {
+        return write_ascii_sparse_coo_template<I, J, _Float16>(params...);
+    }
     case rocsparseio_type_float32:
     {
         return write_ascii_sparse_coo_template<I, J, float>(params...);
@@ -723,6 +732,7 @@ rocsparseio_status
         return write_ascii_sparse_coo_dispatch_t<I, int64_t, P...>(t, params...);
     }
     case rocsparseio_type_int8:
+    case rocsparseio_type_float16:
     case rocsparseio_type_float32:
     case rocsparseio_type_float64:
     case rocsparseio_type_complex32:
@@ -748,6 +758,7 @@ rocsparseio_status
         return write_ascii_sparse_coo_dispatch_jt<int64_t, P...>(j, t, params...);
     }
     case rocsparseio_type_int8:
+    case rocsparseio_type_float16:
     case rocsparseio_type_float32:
     case rocsparseio_type_float64:
     case rocsparseio_type_complex32:
@@ -774,6 +785,10 @@ rocsparseio_status write_ascii_dense_vector(rocsparseio_type t, P... params)
     case rocsparseio_type_int8:
     {
         return write_ascii_dense_vector_template<int8_t>(params...);
+    }
+    case rocsparseio_type_float16:
+    {
+        return write_ascii_dense_vector_template<_Float16>(params...);
     }
     case rocsparseio_type_float32:
     {
@@ -1058,6 +1073,7 @@ rocsparseio_status rocsparseio2csr(const char* ifilename, const char* ofilename)
             break;
         }
         case rocsparseio_type_int8:
+        case rocsparseio_type_float16:
         case rocsparseio_type_float32:
         case rocsparseio_type_float64:
         case rocsparseio_type_complex32:
@@ -1087,6 +1103,7 @@ rocsparseio_status rocsparseio2csr(const char* ifilename, const char* ofilename)
             break;
         }
         case rocsparseio_type_int8:
+        case rocsparseio_type_float16:
         case rocsparseio_type_float32:
         case rocsparseio_type_float64:
         case rocsparseio_type_complex32:
@@ -1109,6 +1126,16 @@ rocsparseio_status rocsparseio2csr(const char* ifilename, const char* ofilename)
         {
             idata    = (double*)malloc(sizeof(double) * (nnz));
             float* p = (float*)data;
+            for(uint64_t i = 0; i < nnz; ++i)
+            {
+                idata[i] = p[i];
+            }
+            break;
+        }
+        case rocsparseio_type_float16:
+        {
+            idata       = (double*)malloc(sizeof(double) * (nnz));
+            _Float16* p = (_Float16*)data;
             for(uint64_t i = 0; i < nnz; ++i)
             {
                 idata[i] = p[i];

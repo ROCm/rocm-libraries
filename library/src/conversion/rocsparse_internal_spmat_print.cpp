@@ -28,6 +28,12 @@
 
 namespace rocsparse
 {
+    inline std::ostream& operator<<(std::ostream& out, const _Float16& x)
+    {
+        out << (float)x;
+        return out;
+    }
+
     template <typename T>
     static rocsparse_status internal_dnvec_print(std::ostream& out, int64_t nmemb, const void* h)
     {
@@ -137,6 +143,11 @@ namespace rocsparse
         RETURN_IF_HIP_ERROR(hipMemcpy(hind, dind, datatype_sizeof * nmemb, hipMemcpyDeviceToHost));
         switch(datatype)
         {
+        case rocsparse_datatype_f16_r:
+        {
+            rocsparse::internal_dnvec_print<_Float16>(out, nmemb, hind);
+            break;
+        }
         case rocsparse_datatype_f32_r:
         {
             rocsparse::internal_dnvec_print<float>(out, nmemb, hind);
@@ -196,6 +207,11 @@ namespace rocsparse
         RETURN_IF_HIP_ERROR(hipMemcpy(hind, dind, datatype_sizeof * m * n, hipMemcpyDeviceToHost));
         switch(datatype)
         {
+        case rocsparse_datatype_f16_r:
+        {
+            rocsparse::internal_dnmat_print<_Float16>(out, m, n, hind, m);
+            break;
+        }
         case rocsparse_datatype_f32_r:
         {
             rocsparse::internal_dnmat_print<float>(out, m, n, hind, m);

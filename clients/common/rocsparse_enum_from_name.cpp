@@ -48,6 +48,7 @@ inline constexpr int token_count(F f, P... p)
 DEF(rocsparse_indextype, rocsparse_indextype_u16, rocsparse_indextype_i32, rocsparse_indextype_i64);
 
 DEF(rocsparse_datatype,
+    rocsparse_datatype_f16_r,
     rocsparse_datatype_f32_r,
     rocsparse_datatype_f64_r,
     rocsparse_datatype_f32_c,
@@ -185,6 +186,7 @@ bool rocsparse_datatype_from_name(rocsparse_datatype value, const char* name)
     {
         switch(v)
         {
+            CASE(rocsparse_datatype_f16_r);
             CASE(rocsparse_datatype_f32_r);
             CASE(rocsparse_datatype_f64_r);
             CASE(rocsparse_datatype_f32_c);

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -234,6 +234,10 @@ void rocsparse_matrix_factory_random<T, I, J>::init_coo(std::vector<I>&        c
 template struct rocsparse_matrix_factory_random<int8_t, int32_t, int32_t>;
 template struct rocsparse_matrix_factory_random<int8_t, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_random<int8_t, int64_t, int64_t>;
+
+template struct rocsparse_matrix_factory_random<_Float16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_random<_Float16, int64_t, int32_t>;
+template struct rocsparse_matrix_factory_random<_Float16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_random<float, int32_t, int32_t>;
 template struct rocsparse_matrix_factory_random<float, int64_t, int32_t>;

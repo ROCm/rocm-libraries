@@ -344,6 +344,9 @@ INSTANTIATE_BUFFER_SIZE(rocsparse_double_complex, int64_t, int32_t, rocsparse_do
 INSTANTIATE_BUFFER_SIZE(rocsparse_double_complex, int64_t, int64_t, rocsparse_double_complex);
 
 // Mixed precisions
+INSTANTIATE_BUFFER_SIZE(float, int32_t, int32_t, _Float16);
+INSTANTIATE_BUFFER_SIZE(float, int64_t, int32_t, _Float16);
+INSTANTIATE_BUFFER_SIZE(float, int64_t, int64_t, _Float16);
 INSTANTIATE_BUFFER_SIZE(int32_t, int32_t, int32_t, int8_t);
 INSTANTIATE_BUFFER_SIZE(int32_t, int64_t, int32_t, int8_t);
 INSTANTIATE_BUFFER_SIZE(int32_t, int64_t, int64_t, int8_t);

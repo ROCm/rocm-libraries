@@ -100,6 +100,8 @@ namespace rocsparse
     {
         switch(type)
         {
+        case rocsparse_datatype_f16_r:
+            return rocblas_datatype_f16_r;
         case rocsparse_datatype_f32_r:
             return rocblas_datatype_f32_r;
         case rocsparse_datatype_f64_r:

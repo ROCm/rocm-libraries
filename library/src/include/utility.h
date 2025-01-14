@@ -576,6 +576,7 @@ namespace rocsparse
     {
         switch(value_)
         {
+        case rocsparse_datatype_f16_r:
         case rocsparse_datatype_f32_r:
         case rocsparse_datatype_f64_r:
         case rocsparse_datatype_f32_c:
@@ -1029,6 +1030,10 @@ namespace rocsparse
         case rocsparse_datatype_u8_r:
         {
             return sizeof(uint8_t);
+        }
+        case rocsparse_datatype_f16_r:
+        {
+            return sizeof(_Float16);
         }
         case rocsparse_datatype_f32_r:
         {

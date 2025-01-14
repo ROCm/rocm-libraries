@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -89,6 +89,18 @@
             }                                                       \
         }                                                           \
     } while(0)
+
+inline std::ostream& operator<<(std::ostream& os, const _Float16& that_)
+{
+    return os << (float)that_;
+}
+
+template <>
+void unit_check_general(
+    int64_t M, int64_t N, const _Float16* A, int64_t LDA, const _Float16* B, int64_t LDB)
+{
+    ROCSPARSE_UNIT_CHECK(M, N, A, LDA, B, LDB, ASSERT_FLOAT_EQ);
+}
 
 template <>
 void unit_check_general(
@@ -552,6 +564,11 @@ void unit_check_garray(rocsparse_datatype val_type,
     case rocsparse_datatype_u32_r:
     {
         //      unit_check_segments<uint32_t>(size,(const uint32_t*) source, (const uint32_t*) t);
+        break;
+    }
+    case rocsparse_datatype_f16_r:
+    {
+        unit_check_segments<_Float16>(size, (const _Float16*)source, (const _Float16*)t);
         break;
     }
     case rocsparse_datatype_i8_r:

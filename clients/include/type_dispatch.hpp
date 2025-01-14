@@ -57,6 +57,7 @@ auto rocsparse_simple_dispatch(const Arguments& arg)
     case rocsparse_datatype_u8_r:
     case rocsparse_datatype_i32_r:
     case rocsparse_datatype_u32_r:
+    case rocsparse_datatype_f16_r:
         return TEST<void>{}(arg);
     }
     return TEST<void>{}(arg);
@@ -82,6 +83,7 @@ auto rocsparse_it_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
+        case rocsparse_datatype_f16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -101,6 +103,7 @@ auto rocsparse_it_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
+        case rocsparse_datatype_f16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -130,6 +133,7 @@ auto rocsparse_it_plus_int8_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
+        case rocsparse_datatype_f16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -150,6 +154,7 @@ auto rocsparse_it_plus_int8_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
+        case rocsparse_datatype_f16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -179,6 +184,7 @@ auto rocsparse_ijt_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
+        case rocsparse_datatype_f16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -198,6 +204,7 @@ auto rocsparse_ijt_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
+        case rocsparse_datatype_f16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -217,6 +224,7 @@ auto rocsparse_ijt_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
+        case rocsparse_datatype_f16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -555,6 +563,10 @@ auto rocsparse_iabct_dispatch(const Arguments& arg)
         = (A == rocsparse_datatype_i8_r && B == rocsparse_datatype_i8_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
+    bool f16r_f16r_f32r_f32r_case
+        = (A == rocsparse_datatype_f16_r && B == rocsparse_datatype_f16_r
+           && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
+
 #define DISPATCH_TEST(ITYPE)                                         \
     if(f32r_case)                                                    \
     {                                                                \
@@ -587,6 +599,10 @@ auto rocsparse_iabct_dispatch(const Arguments& arg)
     else if(i8r_i8r_f32r_f32r_case)                                  \
     {                                                                \
         return TEST<ITYPE, int8_t, int8_t, float, float>{}(arg);     \
+    }                                                                \
+    else if(f16r_f16r_f32r_f32r_case)                                \
+    {                                                                \
+        return TEST<ITYPE, _Float16, _Float16, float, float>{}(arg); \
     }
 
     switch(I)
@@ -634,6 +650,10 @@ auto rocsparse_ijabct_dispatch(const Arguments& arg)
         = (A == rocsparse_datatype_i8_r && B == rocsparse_datatype_i8_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
+    bool f16r_f16r_f32r_f32r_case
+        = (A == rocsparse_datatype_f16_r && B == rocsparse_datatype_f16_r
+           && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
+
 #define DISPATCH_TEST(ITYPE, JTYPE)                                         \
     if(f32r_case)                                                           \
     {                                                                       \
@@ -668,6 +688,10 @@ auto rocsparse_ijabct_dispatch(const Arguments& arg)
     else if(i8r_i8r_f32r_f32r_case)                                         \
     {                                                                       \
         return TEST<ITYPE, JTYPE, int8_t, int8_t, float, float>{}(arg);     \
+    }                                                                       \
+    else if(f16r_f16r_f32r_f32r_case)                                       \
+    {                                                                       \
+        return TEST<ITYPE, JTYPE, _Float16, _Float16, float, float>{}(arg); \
     }
 
     switch(I)

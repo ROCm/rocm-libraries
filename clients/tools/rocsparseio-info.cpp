@@ -32,7 +32,6 @@ using rocsparseio_double_complex = std::complex<double>;
 
 typedef struct
 {
-
     uint64_t mean_nnz_per_seq;
     uint64_t min_nnz_per_seq;
     uint64_t max_nnz_per_seq;
@@ -60,6 +59,18 @@ struct transpose_pair_t
         next  = nullptr;
     }
 };
+
+template <typename T>
+double abs(T val)
+{
+    return std::abs(val);
+}
+
+template <>
+double abs(_Float16 val)
+{
+    return std::abs((double)val);
+}
 
 template <typename I, typename J, typename T>
 rocsparseio_status rocsparseio_csx_statistics(rocsparseio_direction dir,
@@ -184,7 +195,7 @@ rocsparseio_status rocsparseio_csx_statistics(rocsparseio_direction dir,
                 {
                     if(lst->index == k)
                     {
-                        const double d = std::abs(lst->val[0] - v);
+                        const double d = abs(lst->val[0] - v);
                         sym_val        = std::max(sym_val, d);
                         break;
                     }
@@ -253,6 +264,10 @@ rocsparseio_status rocsparseio_csx_statistics_val_type(rocsparseio_type val_type
     {
         return rocsparseio_csx_statistics<I, J, int8_t>(params...);
     }
+    case rocsparseio_type_float16:
+    {
+        return rocsparseio_csx_statistics<I, J, _Float16>(params...);
+    }
     case rocsparseio_type_float32:
     {
         return rocsparseio_csx_statistics<I, J, float>(params...);
@@ -289,6 +304,7 @@ rocsparseio_status rocsparseio_csx_statistics_ind_type(rocsparseio_type ind_type
         return rocsparseio_csx_statistics_val_type<I, int64_t>(val_type, params...);
     }
     case rocsparseio_type_int8:
+    case rocsparseio_type_float16:
     case rocsparseio_type_float32:
     case rocsparseio_type_float64:
     case rocsparseio_type_complex32:
@@ -317,6 +333,7 @@ rocsparseio_status rocsparseio_csx_statistics_dynamic_dispatch(rocsparseio_type 
         return rocsparseio_csx_statistics_ind_type<int64_t>(ind_type, val_type, params...);
     }
     case rocsparseio_type_int8:
+    case rocsparseio_type_float16:
     case rocsparseio_type_float32:
     case rocsparseio_type_float64:
     case rocsparseio_type_complex32:

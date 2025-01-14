@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,6 +38,13 @@ static inline void read_mtx_value(std::istringstream& is, int64_t& row, int64_t&
 static inline void read_mtx_value(std::istringstream& is, int64_t& row, int64_t& col, float& val)
 {
     is >> row >> col >> val;
+}
+
+static inline void read_mtx_value(std::istringstream& is, int64_t& row, int64_t& col, _Float16& val)
+{
+    float temp;
+    read_mtx_value(is, row, col, temp);
+    val = temp;
 }
 
 static inline void read_mtx_value(std::istringstream& is, int64_t& row, int64_t& col, double& val)
@@ -384,6 +391,10 @@ INSTANTIATE_TIJ(int8_t, int32_t, int32_t);
 INSTANTIATE_TIJ(int8_t, int64_t, int32_t);
 INSTANTIATE_TIJ(int8_t, int64_t, int64_t);
 
+INSTANTIATE_TIJ(_Float16, int32_t, int32_t);
+INSTANTIATE_TIJ(_Float16, int64_t, int32_t);
+INSTANTIATE_TIJ(_Float16, int64_t, int64_t);
+
 INSTANTIATE_TIJ(float, int32_t, int32_t);
 INSTANTIATE_TIJ(float, int64_t, int32_t);
 INSTANTIATE_TIJ(float, int64_t, int64_t);
@@ -402,6 +413,9 @@ INSTANTIATE_TIJ(rocsparse_double_complex, int64_t, int64_t);
 
 INSTANTIATE_TI(int8_t, int32_t);
 INSTANTIATE_TI(int8_t, int64_t);
+
+INSTANTIATE_TI(_Float16, int32_t);
+INSTANTIATE_TI(_Float16, int64_t);
 
 INSTANTIATE_TI(float, int32_t);
 INSTANTIATE_TI(float, int64_t);

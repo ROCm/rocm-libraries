@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,9 +24,10 @@
 
 #include "rocsparse_importer_rocalution.hpp"
 
-static inline void read_csr_values(std::ifstream& in, int64_t nnz, int8_t* csr_val)
+template <typename T>
+void read_csr_values(std::ifstream& in, int64_t nnz, T* csr_val)
 {
-    // Temporary array to convert from double to float
+    // Temporary array to convert from double to T
     std::vector<double> tmp(nnz);
 
     // Read in double values
@@ -37,33 +38,18 @@ static inline void read_csr_values(std::ifstream& in, int64_t nnz, int8_t* csr_v
 #endif
     for(int64_t i = 0; i < nnz; ++i)
     {
-        csr_val[i] = static_cast<int8_t>(tmp[i]);
+        csr_val[i] = static_cast<T>(tmp[i]);
     }
 }
 
-static inline void read_csr_values(std::ifstream& in, int64_t nnz, float* csr_val)
-{
-    // Temporary array to convert from double to float
-    std::vector<double> tmp(nnz);
-
-    // Read in double values
-    in.read((char*)tmp.data(), sizeof(double) * nnz);
-
-#ifdef _OPENMP
-#pragma omp parallel for schedule(dynamic, 1024)
-#endif
-    for(int64_t i = 0; i < nnz; ++i)
-    {
-        csr_val[i] = static_cast<float>(tmp[i]);
-    }
-}
-
-static inline void read_csr_values(std::ifstream& in, int64_t nnz, double* csr_val)
+template <>
+void read_csr_values(std::ifstream& in, int64_t nnz, double* csr_val)
 {
     in.read((char*)csr_val, sizeof(double) * nnz);
 }
 
-static inline void read_csr_values(std::ifstream& in, int64_t nnz, rocsparse_float_complex* csr_val)
+template <>
+void read_csr_values(std::ifstream& in, int64_t nnz, rocsparse_float_complex* csr_val)
 {
     // Temporary array to convert from double to float complex
     std::vector<rocsparse_double_complex> tmp(nnz);
@@ -81,8 +67,8 @@ static inline void read_csr_values(std::ifstream& in, int64_t nnz, rocsparse_flo
     }
 }
 
-static inline void
-    read_csr_values(std::ifstream& in, int64_t nnz, rocsparse_double_complex* csr_val)
+template <>
+void read_csr_values(std::ifstream& in, int64_t nnz, rocsparse_double_complex* csr_val)
 {
     in.read((char*)csr_val, sizeof(rocsparse_double_complex) * nnz);
 }
@@ -309,6 +295,10 @@ INSTANTIATE_TIJ(int8_t, int32_t, int32_t);
 INSTANTIATE_TIJ(int8_t, int64_t, int32_t);
 INSTANTIATE_TIJ(int8_t, int64_t, int64_t);
 
+INSTANTIATE_TIJ(_Float16, int32_t, int32_t);
+INSTANTIATE_TIJ(_Float16, int64_t, int32_t);
+INSTANTIATE_TIJ(_Float16, int64_t, int64_t);
+
 INSTANTIATE_TIJ(float, int32_t, int32_t);
 INSTANTIATE_TIJ(float, int64_t, int32_t);
 INSTANTIATE_TIJ(float, int64_t, int64_t);
@@ -327,6 +317,9 @@ INSTANTIATE_TIJ(rocsparse_double_complex, int64_t, int64_t);
 
 INSTANTIATE_TI(int8_t, int32_t);
 INSTANTIATE_TI(int8_t, int64_t);
+
+INSTANTIATE_TI(_Float16, int32_t);
+INSTANTIATE_TI(_Float16, int64_t);
 
 INSTANTIATE_TI(float, int32_t);
 INSTANTIATE_TI(float, int64_t);
