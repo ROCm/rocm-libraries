@@ -106,8 +106,8 @@ struct __type_to_vector<__hip_bfloat16>
 template <>
 struct __cccl_complex_overload_traits<__hip_bfloat16, false, false>
 {
-  typedef __hip_bfloat16 _ValueType;
-  typedef complex<__hip_bfloat16> _ComplexType;
+  using _ValueType   = __hip_bfloat16;
+  using _ComplexType = complex<__hip_bfloat16>;
 };
 
 template <class _Tp>
