@@ -1,7 +1,6 @@
-#include "TensorDescriptor.hpp"
-
 #include <DataGenerator.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
+#include <rocRoller/TensorDescriptor.hpp>
 
 using namespace DGen;
 
