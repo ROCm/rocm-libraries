@@ -5,13 +5,13 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/TensorDescriptor.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "Utilities.hpp"
 
 #include <common/GEMMProblem.hpp>
-#include <common/TensorDescriptor.hpp>
 
 using namespace rocRoller;
 

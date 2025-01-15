@@ -6,6 +6,7 @@
 #include <rocRoller/Context.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/TensorDescriptor.hpp>
 
 #include "CustomMatchers.hpp"
 #include "CustomSections.hpp"
@@ -20,7 +21,6 @@
 #include <catch2/generators/catch_generators_range.hpp>
 
 #include <common/SourceMatcher.hpp>
-#include <common/TensorDescriptor.hpp>
 #include <common/TestValues.hpp>
 
 using namespace rocRoller;

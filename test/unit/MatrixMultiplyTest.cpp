@@ -11,13 +11,13 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/T_Execute.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
+#include <rocRoller/TensorDescriptor.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
-#include <common/TensorDescriptor.hpp>
 #include <common/mxDataGen.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 

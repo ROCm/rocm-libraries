@@ -165,6 +165,11 @@ namespace rocRoller
         return m_kernelGraph;
     }
 
+    CommandPtr CommandKernel::getCommand() const
+    {
+        return m_command;
+    }
+
     hipFunction_t CommandKernel::getHipFunction() const
     {
         return m_executableKernel->getHipFunction();

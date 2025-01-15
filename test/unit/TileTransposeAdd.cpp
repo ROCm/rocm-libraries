@@ -9,12 +9,12 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/TensorDescriptor.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "Utilities.hpp"
-#include <common/TensorDescriptor.hpp>
 
 using namespace rocRoller;
 

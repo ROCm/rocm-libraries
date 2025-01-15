@@ -1,8 +1,7 @@
 #pragma once
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelOptions.hpp>
-
-#include "../../test/common/common/TensorDescriptor.hpp"
+#include <rocRoller/TensorDescriptor.hpp>
 
 #include "GEMMParameters.hpp"
 #include "GEMMSolution.hpp"

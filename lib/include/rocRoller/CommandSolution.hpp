@@ -238,6 +238,13 @@ namespace rocRoller
         ContextPtr getContext();
 
         /**
+         * @brief Get the Command object
+         *
+         * @return CommandPtr
+         */
+        CommandPtr getCommand() const;
+
+        /**
          * Determines kernel arguments for a particular invocation.
          */
         KernelArguments getKernelArguments(RuntimeArguments const& args);
