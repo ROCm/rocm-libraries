@@ -91,6 +91,12 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
     }
 
+    LoadTileDirect2LDS::LoadTileDirect2LDS() = default;
+    LoadTileDirect2LDS::LoadTileDirect2LDS(rocRoller::VariableType const varType)
+        : varType(varType)
+    {
+    }
+
     StoreTiled::StoreTiled() = default;
     StoreTiled::StoreTiled(DataType const dtype)
         : dataType(dtype)
@@ -138,6 +144,7 @@ namespace rocRoller::KernelGraph::ControlGraph
     RR_CLASS_NAME_IMPL(LoadVGPR);
     RR_CLASS_NAME_IMPL(LoadSGPR);
     RR_CLASS_NAME_IMPL(LoadLDSTile);
+    RR_CLASS_NAME_IMPL(LoadTileDirect2LDS);
     RR_CLASS_NAME_IMPL(StoreTiled);
     RR_CLASS_NAME_IMPL(StoreSGPR);
     RR_CLASS_NAME_IMPL(StoreLDSTile);

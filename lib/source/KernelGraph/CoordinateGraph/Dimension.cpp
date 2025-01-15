@@ -117,6 +117,12 @@ namespace rocRoller
         {
         }
 
+        User::User(std::string const& name, Expression::ExpressionPtr size)
+            : BaseDimension(size, Expression::literal(1u))
+            , argumentName(name)
+        {
+        }
+
         Workgroup::Workgroup(int const dim)
             : SubDimension(dim, nullptr, Expression::literal(1u))
         {

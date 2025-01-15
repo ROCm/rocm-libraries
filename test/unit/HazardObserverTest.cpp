@@ -69,6 +69,31 @@ namespace rocRollerTest
         auto v = this->createRegisters(Register::Type::Vector, DataType::UInt32, 5);
         auto s = this->createRegisters(Register::Type::Scalar, DataType::UInt32, 2);
 
+        // v_readfirstlane reads from the first lane
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_add_u32", {v[1]}, {v[1], v[0]}, {}, ""),
+                   Instruction("v_readfirstlane_b32", {s[1]}, {v[1]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            if constexpr(std::is_same_v<TypeParam, Gfx908> || std::is_same_v<TypeParam, Gfx90a>)
+            {
+                this->peekAndSchedule(insts[0]);
+                this->peekAndSchedule(insts[1]);
+
+                EXPECT_THAT(this->output(), Not(HasSubstr("s_nop")));
+            }
+            else
+            {
+                // NOPs are required on 94X arch
+                this->peekAndSchedule(insts[0]);
+                this->peekAndSchedule(insts[1], 1);
+
+                EXPECT_THAT(this->output(), HasSubstr("s_nop 0"));
+            }
+            this->clearOutput();
+        }
+
         // v_readlane (2nd op) read as laneselect
         {
             std::vector<Instruction> insts = {

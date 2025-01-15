@@ -28,7 +28,8 @@ namespace rocRoller
             Global,
             Scalar,
             Local,
-            Buffer
+            Buffer,
+            Buffer2LDS
         };
 
         enum MemoryDirection : int
@@ -305,8 +306,7 @@ namespace rocRoller
          * @param buffOpts Buffer options
          * @param numBytes The number of bytes to load.
          */
-        Generator<Instruction> bufferLoad2LDS(Register::ValuePtr                addr,
-                                              Register::ValuePtr                data,
+        Generator<Instruction> bufferLoad2LDS(Register::ValuePtr                data,
                                               std::shared_ptr<BufferDescriptor> buffDesc,
                                               BufferInstructionOptions          buffOpts,
                                               int                               numBytes);

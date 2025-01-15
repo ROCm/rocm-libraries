@@ -1480,8 +1480,34 @@ namespace MemoryInstructionsTest
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
                 bufInstOpts.lds  = true;
 
-                co_yield m_context->mem()->bufferLoad2LDS(
-                    s_offset, vgprSerial, bufDesc, bufInstOpts, N);
+                auto numBytes = (N < 4) ? N : 4;
+
+                auto wordgroupSizeTotal = product(m_context->kernel()->workgroupSize());
+                auto m0                 = m_context->getM0();
+
+                for(int i = 0; i < N; i += numBytes)
+                {
+                    if(i == 0)
+                    {
+                        co_yield generate(m0, s_offset->expression(), m_context);
+                    }
+                    else
+                    {
+                        // set LDS write base address
+                        co_yield generate(m0,
+                                          m0->expression()
+                                              + Expression::literal(numBytes * wordgroupSizeTotal),
+                                          m_context);
+                        // set global read address
+                        co_yield generate(vgprSerial,
+                                          vgprSerial->expression() + Expression::literal(numBytes),
+                                          m_context);
+                    }
+                    co_yield m_context->mem()->barrier();
+                    co_yield m_context->mem()->bufferLoad2LDS(
+                        vgprSerial, bufDesc, bufInstOpts, numBytes);
+                }
+
                 co_yield m_context->mem()->barrier();
                 co_yield m_context->mem()->loadLocal(v_ptr, v_lds, 0, N);
 

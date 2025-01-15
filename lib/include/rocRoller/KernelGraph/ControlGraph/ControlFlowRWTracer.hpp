@@ -78,6 +78,7 @@ namespace rocRoller::KernelGraph
         void operator()(Scope const& op, int tag);
         void operator()(SetCoordinate const& op, int tag);
         void operator()(StoreLDSTile const& op, int tag);
+        void operator()(LoadTileDirect2LDS const& op, int tag);
         void operator()(StoreLinear const& op, int tag);
         void operator()(StoreTiled const& op, int tag);
         void operator()(StoreVGPR const& op, int tag);

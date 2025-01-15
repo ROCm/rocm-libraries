@@ -87,6 +87,20 @@ namespace rocRoller
                 dest, newAddr->subset({0}), offsetVal, bufDesc, buffOpts, numBytes, high);
             break;
 
+        case Buffer2LDS:
+            AssertFatal(bufDesc);
+            // If the provided offset is not a literal, create a new register that will store the value
+            // of addr + offset and pass it to loadLocal
+            if(offset && offset->regType() != Register::Type::Literal)
+            {
+                newAddr
+                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
+                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
+            }
+
+            co_yield bufferLoad2LDS(newAddr->subset({0}), bufDesc, buffOpts, numBytes);
+
+            break;
         default:
             throw std::runtime_error("Load not supported for provided Memorykind");
         }
@@ -680,29 +694,20 @@ namespace rocRoller
     }
 
     inline Generator<Instruction>
-        MemoryInstructions::bufferLoad2LDS(Register::ValuePtr                addr,
-                                           Register::ValuePtr                data,
+        MemoryInstructions::bufferLoad2LDS(Register::ValuePtr                data,
                                            std::shared_ptr<BufferDescriptor> buffDesc,
                                            BufferInstructionOptions          buffOpts,
                                            int                               numBytes)
     {
-        AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
         AssertFatal(buffOpts.lds);
 
         // TODO : add support for other memory instruction generator where numBytes == 3 || numBytes % m_wordSize != 0
-        AssertFatal(numBytes > 0
-                        && ((numBytes < m_wordSize && numBytes != 3) || numBytes % m_wordSize == 0),
+        AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4,
                     "Invalid number of bytes",
-                    ShowValue(numBytes),
-                    ShowValue(m_wordSize));
+                    ShowValue(numBytes));
 
         auto ctx = m_context.lock();
-
-        // copy the lds write address to m0 register
-        auto m0 = ctx->getM0();
-        AssertFatal(addr->regType() == Register::Type::Scalar);
-        co_yield generate(m0, addr->expression(), ctx);
 
         std::string offsetModifier = "offset: 0", glc = "", slc = "", lds = "lds";
         if(buffOpts.glc)
@@ -715,50 +720,29 @@ namespace rocRoller
         }
 
         auto sgprSrd = buffDesc->allRegisters();
-        auto offset  = 0;
-        auto stride  = 0;
-        do
+
+        std::string opEnd = "";
+        if(numBytes < m_wordSize)
         {
-            // the soffset can be constant or sgpr
-            // copy the soffset to read address when offset is greater than max constant (i.e., 64)
-            auto constantOffset = (offset <= 64) ? offset : 0;
-            if(offset > 64)
+            if(numBytes == 1)
             {
-                auto sOffset  = (offset <= 64 + m_wordSize) ? offset : stride;
-                auto readAddr = data;
-                data          = nullptr;
-                co_yield generate(data, readAddr->expression() + Expression::literal(sOffset), ctx);
+                opEnd += "ubyte";
             }
+            else if(numBytes == 2)
+            {
+                opEnd += "ushort";
+            }
+        }
+        else
+        {
+            opEnd += "dword";
+        }
 
-            auto        remain = numBytes - offset;
-            std::string opEnd  = "";
-            if(remain < m_wordSize)
-            {
-                if(remain == 1)
-                {
-                    opEnd += "ubyte";
-                    stride = 1;
-                }
-                else if(remain == 2)
-                {
-                    opEnd += "ushort";
-                    stride = 2;
-                }
-            }
-            else
-            {
-                opEnd += "dword";
-                stride = m_wordSize;
-            }
-
-            co_yield_(Instruction("buffer_load_" + opEnd,
-                                  {},
-                                  {data, sgprSrd, Register::Value::Literal(constantOffset)},
-                                  {"offen", offsetModifier, glc, slc, lds},
-                                  "Load value direct to lds"));
-            co_yield generate(m0, m0->expression() + Expression::literal(stride), ctx);
-            offset += stride;
-        } while(offset < numBytes);
+        co_yield_(Instruction("buffer_load_" + opEnd,
+                              {},
+                              {data, sgprSrd, Register::Value::Literal(0)},
+                              {"offen", offsetModifier, glc, slc, lds},
+                              "Load value direct to lds"));
 
         if(ctx->kernelOptions().alwaysWaitAfterLoad)
             co_yield Instruction::Wait(WaitCount::Zero(

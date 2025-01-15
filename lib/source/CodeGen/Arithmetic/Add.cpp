@@ -97,8 +97,6 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        co_yield swapIfRHSLiteral(lhs, rhs);
-
         co_yield_(Instruction("s_add_u32", {dest}, {lhs, rhs}, {}, ""));
     }
 

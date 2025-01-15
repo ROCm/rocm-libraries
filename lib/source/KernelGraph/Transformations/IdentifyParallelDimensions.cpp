@@ -82,6 +82,7 @@ namespace rocRoller
                               ControlGraph::LoadSGPR,
                               ControlGraph::LoadTiled,
                               ControlGraph::LoadVGPR,
+                              ControlGraph::LoadTileDirect2LDS,
                               ControlGraph::Multiply,
                               ControlGraph::NOP,
                               ControlGraph::Scope,

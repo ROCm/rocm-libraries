@@ -321,6 +321,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(Scope);
             MAKE_OPERATION_VISITOR(SetCoordinate);
             MAKE_OPERATION_VISITOR(StoreLDSTile);
+            MAKE_OPERATION_VISITOR(LoadTileDirect2LDS);
             MAKE_OPERATION_VISITOR(StoreLinear);
             MAKE_OPERATION_VISITOR(StoreTiled);
             MAKE_OPERATION_VISITOR(StoreVGPR);
