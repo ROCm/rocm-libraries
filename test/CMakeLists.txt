@@ -175,6 +175,7 @@ set(
   catch/RandomNumberExpressionTest.cpp
   catch/ScalarExpressionTest.cpp
   catch/SettingsTest.cpp
+  catch/SubDwordExpressionTest.cpp
   catch/TernaryExpressionTest.cpp
   catch/TestContextTest.cpp
   catch/UnrollLoopsTest.cpp

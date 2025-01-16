@@ -766,6 +766,88 @@ namespace rocRoller
             return element<std::initializer_list<T>>(indices);
         }
 
+        inline ValuePtr Value::bitfield(uint8_t bitOffset, uint8_t bitWidth) const
+        {
+            AssertFatal(allocationState() != AllocationState::NoAllocation,
+                        ShowValue(allocationState()));
+            AssertFatal(!m_allocationCoord.empty(), ShowValue(m_allocationCoord.size()));
+
+            // Does it make sense to allow taking a bitfield of another bitfield?
+            AssertFatal(!this->isBitfield());
+
+            AssertFatal(bitWidth != 0);
+            AssertFatal(bitWidth < bitsPerRegister);
+
+            AssertFatal(bitOffset < registerCount() * bitsPerRegister,
+                        "bitOffset is greater than number of bits in this value.");
+
+            uint registerOfBitOffset = bitOffset / bitsPerRegister;
+            uint registerOfLastBit   = (bitOffset + bitWidth - 1) / bitsPerRegister;
+
+            AssertFatal(registerOfBitOffset == registerOfLastBit,
+                        "cannot get bitfield across registers.");
+
+            std::vector<int> allocationCoord = {m_allocationCoord.at(registerOfBitOffset)};
+
+            auto bitfieldValue
+                = std::make_shared<Value>(m_allocation, m_regType, m_varType, allocationCoord);
+
+            bitfieldValue->m_bitOffset = bitOffset - registerOfBitOffset * bitsPerRegister;
+            bitfieldValue->m_bitWidth  = bitWidth;
+
+            return bitfieldValue;
+        }
+
+        template <std::ranges::forward_range T>
+        inline ValuePtr Value::segment(T const& indices) const
+        {
+            auto const info = DataTypeInfo::Get(m_varType);
+
+            AssertFatal(info.packing > 1,
+                        "bitfield access by index is only supported for packed types.");
+
+            auto isContiguousRange = [](T v) -> bool {
+                return std::adjacent_find(
+                           v.begin(), v.end(), [](auto a, auto b) { return (b - a) != 1; })
+                       == v.end();
+            };
+
+            AssertFatal(isContiguousRange(indices), "indices must refer to adjacent elements.");
+
+            auto first = *std::ranges::begin(indices);
+            auto last  = *std::ranges::prev(std::ranges::end(indices));
+
+            uint startBitOffset = first * (info.elementBits / info.packing);
+            uint endBitOffset   = (last + 1) * (info.elementBits / info.packing);
+            uint bitWidth       = endBitOffset - startBitOffset;
+
+            return bitfield(startBitOffset, bitWidth);
+        }
+
+        template <typename T>
+        std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>,
+                         ValuePtr> inline Value::segment(std::initializer_list<T> indices) const
+        {
+            return segment<std::initializer_list<T>>(indices);
+        }
+
+        inline bool Value::isBitfield() const
+        {
+            return this->m_bitOffset.has_value();
+        }
+
+        inline uint8_t Value::getBitOffset() const
+        {
+            AssertFatal(this->m_bitOffset.has_value());
+            return this->m_bitOffset.value();
+        }
+
+        inline uint8_t Value::getBitWidth() const
+        {
+            AssertFatal(this->m_bitWidth.has_value());
+            return this->m_bitWidth.value();
+        }
+
         inline Allocation::Allocation(ContextPtr        context,
                                       Type              regType,
                                       VariableType      variableType,

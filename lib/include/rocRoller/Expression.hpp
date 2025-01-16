@@ -493,7 +493,7 @@ namespace rocRoller
             {
                 outputDataType = other.outputDataType;
                 offset         = other.offset;
-                width          = other.offset;
+                width          = other.width;
 
                 return *this;
             }

@@ -792,6 +792,13 @@ namespace rocRoller
                 co_yield mm->mul(dest, lhs, r1hs, r2hs, M, N, K, B);
             }
 
+            Generator<Instruction> operator()(Register::ValuePtr& dest, BitFieldExtract const& expr)
+            {
+                AssertFatal(std::holds_alternative<Register::ValuePtr>(*expr.arg));
+                auto arg = std::get<Register::ValuePtr>(*expr.arg);
+                co_yield generateOp<BitFieldExtract>(dest, arg, expr);
+            }
+
             Generator<Instruction> operator()(Register::ValuePtr& dest, WaveTilePtr const& expr)
             {
                 Throw<FatalError>("WaveTile can only appear as an argument to MatrixMultiply.");
@@ -964,6 +971,8 @@ namespace rocRoller
                 // There may be additional optimizations after resolving DataFlowTags and kernel arguments.
                 expr = fast(expr);
             }
+
+            expr = lowerBitfieldValues(expr);
 
             CodeGeneratorVisitor v{context};
 

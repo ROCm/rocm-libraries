@@ -125,5 +125,14 @@ namespace rocRoller
          * @return ExpressionPtr Transformed expression
          */
         ExpressionPtr lowerPRNG(ExpressionPtr exp);
+
+        /**
+         * @brief Resolve all ValuePtr expressions that are bitfields into
+         * BitFieldExtract expressions.
+         *
+         * @param expr Input expression
+         * @return ExpressionPtr Transformed expression
+         */
+        ExpressionPtr lowerBitfieldValues(ExpressionPtr expr);
     }
 }
