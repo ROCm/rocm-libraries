@@ -73,7 +73,6 @@ namespace rocRoller
         // Create a Machine Code Assembly Info instance
         llvm::MCTargetOptions            mcOptions;
         std::unique_ptr<llvm::MCAsmInfo> MAI(TheTarget->createMCAsmInfo(*MRI, triple, mcOptions));
-        MAI->setRelaxELFRelocations(true);
 
         // Create an output stream
         std::error_code EC;
