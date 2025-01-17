@@ -745,7 +745,6 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   bias_vector: [0, 1]
-  bias_type: f16_r
   unit_check: 1
   gpu_arch: '942'
 

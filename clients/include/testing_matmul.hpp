@@ -77,6 +77,7 @@ bool isSwizzleSupported(hipDataType datatype)
 {
     switch(datatype)
     {
+    case HIP_R_16BF:
     case HIP_R_16F:
     case HIP_R_8F_E4M3_FNUZ:
         return true;
@@ -90,6 +91,7 @@ hipblasLtOrder_t orderForDatatype(hipDataType datatype)
     switch(datatype)
     {
     case HIP_R_16F:
+    case HIP_R_16BF:
         return HIPBLASLT_ORDER_COL16_4R8;
     case HIP_R_8F_E4M3_FNUZ:
         return HIPBLASLT_ORDER_COL16_4R16;

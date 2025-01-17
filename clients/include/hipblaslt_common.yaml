@@ -250,6 +250,8 @@ Real precisions 2 bytes: &real_precisions_2b
 Real precisions swizzle support: &real_precisions_swizzleA_support
   - &fp16_precision_dst_fp16_swizzleA
     { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_a: true}
+  - &bf16_precision_dst_bf16_swizzleA
+    { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_a: true}
   - &f8n_precision_dst_fp16_swizzleA
     { a_type: f8_fnuz_r, b_type: f8_fnuz_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_a: true}
 
