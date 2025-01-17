@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -19899,75 +19899,6 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_strided_batched_64(rocblas_handle   
                                                                int64_t                 ldb,
                                                                rocblas_stride          stride_b,
                                                                int64_t                 batch_count);
-//! @}
-
-/*! @{
-    \brief <b> BLAS Level 3 API </b>
-
-    \details
-    gemm_kernel_name functions were never fully implemented and are deprecated for removal in a future release.
-
-    Returns rocblas_status_not_implemented.
-    ********************************************************************/
-ROCBLAS_DEPRECATED_MSG("rocblas_hgemm_kernel_name will be removed in a future release")
-ROCBLAS_EXPORT rocblas_status rocblas_hgemm_kernel_name(rocblas_handle      handle,
-                                                        rocblas_operation   transA,
-                                                        rocblas_operation   transB,
-                                                        rocblas_int         m,
-                                                        rocblas_int         n,
-                                                        rocblas_int         k,
-                                                        const rocblas_half* alpha,
-                                                        const rocblas_half* A,
-                                                        rocblas_int         lda,
-                                                        rocblas_stride      stride_a,
-                                                        const rocblas_half* B,
-                                                        rocblas_int         ldb,
-                                                        rocblas_stride      stride_b,
-                                                        const rocblas_half* beta,
-                                                        rocblas_half*       C,
-                                                        rocblas_int         ldc,
-                                                        rocblas_stride      stride_c,
-                                                        rocblas_int         batch_count);
-
-ROCBLAS_DEPRECATED_MSG("rocblas_sgemm_kernel_name will be removed in a future release")
-ROCBLAS_EXPORT rocblas_status rocblas_sgemm_kernel_name(rocblas_handle    handle,
-                                                        rocblas_operation transA,
-                                                        rocblas_operation transB,
-                                                        rocblas_int       m,
-                                                        rocblas_int       n,
-                                                        rocblas_int       k,
-                                                        const float*      alpha,
-                                                        const float*      A,
-                                                        rocblas_int       lda,
-                                                        rocblas_stride    stride_a,
-                                                        const float*      B,
-                                                        rocblas_int       ldb,
-                                                        rocblas_stride    stride_b,
-                                                        const float*      beta,
-                                                        float*            C,
-                                                        rocblas_int       ldc,
-                                                        rocblas_stride    stride_c,
-                                                        rocblas_int       batch_count);
-
-ROCBLAS_DEPRECATED_MSG("rocblas_dgemm_kernel_name will be removed in a future release")
-ROCBLAS_EXPORT rocblas_status rocblas_dgemm_kernel_name(rocblas_handle    handle,
-                                                        rocblas_operation transA,
-                                                        rocblas_operation transB,
-                                                        rocblas_int       m,
-                                                        rocblas_int       n,
-                                                        rocblas_int       k,
-                                                        const double*     alpha,
-                                                        const double*     A,
-                                                        rocblas_int       lda,
-                                                        rocblas_stride    stride_a,
-                                                        const double*     B,
-                                                        rocblas_int       ldb,
-                                                        rocblas_stride    stride_b,
-                                                        const double*     beta,
-                                                        double*           C,
-                                                        rocblas_int       ldc,
-                                                        rocblas_stride    stride_c,
-                                                        rocblas_int       batch_count);
 //! @}
 
 /*! @{

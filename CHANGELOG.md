@@ -3,6 +3,20 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
+## (Unreleased) rocBLAS 5.0.0
+
+### Added
+
+### Changed
+
+### Removed
+
+* `rocblas_hgemm_kernel_name`, `rocblas_sgemm_kernel_name`, and `rocblas_dgemm_kernel_name` API functions
+
+### Optimized
+
+### Resolved issues
+
 ## (Unreleased) rocBLAS 4.4.0
 
 ### Added
