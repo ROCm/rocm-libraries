@@ -685,7 +685,7 @@ namespace rocsparse
         case rocsparse_spmv_alg_default:
         case rocsparse_spmv_alg_coo:
         case rocsparse_spmv_alg_csr_adaptive:
-        case rocsparse_spmv_alg_csr_stream:
+        case rocsparse_spmv_alg_csr_rowsplit:
         case rocsparse_spmv_alg_ell:
         case rocsparse_spmv_alg_coo_atomic:
         case rocsparse_spmv_alg_bsr:

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -115,7 +115,7 @@ DEF(rocsparse_spmv_alg,
     rocsparse_spmv_alg_bsr,
     rocsparse_spmv_alg_coo,
     rocsparse_spmv_alg_csr_adaptive,
-    rocsparse_spmv_alg_csr_stream,
+    rocsparse_spmv_alg_csr_rowsplit,
     rocsparse_spmv_alg_ell,
     rocsparse_spmv_alg_coo_atomic,
     rocsparse_spmv_alg_csr_lrb);
@@ -416,7 +416,7 @@ bool rocsparse_spmv_alg_from_name(rocsparse_spmv_alg value, const char* name)
             CASE(rocsparse_spmv_alg_bsr);
             CASE(rocsparse_spmv_alg_coo);
             CASE(rocsparse_spmv_alg_csr_adaptive);
-            CASE(rocsparse_spmv_alg_csr_stream);
+            CASE(rocsparse_spmv_alg_csr_rowsplit);
             CASE(rocsparse_spmv_alg_ell);
             CASE(rocsparse_spmv_alg_coo_atomic);
             CASE(rocsparse_spmv_alg_csr_lrb);

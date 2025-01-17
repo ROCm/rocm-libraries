@@ -154,21 +154,21 @@ namespace rocsparse
 }
 
 template <typename T, typename I, typename J, typename A, typename X, typename Y>
-rocsparse_status rocsparse::csrmv_stream_template_dispatch(rocsparse_handle    handle,
-                                                           rocsparse_operation trans,
-                                                           J                   m,
-                                                           J                   n,
-                                                           I                   nnz,
-                                                           const T*            alpha_device_host,
-                                                           const rocsparse_mat_descr descr,
-                                                           const A*                  csr_val,
-                                                           const I* csr_row_ptr_begin,
-                                                           const I* csr_row_ptr_end,
-                                                           const J* csr_col_ind,
-                                                           const X* x,
-                                                           const T* beta_device_host,
-                                                           Y*       y,
-                                                           bool     force_conj)
+rocsparse_status rocsparse::csrmv_rowsplit_template_dispatch(rocsparse_handle    handle,
+                                                             rocsparse_operation trans,
+                                                             J                   m,
+                                                             J                   n,
+                                                             I                   nnz,
+                                                             const T*            alpha_device_host,
+                                                             const rocsparse_mat_descr descr,
+                                                             const A*                  csr_val,
+                                                             const I* csr_row_ptr_begin,
+                                                             const I* csr_row_ptr_end,
+                                                             const J* csr_col_ind,
+                                                             const X* x,
+                                                             const T* beta_device_host,
+                                                             Y*       y,
+                                                             bool     force_conj)
 {
     bool conj = (trans == rocsparse_operation_conjugate_transpose || force_conj);
 
@@ -330,22 +330,22 @@ rocsparse_status rocsparse::csrmv_stream_template_dispatch(rocsparse_handle    h
     return rocsparse_status_success;
 }
 
-#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, XTYPE, YTYPE)                   \
-    template rocsparse_status rocsparse::csrmv_stream_template_dispatch<TTYPE>( \
-        rocsparse_handle          handle,                                       \
-        rocsparse_operation       trans,                                        \
-        JTYPE                     m,                                            \
-        JTYPE                     n,                                            \
-        ITYPE                     nnz,                                          \
-        const TTYPE*              alpha_device_host,                            \
-        const rocsparse_mat_descr descr,                                        \
-        const ATYPE*              csr_val,                                      \
-        const ITYPE*              csr_row_ptr_begin,                            \
-        const ITYPE*              csr_row_ptr_end,                              \
-        const JTYPE*              csr_col_ind,                                  \
-        const XTYPE*              x,                                            \
-        const TTYPE*              beta_device_host,                             \
-        YTYPE*                    y,                                            \
+#define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, XTYPE, YTYPE)                     \
+    template rocsparse_status rocsparse::csrmv_rowsplit_template_dispatch<TTYPE>( \
+        rocsparse_handle          handle,                                         \
+        rocsparse_operation       trans,                                          \
+        JTYPE                     m,                                              \
+        JTYPE                     n,                                              \
+        ITYPE                     nnz,                                            \
+        const TTYPE*              alpha_device_host,                              \
+        const rocsparse_mat_descr descr,                                          \
+        const ATYPE*              csr_val,                                        \
+        const ITYPE*              csr_row_ptr_begin,                              \
+        const ITYPE*              csr_row_ptr_end,                                \
+        const JTYPE*              csr_col_ind,                                    \
+        const XTYPE*              x,                                              \
+        const TTYPE*              beta_device_host,                               \
+        YTYPE*                    y,                                              \
         bool                      force_conj);
 
 // Uniform precision

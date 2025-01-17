@@ -1482,7 +1482,7 @@ static void host_csrmv_general(rocsparse_operation  trans,
 
     if(trans == rocsparse_operation_none)
     {
-        if(algo == rocsparse_spmv_alg_csr_stream)
+        if(algo == rocsparse_spmv_alg_csr_rowsplit)
         {
             // Get device properties
             int             dev;
@@ -1625,7 +1625,7 @@ static void host_csrmv_symmetric(rocsparse_operation  trans,
 {
     bool conj = (trans == rocsparse_operation_conjugate_transpose || force_conj);
 
-    if(algo == rocsparse_spmv_alg_csr_stream || trans != rocsparse_operation_none)
+    if(algo == rocsparse_spmv_alg_csr_rowsplit || trans != rocsparse_operation_none)
     {
         // Get device properties
         int             dev;

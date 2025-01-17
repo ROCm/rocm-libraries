@@ -48,7 +48,7 @@ namespace rocsparse
             switch(alg)
             {
             case rocsparse_spmv_alg_default:
-            case rocsparse_spmv_alg_csr_stream:
+            case rocsparse_spmv_alg_csr_rowsplit:
             case rocsparse_spmv_alg_csr_adaptive:
             case rocsparse_spmv_alg_csr_lrb:
             {
@@ -76,7 +76,7 @@ namespace rocsparse
             {
                 return rocsparse_status_success;
             }
-            case rocsparse_spmv_alg_csr_stream:
+            case rocsparse_spmv_alg_csr_rowsplit:
             case rocsparse_spmv_alg_csr_adaptive:
             case rocsparse_spmv_alg_bsr:
             case rocsparse_spmv_alg_ell:
@@ -97,7 +97,7 @@ namespace rocsparse
             {
                 return rocsparse_status_success;
             }
-            case rocsparse_spmv_alg_csr_stream:
+            case rocsparse_spmv_alg_csr_rowsplit:
             case rocsparse_spmv_alg_csr_adaptive:
             case rocsparse_spmv_alg_bsr:
             case rocsparse_spmv_alg_coo:
@@ -116,7 +116,7 @@ namespace rocsparse
             {
             case rocsparse_spmv_alg_default:
             case rocsparse_spmv_alg_coo:
-            case rocsparse_spmv_alg_csr_stream:
+            case rocsparse_spmv_alg_csr_rowsplit:
             case rocsparse_spmv_alg_csr_adaptive:
             case rocsparse_spmv_alg_ell:
             case rocsparse_spmv_alg_bsr:
@@ -140,7 +140,7 @@ namespace rocsparse
                 return rocsparse_status_success;
             }
             case rocsparse_spmv_alg_ell:
-            case rocsparse_spmv_alg_csr_stream:
+            case rocsparse_spmv_alg_csr_rowsplit:
             case rocsparse_spmv_alg_csr_adaptive:
             case rocsparse_spmv_alg_coo:
             case rocsparse_spmv_alg_coo_atomic:
@@ -162,9 +162,9 @@ namespace rocsparse
     {
         switch(spmv_alg)
         {
-        case rocsparse_spmv_alg_csr_stream:
+        case rocsparse_spmv_alg_csr_rowsplit:
         {
-            target = rocsparse::csrmv_alg_stream;
+            target = rocsparse::csrmv_alg_rowsplit;
             return rocsparse_status_success;
         }
 
@@ -216,7 +216,7 @@ namespace rocsparse
         }
 
         case rocsparse_spmv_alg_csr_adaptive:
-        case rocsparse_spmv_alg_csr_stream:
+        case rocsparse_spmv_alg_csr_rowsplit:
         case rocsparse_spmv_alg_bsr:
         case rocsparse_spmv_alg_ell:
         case rocsparse_spmv_alg_csr_lrb:
@@ -251,7 +251,7 @@ namespace rocsparse
         }
 
         case rocsparse_spmv_alg_csr_adaptive:
-        case rocsparse_spmv_alg_csr_stream:
+        case rocsparse_spmv_alg_csr_rowsplit:
         case rocsparse_spmv_alg_bsr:
         case rocsparse_spmv_alg_ell:
         case rocsparse_spmv_alg_csr_lrb:
@@ -488,7 +488,7 @@ namespace rocsparse
                     (const I*)mat->const_row_data,
                     ((const I*)mat->const_row_data) + 1,
                     (const J*)mat->const_col_data,
-                    (alg == rocsparse_spmv_alg_csr_stream) ? nullptr : mat->info,
+                    (alg == rocsparse_spmv_alg_csr_rowsplit) ? nullptr : mat->info,
                     (const X*)x->const_values,
                     (const T*)beta,
                     (Y*)y->values,
@@ -552,7 +552,7 @@ namespace rocsparse
                     (const A*)mat->const_val_data,
                     (const I*)mat->const_col_data,
                     (const J*)mat->const_row_data,
-                    (alg == rocsparse_spmv_alg_csr_stream) ? nullptr : mat->info,
+                    (alg == rocsparse_spmv_alg_csr_rowsplit) ? nullptr : mat->info,
                     (const X*)x->const_values,
                     (const T*)beta,
                     (Y*)y->values));

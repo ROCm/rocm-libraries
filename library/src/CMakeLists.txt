@@ -80,7 +80,7 @@ set(rocsparse_source
   src/level2/rocsparse_bsrsv_solve.cpp
   src/level2/rocsparse_coomv.cpp
   src/level2/rocsparse_coomv_aos.cpp
-  src/level2/rocsparse_csrmv_template_stream.cpp
+  src/level2/rocsparse_csrmv_template_rowsplit.cpp
   src/level2/rocsparse_csrmv_template_adaptive.cpp
   src/level2/rocsparse_csrmv_template_lrb.cpp
   src/level2/rocsparse_csrmv.cpp

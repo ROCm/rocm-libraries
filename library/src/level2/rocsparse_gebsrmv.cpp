@@ -394,7 +394,7 @@ rocsparse_status rocsparse::gebsrmv_template(rocsparse_handle          handle, /
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_template(handle,
                                                             trans,
-                                                            rocsparse::csrmv_alg_stream,
+                                                            rocsparse::csrmv_alg_rowsplit,
                                                             mb,
                                                             nb,
                                                             nnzb,

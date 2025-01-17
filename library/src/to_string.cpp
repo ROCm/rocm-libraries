@@ -313,7 +313,7 @@ const char* rocsparse::to_string(rocsparse_spmv_alg value_)
         CASE(rocsparse_spmv_alg_default);
         CASE(rocsparse_spmv_alg_coo);
         CASE(rocsparse_spmv_alg_csr_adaptive);
-        CASE(rocsparse_spmv_alg_csr_stream);
+        CASE(rocsparse_spmv_alg_csr_rowsplit);
         CASE(rocsparse_spmv_alg_ell);
         CASE(rocsparse_spmv_alg_coo_atomic);
         CASE(rocsparse_spmv_alg_bsr);

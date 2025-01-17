@@ -143,21 +143,21 @@ rocsparse_status rocsparse::bsrmv_template_dispatch(rocsparse_handle          ha
     //
     if(block_dim == 1)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_stream_template_dispatch(handle,
-                                                                            trans,
-                                                                            mb,
-                                                                            nb,
-                                                                            nnzb,
-                                                                            alpha_device_host,
-                                                                            descr,
-                                                                            bsr_val,
-                                                                            bsr_row_ptr,
-                                                                            bsr_row_ptr + 1,
-                                                                            bsr_col_ind,
-                                                                            x,
-                                                                            beta_device_host,
-                                                                            y,
-                                                                            false));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_rowsplit_template_dispatch(handle,
+                                                                              trans,
+                                                                              mb,
+                                                                              nb,
+                                                                              nnzb,
+                                                                              alpha_device_host,
+                                                                              descr,
+                                                                              bsr_val,
+                                                                              bsr_row_ptr,
+                                                                              bsr_row_ptr + 1,
+                                                                              bsr_col_ind,
+                                                                              x,
+                                                                              beta_device_host,
+                                                                              y,
+                                                                              false));
         return rocsparse_status_success;
     }
 

@@ -655,7 +655,7 @@ public:
             const bool has_datafile = rocsparse_arguments_has_datafile(arg);
             bool       to_int       = false;
             to_int |= (prop.warpSize == 32);
-            to_int |= (alg != rocsparse_spmv_alg_csr_stream);
+            to_int |= (alg != rocsparse_spmv_alg_csr_rowsplit);
             to_int |= (trans != rocsparse_operation_none && has_datafile);
             to_int |= (matrix_type == rocsparse_matrix_type_symmetric && has_datafile);
             static constexpr bool             full_rank = false;

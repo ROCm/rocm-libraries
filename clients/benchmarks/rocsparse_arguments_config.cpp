@@ -529,7 +529,7 @@ int rocsparse_arguments_config::parse(int&argc,char**&argv, options_description&
   if(this->b_spmv_alg != rocsparse_spmv_alg_default
        && this->b_spmv_alg != rocsparse_spmv_alg_coo
        && this->b_spmv_alg != rocsparse_spmv_alg_csr_adaptive
-       && this->b_spmv_alg != rocsparse_spmv_alg_csr_stream
+       && this->b_spmv_alg != rocsparse_spmv_alg_csr_rowsplit
        && this->b_spmv_alg != rocsparse_spmv_alg_ell
        && this->b_spmv_alg != rocsparse_spmv_alg_coo_atomic
        && this->b_spmv_alg != rocsparse_spmv_alg_bsr

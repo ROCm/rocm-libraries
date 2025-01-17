@@ -355,8 +355,8 @@ constexpr auto rocsparse_spmvalg2string(rocsparse_spmv_alg alg)
         return "coo";
     case rocsparse_spmv_alg_csr_adaptive:
         return "csradaptive";
-    case rocsparse_spmv_alg_csr_stream:
-        return "csrstream";
+    case rocsparse_spmv_alg_csr_rowsplit:
+        return "csrrowsplit";
     case rocsparse_spmv_alg_ell:
         return "ell";
     case rocsparse_spmv_alg_coo_atomic:

@@ -144,7 +144,7 @@ void testing_csrmv_managed(const Arguments& arg)
 
     bool to_int = false;
     to_int |= (prop.warpSize == 32);
-    to_int |= (alg != rocsparse_spmv_alg_csr_stream);
+    to_int |= (alg != rocsparse_spmv_alg_csr_rowsplit);
 
     static constexpr bool       full_rank = false;
     rocsparse_matrix_factory<T> matrix_factory(arg, arg.unit_check ? to_int : false, full_rank);
