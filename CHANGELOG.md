@@ -6,12 +6,18 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 3.5.0
 
 ### Added
+
 * Adds half float mixed precision to SpMM where A and B use float16 and C and the compute type use float
+* Added `rocsparse_spmv_alg_csr_rowsplit` algorithm.
 
 ### Optimized
 
 * Reduced the number of template instantiations in the library to further reduce the shared library binary size and improve compile times
 * Improved the user documentation
+
+### Upcoming changes
+
+* Deprecated `rocsparse_spmv_alg_csr_stream` algorithm. Users should use the `rocsparse_spmv_alg_csr_rowsplit` algorithm going forward.
 
 ## rocSPARSE 3.4.0 for ROCm 6.4.0
 
@@ -22,7 +28,6 @@ Documentation for rocSPARSE is available at
 * Added `rocsparse_[s|d|c|z]csritilu0_compute_ex` routines for iterative ILU
 * Added `rocsparse_[s|d|c|z]csritsv_solve_ex` routines for iterative triangular solve
 * Added `GPU_TARGETS` to replace the now deprecated `AMDGPU_TARGETS` in cmake files
-* Added `rocsparse_spmv_alg_csr_rowsplit` algorithm.
 * Added BSR format to the SpMM generic routine `rocsparse_spmm`
 
 ### Changed
@@ -48,7 +53,6 @@ Documentation for rocSPARSE is available at
 * Deprecated `rocsparse_[s|d|c|z]csritilu0_compute` routines. Users should use the newly added `rocsparse_[s|d|c|z]csritilu0_compute_ex` routines going forward.
 * Deprecated `rocsparse_[s|d|c|z]csritsv_solve` routines. Users should use the newly added `rocsparse_[s|d|c|z]csritsv_solve_ex` routines going forward.
 * Deprecated `AMDGPU_TARGETS` using in cmake files. Users should use `GPU_TARGETS` going forward.
-* Deprecated `rocsparse_spmv_alg_csr_stream` algorithm. Users should use the `rocsparse_spmv_alg_csr_rowsplit` algorithm going forward.
 
 ## rocSPARSE 3.3.0 for ROCm 6.3.0
 
