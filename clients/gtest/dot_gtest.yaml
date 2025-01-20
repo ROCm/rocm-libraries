@@ -408,6 +408,20 @@ Tests:
       - dot_ex:  *double_precision_complex_real
       - dotc_ex: *double_precision_complex_real
 
+  - name: dot_very_large_gfx942
+    category: nightly
+    N: [ 200000333 ]
+    incx: 1
+    incy: 1
+    initialization: hpl
+    pointer_mode_host: false
+    batch_count: [ 2 ]
+    gpu_arch: ['942']
+    function:
+      - dot:  *single_double_precisions
+      - dot_batched:   *single_double_precisions
+      - dot_strided_batched:   *single_double_precisions
+
   - name: dot_multi_threads_stream
     category: nightly
     N: [ 5000, 800000 ]

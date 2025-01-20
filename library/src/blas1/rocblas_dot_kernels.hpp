@@ -25,6 +25,7 @@
 #include "device_macros.hpp"
 #include "rocblas_block_sizes.h"
 #include "rocblas_dot.hpp"
+#include "rocblas_level1_threshold.hpp"
 
 template <typename T>
 constexpr int rocblas_dot_one_block_threshold()
@@ -213,6 +214,51 @@ rocblas_dot_kernel(rocblas_int n,
 #endif
 }
 
+template <typename API_INT, int NB, typename T, typename U, typename V = T>
+ROCBLAS_KERNEL(NB)
+rocblas_dot_kernel_gfx942_float_double(rocblas_int n,
+                                       const U __restrict__ xa,
+                                       rocblas_stride shiftx,
+                                       API_INT        incx,
+                                       rocblas_stride stridex,
+                                       const U __restrict__ ya,
+                                       rocblas_stride shifty,
+                                       API_INT        incy,
+                                       rocblas_stride stridey,
+                                       V* __restrict__ workspace,
+                                       T* __restrict__ out)
+{
+// gfx942 kernels
+#if defined(__gfx942__)
+    int         i = blockIdx.x * NB + threadIdx.x;
+    const auto* x = load_ptr_batch(xa, blockIdx.z, shiftx, stridex);
+    const auto* y = load_ptr_batch(ya, blockIdx.z, shifty, stridey);
+
+    V sum = 0;
+
+    //Loop unrolled for i threads
+    if((i + (3 * NB * gridDim.x)) < n)
+    {
+        sum += V(y[i * int64_t(incy)]) * V(x[i * int64_t(incx)]);
+        sum += V(y[(i + (NB * gridDim.x)) * int64_t(incy)])
+               * V(x[(i + (NB * gridDim.x)) * int64_t(incx)]);
+        sum += V(y[(i + (2 * NB * gridDim.x)) * int64_t(incy)])
+               * V(x[(i + (2 * NB * gridDim.x)) * int64_t(incx)]);
+        sum += V(y[(i + (3 * NB * gridDim.x)) * int64_t(incy)])
+               * V(x[(i + (3 * NB * gridDim.x)) * int64_t(incx)]);
+        i += (4 * NB * gridDim.x);
+    }
+
+    //Loop for other i threads which did not do the computation in the above-unrolled loop
+    for(; i < (4 * NB * gridDim.x) && i < n; i += NB * gridDim.x)
+        sum += V(y[i * int64_t(incy)]) * V(x[i * int64_t(incx)]);
+
+    sum = rocblas_dot_block_reduce<NB>(sum);
+
+    rocblas_dot_save_sum<false>(sum, blockIdx.z, workspace, out);
+#endif
+}
+
 template <typename API_INT,
           bool ONE_BLOCK,
           int  NB,
@@ -370,10 +416,16 @@ rocblas_status rocblas_internal_dot_launcher(rocblas_handle __restrict__ handle,
         return rocblas_status_success;
     }
 
+    //Identifying the precision to have an appropriate optimization
+    static constexpr bool is_float  = std::is_same_v<V, float> && std::is_same_v<T, float>;
+    static constexpr bool is_double = std::is_same_v<V, double> && std::is_same_v<T, double>;
+
     //Identifying the architecture to have an appropriate optimization
     int  arch_major = handle->getArchMajor();
     bool is_arch_10_or_11_or_12
         = arch_major == 10 || arch_major == 11 || arch_major == 12 ? true : false;
+    bool is_gfx942 = handle->getArch() == 942 ? true : false;
+
     static constexpr int WIN = rocblas_dot_WIN<T>();
 
     // in case of negative inc shift pointer to end of data for negative indexing tid*inc
@@ -539,6 +591,60 @@ rocblas_status rocblas_internal_dot_launcher(rocblas_handle __restrict__ handle,
                 workspace,
                 output);
         }
+
+        if(handle->pointer_mode == rocblas_pointer_mode_host)
+        {
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&results[0],
+                                               output,
+                                               sizeof(T) * batch_count,
+                                               hipMemcpyDeviceToHost,
+                                               handle->get_stream()));
+            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->get_stream()));
+        }
+    }
+    //optimized gfx942 kernel for very large N
+    else if(is_gfx942 && (is_float || is_double) && n > sddot_gfx942_lower_threshold
+            && (x != y || incx != incy || offsetx != offsety || stridex != stridey))
+    {
+        static constexpr bool ONE_BLOCK = false;
+        static constexpr int  DOT_NB    = 1024;
+        static constexpr int  DOT_NELEM = 4;
+        rocblas_int           blocks = rocblas_reduction_kernel_block_count(n, DOT_NB * DOT_NELEM);
+        T*                    output = results;
+        if(handle->pointer_mode == rocblas_pointer_mode_host)
+        {
+            size_t offset = size_t(batch_count) * blocks;
+            output        = (T*)(workspace + offset);
+        }
+
+        dim3 grid(blocks, 1, batch_count);
+        dim3 threads(DOT_NB);
+
+        ROCBLAS_LAUNCH_KERNEL((rocblas_dot_kernel_gfx942_float_double<API_INT, DOT_NB, T>),
+                              grid,
+                              threads,
+                              0,
+                              handle->get_stream(),
+                              n,
+                              x,
+                              shiftx,
+                              incx,
+                              stridex,
+                              y,
+                              shifty,
+                              incy,
+                              stridey,
+                              workspace,
+                              output);
+
+        ROCBLAS_LAUNCH_KERNEL((rocblas_dot_kernel_reduce<DOT_NB, DOT_NELEM>),
+                              dim3(batch_count),
+                              threads,
+                              0,
+                              handle->get_stream(),
+                              blocks,
+                              workspace,
+                              output);
 
         if(handle->pointer_mode == rocblas_pointer_mode_host)
         {
