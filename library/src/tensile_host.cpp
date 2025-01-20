@@ -1143,15 +1143,19 @@ rocblas_status
                 status            = hipblasltResult;
                 hipblaslt_backend = true;
             }
+            else
+            {
+                rocblas_internal_ostream msg;
+                print_once(msg << "\nrocBLAS warning: hipBlasLT failed, falling back to tensile. ");
+            }
         }
         catch(...)
         {
             rocblas_internal_ostream msg;
-            print_once(msg << "\nrocBLAS warning: hipBlasLT exception encountered. ");
+            print_once(
+                msg
+                << "\nrocBLAS warning: hipBlasLT exception encountered, falling back to tensile. ");
         }
-
-        rocblas_internal_ostream msg;
-        print_once(msg << "\nrocBLAS warning: hipBlasLT failed, falling back to tensile. ");
     }
 #endif
 
