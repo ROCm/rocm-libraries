@@ -25,13 +25,14 @@
  ###############################################################################
 
 cmake_minimum_required(VERSION 3.14)
+message(STATUS "CMake version: ${CMAKE_VERSION}")
 
 # NOTE: This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
 if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
   set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel." )
 endif()
-message( VERBOSE "CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+message(STATUS "CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE )
 
 if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
@@ -86,6 +87,15 @@ include(ROCMPackageConfigHelpers)
 include(ROCMInstallSymlinks)
 include(CheckCXXCompilerFlag)
 
+# check if ROCm supports `__hip_fp8_e5m2` and `__hip_fp8_e4m3`
+include(cmake/Macros/CheckF8.cmake)
+check_f8(F8_EXISTS)
+if(F8_EXISTS)
+    message( STATUS "Performing Test `__hip_fp8_e5m2` and `__hip_fp8_e4m3` - Success" )
+else()
+    message(FATAL_ERROR "The detected ROCm does not support data type `__hip_fp8_e5m2` or `__hip_fp8_e4m3`.")
+endif()
+
 # check if asan is enabled
 if (NOT DEFINED ADDRESS_SANITIZER AND DEFINED ENV{ADDRESS_SANITIZER})
     set(ADDRESS_SANITIZER $ENV{ADDRESS_SANITIZER})
@@ -109,7 +119,7 @@ include(CheckCXXCompilerFlag)
 if (BUILD_OFFLOAD_COMPRESS)
   check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if (NOT CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
-    message( STATUS "WARNING: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option." )
+    message(WARNING "BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option." )
     set(CMAKE_NO_BUILTIN_CHRPATH ON)
   else()
     set(CMAKE_NO_BUILTIN_CHRPATH OFF)
@@ -125,37 +135,37 @@ if(GPU_TARGETS)
   set(GPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 elseif(AMDGPU_TARGETS)
   set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
-  message(STATUS "WARNING: AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
+  message(DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
 else()
   set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 endif()
-message( VERBOSE "GPU_TARGETS=${GPU_TARGETS}")
+message(STATUS "GPU_TARGETS=${GPU_TARGETS}")
 
 if(HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR)
   add_compile_definitions(HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=1)
 else()
   add_compile_definitions(HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=0)
 endif()
-message("-- HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=${HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR}")
+message(STATUS "HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=${HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR}")
 
 # Setup HIP
 find_package(hip REQUIRED )
 math(EXPR hip_VERSION_FLAT "(${hip_VERSION_MAJOR} * 1000 + ${hip_VERSION_MINOR}) * 100000 + ${hip_VERSION_PATCH}")
-message("hip_version_flat=${hip_VERSION_FLAT}")
+message(STATUS "hip_version_flat=${hip_VERSION_FLAT}")
 
 # No assumption that HIP kernels are launched with uniform block size for backward compatibility
 # SWDEV-413293 and https://reviews.llvm.org/D155213
 if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 500723302)
-  message("Adding the fno-offload-uniform-block compiler flag")
+  message(STATUS "Adding the fno-offload-uniform-block compiler flag")
   add_compile_options(-fno-offload-uniform-block)
 endif()
 # Add optimization flags needed by backend
 if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600140090)
-  message("Adding the enable-post-misched=0 compiler flag")
+  message(STATUS "Adding the enable-post-misched=0 compiler flag")
   add_compile_options("SHELL: -mllvm -enable-post-misched=0")
 endif()
 if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
-  message("Adding -amdgpu-early-inline-all=true and -amdgpu-function-calls=false")
+  message(STATUS "Adding -amdgpu-early-inline-all=true and -amdgpu-function-calls=false")
   add_compile_options("SHELL: -mllvm -amdgpu-early-inline-all=true")
   add_compile_options("SHELL: -mllvm -amdgpu-function-calls=false")
 endif()
