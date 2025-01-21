@@ -79,14 +79,21 @@ namespace hiptensor
 
     std::ostream& PermutationTest::printHeader(std::ostream& stream /* = std::cout */) const
     {
-        return stream << "TypeIn, TypeCompute, "
-                      << "Operators             , LogLevel, "
-                      << "Lengths, PermutedOrder, "
-                      << "Alpha, elapsedMs, "
-                      << "Problem Size(GFlops), "
-                      << "TFlops/s, "
-                      << "TotalBytes, "
-                      << "Result" << std::endl;
+        // clang-format off
+        return stream << "TypeIn,"     // 1
+            << "TypeCompute,"          // 2
+            << "Operators,"            // 3
+            << "LogLevel,"             // 4
+            << "Lengths,"              // 5
+            << "PermutedOrder,"        // 6
+            << "Alpha,"                // 7
+            << "ElapsedMs,"            // 8
+            << "Problem Size(GFlops)," // 9
+            << "TFlops,"               // 10
+            << "TotalBytes,"           // 11
+            << "Result"                // 12
+            << std::endl;
+        // clang-format on
     }
 
     std::ostream& PermutationTest::printKernel(std::ostream& stream) const
@@ -99,62 +106,40 @@ namespace hiptensor
         auto alpha        = std::get<4>(param);
         auto operators    = std::get<5>(param);
 
-        stream << hipTypeToString(testType[0]) << ", "
-               << computeTypeToString(convertToComputeType(testType[1])) << ", "
-               << opTypeToString(operators[0]) << ", " << opTypeToString(operators[1]) << ", "
-               << logLevelToString(logLevel) << ", [";
-
-        for(int i = 0; i < lengths.size(); i++)
-        {
-            if(i != 0)
-            {
-                stream << ", ";
-            }
-            stream << lengths[i];
-        }
-        stream << "], [";
-
-        if(!permutedDims.empty())
-        {
-            for(int i = 0; i < permutedDims.size(); i++)
-            {
-                if(i != 0)
-                {
-                    stream << ", ";
-                }
-                stream << permutedDims[i];
-            }
-        }
-        stream << "], " << alpha << ", ";
+        // clang-format off
+        stream << hipTypeToString(testType[0]) << ","                                              // 1
+            << computeTypeToString(convertToComputeType(testType[1])) << ","                       // 2
+            << "[ " << opTypeToString(operators[0]) << " " << opTypeToString(operators[1]) << "]," // 3
+            << logLevelToString(logLevel) << ",";                                                  // 4
+        printContainerInCsv(lengths, stream) << ",";                                               // 5
+        printContainerInCsv(permutedDims, stream) << ",";                                          // 6
+        stream << alpha << ",";                                                                    // 7
+        // clang-format on
 
         if(!mRunFlag)
         {
-            stream << "n/a"
-                   << ", "
-                   << "n/a"
-                   << ", "
-                   << "n/a"
-                   << ", "
-                   << "n/a"
-                   << ", "
-                   << "SKIPPED" << std::endl;
+            // clang-format off
+            stream << "n/a" << "," // 8
+                << "n/a" << ","    // 9
+                << "n/a" << ","    // 10
+                << "n/a" << ","    // 11
+                << "SKIPPED"       // 12
+                << std::endl;
+            // clang-format on
         }
         else
         {
+            auto isPerformValidation = HiptensorOptions::instance()->performValidation();
+            auto result = isPerformValidation ? (mValidationResult ? "PASSED" : "FAILED") : "BENCH";
 
-            stream << mElapsedTimeMs << ", " << mTotalGFlops << ", " << mMeasuredTFlopsPerSec
-                   << ", " << mTotalBytes << ", ";
-
-            auto& testOptions = HiptensorOptions::instance();
-
-            if(testOptions->performValidation())
-            {
-                stream << ((bool)mValidationResult ? "PASSED" : "FAILED") << std::endl;
-            }
-            else
-            {
-                stream << "BENCH" << std::endl;
-            }
+            // clang-format off
+            stream << mElapsedTimeMs << ","     //8
+                << mTotalGFlops << ","          //9
+                << mMeasuredTFlopsPerSec << "," //10
+                << mTotalBytes << ","           //11
+                << result                       //12
+                << std::endl;
+            // clang-format on
         }
 
         return stream;

@@ -113,14 +113,23 @@ namespace hiptensor
 
     std::ostream& ReductionTest::printHeader(std::ostream& stream /* = std::cout */) const
     {
-        return stream << "TypeIn, TypeCompute, "
-                      << "Operator, LogLevel, "
-                      << "Lengths, ReOrder, "
-                      << "Alpha, Beta, elapsedMs, "
-                      << "Problem Size(GFlops), "
-                      << "TFlops/s, "
-                      << "TotalBytes, "
-                      << "Result" << std::endl;
+        // clang-format off
+        return stream
+            << "TypeIn,"               //1
+            << "TypeCompute,"          //2
+            << "Operator,"             //3
+            << "LogLevel,"             //4
+            << "Lengths,"              //5
+            << "ReOrder,"              //6
+            << "Alpha,"                //7
+            << "Beta,"                 //8
+            << "elapsedMs,"            //9
+            << "Problem Size(GFlops)," //10
+            << "TFlops,"               //11
+            << "TotalBytes,"           //12
+            << "Result"                 //13
+            << std::endl;
+        // clang-format on
     }
 
     std::ostream& ReductionTest::printKernel(std::ostream& stream) const
@@ -134,61 +143,41 @@ namespace hiptensor
         auto beta       = std::get<5>(param);
         auto op         = std::get<6>(param);
 
-        stream << hipTypeToString(testType[0]) << ", "
-               << computeTypeToString(convertToComputeType(testType[1])) << ", "
-               << opTypeToString(op) << ", " << logLevelToString(logLevel) << ", [";
-
-        for(int i = 0; i < lengths.size(); i++)
-        {
-            if(i != 0)
-            {
-                stream << ", ";
-            }
-            stream << lengths[i];
-        }
-        stream << "], [";
-
-        if(!outputDims.empty())
-        {
-            for(int i = 0; i < outputDims.size(); i++)
-            {
-                if(i != 0)
-                {
-                    stream << ", ";
-                }
-                stream << outputDims[i];
-            }
-        }
-        stream << "], " << alpha << ", " << beta << ", ";
+        // clang-format off
+        stream << hipTypeToString(testType[0]) << ","                           //1
+               << computeTypeToString(convertToComputeType(testType[1])) << "," //2
+               << opTypeToString(op) << ","                                     //3
+               << logLevelToString(logLevel) << ",";                            //4
+        printContainerInCsv(lengths, stream) << ",";                            //5
+        printContainerInCsv(outputDims, stream) << ",";                         //6
+        stream << alpha << ","                                                  //7
+            << beta << ",";                                                     //8
+        // clang-format on
 
         if(!mRunFlag)
         {
-            stream << "n/a"
-                   << ", "
-                   << "n/a"
-                   << ", "
-                   << "n/a"
-                   << ", "
-                   << "n/a"
-                   << ", "
-                   << "SKIPPED" << std::endl;
+            // clang-format off
+            stream << "n/a" << "," //9
+                   << "n/a" << "," //10
+                   << "n/a" << "," //11
+                   << "n/a" << "," //12
+                   << "SKIPPED"     //13
+                   << std::endl;
+            // clang-format on
         }
         else
         {
+            auto isPerformValidation = HiptensorOptions::instance()->performValidation();
+            auto result = isPerformValidation ? (mValidationResult ? "PASSED" : "FAILED") : "BENCH";
 
-            stream << mElapsedTimeMs << ", " << mTotalGFlops << ", " << mMeasuredTFlopsPerSec
-                   << ", " << mTotalBytes << ", ";
-
-            auto& testOptions = HiptensorOptions::instance();
-
-            if(testOptions->performValidation())
-            {
-                stream << ((bool)mValidationResult ? "PASSED" : "FAILED") << std::endl;
-            }
-            else
-            {
-                stream << "BENCH" << std::endl;
-            }
+            // clang-format off
+            stream << mElapsedTimeMs << ","     //9
+                << mTotalGFlops << ","          //10
+                << mMeasuredTFlopsPerSec << "," //11
+                << mTotalBytes << ","           //12
+                << result                        //13
+                << std::endl;
+            // clang-format on
         }
 
         return stream;

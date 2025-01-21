@@ -90,11 +90,29 @@ namespace hiptensor
 
     std::ostream& ContractionTest::printHeader(std::ostream& stream /* = std::cout */) const
     {
-        return stream << "TypeA, TypeB, TypeC, " << "TypeD, TypeCompute, "
-                      << "Algorithm, Operator, " << "WorkSizePreference, LogLevel, "
-                      << "Lengths, Strides, Modes, Alpha," << "Beta, elapsedMs, "
-                      << "Problem Size(GFlops), " << "TFlops/s, " << "TotalBytes, " << "Result"
-                      << std::endl;
+        // clang-format off
+        return stream
+            << "TypeA,"                // 1
+            << "TypeB,"                // 2
+            << "TypeC,"                // 3
+            << "TypeD,"                // 4
+            << "TypeCompute,"          // 5
+            << "Algorithm,"            // 6
+            << "Operator,"             // 7
+            << "WorkSizePreference,"   // 8
+            << "LogLevel,"             // 9
+            << "Lengths,"              // 10
+            << "Strides,"              // 11
+            << "Modes,"                // 12
+            << "Alpha,"                // 13
+            << "Beta,"                 // 14
+            << "elapsedMs,"            // 15
+            << "Problem Size(GFlops)," // 16
+            << "TFlops,"               // 17
+            << "TotalBytes,"           // 18
+            << "Result"                // 19
+            << std::endl;
+        // clang-format on
     }
 
     std::ostream& ContractionTest::printKernel(std::ostream& stream) const
@@ -111,96 +129,50 @@ namespace hiptensor
         auto alpha        = std::get<8>(param);
         auto beta         = std::get<9>(param);
 
-        stream << hipTypeToString(testType[0]) << ", " << hipTypeToString(testType[1]) << ", "
-               << hipTypeToString(testType[2]) << ", " << hipTypeToString(testType[3]) << ", "
-               << computeTypeToString(convertToComputeType(testType[4])) << ", "
-               << algoTypeToString(algorithm) << ", " << opTypeToString(operatorType) << ", "
-               << workSizePrefToString(workSizePref) << ", " << logLevelToString(logLevel) << ", [";
-
-        for(int i = 0; i < lengths.size(); i++)
-        {
-            if(i != 0)
-            {
-                stream << ", ";
-            }
-            stream << "[";
-            for(int j = 0; j < lengths[i].size(); j++)
-            {
-                if(j != 0)
-                {
-                    stream << ", ";
-                }
-                stream << lengths[i][j];
-            }
-            stream << "]";
-        }
-        stream << "], [";
-
-        if(!strides.empty())
-        {
-            for(int i = 0; i < strides.size(); i++)
-            {
-                if(i != 0)
-                {
-                    stream << ", ";
-                }
-                stream << "[";
-                for(int j = 0; j < strides[i].size(); j++)
-                {
-                    if(j != 0)
-                    {
-                        stream << ", ";
-                    }
-                    stream << strides[i][j];
-                }
-                stream << "]";
-            }
-        }
-        stream << "], [";
-
-        if(!modes.empty())
-        {
-            for(int i = 0; i < modes.size(); i++)
-            {
-                if(i != 0)
-                {
-                    stream << ", ";
-                }
-                stream << "[";
-                for(int j = 0; j < modes[i].size(); j++)
-                {
-                    if(j != 0)
-                    {
-                        stream << ", ";
-                    }
-                    stream << modes[i][j];
-                }
-                stream << "]";
-            }
-        }
-        stream << "], " << alpha << ", " << beta << ", ";
+        // clang-format off
+        stream
+            << hipTypeToString(testType[0]) << ","                           // 1
+            << hipTypeToString(testType[1]) << ","                           // 2
+            << hipTypeToString(testType[2]) << ","                           // 3
+            << hipTypeToString(testType[3]) << ","                           // 4
+            << computeTypeToString(convertToComputeType(testType[4])) << "," // 5
+            << algoTypeToString(algorithm)  << ","                           // 6
+            << opTypeToString(operatorType) << ","                           // 7
+            << workSizePrefToString(workSizePref) << ","                     // 8
+            << logLevelToString(logLevel) << ",";                            // 9
+        printContainerInCsv(lengths, stream) << ",";                         // 10
+        printContainerInCsv(strides, stream) << ",";                         // 11
+        printContainerInCsv(modes, stream)   << ",";                         // 12
+        printContainerInCsv(alpha, stream)   << ",";                         // 13
+        printContainerInCsv(beta, stream)   << ",";                          // 14
+        // clang-format on
 
         if(!mRunFlag)
         {
-            stream << "n/a" << ", " << "n/a" << ", " << "n/a" << ", " << "n/a" << ", " << "SKIPPED"
-                   << std::endl;
+            // clang-format off
+            stream
+                << "n/a" << "," // 15
+                << "n/a" << "," // 16
+                << "n/a" << "," // 17
+                << "n/a" << "," // 18
+                << "SKIPPED"    // 19
+                << std::endl;
+            // clang-format on
         }
         else
         {
+            auto isPerformValidation = HiptensorOptions::instance()->performValidation();
+            auto result = isPerformValidation ? (mValidationResult ? "PASSED" : "FAILED") : "BENCH";
 
-            stream << mElapsedTimeMs << ", " << mTotalGFlops << ", " << mMeasuredTFlopsPerSec
-                   << ", " << mTotalBytes << ", ";
-
-            auto& testOptions = HiptensorOptions::instance();
-
-            if(testOptions->performValidation())
-            {
-                stream << ((bool)mValidationResult ? "PASSED" : "FAILED") << std::endl;
-            }
-            else
-            {
-                stream << "BENCH" << std::endl;
-            }
+            // clang-format off
+            stream
+                   << mElapsedTimeMs        << ","       // 15
+                   << mTotalGFlops          << ","       // 16
+                   << mMeasuredTFlopsPerSec << ","       // 17
+                   << mTotalBytes           << ","       // 18
+                   << result                             // 19
+                   << std::endl;
+            // clang-format on
         }
 
         return stream;
