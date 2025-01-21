@@ -8,6 +8,15 @@
   in a future release. Users are encouraged to directly invoke their
   Fortran or HIP compilers as appropriate for each source file.
 
+## hipfort 0.5.1 for ROCm 6.3.2
+
+### Additions
+
+* Support for building with LLVM Flang
+
+### Resolved issues
+
+* Fixed the exported `hipfort::hipsparse` CMake target
 
 ## hipfort 0.5.0 for ROCm 6.3.0
 
@@ -21,7 +30,7 @@
 
 ## hipfort 0.4-0 for ROCm 6.0.1
 
-### Fixes
+### Resolved issues
 
 - Included hipfort-config.cmake in the deb and rpm packages
 
