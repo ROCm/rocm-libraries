@@ -4,6 +4,16 @@ root: index
 subtrees:
   - entries:
     - file: what-is-hipcub
+  - caption: Installation
+    entries:
+    - file: install/hipCUB-prerequisites
+      title: Installation prerequisites
+    - file: install/hipCUB-install-overview
+      title: Installation overview
+    - file: install/hipCUB-install-on-Windows
+      title: Installing on Windows
+    - file: install/hipCUB-install-with-cmake
+      title: Installing on Linux and Windows with CMake
   - caption: API reference
     entries:
     - file: api-reference/data-type-support

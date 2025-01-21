@@ -9,15 +9,19 @@
 hipCUB documentation
 ===========================
 
-hipCUB is a thin header-only wrapper library on top of rocPRIM or CUB. It enables developers to port project
-using CUB library to the `HIP <https://github.com/ROCm-Developer-Tools/HIP>`_ layer and to run them
-on AMD hardware. To learn more, see :ref:`what-is-hipcub`
+hipCUB is a thin, header-only wrapper library for `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`_ and `CUB <https://docs.nvidia.com/cuda/cub/index.html>`_. It enables developers to port projects
+using the CUB library to the `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ layer and run on AMD hardware. To learn more, see :ref:`what-is-hipcub`
 
-You can access hipCUB code on our `GitHub repository <https://github.com/ROCm/hipCUB>`_.
-
-The documentation is structured as follows:
+The hipCUB repository is located at `https://github.com/ROCm/hipCUB <https://github.com/ROCm/hipCUB>`_.
 
 .. grid:: 2
+
+  .. grid-item-card:: Installation
+
+    * :doc:`Prerequisites <install/hipCUB-prerequisites>`
+    * :doc:`Installation overview <install/hipCUB-install-overview>`
+    * :doc:`Installing on Windows <install/hipCUB-install-on-Windows>`
+    * :doc:`Installing on Linux and Windows with CMake <install/hipCUB-install-with-cmake>`
 
   .. grid-item-card:: API Reference
 
