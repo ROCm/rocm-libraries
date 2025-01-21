@@ -8,57 +8,16 @@
 Data type support
 ******************************************
 
-The input and output data types supported by hipCUB are listed here:
+hipCUB supports the following data types on both ROCm and CUDA:
 
-  .. list-table:: Supported Input/Output Types
-    :header-rows: 1
-    :name: supported-input-output-types
+* ``int8``
+* ``int16``
+* ``int32``
+* ``float32``
+* ``float64``
 
-    *
-      - Input/Output Types
-      - AMD Support
-      - CUDA Support
-    *
-      - int8
-      - ✅
-      - ✅
-    *
-      - float8
-      - ❌
-      - ❌
-    *
-      - bfloat8
-      - ❌
-      - ❌
-    *
-      - int16
-      - ✅
-      - ✅
-    *
-      - float16
-      - ✅
-      - ✅ [#]_
-    *
-      - bfloat16      
-      - ✅
-      - ✅ [#]_
-    *
-      - int32
-      - ✅
-      - ✅
-    *
-      - tensorfloat32
-      - ❌
-      - ❌
-    *
-      - float32
-      - ✅
-      - ✅
-    *
-      - float64
-      - ✅
-      - ✅
+``float8``, ``bfloat8``, and ``tensorfloat32`` are not supported by hipCUB on neither ROCm nor CUDA.
 
-.. rubric:: Footnotes
-.. [#] NVIDIA backend can't handle ``float16`` with the following API calls: ``block_adjacent_difference``, ``device_adjacenet_difference``, ``device_reduce``, ``device_scan``, ``device_segmented_reduce`` and ``device_select``.
-.. [#] NVIDIA backend can't handle ``bfloat16`` with the following API calls: ``block_adjacent_difference``, ``device_adjacenet_difference``, ``device_reduce``, ``device_scan``, ``device_segmented_reduce``, ``device_select`` and ``device_histogram``.
+The NVIDIA back end does not support ``float16`` nor ``bfloat16`` with the following API calls: ``block_adjacent_difference``, ``device_adjacent_difference``, ``device_reduce``, ``device_scan``, ``device_segmented_reduce`` and ``device_select``.
+
+The NVIDIA backend also does not support ``bfloat16`` with ``device_histogram``.
