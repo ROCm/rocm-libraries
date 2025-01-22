@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 
 #include "../../library/src/include/handle.hpp"
 #include "argument_model.hpp"
+#include "client_omp.hpp"
 #include "rocblas.h"
 #include "rocblas_arguments.hpp"
 #include "test_cleanup.hpp"
@@ -250,7 +251,10 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
         }                                                                                    \
         g_stream_pool.reset(devices, streams);                                               \
         if(threads)                                                                          \
+        {                                                                                    \
+            client_omp_manager manager(threads);                                             \
             LAUNCH_TEST_ON_THREADS(test, threads, streams, devices);                         \
+        }                                                                                    \
         else                                                                                 \
             LAUNCH_TEST_ON_STREAMS(test, streams, devices);                                  \
     } while(0)

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #include "rocblas_test.hpp"
 #include "test_cleanup.hpp"
 
+#include "client_omp.hpp"
 #include "client_utility.hpp"
 
 using namespace testing;
@@ -285,6 +286,7 @@ static void rocblas_set_test_device()
  *****************/
 int main(int argc, char** argv)
 {
+    client_omp_manager::limit_by_processor_count();
     rocblas_client_init();
 
     std::string filter_override;

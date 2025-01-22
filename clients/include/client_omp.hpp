@@ -1,5 +1,6 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,9 +23,15 @@
 
 #pragma once
 
-#include <memory.h>
+class client_omp_manager
+{
+public:
+    client_omp_manager(size_t std_thread_count);
+    ~client_omp_manager();
 
-// global for device memory padding see d_vector.hpp
+    static void limit_by_processor_count();
 
-extern size_t g_DVEC_PAD;
-void          d_vector_set_pad_length(size_t pad);
+private:
+    int  m_original_omp_threads;
+    bool m_active;
+};

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -67,6 +67,7 @@ endfunction()
 set(rocblas_common_source
     # general
     singletons.cpp
+    client_omp.cpp
     client_utility.cpp
     frequency_monitor.cpp
     rocblas_arguments.cpp
@@ -82,14 +83,6 @@ set(rocblas_testing_common_source
     # general
     cblas_interface.cpp
     ${BLIS_CPP}
-    # aux
-    # general.cpp
-    # set_get_pointer_mode.cpp
-    # set_get_atomics_mode.cpp
-    # logging_mode.cpp
-    # ostream_threadsafety.cpp
-    # set_get_vector.cpp
-    # set_get_matrix.cpp
     # blas1
     blas1/common_asum.cpp
     blas1/common_axpy.cpp

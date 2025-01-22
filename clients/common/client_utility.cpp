@@ -55,34 +55,8 @@ namespace fs = std::experimental::filesystem;
 #include <unistd.h>
 #endif
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
 void rocblas_client_init()
 {
-    // limit OMP usage as deadlock issues seen in reference library
-#ifdef _OPENMP
-    const int processor_count = std::thread::hardware_concurrency();
-    if(processor_count > 0)
-    {
-        const int omp_current_threads = omp_get_max_threads();
-        if(omp_current_threads >= processor_count)
-        {
-            int limiter           = processor_count > 4 ? processor_count - 2 : processor_count;
-            int omp_limit_threads = std::max(1, limiter);
-
-            if(omp_limit_threads != omp_current_threads)
-            {
-                omp_set_num_threads(omp_limit_threads);
-
-                rocblas_cout << "rocBLAS info: client (OPENMP) reduced omp_set_num_threads to "
-                             << omp_limit_threads << std::endl;
-            }
-        }
-    }
-#endif
-
 #ifndef WIN32
     auto* ld_library_path_override = getenv("LD_LIBRARY_PATH");
     if(ld_library_path_override)
