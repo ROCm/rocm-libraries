@@ -55,8 +55,6 @@ private:
 }  // cuda
 */
 
-// cuda_runtime_api needs to come first
-#include <hip/hip_runtime.h>
 #include <cuda/std/detail/__config>
 
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
@@ -66,6 +64,8 @@ private:
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+
+#include <cuda_runtime_api.h>
 
 #include <cuda/std/__cuda/api_wrapper.h>
 #include <cuda/std/__exception/cuda_error.h>
