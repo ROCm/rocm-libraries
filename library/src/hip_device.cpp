@@ -64,6 +64,10 @@ namespace hiptensor
         {
             mGcnArch = hipGcnArch_t::GFX942;
         }
+        else if(deviceName.find("gfx950") != std::string::npos)
+        {
+            mGcnArch = hipGcnArch_t::GFX950;
+        }
 
         switch(mProps.warpSize)
         {
@@ -122,7 +126,8 @@ namespace hiptensor
         return (mGcnArch == HipDevice::hipGcnArch_t::GFX90A
                 || mGcnArch == HipDevice::hipGcnArch_t::GFX940
                 || mGcnArch == HipDevice::hipGcnArch_t::GFX941
-                || mGcnArch == HipDevice::hipGcnArch_t::GFX942);
+                || mGcnArch == HipDevice::hipGcnArch_t::GFX942
+                || mGcnArch == HipDevice::hipGcnArch_t::GFX950);
     }
 
     // Need to check the host device target support statically before hip modules attempt
