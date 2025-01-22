@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -180,6 +180,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         = arch_major == 10 || arch_major == 11 || arch_major == 12 ? true : false;
 
     bool is_gfx11xx = arch_major == 11 ? true : false;
+    bool is_gfx12xx = arch_major == 12 ? true : false;
     bool is_gfx908  = handle->getArch() == 908 ? true : false;
     bool is_gfx906  = handle->getArch() == 906 ? true : false;
     bool is_gfx90a  = handle->getArch() == 910 ? true : false;
@@ -351,9 +352,9 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             }
 #undef gemvn_double_buffered_KARGS
         }
-        //optimized gemvn kernel with 512 threads/block for gfx906, gfx908, gfx90a, gfx942 and gfx11xx.
-        // When(m < 2*n) should use 512 threads/block for gfx90a, gfx942 and gfx11xx.
-        else if(((is_gfx11xx || is_gfx90a || is_gfx942) && (m < 2 * n))
+        //optimized gemvn kernel with 512 threads/block for gfx906, gfx908, gfx90a, gfx942, gfx11xx and gfx12xx.
+        // When(m < 2*n) should use 512 threads/block for gfx90a, gfx942, gfx11xx and gfx12xx.
+        else if(((is_gfx11xx || is_gfx12xx || is_gfx90a || is_gfx942) && (m < 2 * n))
                 || (is_gfx908
                     && (((is_float || is_double || is_complex_float) && m <= gemvn_gfx908_threshold
                          && n <= gemvn_gfx908_threshold)
