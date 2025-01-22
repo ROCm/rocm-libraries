@@ -1,5 +1,5 @@
 # Default code owners
-* @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd @yoichiyoshida @babakpst @nakajee
+* @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd @yoichiyoshida @babakpst
 # pattern overrides should also be reviewed by core rocBLAS: @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
 # Documentation files
 docs/ @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
