@@ -25,13 +25,14 @@
  ###############################################################################
 
 cmake_minimum_required( VERSION 3.14 )
+message(STATUS "CMake version: ${CMAKE_VERSION}")
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
 if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
   set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
-message( VERBOSE "CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+message(STATUS "CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
 
 set( CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE )
 
@@ -80,11 +81,6 @@ include(ROCMClients)
 set ( VERSION_STRING "1.7.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
-set(MINIMUM_REQUIRED_ROCM_VERSION 6.3.0)
-if(NOT DEFINED ROCM_PLATFORM_VERSION OR ${ROCM_PLATFORM_VERSION} VERSION_LESS ${MINIMUM_REQUIRED_ROCM_VERSION})
-  message(FATAL_ERROR "${PROJECT_NAME} ${VERSION_STRING} and later versions require at least ROCm version ${MINIMUM_REQUIRED_ROCM_VERSION} for support.\nThe detected ROCm version is ${ROCM_PLATFORM_VERSION}.")
-endif()
-
 # configure a header file to pass the CMake version settings to the source
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/include/rocwmma/internal/rocwmma-version.hpp.in"
                "${CMAKE_CURRENT_SOURCE_DIR}/library/include/rocwmma/rocwmma-version.hpp" )
@@ -108,6 +104,15 @@ else()
         TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201" )
 endif()
 
+# check if ROCm supports `__hip_fp8_e5m2` and `__hip_fp8_e4m3`
+include(cmake/Macros/CheckF8.cmake)
+check_f8(F8_EXISTS)
+if(F8_EXISTS)
+    message( STATUS "Performing Test `__hip_fp8_e5m2` and `__hip_fp8_e4m3` - Success" )
+else()
+    message(FATAL_ERROR "The detected ROCm does not support data type `__hip_fp8_e5m2` or `__hip_fp8_e4m3`.")
+endif()
+
 # Check if offload compression is supported
 include(CheckCXXCompilerFlag)
 if (BUILD_OFFLOAD_COMPRESS)
@@ -127,11 +132,11 @@ if(GPU_TARGETS)
   set(GPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 elseif(AMDGPU_TARGETS)
   set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
-  message(STATUS "WARNING: AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
+  message(WARNING "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
 else()
   set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 endif()
-message( VERBOSE "GPU_TARGETS=${GPU_TARGETS}")
+message(STATUS "GPU_TARGETS=${GPU_TARGETS}")
 
 find_package( hip REQUIRED )
 find_package( hiprtc REQUIRED )
