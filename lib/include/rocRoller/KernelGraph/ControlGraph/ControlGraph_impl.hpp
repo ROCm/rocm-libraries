@@ -103,6 +103,10 @@ namespace rocRoller::KernelGraph::ControlGraph
                     ShowValue(getElementType(nodeA)),
                     ShowValue(getElementType(nodeB)));
 
+        auto const order = lookupOrderCache(nodeA, nodeB);
+        if(order != NodeOrdering::Undefined || m_cacheStatus == CacheStatus::Valid)
+            return order;
+
         populateOrderCache();
         return lookupOrderCache(nodeA, nodeB);
     }
@@ -113,10 +117,10 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         for(auto const& pair : m_orderCache)
         {
-            if(pair.first.first == node && pair.second == NodeOrdering::LeftFirst)
-                co_yield pair.first.second;
-            else if(pair.first.second == node && pair.second == NodeOrdering::RightFirst)
-                co_yield pair.first.first;
+            if(std::get<0>(pair.first) == node && pair.second == NodeOrdering::LeftFirst)
+                co_yield std::get<1>(pair.first);
+            else if(std::get<1>(pair.first) == node && pair.second == NodeOrdering::RightFirst)
+                co_yield std::get<0>(pair.first);
         }
     }
 
@@ -126,10 +130,10 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         for(auto const& pair : m_orderCache)
         {
-            if(pair.first.first == node && pair.second == NodeOrdering::RightFirst)
-                co_yield pair.first.second;
-            else if(pair.first.second == node && pair.second == NodeOrdering::LeftFirst)
-                co_yield pair.first.first;
+            if(std::get<0>(pair.first) == node && pair.second == NodeOrdering::RightFirst)
+                co_yield std::get<1>(pair.first);
+            else if(std::get<1>(pair.first) == node && pair.second == NodeOrdering::LeftFirst)
+                co_yield std::get<0>(pair.first);
         }
     }
 
@@ -139,10 +143,11 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         for(auto const& pair : m_orderCache)
         {
-            if(pair.first.first == node && pair.second == NodeOrdering::RightInBodyOfLeft)
-                co_yield pair.first.second;
-            else if(pair.first.second == node && pair.second == NodeOrdering::LeftInBodyOfRight)
-                co_yield pair.first.first;
+            if(std::get<0>(pair.first) == node && pair.second == NodeOrdering::RightInBodyOfLeft)
+                co_yield std::get<1>(pair.first);
+            else if(std::get<1>(pair.first) == node
+                    && pair.second == NodeOrdering::LeftInBodyOfRight)
+                co_yield std::get<0>(pair.first);
         }
     }
 
@@ -152,10 +157,11 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         for(auto const& pair : m_orderCache)
         {
-            if(pair.first.second == node && pair.second == NodeOrdering::RightInBodyOfLeft)
-                co_yield pair.first.first;
-            else if(pair.first.first == node && pair.second == NodeOrdering::LeftInBodyOfRight)
-                co_yield pair.first.second;
+            if(std::get<1>(pair.first) == node && pair.second == NodeOrdering::RightInBodyOfLeft)
+                co_yield std::get<0>(pair.first);
+            else if(std::get<0>(pair.first) == node
+                    && pair.second == NodeOrdering::LeftInBodyOfRight)
+                co_yield std::get<1>(pair.first);
         }
     }
 
