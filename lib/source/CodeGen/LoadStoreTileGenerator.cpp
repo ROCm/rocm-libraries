@@ -981,7 +981,7 @@ namespace rocRoller
                            GPUCapability::ArchAccUnifiedRegs)
                        && reg->regType() != Register::Type::Vector)
                     {
-                        // If no unifified acc/vgpr registers, create a temporary vgpr register.
+                        // If no unified acc/vgpr registers, create a temporary vgpr register.
                         // The result of the load will be copied into finalVGPR after the load
                         // has been performed.
                         info.data = tmpl;
@@ -1294,6 +1294,7 @@ namespace rocRoller
                 co_yield loadMacroTileVGPR(tag, load, coords);
                 break;
             case MemoryType::WAVE:
+            case MemoryType::WAVE_SWIZZLE:
             {
                 switch(macTile.layoutType)
                 {

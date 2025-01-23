@@ -119,5 +119,8 @@ namespace rocRoller
             {"HasDSReadTransposeB4", Value::HasDSReadTransposeB4},
 
             {"HasPRNG", Value::HasPRNG},
+
+            {"HasPermLanes16", Value::HasPermLanes16},
+            {"HasPermLanes32", Value::HasPermLanes32},
     };
 }

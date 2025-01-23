@@ -329,6 +329,11 @@ namespace rocRoller
             std::vector<int> subTileSizes;
 
             /**
+             * Size of matrix instruction tile.
+             */
+            std::vector<int> miTileSizes;
+
+            /**
              * Number of bytes padding each dimension.
              *
              * For example, a MxN Macrotile padded with [[x y]] requires
@@ -366,7 +371,8 @@ namespace rocRoller
             MacroTile(std::vector<int> const& sizes,
                       LayoutType const        layoutType,
                       std::vector<int> const& subTileSizes = {},
-                      MemoryType const        memoryType   = MemoryType::WAVE);
+                      MemoryType const        memoryType   = MemoryType::WAVE,
+                      std::vector<int> const& miTileSizes  = {});
 
             /**
              * Construct MacroTile dimension that is padded.
@@ -480,6 +486,7 @@ namespace rocRoller
             int rank = 0;
 
             std::vector<int> sizes;
+            std::vector<int> wsizes;
 
             LayoutType         layout = LayoutType::None;
             Register::ValuePtr vgpr; // TODO: Does this belong here?  Move to "getVGPR"?

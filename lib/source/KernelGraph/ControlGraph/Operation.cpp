@@ -145,10 +145,17 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
     }
 
+    Exchange::Exchange() = default;
+    Exchange::Exchange(rocRoller::VariableType const varType)
+        : varType(varType)
+    {
+    }
+
     RR_CLASS_NAME_IMPL(SetCoordinate);
     RR_CLASS_NAME_IMPL(ConditionalOp);
     RR_CLASS_NAME_IMPL(AssertOp);
     RR_CLASS_NAME_IMPL(DoWhileOp);
+    RR_CLASS_NAME_IMPL(Exchange);
     RR_CLASS_NAME_IMPL(ForLoopOp);
     RR_CLASS_NAME_IMPL(UnrollOp);
     RR_CLASS_NAME_IMPL(Assign);

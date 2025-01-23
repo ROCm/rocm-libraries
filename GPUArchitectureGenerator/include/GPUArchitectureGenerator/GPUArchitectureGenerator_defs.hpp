@@ -116,6 +116,9 @@ namespace GPUArchitectureGenerator
              {"ds_read_b96_tr_b6  v[4:6], v1, offset:0", ""}},
             {rocRoller::GPUCapability::HasDSReadTransposeB4,
              {"ds_read_b64_tr_b4  v[4:5], v1, offset:0", ""}},
+
+            {rocRoller::GPUCapability::HasPermLanes16, {"v_permlane16_swap_b32 v4, v5", ""}},
+            {rocRoller::GPUCapability::HasPermLanes32, {"v_permlane32_swap_b32 v4, v5", ""}},
     };
 
     // GPUCapability -> <Vector of ISAs That Support It>
