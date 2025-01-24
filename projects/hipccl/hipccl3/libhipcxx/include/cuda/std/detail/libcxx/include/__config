@@ -1394,13 +1394,15 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 //          The clock rate on other architectures like gfx1030/RDNA2 is not specified in the ISA docs.
 #        else
 #           ifdef _LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE
-#               warning Timing-related utility APIs (e.g., chrono) are currently not supported on the current architecture by libhipcxx. \
+#               ifndef  NDEBUG
+#                   warning Timing-related utility APIs (e.g., chrono) are currently not supported on the current architecture by libhipcxx. \
 Using _LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE for these APIs will result in incorrect results (timings).
-            // This should intentionally make no sense and tell the user that the value is meaningless
+#               endif
 #           else
 #               error Timing-related utility APIs (e.g., chrono) are currently not supported on the current architecture by libhipcxx. \
 To override this error and proceed with the build, please set the compile-time flag _LIBCUDACXX_ALLOW_UNSUPPORTED_ARCHITECTURE
 #           endif
+            // This should intentionally make no sense and tell the user that the value is meaningless
 #           define _LIBCUDACXX_HIP_TSC_CLOCKRATE 1
 #           define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 1
 #        endif
