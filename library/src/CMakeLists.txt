@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -67,7 +67,7 @@ add_library( roc::hipblas ALIAS hipblas )
 set(static_depends)
 
 find_package( hipblas-common REQUIRED CONFIG PATHS ${ROCM_PATH})
-target_link_libraries( hipblas PUBLIC roc::hipblas-common )
+target_link_libraries( hipblas INTERFACE roc::hipblas-common )
 
 # Build hipblas from source on AMD platform
 if(HIP_PLATFORM STREQUAL amd)
