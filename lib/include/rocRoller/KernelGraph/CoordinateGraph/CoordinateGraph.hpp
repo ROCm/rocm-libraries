@@ -107,7 +107,7 @@ namespace rocRoller
                         std::vector<int> const&                dsts,
                         Expression::ExpressionTransducer       transducer);
 
-            EdgeType getEdgeType(int index);
+            EdgeType getEdgeType(int index) const;
 
             template <Graph::Direction Dir, typename Visitor>
             std::vector<Expression::ExpressionPtr>

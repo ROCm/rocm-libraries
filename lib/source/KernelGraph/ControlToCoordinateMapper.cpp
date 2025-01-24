@@ -154,15 +154,14 @@ namespace rocRoller::KernelGraph
     {
         std::string name(ConnectionSpec const& cs)
         {
-            return std::visit(
-                rocRoller::overloaded{
-                    [](std::monostate const&) { return "none"; },
-                    [](JustNaryArgument const&) { return "NaryArgument"; },
-                    [](ComputeIndex const&) { return "ComputeIndex"; },
-                    [](TypeAndSubDimension const&) { return "TypeAndSubDimension"; },
-                    [](TypeAndNaryArgument const&) { return "TypeAndNaryArgument"; },
-                    [](LDSTypeAndSubDimension const&) { return "LDSTypeAndSubDimension"; }},
-                cs);
+            return std::visit(rocRoller::overloaded{
+                                  [](std::monostate const&) { return "none"; },
+                                  [](JustNaryArgument const&) { return "NaryArgument"; },
+                                  [](ComputeIndex const&) { return "ComputeIndex"; },
+                                  [](TypeAndSubDimension const&) { return "TypeAndSubDimension"; },
+                                  [](TypeAndNaryArgument const&) { return "TypeAndNaryArgument"; },
+                              },
+                              cs);
         }
 
         std::string toString(ComputeIndexArgument cia)
@@ -181,23 +180,6 @@ namespace rocRoller::KernelGraph
                 return "STRIDE";
             case ComputeIndexArgument::BUFFER:
                 return "BUFFER";
-            default:
-                return "Invalid";
-            }
-        }
-
-        std::string toString(LDSLoadStore ld)
-        {
-            switch(ld)
-            {
-            case LDSLoadStore::LOAD_FROM_GLOBAL:
-                return "LOAD_FROM_GLOBAL";
-            case LDSLoadStore::STORE_INTO_LDS:
-                return "STORE_INTO_LDS";
-            case LDSLoadStore::LOAD_FROM_LDS:
-                return "LOAD_FROM_LDS";
-            case LDSLoadStore::STORE_INTO_GLOBAL:
-                return "STORE_INTO_GLOBAL";
             default:
                 return "Invalid";
             }
@@ -228,12 +210,6 @@ namespace rocRoller::KernelGraph
             std::string operator()(TypeAndNaryArgument const& ci) const
             {
                 return concatenate(ci.id, ": (", ci.argument, ")");
-            }
-
-            std::string operator()(LDSTypeAndSubDimension const& ci) const
-            {
-                return concatenate(
-                    "LDS: ", ci.id, ": (", ci.subdimension, ", ", toString(ci.direction), ")");
             }
         };
 

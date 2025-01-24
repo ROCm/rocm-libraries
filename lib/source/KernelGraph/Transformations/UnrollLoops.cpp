@@ -3,6 +3,7 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
@@ -70,7 +71,6 @@ namespace rocRoller
                 READ,
             };
             using RW = ControlFlowRWTracer::ReadWrite;
-            std::map<int, std::vector<int>> result;
             rocRoller::Log::getLogger()->debug("KernelGraph::findLoopDependencies({})", forLoop);
             auto                topForLoopCoord = kgraph.mapper.get<ForLoop>(forLoop);
             ControlFlowRWTracer tracer(kgraph, forLoop);
@@ -153,6 +153,7 @@ namespace rocRoller
             }
 
             // For the loop-carried-depencies, find the write operation.
+            std::map<int, std::vector<int>> result;
             for(auto coordinate : loopCarriedDependencies)
             {
                 for(auto x : readwrite)
@@ -196,9 +197,10 @@ namespace rocRoller
         {
             for(int i = 0; i < sequentialOperations.size() - 1; i++)
             {
-                graph.control.addElement(Sequence(),
-                                         {sequentialOperations[i].back()},
-                                         {sequentialOperations[i + 1].front()});
+                auto a    = getTopSetCoordinate(graph, sequentialOperations[i].back());
+                auto b    = getTopSetCoordinate(graph, sequentialOperations[i + 1].front());
+                auto edge = graph.control.addElement(Sequence(), {a}, {b});
+                Log::debug("UnrollLoops::makeSequential:: Added Sequence edge {}", edge);
             }
         }
 
@@ -277,6 +279,13 @@ namespace rocRoller
                 loopCarriedDependencies = findLoopCarriedDependencies(graph, tag);
                 for(auto const& [coord, controls] : loopCarriedDependencies)
                 {
+                    // In the KLOOP, we do want to duplicate LDS (and paired tiles)
+                    bool pairedWithLDS = false;
+                    for(auto op : controls)
+                        pairedWithLDS |= graph.mapper.get<LDS>(op) != -1;
+                    if(pairedWithLDS)
+                        continue;
+
                     dontDuplicate.insert(coord);
                 }
             }
@@ -329,9 +338,17 @@ namespace rocRoller
                             graph.mapper.connect<Unroll>(setCoord, unrollDimension);
                             graph.control.addElement(Body(), {setCoord}, {op});
                             rv.push_back(setCoord);
+
+                            Log::debug("Added SetCoordinate {} for coordinate {} (value {}) above "
+                                       "operation {}",
+                                       setCoord,
+                                       unrollDimension,
+                                       coordValue,
+                                       op);
                         }
                         else
                         {
+                            Log::debug("Skipping SetCoordinate for operation {}", op);
                             rv.push_back(op);
                         }
                     }
@@ -379,30 +396,49 @@ namespace rocRoller
 
             // Connect the duplicated bodies to the loop, adding SetCoordinate nodes
             // as needed.
+            auto isLoadTiled    = graph.control.isElemType<LoadTiled>();
+            auto isLoadLDSTile  = graph.control.isElemType<LoadLDSTile>();
+            auto isStoreTiled   = graph.control.isElemType<StoreTiled>();
+            auto isStoreLDSTile = graph.control.isElemType<StoreLDSTile>();
+
+            auto getTops = [&](auto predicate, auto starts) {
+                std::set<int> rv;
+                for(auto op :
+                    filter(predicate, graph.control.depthFirstVisit(starts, GD::Downstream)))
+                {
+                    rv.insert(getTopSetCoordinate(graph, op));
+                }
+                return rv;
+            };
+
+            Log::debug("  Ordering loop {}", tag);
             std::set<int> previousLoads;
+            std::set<int> previousLDSLoads;
             std::set<int> previousStores;
+            std::set<int> previousLDSStores;
             for(int i = 0; i < unrollAmount; i++)
             {
-                duplicatedBodies[i] = connectWithSetCoord(duplicatedBodies[i], i);
-                auto currentLoads
-                    = filter(graph.control.isElemType<LoadTiled>(),
-                             graph.control.depthFirstVisit(duplicatedBodies[i], GD::Downstream))
-                          .to<std::set>();
-                auto currentStores
-                    = filter(graph.control.isElemType<StoreTiled>(),
-                             graph.control.depthFirstVisit(duplicatedBodies[i], GD::Downstream))
-                          .to<std::set>();
+                duplicatedBodies[i]   = connectWithSetCoord(duplicatedBodies[i], i);
+                auto currentLoads     = getTops(isLoadTiled, duplicatedBodies[i]);
+                auto currentLDSLoads  = getTops(isLoadLDSTile, duplicatedBodies[i]);
+                auto currentStores    = getTops(isStoreTiled, duplicatedBodies[i]);
+                auto currentLDSStores = getTops(isStoreLDSTile, duplicatedBodies[i]);
                 if(i > 0)
                 {
                     orderMemoryNodes(graph, previousLoads, currentLoads, true);
+                    orderMemoryNodes(graph, previousLDSLoads, currentLDSLoads, true);
                     orderMemoryNodes(graph, previousStores, currentStores, true);
+                    orderMemoryNodes(graph, previousLDSStores, currentLDSStores, true);
                 }
-                previousLoads  = currentLoads;
-                previousStores = currentStores;
+                previousLoads     = currentLoads;
+                previousLDSLoads  = currentLDSLoads;
+                previousStores    = currentStores;
+                previousLDSStores = currentLDSStores;
             }
 
             // If there are any loop carried dependencies, add Sequence nodes
             // between the control nodes with dependencies.
+            Log::debug("  Adding sequence edges between loop-carried-dependencies {}", tag);
             for(auto [coord, allControls] : sequentialOperations)
             {
                 makeSequential(graph, allControls);
@@ -644,9 +680,9 @@ namespace rocRoller
         KernelGraph UnrollLoops::apply(KernelGraph const& original)
         {
             TIMER(t, "KernelGraph::unrollLoops");
-            auto newGraph = original;
-            commit(newGraph);
-            return newGraph;
+            auto graph = original;
+            commit(graph);
+            return graph;
         }
     }
 }

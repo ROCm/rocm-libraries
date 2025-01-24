@@ -266,11 +266,15 @@ namespace LDSCopyTest
         auto params = std::make_shared<CommandParameters>();
         params->setWaveTilesPerWavefront(1, 1);
 
-        auto lowerTile = std::make_shared<LowerTile>(params, m_context);
-        kgraph         = kgraph.transform(lowerTile);
-
         auto addLDS = std::make_shared<AddLDS>(params, m_context);
         kgraph      = kgraph.transform(addLDS);
+
+        // adds barriers
+        auto addPrefetch = std::make_shared<AddPrefetch>(params, m_context);
+        kgraph           = kgraph.transform(addPrefetch);
+
+        auto lowerTile = std::make_shared<LowerTile>(params, m_context);
+        kgraph         = kgraph.transform(lowerTile);
 
         auto addComputeIndex = std::make_shared<AddComputeIndex>();
         kgraph               = kgraph.transform(addComputeIndex);

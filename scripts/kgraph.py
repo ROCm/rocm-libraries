@@ -19,6 +19,30 @@ import yaml
 from dot_diff import diff_dots
 
 
+def extract_normalised_asm(path: pathlib.Path, strip_metadata: bool = True):
+    """Extract normalized ASM from assembly file."""
+    source = path.read_text()
+
+    meta = False
+
+    asm = []
+    for line in source.splitlines():
+        double_slash = line.find("//")
+        if double_slash != -1:
+            line = line[:double_slash]
+        line = line.rstrip()
+        if "kernel_graph_dot" in line:
+            continue
+        if ".amdgpu_metadata" in line:
+            meta = True
+        if line and not meta:
+            asm.append(line)
+        if ".end_amdgpu_metadata" in line:
+            meta = False
+
+    return "\n".join(asm)
+
+
 def extract_asm_dot(path: pathlib.Path):
     """Extract .kernel_graph meta data from assembly file."""
     source = path.read_text()
@@ -92,6 +116,12 @@ def process_serialized_graph(graph: dict, out_path: pathlib.Path):
         print(f"Wrote {f.name}")
 
 
+def process_asm(path: pathlib.Path):
+    asm = pathlib.Path(path.stem + "_normalized.s")
+    asm.write_text(extract_normalised_asm(path))
+    print(f"Wrote {asm}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract and render kernel graph.")
     parser.add_argument("fname", type=str, help="Assembly or log file name")
@@ -142,13 +172,15 @@ if __name__ == "__main__":
         if graph is not None and not args.dot_only:
             process_serialized_graph(graph, foutput)
 
+        process_asm(path)
+
     elif path.suffix == ".log":
         dots = extract_log_dots(path)
         if not args.omit_diff:
             dots = diff_dots(dots)
         for i, dot in enumerate(dots):
             serial_str = f"_{i:04d}"
-            foutput_serial = pathlib.Path(str(foutput) + serial_str)
+            foutput_serial = pathlib.Path(str(foutput.stem) + serial_str)
             process_dot(
                 dot,
                 foutput_serial,

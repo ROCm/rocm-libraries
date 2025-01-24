@@ -165,7 +165,7 @@ namespace AddStreamKTest
         auto [forKCoord, forKOp]
             = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
 
-        auto user = kgraph.coordinates.addElement(User("result"));
+        auto user = kgraph.coordinates.addElement(User({}, "result"));
 
         auto tileM = kgraph.coordinates.addElement(
             MacroTileNumber(0, Expression::literal(numTileM), nullptr));
@@ -351,8 +351,8 @@ namespace AddStreamKTest
         auto [forKCoord, forKOp]
             = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
 
-        auto in  = kgraph.coordinates.addElement(User("in"));
-        auto out = kgraph.coordinates.addElement(User("out"));
+        auto in  = kgraph.coordinates.addElement(User({}, "in"));
+        auto out = kgraph.coordinates.addElement(User({}, "out"));
 
         auto tileM = kgraph.coordinates.addElement(
             MacroTileNumber(0, Expression::literal(numTileM), nullptr));

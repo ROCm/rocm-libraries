@@ -172,6 +172,9 @@ set(
   catch/IdentifyParallelDimensionsTest.cpp
   catch/KernelArgumentsTest.cpp
   catch/KernelGraphConstraintsTest.cpp
+  catch/KernelGraphRemoveDuplicatesTest.cpp
+  catch/KernelGraphSimplifyTest.cpp
+  catch/KernelGraphUtilsTest.cpp
   catch/RandomNumberExpressionTest.cpp
   catch/ScalarExpressionTest.cpp
   catch/SettingsTest.cpp

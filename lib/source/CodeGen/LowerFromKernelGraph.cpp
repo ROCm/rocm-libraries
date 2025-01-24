@@ -546,7 +546,14 @@ namespace rocRoller
                 Register::ValuePtr dest;
                 if(!deferred)
                 {
-                    rocRoller::Log::getLogger()->debug("  immediate: count {}", assign.valueCount);
+                    // ZZZ
+                    auto valueCount = assign.valueCount;
+                    if(valueCount == 0)
+                    {
+                        auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
+                        valueCount = tmp->valueCount();
+                    }
+                    Log::debug("  immediate: count {}", assign.valueCount);
                     if(assign.regType == Register::Type::Accumulator)
                     {
                         // ACCVGPR should always be contiguous
@@ -554,9 +561,9 @@ namespace rocRoller
                             dimTag,
                             assign.regType,
                             resultVariableType(assign.expression),
-                            assign.valueCount,
+                            valueCount,
                             Register::AllocationOptions{.contiguousChunkWidth
-                                                        = static_cast<int>(assign.valueCount)});
+                                                        = static_cast<int>(valueCount)});
                     }
                     else
                     {
@@ -564,7 +571,7 @@ namespace rocRoller
                             dimTag,
                             assign.regType,
                             resultVariableType(assign.expression),
-                            assign.valueCount);
+                            valueCount);
                     }
                     if(dest->name().empty())
                         dest->setName(concatenate("DataFlowTag", dimTag));

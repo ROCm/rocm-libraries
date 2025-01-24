@@ -210,7 +210,7 @@ namespace rocRoller
                 auto v1 = visitor.call(v0);
                 auto v2 = visitor.call(v1);
 
-                Log::debug("launchTimeSubExpressions: {} -> {} -> {} -> {}",
+                Log::trace("launchTimeSubExpressions: {} -> {} -> {} -> {}",
                            toString(expr),
                            toString(v0),
                            toString(v1),
@@ -250,7 +250,7 @@ namespace rocRoller
                 auto visitor2 = LaunchTimeExpressionVisitor(ctx, true);
                 auto v2       = visitor2.call(v1);
 
-                Log::debug("launchTimeSubExpressions: {} -> {} -> {} -> {}",
+                Log::trace("launchTimeSubExpressions: {} -> {} -> {} -> {}",
                            toString(expr),
                            toString(v0),
                            toString(v1),

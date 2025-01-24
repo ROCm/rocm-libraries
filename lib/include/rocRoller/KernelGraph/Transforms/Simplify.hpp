@@ -16,5 +16,9 @@ namespace rocRoller
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override;
         };
+
+        KernelGraph removeRedundantSequenceEdges(KernelGraph const&);
+        KernelGraph removeRedundantBodyEdges(KernelGraph const&);
+        KernelGraph removeRedundantNOPs(KernelGraph const&);
     }
 }

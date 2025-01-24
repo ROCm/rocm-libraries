@@ -109,6 +109,11 @@ namespace rocRoller::KernelGraph
         return rv;
     }
 
+    std::unordered_map<int, int> ControlFlowRWTracer::getBodyParents() const
+    {
+        return m_bodyParent;
+    }
+
     void ControlFlowRWTracer::trackRegister(int control, int coordinate, ReadWrite rw)
     {
         if(control < 0 || coordinate < 0)
@@ -197,15 +202,15 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(Assign const& op, int tag)
     {
-        auto dst = m_graph.mapper.getConnections(tag)[0].coordinate;
-        trackRegister(tag, dst, ReadWrite::WRITE);
-
         CollectDataFlowExpressionVisitor visitor;
         visitor.call(op.expression);
         for(auto src : visitor.tags)
         {
             trackRegister(tag, src, ReadWrite::READ);
         }
+
+        auto dst = m_graph.mapper.getConnections(tag)[0].coordinate;
+        trackRegister(tag, dst, ReadWrite::WRITE);
     }
 
     void ControlFlowRWTracer::operator()(Barrier const& op, int tag) {}
@@ -337,16 +342,20 @@ namespace rocRoller::KernelGraph
     {
         auto dst = m_graph.mapper.get<MacroTile>(tag);
         auto lds = m_graph.mapper.get<LDS>(tag);
-        trackRegister(tag, dst, ReadWrite::WRITE);
+
+        dst = only(m_graph.coordinates.getInputNodeIndices(dst, CT::isEdge<CT::View>))
+                  .value_or(dst);
+
         trackRegister(tag, lds, ReadWrite::READ);
         trackConnections(tag, {dst, lds}, ReadWrite::READ);
+        trackRegister(tag, dst, ReadWrite::WRITE);
     }
 
     void ControlFlowRWTracer::operator()(LoadLinear const& op, int tag)
     {
         auto dst = m_graph.mapper.get<Linear>(tag);
-        trackRegister(tag, dst, ReadWrite::WRITE);
         trackConnections(tag, {dst}, ReadWrite::READ);
+        trackRegister(tag, dst, ReadWrite::WRITE);
     }
 
     void ControlFlowRWTracer::operator()(SeedPRNG const& op, int tag)
@@ -366,22 +375,22 @@ namespace rocRoller::KernelGraph
         dst = only(m_graph.coordinates.getInputNodeIndices(dst, CT::isEdge<CT::View>))
                   .value_or(dst);
 
-        trackRegister(tag, dst, ReadWrite::WRITE);
         trackConnections(tag, {dst}, ReadWrite::READ);
+        trackRegister(tag, dst, ReadWrite::WRITE);
     }
 
     void ControlFlowRWTracer::operator()(LoadVGPR const& op, int tag)
     {
         auto dst = m_graph.mapper.get<VGPR>(tag);
-        trackRegister(tag, dst, ReadWrite::WRITE);
         trackConnections(tag, {dst}, ReadWrite::READ);
+        trackRegister(tag, dst, ReadWrite::WRITE);
     }
 
     void ControlFlowRWTracer::operator()(LoadSGPR const& op, int tag)
     {
         auto dst = m_graph.mapper.get<VGPR>(tag);
-        trackRegister(tag, dst, ReadWrite::WRITE);
         trackConnections(tag, {dst}, ReadWrite::READ);
+        trackRegister(tag, dst, ReadWrite::WRITE);
     }
 
     void ControlFlowRWTracer::operator()(Multiply const& op, int tag)
@@ -438,11 +447,11 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(StoreLDSTile const& op, int tag)
     {
-        auto source = m_graph.mapper.get<MacroTile>(tag);
-        auto lds    = m_graph.mapper.get<LDS>(tag);
-        trackRegister(tag, source, ReadWrite::READ);
+        auto dst = m_graph.mapper.get<MacroTile>(tag);
+        auto lds = m_graph.mapper.get<LDS>(tag);
+        trackRegister(tag, dst, ReadWrite::READ);
+        trackConnections(tag, {dst, lds}, ReadWrite::READ);
         trackRegister(tag, lds, ReadWrite::WRITE);
-        trackConnections(tag, {source, lds}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadTileDirect2LDS const& op, int tag)

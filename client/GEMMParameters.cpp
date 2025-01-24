@@ -81,7 +81,7 @@ namespace rocRoller
 
             std::ostream& operator<<(std::ostream& s, SolutionParameters const& x)
             {
-                s << "Arch:      " << x.architecture.toString();
+                s << "Arch:      " << x.architecture.toString() << std::endl;
                 if(x.streamK)
                 {
                     s << "Algorithm: StreamK twoTile:" << x.streamKTwoTile << std::endl;

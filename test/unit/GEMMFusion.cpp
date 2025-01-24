@@ -252,13 +252,11 @@ namespace GEMMDriverTest
                 {gemm.macM, gemm.macN},
                 LayoutType::MATRIX_ACCUMULATOR,
                 {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                gemm.storeLDSD ? MemoryType::JAMMED_WAVE_LDS : MemoryType::WAVE);
+                gemm.storeLDSD ? MemoryType::WAVE_LDS : MemoryType::WAVE);
 
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);
             params->setDimensionInfo(tagLoadC, macTileC);
-            // TODO Fix MemoryType promotion (JAMMED_WAVE_LDS)
-            params->setDimensionInfo(tagD, macTileD);
             params->setDimensionInfo(tagRelu, macTileD);
 
             params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});

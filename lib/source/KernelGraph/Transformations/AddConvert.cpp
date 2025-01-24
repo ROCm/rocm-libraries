@@ -16,99 +16,28 @@ namespace rocRoller
         private:
             struct ConvertLocation
             {
-                int                                       storage;
+                /// Storage coordinate (segmented) that needs to be converted
+                int storageCoord;
+
+                /// Load operations that write to storageCoord
+                std::unordered_set<int> loadOps;
+
+                /// Multiply operations that read from storageCoord
                 std::vector<std::pair<int, NaryArgument>> uses;
-                int                                       parentNode;
-                ControlEdge                               edgeType;
             };
 
-            struct SharedParents
-            {
-                // Map from an operation to it's parent and argument type
-                std::map<int, std::pair<int, NaryArgument>> sharedParent;
-                // Map from a parent to it's edge type
-                std::map<int, ControlEdge> edgeType;
-            };
+            void stageMultiplyConverts(KernelGraph const& graph);
+            void commit(KernelGraph& graph);
 
-            void          stageMultiplyConverts(KernelGraph const& graph);
-            void          commit(KernelGraph& graph);
-            SharedParents findSharedParents(KernelGraph const& graph, int coord);
-
+            // Map from storage coordinate to vector of {Multiply operation tag, RHS/LHS} pairs.
             std::map<int, std::vector<std::pair<int, NaryArgument>>> m_multiplyArgs;
-            std::map<int, int>                                       m_loadMap;
-            std::map<int, DataType>                                  m_storageDataType;
-            std::vector<ConvertLocation>                             m_locations;
+            // Map from storage coordinate to set of LoadTiled/LoadLDSTile operations
+            std::map<int, std::unordered_set<int>> m_loadMap;
+            // Map from storage coordinate to DataType
+            std::map<int, DataType> m_storageDataType;
+
+            std::vector<ConvertLocation> m_locations;
         };
-
-        /**
-         * @brief Find where converts should be added for a given storage tag.
-         *
-         * Returns the location of the node whose result should be converted, as well as the
-         * edge type that the node is connected with.
-         *
-         * @param graph
-         * @param coord
-         * @return std::pair<int, ControlEdge>
-         */
-        AddConvertOperations::SharedParents
-            AddConvertOperations::findSharedParents(KernelGraph const& graph, int coord)
-        {
-            SharedParents rv;
-
-            for(auto [opTag, arg] : m_multiplyArgs[coord])
-            {
-                int selectedTag = 0;
-
-                auto parentNodes
-                    = graph.control.getInputNodeIndices<Sequence>(opTag).to<std::vector>();
-
-                for(auto const& parent : parentNodes)
-                {
-                    // Look for loads of coord
-                    if(isOperation<LoadTiled>(graph.control.getElement(parent))
-                       || isOperation<LoadLDSTile>(graph.control.getElement(parent))
-                       || isOperation<SetCoordinate>(graph.control.getElement(parent)))
-                    {
-                        if(m_loadMap[parent] == coord)
-                        {
-                            selectedTag = parent;
-                            break;
-                        }
-                    }
-                    // Sometimes Multiply could be connected to a NOP (Due to prefetching)
-                    else if(isOperation<NOP>(graph.control.getElement(parent)))
-                    {
-                        selectedTag = parent;
-                    }
-                }
-
-                if(selectedTag)
-                    rv.edgeType[selectedTag] = Sequence();
-                else
-                {
-                    auto parentNodes
-                        = graph.control.getInputNodeIndices<Body>(opTag).to<std::vector>();
-
-                    for(auto const& parent : parentNodes)
-                    {
-                        // Sometimes Multiply could be connected to a ForLoop (Due to prefetching)
-                        if(isOperation<ForLoopOp>(graph.control.getElement(parent)))
-                        {
-                            selectedTag = parent;
-                        }
-                    }
-
-                    if(selectedTag)
-                        rv.edgeType[selectedTag] = Body();
-                }
-
-                AssertFatal(selectedTag > 0, "No valid parent found.");
-
-                rv.sharedParent[opTag] = {selectedTag, arg};
-            }
-
-            return rv;
-        }
 
         void AddConvertOperations::stageMultiplyConverts(KernelGraph const& graph)
         {
@@ -129,7 +58,8 @@ namespace rocRoller
                 else if(isOperation<LoadTiled>(graph.control.getElement(node))
                         || isOperation<LoadLDSTile>(graph.control.getElement(node)))
                 {
-                    m_loadMap[getTopSetCoordinate(graph, node)] = graph.mapper.get<MacroTile>(node);
+                    auto coord = graph.mapper.get<MacroTile>(node);
+                    m_loadMap[coord].insert(node);
                     m_storageDataType[graph.mapper.get<MacroTile>(node)]
                         = getDataType(std::get<Operation>(graph.control.getElement(node)));
                 }
@@ -144,19 +74,7 @@ namespace rocRoller
                 if(m_storageDataType[storage] == unsegmented->dataType)
                     continue;
 
-                auto sharedParents = findSharedParents(graph, storage);
-                for(auto [parent, edgeType] : sharedParents.edgeType)
-                {
-                    std::vector<std::pair<int, NaryArgument>> uses;
-                    for(auto const& kv : sharedParents.sharedParent)
-                    {
-                        auto opTag              = kv.first;
-                        auto [selectedTag, arg] = kv.second;
-                        if(selectedTag == parent)
-                            uses.push_back({opTag, arg});
-                    }
-                    m_locations.emplace_back(ConvertLocation{storage, uses, parent, edgeType});
-                }
+                m_locations.emplace_back(ConvertLocation{storage, m_loadMap[storage], multiplies});
             }
         }
 
@@ -168,48 +86,29 @@ namespace rocRoller
 
             for(auto& location : m_locations)
             {
-                auto edgeTypeIndex = location.edgeType.index();
-
                 // Create new node for convert in control graph and storage in coordinate graph
-                auto newStorage
-                    = graph.coordinates.addElement(graph.coordinates.getElement(location.storage));
+                auto newStorage = graph.coordinates.addElement(
+                    graph.coordinates.getElement(location.storageCoord));
                 auto dataFlow    = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
-                    location.storage, Register::Type::Vector, DataType::None});
-                auto unsegmented = DataTypeInfo::Get(m_storageDataType[location.storage])
+                    location.storageCoord, Register::Type::Vector, DataType::None});
+                auto unsegmented = DataTypeInfo::Get(m_storageDataType[location.storageCoord])
                                        .unsegmentedVariableType()
                                        ->dataType;
-                auto convertNode = graph.control.addElement(
-                    Assign{Register::Type::Vector, Expression::convert(unsegmented, dataFlow)});
-                graph.mapper.connect(convertNode, newStorage, NaryArgument::DEST);
 
-                // Create Edge from shared node to convert node
-                graph.control.addElement(location.edgeType, {location.parentNode}, {convertNode});
+                for(auto loadOp : location.loadOps)
+                {
+                    // ZZZ VALUE COUNT
+                    auto convertNode = graph.control.addElement(Assign{
+                        Register::Type::Vector, Expression::convert(unsegmented, dataFlow), 0});
+                    graph.mapper.connect(convertNode, newStorage, NaryArgument::DEST);
+                    insertAfter(graph, loadOp, convertNode, convertNode);
+                }
 
-                // Delete edges from shared node to Multiply
+                // Change mappings for all multiplies
                 for(auto const& [node, arg] : location.uses)
                 {
-                    // Make sure the edge still exists in the graph before attempting to delete
-                    auto parentNodes
-                        = graph.control
-                              .getInputNodeIndices(node,
-                                                   [&edgeTypeIndex](ControlEdge const& a) {
-                                                       return a.index() == edgeTypeIndex;
-                                                   })
-                              .to<std::set>();
-
-                    if(parentNodes.count(location.parentNode))
-                        graph.control.deleteElement(std::vector<int>{location.parentNode},
-                                                    std::vector<int>{node},
-                                                    [&edgeTypeIndex](ControlEdge const& a) {
-                                                        return a.index() == edgeTypeIndex;
-                                                    });
-
-                    // Create edges from convert node to multiplies
-                    graph.control.addElement(Sequence(), {convertNode}, {node});
-
-                    // Change mappings for all multiplies
                     graph.mapper.disconnect(
-                        node, location.storage, Connections::typeArgument<MacroTile>(arg));
+                        node, location.storageCoord, Connections::typeArgument<MacroTile>(arg));
                     graph.mapper.connect(
                         node, newStorage, Connections::typeArgument<MacroTile>(arg));
                 }
@@ -217,9 +116,9 @@ namespace rocRoller
                 // Add newStorage to coordinate graph, keeping track of duplicates
                 // If duplicate, find original.
                 auto duplicateStorage = only(graph.coordinates.getOutputNodeIndices(
-                    location.storage, CT::isEdge<Duplicate>));
+                    location.storageCoord, CT::isEdge<Duplicate>));
 
-                auto originalStorage = duplicateStorage ? *duplicateStorage : location.storage;
+                auto originalStorage = duplicateStorage ? *duplicateStorage : location.storageCoord;
 
                 // If original hasn't been seen, insert newStorage after original with DataFlow edge
                 if(newStorageDuplicate.count(originalStorage) == 0)
@@ -268,6 +167,14 @@ namespace rocRoller
         KernelGraph AddConvert::apply(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::addConvert");
+
+            // XXX REMOVE THIS
+            {
+                std::ofstream dfile;
+                dfile.open("pre-add-convert.dot", std::ofstream::out | std::ofstream::trunc);
+                dfile << k.toDOT();
+                dfile.close();
+            }
 
             auto graph = k;
 

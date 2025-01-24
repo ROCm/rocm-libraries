@@ -354,7 +354,8 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
 
         unsigned long long sizeC = hostC.size(), sizeA = hostA.size(), sizeB = hostB.size();
 
@@ -897,7 +898,8 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
 
         unsigned long long sizeC = hostC.size(), sizeA = hostA.size(), sizeB = hostB.size();
 
@@ -1444,7 +1446,8 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
 
         unsigned long long sizeC = hostC.size(), sizeA = hostA.size(), sizeB = hostB.size();
 
@@ -1929,7 +1932,8 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
 
         unsigned long long sizeC = hostC.size(), sizeA = hostA.size(), sizeB = hostB.size();
 

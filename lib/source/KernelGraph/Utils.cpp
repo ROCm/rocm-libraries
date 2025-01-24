@@ -19,6 +19,179 @@ namespace rocRoller
          * Helpers
          */
 
+        std::string toString(UnrollColouring const& colouring)
+        {
+            std::stringstream os;
+
+            auto colourToString = [](auto colour) -> std::string {
+                std::stringstream os;
+                os << "[ ";
+                for(auto [coord, value] : colour)
+                {
+                    os << "(" << coord << ", " << value << "), ";
+                }
+                os << "]";
+                return os.str();
+            };
+
+            os << "Coordinate colours:" << std::endl;
+            for(auto c : colouring.coordinateColour)
+                os << "  " << c.first << ": " << colourToString(c.second) << std::endl;
+            os << "Operation colours:" << std::endl;
+            for(auto c : colouring.operationColour)
+                os << "  " << c.first << ": " << colourToString(c.second) << std::endl;
+
+            return os.str();
+        }
+
+        UnrollColouring colourByUnrollValue(KernelGraph const&             graph,
+                                            int                            topOp,
+                                            std::unordered_set<int> const& exclude)
+        {
+            UnrollColouring rv;
+
+            if(topOp == -1)
+                topOp = only(graph.control.roots()).value();
+
+            auto bodies = graph.control.getOutputNodeIndices<Body>(topOp).to<std::unordered_set>();
+
+            //
+            // First, look for SetCoordinate nodes and compute their colour.
+            //
+            std::map<int, std::pair<int, int>> setCoordinateColour;
+            for(auto bodyTop : bodies)
+            {
+                for(auto setCoordTag :
+                    filter(graph.control.isElemType<SetCoordinate>(),
+                           graph.control.depthFirstVisit(bodyTop, GD::Downstream)))
+                {
+                    auto setCoord   = graph.control.get<SetCoordinate>(setCoordTag).value();
+                    auto coordinate = graph.mapper.get<Unroll>(setCoordTag);
+                    if(coordinate == -1)
+                        continue;
+
+                    if(exclude.contains(coordinate))
+                        continue;
+
+                    if(!evaluationTimes(
+                           setCoord.value)[rocRoller::Expression::EvaluationTime::Translate])
+                        continue;
+
+                    setCoordinateColour[setCoordTag]
+                        = {coordinate, getUnsignedInt(evaluate(setCoord.value))};
+                }
+            }
+
+            if(setCoordinateColour.empty())
+                return rv;
+
+            //
+            // Next, colour SetCoordinate body operations, and any
+            // coordinates that they are mapped to.
+            //
+            for(auto [setCoordinate, colouring] : setCoordinateColour)
+            {
+                auto [coord, value] = colouring;
+                for(auto op : graph.control.depthFirstVisit(
+                        setCoordinate, graph.control.isElemType<Body>(), GD::Downstream))
+                {
+                    rv.operationColour[op][coord] = value;
+
+                    Log::trace("colourByUnrollValue::SetCoordinate explicit operation {} unroll {} "
+                               "colour {}",
+                               op,
+                               coord,
+                               value);
+                }
+            }
+
+            //
+            // Now follow traces and propagate colour
+            //
+            auto trace = ControlFlowRWTracer(graph, topOp).coordinatesReadWrite();
+            for(auto record : trace)
+            {
+                if(record.rw == ControlFlowRWTracer::ReadWrite::READ)
+                {
+                    if(!rv.coordinateColour.contains(record.coordinate))
+                        continue;
+
+                    for(auto [coord, value] : rv.coordinateColour[record.coordinate])
+                    {
+                        if(!rv.operationColour[record.control].contains(coord))
+                        {
+                            rv.operationColour[record.control][coord] = value;
+                            Log::trace("colourByUnrollValue::operationColour READ operation {} "
+                                       "coordinate {} "
+                                       "unroll {} "
+                                       "colour {}",
+                                       record.control,
+                                       record.coordinate,
+                                       coord,
+                                       value);
+                        }
+                    }
+                }
+                else
+                {
+                    // WRITE or READWRITE (in the case of READWRITE,
+                    // the operation should have a colour already)
+                    if(!rv.operationColour.contains(record.control))
+                        continue;
+
+                    for(auto [coord, value] : rv.operationColour[record.control])
+                    {
+                        rv.coordinateColour[record.coordinate][coord] = value;
+
+                        Log::trace("colourByUnrollValue::coordinateColour WRITE/READWRITE "
+                                   "operation {} coordinate {} unroll {} colour {}",
+                                   record.control,
+                                   record.coordinate,
+                                   coord,
+                                   value);
+                    }
+                }
+            }
+
+            //
+            // Also, propagate colour up SetCoordinate-chains
+            //
+            for(auto [setCoordinate, _ignore] : setCoordinateColour)
+            {
+                // Go down Body edges
+                int tag = setCoordinate;
+                while(true)
+                {
+                    auto child = only(graph.control.getOutputNodeIndices<Body>(tag));
+                    if(!child)
+                        break;
+                    tag = child.value();
+                }
+
+                for(auto [coord, value] : rv.operationColour[tag])
+                    rv.operationColour[setCoordinate][coord] = value;
+            }
+
+            //
+            // Find Sequence separator edges
+            //
+            for(auto [bodyElem, _ignore] : rv.operationColour)
+            {
+                for(auto edge : filter(graph.control.isElemType<Sequence>(),
+                                       graph.control.getNeighbours<GD::Downstream>(bodyElem)))
+                {
+                    auto otherElem
+                        = only(graph.control.getNeighbours<GD::Downstream>(edge)).value();
+
+                    if(rv.operationColour.contains(otherElem)
+                       && rv.operationColour[otherElem] != rv.operationColour[bodyElem])
+                        rv.separators.insert(edge);
+                }
+            }
+
+            return rv;
+        }
+
         /**
          * Create a range-based for loop.
          */
@@ -77,8 +250,6 @@ namespace rocRoller
 
         std::pair<int, int> getForLoopCoords(int forLoopOp, KernelGraph const& kgraph)
         {
-            namespace CG = rocRoller::KernelGraph::CoordinateGraph;
-
             auto range   = kgraph.mapper.get(forLoopOp, NaryArgument::DEST);
             auto forLoop = kgraph.mapper.get<ForLoop>(forLoopOp);
             return {forLoop, range};
@@ -133,41 +304,51 @@ namespace rocRoller
 
         int replaceWith(KernelGraph& graph, int op, int newOp, bool includeBody)
         {
-            auto location = graph.control.getLocation(op);
+            auto& ctrl     = graph.control;
+            auto  location = ctrl.getLocation(op);
+
             for(auto const& input : location.incoming)
             {
-                auto edge = graph.control.getElement(input);
-                int  parent
-                    = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
-                graph.control.deleteElement(input);
-                if(graph.control.getInputNodeIndices<Body>(newOp).to<std::unordered_set>().count(
-                       parent)
-                   == 0)
+                auto parent    = *only(ctrl.getNeighbours<Graph::Direction::Upstream>(input));
+                auto edge      = ctrl.getElement(input);
+                auto maybeBody = ctrl.get<Body>(input);
+
+                if(maybeBody)
                 {
-                    graph.control.addElement(edge, {parent}, {newOp});
+                    ctrl.deleteElement(input);
+                    auto updatedBodyParents
+                        = ctrl.getInputNodeIndices<Body>(newOp).to<std::unordered_set>();
+                    if(!updatedBodyParents.contains(parent))
+                    {
+                        ctrl.addElement(edge, {parent}, {newOp});
+                    }
+                }
+                else
+                {
+                    ctrl.deleteElement(input);
+                    ctrl.addElement(edge, {parent}, {newOp});
                 }
             }
+
             for(auto const& output : location.outgoing)
             {
-                auto edge = graph.control.getElement(output);
-                if(std::holds_alternative<ControlEdge>(edge))
+                auto child = *only(ctrl.getNeighbours<Graph::Direction::Downstream>(output));
+                auto edge  = ctrl.getElement(output);
+                auto maybeSequence = ctrl.get<Sequence>(output);
+                auto maybeBody     = ctrl.get<Body>(output);
+
+                if(maybeSequence)
                 {
-                    auto cedge = std::get<ControlEdge>(edge);
-                    if(std::holds_alternative<Sequence>(cedge)
-                       || (includeBody && std::holds_alternative<Body>(cedge)))
-                    {
-                        int child
-                            = *graph.control.getNeighbours<Graph::Direction::Downstream>(output)
-                                   .begin();
-                        graph.control.deleteElement(output);
-                        if(graph.control.getOutputNodeIndices<Body>(newOp)
-                               .to<std::unordered_set>()
-                               .count(child)
-                           == 0)
-                        {
-                            graph.control.addElement(edge, {newOp}, {child});
-                        }
-                    }
+                    ctrl.deleteElement(output);
+                    ctrl.addElement(edge, {newOp}, {child});
+                }
+                else if(includeBody && maybeBody)
+                {
+                    ctrl.deleteElement(output);
+                    auto updatedBodyChildren
+                        = ctrl.getOutputNodeIndices<Body>(newOp).to<std::unordered_set>();
+                    if(!updatedBodyChildren.contains(child))
+                        ctrl.addElement(edge, {newOp}, {child});
                 }
             }
 
@@ -191,6 +372,20 @@ namespace rocRoller
                 }
             }
             graph.control.addElement(Sequence(), {bottom}, {op});
+        }
+
+        void insertAfter(KernelGraph& graph, int op, int top, int bottom)
+        {
+            auto location = graph.control.getLocation(op);
+            for(auto const& output : location.outgoing)
+            {
+                auto edge = graph.control.getElement(output);
+                int  child
+                    = *graph.control.getNeighbours<Graph::Direction::Downstream>(output).begin();
+                graph.control.deleteElement(output);
+                graph.control.addElement(edge, {bottom}, {child});
+            }
+            graph.control.addElement(Sequence(), {op}, {top});
         }
 
         void insertWithBody(KernelGraph& graph, int op, int newOp)
@@ -488,30 +683,6 @@ namespace rocRoller
                       targetRequired.cend(),
                       std::inserter(required, required.end()));
 
-            auto elem      = graph.control.getElement(tag);
-            auto ldsTarget = std::visit(
-                rocRoller::overloaded{
-                    [&](StoreTiled const& op) {
-                        auto ldsSpec = Connections::LDSTypeAndSubDimension{
-                            LDS().name(), 0, Connections::LDSLoadStore::STORE_INTO_LDS};
-                        return graph.mapper.get(tag, ldsSpec);
-                    },
-                    [&](LoadTiled const& op) {
-                        auto ldsSpec = Connections::LDSTypeAndSubDimension{
-                            LDS().name(), 0, Connections::LDSLoadStore::LOAD_FROM_LDS};
-                        return graph.mapper.get(tag, ldsSpec);
-                    },
-                    [&](auto const& op) { return -1; }},
-                std::get<Operation>(elem));
-
-            if(ldsTarget != -1)
-            {
-                auto [ldsRequired, ldsPath] = findRequiredCoordinates(ldsTarget, direction, graph);
-                std::copy(ldsPath.cbegin(), ldsPath.cend(), std::inserter(path, path.end()));
-                std::copy(
-                    ldsRequired.cbegin(), ldsRequired.cend(), std::inserter(required, path.end()));
-            }
-
             return {required, path};
         }
 
@@ -544,6 +715,39 @@ namespace rocRoller
                 return rt{*neighbourTag, Graph::Direction::Upstream};
             }
             return {};
+        }
+
+        std::optional<int> findUnrollNeighbour(KernelGraph const& kgraph, int forLoopCoord)
+        {
+            if(forLoopCoord < 0)
+                return {};
+
+            std::optional<int> rv;
+
+            auto forNeighbours
+                = kgraph.coordinates.getNeighbours<GD::Upstream>(forLoopCoord).to<std::vector>();
+            for(auto forNeighbour : forNeighbours)
+            {
+                auto split = kgraph.coordinates.get<Split>(forNeighbour);
+                if(split)
+                {
+                    auto splitNeighbours
+                        = kgraph.coordinates.getNeighbours<GD::Downstream>(forNeighbour)
+                              .to<std::vector>();
+                    for(auto splitNeighbour : splitNeighbours)
+                    {
+                        auto unroll = kgraph.coordinates.get<Unroll>(splitNeighbour);
+                        if(unroll)
+                        {
+                            AssertFatal(!rv || rv == splitNeighbour,
+                                        "More than one Unroll neighbour found.");
+                            rv = splitNeighbour;
+                        }
+                    }
+                }
+            }
+
+            return rv;
         }
 
         int duplicateControlNode(KernelGraph& graph, int tag)

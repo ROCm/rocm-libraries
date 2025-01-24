@@ -237,11 +237,13 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::OrderMemory>(
             !m_commandParameters->allowAmbiguousMemoryNodes));
         transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_commandParameters));
+        transforms.push_back(std::make_shared<KernelGraph::AddLDS>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::LowerLinear>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTile>(m_commandParameters, m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_commandParameters, m_context));
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
 
         // TODO: remove the condition by making ConstantPropagation and Streamk work simultaneously
         if(!m_commandParameters->streamK)
@@ -288,9 +290,11 @@ namespace rocRoller
         {
             transforms.push_back(std::make_shared<KernelGraph::FuseLoops>());
         }
+        transforms.push_back(std::make_shared<KernelGraph::RemoveDuplicates>());
         transforms.push_back(std::make_shared<KernelGraph::OrderEpilogueBlocks>());
-        transforms.push_back(std::make_shared<KernelGraph::AddLDS>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
+        transforms.push_back(
+            std::make_shared<KernelGraph::AddPrefetch>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
         transforms.push_back(std::make_shared<KernelGraph::AddPRNG>(m_context));

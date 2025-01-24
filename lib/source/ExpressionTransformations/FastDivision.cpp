@@ -555,7 +555,7 @@ namespace rocRoller
 
                 auto rv = std::visit(*this, *expr);
 
-                Log::debug("visitor:\n    {}\n    {}", toString(expr), toString(rv));
+                Log::trace("visitor:\n    {}\n    {}", toString(expr), toString(rv));
                 return rv;
             }
 
@@ -571,7 +571,7 @@ namespace rocRoller
             auto visitor = FastDivisionExpressionVisitor(cxt);
             auto rv      = visitor.call(expr);
 
-            Log::debug("fastDivision:\n    {}\n    {}", toString(expr), toString(rv));
+            Log::trace("fastDivision:\n    {}\n    {}", toString(expr), toString(rv));
 
             return rv;
         }
