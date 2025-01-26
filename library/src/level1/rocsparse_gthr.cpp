@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,6 +100,7 @@ INSTANTIATE(int32_t, uint8_t)
 INSTANTIATE(int32_t, uint32_t)
 INSTANTIATE(int32_t, int8_t)
 INSTANTIATE(int32_t, int32_t)
+INSTANTIATE(int32_t, _Float16)
 INSTANTIATE(int32_t, float)
 INSTANTIATE(int32_t, double)
 INSTANTIATE(int32_t, rocsparse_float_complex)
@@ -110,6 +111,7 @@ INSTANTIATE(int64_t, int32_t)
 INSTANTIATE(int64_t, uint8_t)
 INSTANTIATE(int64_t, uint32_t)
 INSTANTIATE(int64_t, int64_t)
+INSTANTIATE(int64_t, _Float16)
 INSTANTIATE(int64_t, float)
 INSTANTIATE(int64_t, double)
 INSTANTIATE(int64_t, rocsparse_float_complex)

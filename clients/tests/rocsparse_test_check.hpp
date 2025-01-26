@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -36,14 +36,15 @@ private:
         {
         case rocsparse_test_numeric_types_enum::all:
         {
-            return std::is_same<T, int8_t>{} || std::is_same<T, float>{}
-                   || std::is_same<T, double>{} || std::is_same<T, rocsparse_float_complex>{}
+            return std::is_same<T, int8_t>{} || std::is_same<T, _Float16>{}
+                   || std::is_same<T, float>{} || std::is_same<T, double>{}
+                   || std::is_same<T, rocsparse_float_complex>{}
                    || std::is_same<T, rocsparse_double_complex>{};
         }
         case rocsparse_test_numeric_types_enum::real_only:
         {
-            return std::is_same<T, int8_t>{} || std::is_same<T, float>{}
-                   || std::is_same<T, double>{};
+            return std::is_same<T, int8_t>{} || std::is_same<T, _Float16>{}
+                   || std::is_same<T, float>{} || std::is_same<T, double>{};
         }
         case rocsparse_test_numeric_types_enum::complex_only:
         {

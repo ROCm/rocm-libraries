@@ -256,6 +256,8 @@ Real precisions: &real_precisions
     { a_type: f16_r, b_type: f16_r, c_type: f32_r, compute_type: f32_r }
   - &int8_precision
     { a_type: i8_r, b_type: i8_r, c_type: i8_r, x_type: i8_r, y_type: i8_r, compute_type: i8_r }
+  - &half_precision
+    { a_type: f16_r, b_type: f16_r, c_type: f16_r, x_type: f16_r, y_type: f16_r, compute_type: f16_r }
   - &single_precision
     { a_type: f32_r, b_type: f32_r, c_type: f32_r, x_type: f32_r, y_type: f32_r, compute_type: f32_r }
   - &double_precision
@@ -317,7 +319,8 @@ All rocsparse_indextype: &all_rocsparse_indextype
          i64]
 
 All rocsparse_datatype: &all_rocsparse_datatype
-        [f32_r,
+        [f16_r,
+         f32_r,
          f64_r
          f32_c,
          f64_c,

@@ -29,7 +29,7 @@ struct rocsparse_test_dispatch_enum
     {
         t,
         it,
-        it_plus_int8,
+        it_plus_int8_float16,
         ijt,
         ixyt,
         iaxyt,

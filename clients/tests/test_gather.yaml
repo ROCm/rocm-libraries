@@ -86,6 +86,33 @@ Tests:
   nnz: [33814, 74711, 311084]
   baseA: [rocsparse_index_base_zero]
 
+- name: gather
+  category: quick
+  function: gather
+  indextype: *i32_i64
+  precision: *half_precision
+  M: [1400]
+  nnz: [5, 77, 723]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: gather
+  category: pre_checkin
+  function: gather
+  indextype: *i32_i64
+  precision: *half_precision
+  M: [12879, 20481, 34769]
+  nnz: [0, 2123, 7689, 9100]
+  baseA: [rocsparse_index_base_one]
+
+- name: gather
+  category: nightly
+  function: gather
+  indextype: *i32_i64
+  precision: *half_precision
+  M: [777234, 1205486, 5467921]
+  nnz: [30476, 54697, 200375]
+  baseA: [rocsparse_index_base_zero]
+
 - name: gather_graph_test
   category: pre_checkin
   function: gather

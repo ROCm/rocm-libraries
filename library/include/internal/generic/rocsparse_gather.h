@@ -54,6 +54,7 @@ extern "C" {
 *  <caption id="gather_uniform">Uniform Precisions</caption>
 *  <tr><th>X / Y
 *  <tr><td>rocsparse_datatype_i8_r
+*  <tr><td>rocsparse_datatype_f16_r
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
 *  <tr><td>rocsparse_datatype_f32_c

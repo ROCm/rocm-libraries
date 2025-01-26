@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -112,7 +112,7 @@ auto rocsparse_it_dispatch(const Arguments& arg)
 }
 
 template <template <typename...> class TEST>
-auto rocsparse_it_plus_int8_dispatch(const Arguments& arg)
+auto rocsparse_it_plus_int8_float16_dispatch(const Arguments& arg)
 {
     const auto I = arg.index_type_I;
     if(I == rocsparse_indextype_i32)
@@ -121,6 +121,8 @@ auto rocsparse_it_plus_int8_dispatch(const Arguments& arg)
         {
         case rocsparse_datatype_i8_r:
             return TEST<int32_t, int8_t>{}(arg);
+        case rocsparse_datatype_f16_r:
+            return TEST<int32_t, _Float16>{}(arg);
         case rocsparse_datatype_f32_r:
             return TEST<int32_t, float>{}(arg);
         case rocsparse_datatype_f64_r:
@@ -133,7 +135,6 @@ auto rocsparse_it_plus_int8_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
-        case rocsparse_datatype_f16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -143,6 +144,8 @@ auto rocsparse_it_plus_int8_dispatch(const Arguments& arg)
         {
         case rocsparse_datatype_i8_r:
             return TEST<int64_t, int8_t>{}(arg);
+        case rocsparse_datatype_f16_r:
+            return TEST<int64_t, _Float16>{}(arg);
         case rocsparse_datatype_f32_r:
             return TEST<int64_t, float>{}(arg);
         case rocsparse_datatype_f64_r:
@@ -154,7 +157,6 @@ auto rocsparse_it_plus_int8_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
-        case rocsparse_datatype_f16_r:
             return TEST<void>{}(arg);
         }
     }

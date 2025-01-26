@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -140,6 +140,11 @@ struct rocsparse_datatype_t
     static inline rocsparse_datatype get();
 };
 
+template <>
+inline rocsparse_datatype rocsparse_datatype_t::get<_Float16>()
+{
+    return rocsparse_datatype_f16_r;
+}
 template <>
 inline rocsparse_datatype rocsparse_datatype_t::get<float>()
 {

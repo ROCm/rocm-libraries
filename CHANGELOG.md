@@ -6,8 +6,8 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 3.5.0
 
 ### Added
-
-* Adds half float mixed precision to SpMM where A and B use float16 and C and the compute type use float
+* Adds half float uniform precision to `rocsparse_scatter` and `rocsparse_gather` routines
+* Adds half float mixed precision to `rocsparse_spmm` where A and B use float16 and C and the compute type use float
 * Added `rocsparse_spmv_alg_csr_rowsplit` algorithm.
 
 ### Optimized

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -80,6 +80,12 @@ try
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int32_t, int8_t>)(handle, x, y));
         return rocsparse_status_success;
     }
+    // half real ; i32
+    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f16_r)
+    {
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int32_t, _Float16>)(handle, x, y));
+        return rocsparse_status_success;
+    }
     // single real ; i32
     if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f32_r)
     {
@@ -110,6 +116,12 @@ try
     if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_i8_r)
     {
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int64_t, int8_t>)(handle, x, y));
+        return rocsparse_status_success;
+    }
+    // half real ; i64
+    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f16_r)
+    {
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int64_t, _Float16>)(handle, x, y));
         return rocsparse_status_success;
     }
     // single real ; i64

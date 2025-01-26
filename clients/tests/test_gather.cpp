@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,5 +24,10 @@
 #include "test.hpp"
 #include "testing_gather.hpp"
 
-TEST_ROUTINE_WITH_CONFIG(
-    gather, level1, rocsparse_test_config_it_plus_int8, arg.M, arg.nnz, arg.baseA, arg.graph_test);
+TEST_ROUTINE_WITH_CONFIG(gather,
+                         level1,
+                         rocsparse_test_config_it_plus_int8_float16,
+                         arg.M,
+                         arg.nnz,
+                         arg.baseA,
+                         arg.graph_test);
