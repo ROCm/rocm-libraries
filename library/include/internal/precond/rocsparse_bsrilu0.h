@@ -451,14 +451,19 @@ rocsparse_status rocsparse_bsrilu0_clear(rocsparse_handle handle, rocsparse_mat_
  *    A \approx LU
  *  \f]
  *
- *  \p rocsparse_bsrilu0 requires a user allocated temporary buffer. Its size is returned
- *  by rocsparse_sbsrilu0_buffer_size(), rocsparse_dbsrilu0_buffer_size(),
- *  rocsparse_cbsrilu0_buffer_size() or rocsparse_zbsrilu0_buffer_size(). Furthermore,
- *  analysis meta data is required. It can be obtained by rocsparse_sbsrilu0_analysis(),
- *  rocsparse_dbsrilu0_analysis(), rocsparse_cbsrilu0_analysis() or
- *  rocsparse_zbsrilu0_analysis(). \p rocsparse_bsrilu0 reports the first zero pivot
- *  (either numerical or structural zero). The zero pivot status can be obtained by
- *  calling rocsparse_bsrilu0_zero_pivot().
+ *  Computing the above incomplete LU factorization requires three steps to complete. First, 
+ *  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_sbsrilu0_buffer_size,
+ *  \ref rocsparse_dbsrilu0_buffer_size, \ref rocsparse_cbsrilu0_buffer_size, or \ref rocsparse_zbsrilu0_buffer_size. Once 
+ *  this buffer size has been determined, the user allocates the buffer and passes it to \ref rocsparse_sbsrilu0_analysis,
+ *  \ref rocsparse_dbsrilu0_analysis, \ref rocsparse_cbsrilu0_analysis, or \ref rocsparse_zbsrilu0_analysis. This will 
+ *  perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_sbsrilu0, 
+ *  \p rocsparse_dbsrilu0, \p rocsparse_cbsrilu0, or \p rocsparse_zbsrilu0 to perform the actual factorization. The calculation 
+ *  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern 
+ *  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls 
+ *  to \ref rocsparse_sbsrilu0 "rocsparse_Xbsrilu0()" are complete, the temporary buffer can be deallocated.
+ *  
+ *  \p rocsparse_bsrilu0 reports the first zero pivot (either numerical or structural zero).
+ *  The zero pivot status can be obtained by calling \ref rocsparse_bsrilu0_zero_pivot().
  *
  *  \note
  *  This function is non blocking and executed asynchronously with respect to the host.

@@ -528,15 +528,86 @@ rocsparse_status rocsparse_csrilu0_clear(rocsparse_handle handle, rocsparse_mat_
 *  \f[
 *    A \approx LU
 *  \f]
+*  where the lower triangular matrix \f$L\f$ and the upper triangular matrix \f$U\f$ are computed using:
+*  \f[
+*    \begin{array}{ll}
+*        L_{ij} = \frac{1}{U_{jj}}(A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times U_{kj}), & \text{if i > j} \\
+*        U_{ij} = (A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times U_{kj}), & \text{if i <= j}
+*    \end{array}
+*  \f]
+*  for each entry found in the CSR matrix \f$A\f$.
 *
-*  \p rocsparse_csrilu0 requires a user allocated temporary buffer. Its size is returned
-*  by rocsparse_scsrilu0_buffer_size(), rocsparse_dcsrilu0_buffer_size(),
-*  rocsparse_ccsrilu0_buffer_size() or rocsparse_zcsrilu0_buffer_size(). Furthermore,
-*  analysis meta data is required. It can be obtained by rocsparse_scsrilu0_analysis(),
-*  rocsparse_dcsrilu0_analysis(), rocsparse_ccsrilu0_analysis() or
-*  rocsparse_zcsrilu0_analysis(). \p rocsparse_csrilu0 reports the first zero pivot
-*  (either numerical or structural zero). The zero pivot status can be obtained by
-*  calling rocsparse_csrilu0_zero_pivot().
+*  Computing the above incomplete \f$LU\f$ factorization requires three steps to complete. First, 
+*  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_scsrilu0_buffer_size,
+*  \ref rocsparse_dcsrilu0_buffer_size, \ref rocsparse_ccsrilu0_buffer_size, or \ref rocsparse_zcsrilu0_buffer_size. Once 
+*  this buffer size has been determined, the user allocates the buffer and passes it to \ref rocsparse_scsrilu0_analysis,
+*  \ref rocsparse_dcsrilu0_analysis, \ref rocsparse_ccsrilu0_analysis, or \ref rocsparse_zcsrilu0_analysis. This will 
+*  perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_scsrilu0, 
+*  \p rocsparse_dcsrilu0, \p rocsparse_ccsrilu0, or \p rocsparse_zcsrilu0 to perform the actual factorization. The calculation 
+*  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern 
+*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls 
+*  to \ref rocsparse_scsrilu0 "rocsparse_Xcsrilu0()" are complete, the temporary buffer can be deallocated.
+*  
+*  When computing the \f$LU\f$ factorization, it is possible that \f$U_{jj} == 0\f$ which would result in a division by zero.
+*  This could occur from either \f$A_{jj}\f$ not existing in the sparse CSR matrix (referred to as a structural zero) or because 
+*  \f$A_{ij} - \sum_{k=0}^{j-1}L_{ik} \times U_{kj} == 0\f$ (referred to as a numerical zero). For example, running the 
+*  \f$LU\f$ factorization on the following matrix:
+*  \f[
+*    \begin{bmatrix}
+*    2 & 1 & 0 \\
+*    1 & 2 & 1 \\
+*    0 & 1 & 2
+*    \end{bmatrix}
+*  \f]
+*  results in a successful \f$LU\f$ factorization, however running with the matrix:
+*  \f[
+*    \begin{bmatrix}
+*    2 & 1 & 0 \\
+*    1 & 1/2 & 1 \\
+*    0 & 1 & 2
+*    \end{bmatrix}
+*  \f]
+*  results in a numerical zero because:
+*  \f[
+*    \begin{array}{ll}
+*        U_{00} &= 2 \\
+*        U_{01} &= 1 \\
+*        L_{10} &= \frac{1}{2} \\
+*        U_{11} &= \frac{1}{2} - \frac{1}{2}
+*               &= 0
+*    \end{array}
+*  \f]
+*  The user can detect the presence of a structural zero by calling \ref rocsparse_csrilu0_zero_pivot() after 
+*  \ref rocsparse_scsrilu0_analysis "rocsparse_Xcsrilu0_analysis()" and/or the presence of a structural or 
+*  numerical zero by calling \ref rocsparse_csrilu0_zero_pivot() after \ref rocsparse_scsrilu0 "rocsparse_Xcsric0()".
+*  In both cases, \ref rocsparse_csrilu0_zero_pivot() will report the first zero pivot (either numerical or structural) 
+*  found. See example below. The user can also set the diagonal type to be \f$1\f$ using \ref rocsparse_set_mat_diag_type() 
+*  which will interpret the matrix \f$A\f$ as having ones on its diagonal (even if no nonzero exists in the sparsity pattern). 
+*
+*  \p rocsparse_csrilu0 computes the \f$LU\f$ factorization inplace meaning that the values array \p csr_val of the \f$A\f$ 
+*  matrix is overwritten with the \f$L\f$ matrix stored in the strictly lower triangular part of \f$A\f$ and the \f$U\f$ matrix
+*  stored in the upper part of \f$A\f$:
+*
+*  \f[
+*    \begin{align}
+*    \begin{bmatrix}
+*    a_{00} & a_{01} & a_{02} \\
+*    a_{10} & a_{11} & a_{12} \\
+*    a_{20} & a_{21} & a_{22}
+*    \end{bmatrix}
+*    \rightarrow
+*    \begin{bmatrix}
+*    u_{00} & u_{01} & u_{02} \\
+*    l_{10} & u_{11} & u_{12} \\
+*    l_{20} & l_{21} & u_{22}
+*    \end{bmatrix}
+*    \end{align}
+*  \f]
+*  The row pointer array \p csr_row_ptr and the column indices array \p csr_col_ind remain the same for \f$A\f$ and \f$LU\f$ as 
+*  the incomplete factorization does not generate new nonzeros in \f$LU\f$ which do not already exist in \f$A\f$.
+*
+*  The performance of computing \f$LU\f$ factorization with rocSPARSE greatly depends on the sparisty pattern
+*  the the matrix \f$A\f$ as this is what determines the amount of parallelism available.
 *
 *  \note
 *  The sparse CSR matrix has to be sorted. This can be achieved by calling

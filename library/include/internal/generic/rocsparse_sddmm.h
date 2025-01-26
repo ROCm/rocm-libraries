@@ -192,7 +192,7 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *
 *  <table>
 *  <caption id="sddmm_algorithms">Algorithms</caption>
-*  <tr><th>Algorithm                         <th>Deterministic  <th>Preprocessing  <th>Notes
+*  <tr><th>CSR/CSC Algorithms                <th>Deterministic  <th>Preprocessing  <th>Notes
 *  <tr><td>rocsparse_sddmm_alg_default</td>  <td>Yes</td>       <td>No</td>        <td>Uses the sparsity pattern of matrix C to perform a limited set of dot products </td>
 *  <tr><td>rocsparse_sddmm_alg_dense</td>    <td>Yes</td>       <td>No</td>        <td>Explicitly converts the matrix C into a dense matrix to perform a dense matrix multiply and add </td>
 *  </table>

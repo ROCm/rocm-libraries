@@ -77,7 +77,7 @@ extern "C" {
 *  The user allocates the \f$C\f$ column indices and values arrays. Now, however, the user calls \p rocsparse_spgemm with the
 *  \ref rocsparse_spgemm_stage_symbolic stage which will fill in the column indices array of \f$C\f$ but not the values array.
 *  The user is then free to repeatedly change the values of \f$A\f$, \f$B\f$, and \f$D\f$ and call \p rocsparse_spgemm with
-*  the \ref rocsparse_spgemm_stage_numeric stage which fill th values array of \f$C\f$. The use of the extra
+*  the \ref rocsparse_spgemm_stage_numeric stage which fill the values array of \f$C\f$. The use of the extra
 *  \ref rocsparse_spgemm_stage_symbolic and \ref rocsparse_spgemm_stage_numeric stages allows the user to compute sparsity pattern
 *  of \f$C\f$ once, but compute the values multiple times.
 *
@@ -100,7 +100,7 @@ extern "C" {
 *  pointer and column indices arrays of the sparse matrices.
 *
 *  In general, when multiplying two sparse matrices together, it is entirely possible that the resulting matrix will require a
-*  a larger index representation to store correctly. For example, when multiplying \f$A \times B\f$ using
+*  larger index representation to store correctly. For example, when multiplying \f$A \times B\f$ using
 *  \ref rocsparse_indextype_i32 index types for the row pointer and column indices arrays, it may be the case that the row pointer
 *  of the resulting \f$C\f$ matrix would require index precision \ref rocsparse_indextype_i64. This is currently not supported. 
 *  In this scenario, the user would need to store the \f$A\f$ and \f$B\f$ matrices using the higher index precision.

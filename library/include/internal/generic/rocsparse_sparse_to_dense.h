@@ -50,7 +50,8 @@ extern "C" {
 *                             &buffer_size,
 *                             nullptr);
 *  \endcode
-*  Finally, the conversion is completed by calling \p rocsparse_sparse_to_dense with both the \p buffer_size and \p temp_buffer:
+*  After this is called, the \p buffer_size will be filled with the size of the required buffer that must be then allocated by the 
+*  user. Finally, the conversion is completed by calling \p rocsparse_sparse_to_dense with both the \p buffer_size and \p temp_buffer:
 *  \code{.c}
 *   // Call dense_to_sparse to complete conversion
 *   rocsparse_sparse_to_dense(handle,

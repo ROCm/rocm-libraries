@@ -152,8 +152,8 @@ extern "C" {
 *   // A = 4 2 0 0
 *   //     0 3 7 0
 *   //     0 0 0 1
-*   rocsparse_int m   = 4;
-*   rocsparse_int n   = 2;
+*   int m   = 4;
+*   int n   = 2;
 *
 *   std::vector<int> hcsr_row_ptr = {0, 1, 3, 5, 6};
 *   std::vector<int> hcsr_col_ind = {0, 0, 1, 1, 2, 3};
@@ -172,7 +172,7 @@ extern "C" {
 *   // Scalar alpha
 *   float alpha = 1.0f;
 *
-*   rocsparse_int nnz = hcsr_row_ptr[m] - hcsr_row_ptr[0];
+*   int nnz = hcsr_row_ptr[m] - hcsr_row_ptr[0];
 *
 *   // Offload data to device
 *   int* dcsr_row_ptr;

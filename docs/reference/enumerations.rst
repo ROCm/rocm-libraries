@@ -230,6 +230,11 @@ rocsparse_gtsv_interleaved_alg
 
 .. doxygenenum:: rocsparse_gtsv_interleaved_alg
 
+rocsparse_gpsv_interleaved_alg
+------------------------------
+
+.. doxygenenum:: rocsparse_gpsv_interleaved_alg
+
 rocsparse_check_spmat_stage
 ---------------------------
 

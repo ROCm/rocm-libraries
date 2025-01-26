@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -439,13 +439,106 @@ rocsparse_status rocsparse_csric0_clear(rocsparse_handle handle, rocsparse_mat_i
 *  \f[
 *    A \approx LL^T
 *  \f]
+*  where the lower triangular matrix \f$L\f$ is computed using:
+*  \f[
+*    L_{ij} = \left\{
+*    \begin{array}{ll}
+*        \sqrt{A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2}},   & \text{if i == j} \\
+*        \frac{1}{L_{jj}}(A_{jj} - \sum_{k=0}^{j-1}L_{ik} \times L_{jk}), & \text{if i > j}
+*    \end{array}
+*    \right.
+*  \f]
+*  for each entry found in the CSR matrix \f$A\f$.
 *
-*  \p rocsparse_csric0 requires a user allocated temporary buffer. Its size is returned
-*  by rocsparse_scsric0_buffer_size() or rocsparse_dcsric0_buffer_size(). Furthermore,
-*  analysis meta data is required. It can be obtained by rocsparse_scsric0_analysis()
-*  or rocsparse_dcsric0_analysis(). \p rocsparse_csric0 reports the first zero pivot
-*  (either numerical or structural zero). The zero pivot status can be obtained by
-*  calling rocsparse_csric0_zero_pivot().
+*  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
+*  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_scsric0_buffer_size,
+*  \ref rocsparse_dcsric0_buffer_size, \ref rocsparse_ccsric0_buffer_size, or \ref rocsparse_zcsric0_buffer_size. Once
+*  this buffer size has been determined, the user allocates the buffer and passes it to \ref rocsparse_scsric0_analysis,
+*  \ref rocsparse_dcsric0_analysis, \ref rocsparse_ccsric0_analysis, or \ref rocsparse_zcsric0_analysis. This will
+*  perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_scsric0,
+*  \p rocsparse_dcsric0, \p rocsparse_ccsric0, or \p rocsparse_zcsric0 to perform the actual factorization. The calculation
+*  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern
+*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls
+*  to \ref rocsparse_scsric0 "rocsparse_Xcsric0()" are complete, the temporary buffer can be deallocated.
+*
+*  When computing the Cholesky factorization, it is possible that \f$L_{jj} == 0\f$ which would result in a division by zero.
+*  This could occur from either \f$A_{jj}\f$ not existing in the sparse CSR matrix (referred to as a structural zero) or because 
+*  \f$A_{jj} - \sum_{k=0}^{j-1}(L_{jk})^{2} == 0\f$ (referred to as a numerical zero). For example, running the Cholesky 
+*  factorization on the following matrix:
+*  \f[
+*    \begin{bmatrix}
+*    2 & 1 & 0 \\
+*    1 & 2 & 1 \\
+*    0 & 1 & 2
+*    \end{bmatrix}
+*  \f]
+*  results in a successful Cholesky factorization, however running with the matrix:
+*  \f[
+*    \begin{bmatrix}
+*    2 & 1 & 0 \\
+*    1 & 1/2 & 1 \\
+*    0 & 1 & 2
+*    \end{bmatrix}
+*  \f]
+*  results in a numerical zero because:
+*  \f[
+*    \begin{array}{ll}
+*        L_{00} &= \sqrt{2} \\
+*        L_{10} &= \frac{1}{\sqrt{2}} \\
+*        L_{11} &= \sqrt{\frac{1}{2} - (\frac{1}{\sqrt{2}})^2}
+*               &= 0
+*    \end{array}
+*  \f]
+*  The user can detect the presence of a structural zero by calling \ref rocsparse_csric0_zero_pivot() after 
+*  \ref rocsparse_scsric0_analysis "rocsparse_Xcsric0_analysis()" and/or the presence of a structural or 
+*  numerical zero by calling \ref rocsparse_csric0_zero_pivot() after \ref rocsparse_scsric0 "rocsparse_Xcsric0()":
+*  \code{.c}
+*  rocsparse_dcsric0(handle,
+*                  m,
+*                  nnz,
+*                  descr_M,
+*                  csr_val,
+*                  csr_row_ptr,
+*                  csr_col_ind,
+*                  info,
+*                  rocsparse_solve_policy_auto,
+*                  temp_buffer);
+*
+*  // Check for zero pivot
+*  if(rocsparse_status_zero_pivot == rocsparse_csric0_zero_pivot(handle,
+*                                                                info,
+*                                                                &position))
+*  {
+*      printf("L has structural and/or numerical zero at L(%d,%d)\n", position, position);
+*  }
+*  \endcode
+*  In both cases, \ref rocsparse_csric0_zero_pivot() will report the first zero pivot (either numerical or structural) 
+*  found. See full example below. The user can also set the diagonal type to be \f$1\f$ using \ref rocsparse_set_mat_diag_type() 
+*  which will interpret the matrix \f$A\f$ as having ones on its diagonal (even if no nonzero exists in the sparsity pattern). 
+*
+*  \p rocsparse_csric0 computes the Cholesky factorization inplace meaning that the values array \p csr_val of the \f$A\f$ 
+*  matrix is overwritten with the \f$L\f$ matrix stored in the lower triangular part of \f$A\f$:
+*
+*  \f[
+*    \begin{align}
+*    \begin{bmatrix}
+*    a_{00} & a_{01} & a_{02} \\
+*    a_{10} & a_{11} & a_{12} \\
+*    a_{20} & a_{21} & a_{22}
+*    \end{bmatrix}
+*    \rightarrow
+*    \begin{bmatrix}
+*    l_{00} & a_{01} & a_{02} \\
+*    l_{10} & l_{11} & a_{12} \\
+*    l_{20} & l_{21} & l_{22}
+*    \end{bmatrix}
+*    \end{align}
+*  \f]
+*  The row pointer array \p csr_row_ptr and the column indices array \p csr_col_ind remain the same for \f$A\f$ and the output as 
+*  the incomplete factorization does not generate new nonzeros in the output which do not already exist in \f$A\f$.
+*
+*  The performance of computing Cholesky factorization with rocSPARSE greatly depends on the sparisty pattern
+*  the the matrix \f$A\f$ as this is what determines the amount of parallelism available.
 *
 *  \note
 *  The sparse CSR matrix has to be sorted. This can be achieved by calling

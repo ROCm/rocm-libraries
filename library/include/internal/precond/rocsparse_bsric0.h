@@ -368,13 +368,19 @@ rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle, rocsparse_mat_i
  *    A \approx LL^T
  *  \f]
  *
- *  \p rocsparse_bsric0 requires a user allocated temporary buffer. Its size is returned
- *  by rocsparse_sbsric0_buffer_size(), rocsparse_dbsric0_buffer_size(),
- *  rocsparse_cbsric0_buffer_size() or rocsparse_zbsric0_buffer_size(). Furthermore,
- *  analysis meta data is required. It can be obtained by rocsparse_sbsric0_analysis(),
- *  rocsparse_dbsric0_analysis(), rocsparse_cbsric0_analysis() or rocsparse_zbsric0_analysis().
+ *  Computing the above incomplete Cholesky factorization requires three steps to complete. First, 
+ *  the user determines the size of the required temporary storage buffer by calling \ref rocsparse_sbsric0_buffer_size,
+ *  \ref rocsparse_dbsric0_buffer_size, \ref rocsparse_cbsric0_buffer_size, or \ref rocsparse_zbsric0_buffer_size. Once 
+ *  this buffer size has been determined, the user allocates the buffer and passes it to \ref rocsparse_sbsric0_analysis,
+ *  \ref rocsparse_dbsric0_analysis, \ref rocsparse_cbsric0_analysis, or \ref rocsparse_zbsric0_analysis. This will 
+ *  perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p rocsparse_sbsric0, 
+ *  \p rocsparse_dbsric0, \p rocsparse_cbsric0, or \p rocsparse_zbsric0 to perform the actual factorization. The calculation 
+ *  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern 
+ *  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls 
+ *  to \ref rocsparse_sbsric0 "rocsparse_Xbsric0()" are complete, the temporary buffer can be deallocated.
+ *  
  *  \p rocsparse_bsric0 reports the first zero pivot (either numerical or structural zero).
- *  The zero pivot status can be obtained by calling rocsparse_bsric0_zero_pivot().
+ *  The zero pivot status can be obtained by calling \ref rocsparse_bsric0_zero_pivot().
  *
  *  \note
  *  This function is non blocking and executed asynchronously with respect to the host.

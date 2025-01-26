@@ -83,7 +83,7 @@ extern "C" {
 *
 *  <table>
 *  <caption id="spmm_csr_algorithms">CSR Algorithms</caption>
-*  <tr><th>Algorithm                              <th>Deterministic  <th>Preprocessing  <th>Notes
+*  <tr><th>CSR Algorithms                         <th>Deterministic  <th>Preprocessing  <th>Notes
 *  <tr><td>rocsparse_spmm_alg_csr</td>            <td>Yes</td>       <td>No</td>        <td>Default algorithm.</td>
 *  <tr><td>rocsparse_spmm_alg_csr_row_split</td>  <td>Yes</td>       <td>No</td>        <td>Assigns a fixed number of threads per row regardless of the number of non-zeros in each row. This can perform well when each row in the matrix has roughly the same number of non-zeros</td>
 *  <tr><td>rocsparse_spmm_alg_csr_nnz_split</td>  <td>No</td>        <td>Yes</td>       <td>Distributes work by having each thread block work on a fixed number of non-zeros regardless of the number of rows that might be involved. This can perform well when the matrix has some rows with few non-zeros and some rows with many non-zeros</td>
@@ -92,7 +92,7 @@ extern "C" {
 *
 *  <table>
 *  <caption id="spmm_coo_algorithms">COO Algorithms</caption>
-*  <tr><th>Algorithm                                    <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><th>COO Algorithms                               <th>Deterministic   <th>Preprocessing <th>Notes
 *  <tr><td>rocsparse_spmm_alg_coo_segmented</td>        <td>Yes</td>        <td>No</td>       <td>Generally not as fast as atomic algorithm but is deterministic</td>
 *  <tr><td>rocsparse_spmm_alg_coo_atomic</td>           <td>No</td>         <td>No</td>       <td>Generally the fastest COO algorithm. Is the default algorithm</td>
 *  <tr><td>rocsparse_spmm_alg_coo_segmented_atomic</td> <td>No</td>         <td>No</td>       <td> </td>
@@ -100,13 +100,13 @@ extern "C" {
 *
 *  <table>
 *  <caption id="spmm_bell_algorithms">Blocked-ELL Algorithms</caption>
-*  <tr><th>Algorithm                     <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
 *  <tr><td>rocsparse_spmm_alg_bell</td>  <td>Yes</td>        <td>No</td>       <td></td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmm_bsr_algorithms">BSR Algorithms</caption>
-*  <tr><th>Algorithm                     <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><th>BSR Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
 *  <tr><td>rocsparse_spmm_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td></td>
 *  </table>
 *
@@ -271,36 +271,37 @@ extern "C" {
 *      //     1 3 1
 *      //     6 2 4
 *
-*      rocsparse_int m   = 4;
-*      rocsparse_int k   = 6;
-*      rocsparse_int n   = 3;
+*      int m   = 4;
+*      int k   = 6;
+*      int n   = 3;
 *
-*      csr_row_ptr[m + 1] = {0, 1, 3};                                              // device memory
-*      csr_col_ind[nnz]   = {0, 0, 1};                                              // device memory
-*      csr_val[nnz]       = {1, 0, 4, 2, 0, 3, 5, 0, 0, 0, 0, 9, 7, 0, 8, 6, 0, 0}; // device memory
+*      csr_row_ptr[m + 1] = {0, 2, 4, 7, 9};             // device memory
+*      csr_col_ind[nnz]   = {0, 1, 1, 2, 0, 3, 4, 2, 4}; // device memory
+*      csr_val[nnz]       = {1, 4, 2, 3, 5, 7, 8, 9, 6}; // device memory
 *
-*      B[k * n]       = {1, 1, 5, 3, 1, 0, 4, 2, 4, 1, 2, 3, 2, 3, 0, 9, 2, 0};     // device memory
-*      C[m * n]       = {1, 1, 1, 6, 1, 2, 3, 2, 5, 1, 1, 4};                       // device memory
+*      B[k * n]       = {1, 1, 5, 3, 1, 0, 4, 2, 4, 1, 2, 3, 2, 3, 0, 9, 2, 0}; // device memory
+*      C[m * n]       = {1, 1, 1, 6, 1, 2, 3, 2, 5, 1, 1, 4};                   // device memory
 *
-*      rocsparse_int nnz = csr_row_ptr[m] - csr_row_ptr[0];
+*      int nnz = csr_row_ptr[m] - csr_row_ptr[0];
 *
 *      float alpha = 1.0f;
 *      float beta  = 0.0f;
 *
 *      // Create CSR arrays on device
-*      rocsparse_int* csr_row_ptr;
-*      rocsparse_int* csr_col_ind;
+*      int* csr_row_ptr;
+*      int* csr_col_ind;
 *      float* csr_val;
 *      float* B;
 *      float* C;
-*      hipMalloc((void**)&csr_row_ptr, sizeof(rocsparse_int) * (m + 1));
-*      hipMalloc((void**)&csr_col_ind, sizeof(rocsparse_int) * nnz);
+*      hipMalloc((void**)&csr_row_ptr, sizeof(int) * (m + 1));
+*      hipMalloc((void**)&csr_col_ind, sizeof(int) * nnz);
 *      hipMalloc((void**)&csr_val, sizeof(float) * nnz);
 *      hipMalloc((void**)&B, sizeof(float) * k * n);
 *      hipMalloc((void**)&C, sizeof(float) * m * n);
 *
 *      // Create rocsparse handle
-*      rocsparse_local_handle handle;
+*      rocsparse_handle handle;
+*      rocsparse_create_handle(&handle);
 *
 *      // Types
 *      rocsparse_indextype itype = rocsparse_indextype_i32;
@@ -330,7 +331,7 @@ extern "C" {
 *                     rocsparse_spmm_alg_default,
 *                     rocsparse_spmm_stage_buffer_size,
 *                     &buffer_size,
-*                     nullptr));
+*                     nullptr);
 *
 *      // Allocate buffer
 *      void* buffer;
@@ -348,7 +349,7 @@ extern "C" {
 *                     rocsparse_spmm_alg_default,
 *                     rocsparse_spmm_stage_preprocess,
 *                     &buffer_size,
-*                     buffer));
+*                     buffer);
 *
 *      // Pointer mode host
 *      rocsparse_spmm(handle,
@@ -363,7 +364,7 @@ extern "C" {
 *                     rocsparse_spmm_alg_default,
 *                     rocsparse_spmm_stage_compute,
 *                     &buffer_size,
-*                     buffer));
+*                     buffer);
 *
 *      // Clear up on device
 *      hipFree(csr_row_ptr);
@@ -371,11 +372,13 @@ extern "C" {
 *      hipFree(csr_val);
 *      hipFree(B);
 *      hipFree(C);
-*      hipFree(temp_buffer);
+*      hipFree(buffer);
 *
 *      rocsparse_destroy_spmat_descr(mat_A);
 *      rocsparse_destroy_dnmat_descr(mat_B);
 *      rocsparse_destroy_dnmat_descr(mat_C);
+* 
+*      rocsparse_destroy_handle(handle);
 *  \endcode
 *
 *  \par Example
@@ -386,45 +389,46 @@ extern "C" {
 *      //     5 0 0 7 8 0
 *      //     0 0 9 0 6 0
 *
-*      rocsparse_int m   = 4;
-*      rocsparse_int k   = 6;
-*      rocsparse_int n   = 3;
+*      int m   = 4;
+*      int k   = 6;
+*      int n   = 3;
 *
-*      csr_row_ptr[m + 1] = {0, 1, 3};                                              // device memory
-*      csr_col_ind[nnz]   = {0, 0, 1};                                              // device memory
-*      csr_val[nnz]       = {1, 0, 4, 2, 0, 3, 5, 0, 0, 0, 0, 9, 7, 0, 8, 6, 0, 0}; // device memory
+*      csr_row_ptr[m + 1] = {0, 2, 4, 7, 9};             // device memory
+*      csr_col_ind[nnz]   = {0, 1, 1, 2, 0, 3, 4, 2, 4}; // device memory
+*      csr_val[nnz]       = {1, 4, 2, 3, 5, 7, 8, 9, 6}; // device memory
 *
 *      B[batch_count_B * k * n]       = {...};     // device memory
 *      C[batch_count_C * m * n]       = {...};     // device memory
 *
-*      rocsparse_int nnz = csr_row_ptr[m] - csr_row_ptr[0];
+*      int nnz = csr_row_ptr[m] - csr_row_ptr[0];
 *
-*      rocsparse_int batch_count_A = 1;
-*      rocsparse_int batch_count_B = 100;
-*      rocsparse_int batch_count_C = 100;
+*      int batch_count_A = 1;
+*      int batch_count_B = 100;
+*      int batch_count_C = 100;
 *
-*      rocsparse_int offsets_batch_stride_A        = 0;
-*      rocsparse_int columns_values_batch_stride_A = 0;
-*      rocsparse_int batch_stride_B                = k * n;
-*      rocsparse_int batch_stride_C                = m * n;
+*      int offsets_batch_stride_A        = 0;
+*      int columns_values_batch_stride_A = 0;
+*      int batch_stride_B                = k * n;
+*      int batch_stride_C                = m * n;
 *
 *      float alpha = 1.0f;
 *      float beta  = 0.0f;
 *
 *      // Create CSR arrays on device
-*      rocsparse_int* csr_row_ptr;
-*      rocsparse_int* csr_col_ind;
+*      int* csr_row_ptr;
+*      int* csr_col_ind;
 *      float* csr_val;
 *      float* B;
 *      float* C;
-*      hipMalloc((void**)&csr_row_ptr, sizeof(rocsparse_int) * (m + 1));
-*      hipMalloc((void**)&csr_col_ind, sizeof(rocsparse_int) * nnz);
+*      hipMalloc((void**)&csr_row_ptr, sizeof(int) * (m + 1));
+*      hipMalloc((void**)&csr_col_ind, sizeof(int) * nnz);
 *      hipMalloc((void**)&csr_val, sizeof(float) * nnz);
 *      hipMalloc((void**)&B, sizeof(float) * batch_count_B * k * n);
 *      hipMalloc((void**)&C, sizeof(float) * batch_count_C * m * n);
 *
 *      // Create rocsparse handle
-*      rocsparse_local_handle handle;
+*      rocsparse_handle handle;
+*      rocsparse_create_handle(&handle);
 *
 *      // Types
 *      rocsparse_indextype itype = rocsparse_indextype_i32;
@@ -458,7 +462,7 @@ extern "C" {
 *                     rocsparse_spmm_alg_default,
 *                     rocsparse_spmm_stage_buffer_size,
 *                     &buffer_size,
-*                     nullptr));
+*                     nullptr);
 *
 *      // Allocate buffer
 *      void* buffer;
@@ -476,7 +480,7 @@ extern "C" {
 *                     rocsparse_spmm_alg_default,
 *                     rocsparse_spmm_stage_preprocess,
 *                     &buffer_size,
-*                     buffer));
+*                     buffer);
 *
 *      // Pointer mode host
 *      rocsparse_spmm(handle,
@@ -491,7 +495,7 @@ extern "C" {
 *                     rocsparse_spmm_alg_default,
 *                     rocsparse_spmm_stage_compute,
 *                     &buffer_size,
-*                     buffer));
+*                     buffer);
 *
 *      // Clear up on device
 *      hipFree(csr_row_ptr);
@@ -499,11 +503,13 @@ extern "C" {
 *      hipFree(csr_val);
 *      hipFree(B);
 *      hipFree(C);
-*      hipFree(temp_buffer);
+*      hipFree(buffer);
 *
 *      rocsparse_destroy_spmat_descr(mat_A);
 *      rocsparse_destroy_dnmat_descr(mat_B);
 *      rocsparse_destroy_dnmat_descr(mat_C);
+*
+*      rocsparse_destroy_handle(handle);
 *  \endcode
 */
 /**@{*/

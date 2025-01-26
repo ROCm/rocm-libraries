@@ -59,8 +59,8 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p rocsparse_spvv supports the following uniform and mixed precision data types for the sparse and dense vectors x and 
-*  y and compute types for the scalar \f$result\f$.
+*  \p rocsparse_spvv supports the following uniform and mixed precision data types for the sparse and dense vectors \f$x\f$ and 
+*  \f$y\f$ and compute types for the scalar \f$result\f$.
 *
 *  \par Uniform Precisions:
 *  <table>

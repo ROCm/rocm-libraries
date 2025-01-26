@@ -76,20 +76,20 @@ extern "C" {
 *
 *  <table>
 *  <caption id="spmv_coo_algorithms">COO Algorithms</caption>
-*  <tr><th>Algorithm                          <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><th>COO Algorithms                     <th>Deterministic   <th>Preprocessing <th>Notes
 *  <tr><td>rocsparse_spmv_alg_coo</td>        <td>Yes</td>        <td>Yes</td>      <td>Generally not as fast as atomic algorithm but is deterministic</td>
 *  <tr><td>rocsparse_spmv_alg_coo_atomic</td> <td>No</td>         <td>No</td>       <td>Generally the fastest COO algorithm</td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmv_ell_algorithms">ELL Algorithms</caption>
-*  <tr><th>Algorithm                     <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
 *  <tr><td>rocsparse_spmv_alg_ell</td>   <td>Yes</td>        <td>No</td>       <td></td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmv_bsr_algorithms">BSR Algorithms</caption>
-*  <tr><th>Algorithm                     <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><th>BSR Algorithm                 <th>Deterministic   <th>Preprocessing <th>Notes
 *  <tr><td>rocsparse_spmv_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td></td>
 *  </table>
 *
@@ -194,8 +194,8 @@ extern "C" {
 *   // A = 0 2 3 0 0 0
 *   //     5 0 0 7 8 0
 *   //     0 0 9 0 6 0
-*   rocsparse_int m   = 4;
-*   rocsparse_int n   = 6;
+*   int m   = 4;
+*   int n   = 6;
 *
 *   std::vector<int> hcsr_row_ptr = {0, 2, 4, 7, 9};
 *   std::vector<int> hcsr_col_ind = {0, 1, 1, 2, 0, 3, 4, 2, 4};
@@ -209,7 +209,7 @@ extern "C" {
 *   // Scalar beta
 *   float beta = 0.0f;
 *
-*   rocsparse_int nnz = hcsr_row_ptr[m] - hcsr_row_ptr[0];
+*   int nnz = hcsr_row_ptr[m] - hcsr_row_ptr[0];
 *
 *   // Offload data to device
 *   int* dcsr_row_ptr;
@@ -388,20 +388,20 @@ ROCSPARSE_EXPORT rocsparse_status rocsparse_spmv(rocsparse_handle            han
 *
 *  <table>
 *  <caption id="spmv_ex_coo_algorithms">COO Algorithms</caption>
-*  <tr><th>Algorithm                          <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><th>COO Algorithms                     <th>Deterministic   <th>Preprocessing <th>Notes
 *  <tr><td>rocsparse_spmv_alg_coo</td>        <td>Yes</td>        <td>Yes</td>      <td>Generally not as fast as atomic algorithm but is deterministic</td>
 *  <tr><td>rocsparse_spmv_alg_coo_atomic</td> <td>No</td>         <td>No</td>       <td>Generally the fastest COO algorithm</td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmv_ex_ell_algorithms">ELL Algorithms</caption>
-*  <tr><th>Algorithm                     <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
 *  <tr><td>rocsparse_spmv_alg_ell</td>   <td>Yes</td>        <td>No</td>       <td></td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmv_ex_bsr_algorithms">BSR Algorithms</caption>
-*  <tr><th>Algorithm                     <th>Deterministic   <th>Preprocessing <th>Notes
+*  <tr><th>BSR Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
 *  <tr><td>rocsparse_spmv_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td></td>
 *  </table>
 *

@@ -118,7 +118,8 @@ extern "C" {
 *      hipMalloc((void**)&csr_val, sizeof(float) * nnzb * row_block_dim * col_block_dim);
 *
 *      // Create rocsparse handle
-*      rocsparse_local_handle handle;
+*      rocsparse_handle handle;
+*      rocsparse_create_handle(&handle);
 *
 *      rocsparse_mat_descr bsr_descr = nullptr;
 *      rocsparse_create_mat_descr(&bsr_descr);

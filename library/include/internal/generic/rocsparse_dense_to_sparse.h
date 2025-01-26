@@ -65,7 +65,7 @@ extern "C" {
 *  This will determine the number of non-zeros that will exist in the sparse matrix which can be queried using 
 *  \ref rocsparse_spmat_get_size routine. With this, the user can allocate the sparse matrix device arrays and 
 *  set them on the sparse matrix descriptor using \ref rocsparse_csr_set_pointers (CSR format), 
-*  \ref rocsparse_csc_set_pointers (for CSC format), or rocsparse_coo_set_pointers (for COO format). Finally, the 
+*  \ref rocsparse_csc_set_pointers (for CSC format), or \ref rocsparse_coo_set_pointers (for COO format). Finally, the 
 *  conversion is completed by calling \p rocsparse_dense_to_sparse with both the \p buffer_size and \p temp_buffer:
 *  \code{.c}
 *   // Call dense_to_sparse to complete conversion

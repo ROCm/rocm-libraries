@@ -66,7 +66,7 @@ extern "C" {
 *  \f[
 *     r_k = \alpha x - (D + T) y_k.
 *  \f]
-*  Starting with \f$y_0 = \f$ \p y, the method iterates if \f$ k \lt \f$ \p host_nmaxiter and until
+*  Starting with \f$y_0 = \f$ \p y, the method iterates while \f$ k \lt \f$ \p host_nmaxiter and until
 *  \f[
 *     \Vert r_k \Vert_{\infty} \le \epsilon,
 *  \f]

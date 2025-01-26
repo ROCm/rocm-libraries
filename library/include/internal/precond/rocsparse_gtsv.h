@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -126,7 +126,20 @@ rocsparse_status rocsparse_zgtsv_buffer_size(rocsparse_handle                han
 *  \brief Tridiagonal solver with pivoting
 *
 *  \details
-*  \p rocsparse_gtsv solves a tridiagonal system for multiple right hand sides using pivoting.
+*  \p rocsparse_gtsv solves a tridiagonal system for multiple right hand sides using pivoting
+*  \f[
+*    T*B = B
+*  \f]
+*  where \f$T\f$ is a sparse tridiagonal matrix and \f$B\f$ is a dense \f$ldb \times n\f$ matrix storing the
+*  right-hand side vectors in column order. The tridiagonal matrix \f$T\f$ is defined by three vectors: \p dl
+*  for the lower diagonal, \p d for the main diagonal and \p du for the upper diagonal.
+*
+*  Solving the tridiagonal system involves two steps. First, the user calls
+*  \ref rocsparse_sgtsv_buffer_size "rocsparse_Xgtsv_buffer_size()" in order to determine the size of the required
+*  temporary storage buffer. Once determined, the user allocates this buffer and passes it to
+*  \ref rocsparse_sgtsv "rocsparse_Xgtsv()" to perform the actual solve. The \f$B\f$ dense matrix, which initially
+*  stores the \p n right-hand side vectors, is overwritten with the \p n solution vectors after the call to
+*  \ref rocsparse_sgtsv "rocsparse_Xgtsv()".
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -382,7 +395,20 @@ rocsparse_status rocsparse_zgtsv_no_pivot_buffer_size(rocsparse_handle          
 *  \brief Tridiagonal solver (no pivoting)
 *
 *  \details
-*  \p rocsparse_gtsv_no_pivot  solves a tridiagonal linear system for multiple right-hand sides
+*  \p rocsparse_gtsv_no_pivot solves a tridiagonal linear system for multiple right-hand sides without pivoting
+*  \f[
+*    T*B = B
+*  \f]
+*  where \f$T\f$ is a sparse tridiagonal matrix and \f$B\f$ is a dense \f$ldb \times n\f$ matrix storing the
+*  right-hand side vectors in column order. The tridiagonal matrix \f$T\f$ is defined by three vectors: \p dl
+*  for the lower diagonal, \p d for the main diagonal and \p du for the upper diagonal.
+*
+*  Solving the tridiagonal system with multiple right-hand sides without pivoting involves two steps. First,
+*  the user calls \ref rocsparse_sgtsv_no_pivot_buffer_size "rocsparse_Xgtsv_no_pivot_buffer_size()" in order
+*  to determine the size of the required temporary storage buffer. Once determined, the user allocates this
+*  buffer and passes it to \ref rocsparse_sgtsv_no_pivot "rocsparse_Xgtsv_no_pivot()" to perform the actual
+*  solve. The \f$B\f$ dense matrix, which initially stores the \p n right-hand side vectors, is overwritten
+*  with the \p n solution vectors after the call to \ref rocsparse_sgtsv_no_pivot "rocsparse_Xgtsv_no_pivot()".
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -575,7 +601,7 @@ rocsparse_status rocsparse_zgtsv_no_pivot(rocsparse_handle                handle
 *  @param[in]
 *  batch_count The number of systems to solve.
 *  @param[in]
-*  batch_stride The number of elements that separate each system. Must satisfy \p batch_stride >= m.
+*  batch_stride The number of elements that separate each system. Must satisfy \p batch_stride >= \p m.
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
 *              rocsparse_sgtsv_no_pivot_strided_batch(), rocsparse_dgtsv_no_pivot_strided_batch(), rocsparse_cgtsv_no_pivot_strided_batch()
@@ -640,7 +666,55 @@ rocsparse_status
 *  \brief Strided Batch tridiagonal solver (no pivoting)
 *
 *  \details
-*  \p rocsparse_gtsv_no_pivot_strided_batch  solves a batched tridiagonal linear system
+*  \p rocsparse_gtsv_no_pivot_strided_batch solves a batched tridiagonal linear system
+*  \f[
+*    T^{i}*x^{i} = x^{i}
+*  \f]
+*  where for each batch \f$i=0\ldots\f$ \p batch_count, \f$T^{i}\f$ is a sparse tridiagonal matrix and
+*  \f$x^{i}\f$ is a dense right-hand side vector. All of the tridiagonal matrices, \f$T^{i}\f$, are
+*  packed one after the other into three vectors: \p dl for the lower diagonals, \p d for the main
+*  diagonals and \p du for the upper diagonals. See below for a description of what this strided
+*  memory pattern looks like.
+*
+*  Solving the batched tridiagonal system involves two steps. First, the user calls
+*  \ref rocsparse_sgtsv_no_pivot_strided_batch_buffer_size "rocsparse_Xgtsv_no_pivot_strided_batch_buffer_size()"
+*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates
+*  this buffer and passes it to \ref rocsparse_sgtsv_no_pivot_strided_batch "rocsparse_Xgtsv_no_pivot_strided_batch()"
+*  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are
+*  overwritten with the solution after the call to
+*  \ref rocsparse_sgtsv_no_pivot_strided_batch "rocsparse_Xgtsv_no_pivot_strided_batch()".
+*
+*  The strided batch routines write each batch matrix one after the other in memory. For example, consider
+*  the following batch matrices:
+*
+*  \f[
+*    \begin{bmatrix}
+*    t^{0}_{00} & t^{0}_{01} & 0 \\
+*    t^{0}_{10} & t^{0}_{11} & t^{0}_{12} \\
+*    0 & t^{0}_{21} & t^{0}_{22}
+*    \end{bmatrix}
+*    \begin{bmatrix}
+*    t^{1}_{00} & t^{1}_{01} & 0 \\
+*    t^{1}_{10} & t^{1}_{11} & t^{1}_{12} \\
+*    0 & t^{1}_{21} & t^{1}_{22}
+*    \end{bmatrix}
+*    \begin{bmatrix}
+*    t^{2}_{00} & t^{2}_{01} & 0 \\
+*    t^{2}_{10} & t^{2}_{11} & t^{2}_{12} \\
+*    0 & t^{2}_{21} & t^{2}_{22}
+*    \end{bmatrix}
+*  \f]
+*
+*  In strided format, the upper, lower, and diagonal arrays would look like:
+*  \f[
+*    \begin{align}
+*    \text{lower} &= \begin{bmatrix} 0 & t^{0}_{10} & t^{0}_{21} & 0 & t^{1}_{10} & t^{1}_{21} & 0 & t^{2}_{10} & t^{2}_{21} \end{bmatrix} \\
+*    \text{diagonal} &= \begin{bmatrix} t^{0}_{00} & t^{0}_{11} & t^{0}_{22} & t^{1}_{00} & t^{1}_{11} & t^{1}_{22} & t^{2}_{00} & t^{2}_{11} & t^{2}_{22} \end{bmatrix} \\
+*    \text{upper} &= \begin{bmatrix} t^{0}_{01} & t^{0}_{12} & 0 & t^{1}_{01} & t^{1}_{12} & 0 & t^{2}_{01} & t^{2}_{12} & 0 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*  For the lower array, for each batch \p i, the \p i*batch_stride entries are zero and for the upper array the
+*  \p i*batch_stride+batch_stride-1 entries are zero.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -664,7 +738,7 @@ rocsparse_status
 *  @param[in]
 *  batch_count The number of systems to solve.
 *  @param[in]
-*  batch_stride The number of elements that separate each system. Must satisfy \p batch_stride >= m.
+*  batch_stride The number of elements that separate each system. Must satisfy \p batch_stride >= \p m.
 *  @param[in]
 *  temp_buffer temporary storage buffer allocated by the user.
 *
@@ -674,6 +748,115 @@ rocsparse_status
 *  \retval     rocsparse_status_invalid_pointer \p dl, \p d,
 *              \p du, \p x or \p temp_buffer pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
+*
+*  \par Example
+*  \code{.c}
+*   // Size of each square tridiagonal matrix
+*    int m = 6;
+*
+*    // Number of batches
+*    int batch_count = 4;
+*
+*    // Batch stride
+*    int batch_stride = m;
+*
+*    // Host tridiagonal matrix
+*    std::vector<float> hdl(batch_stride * batch_count);
+*    std::vector<float> hd(batch_stride * batch_count);
+*    std::vector<float> hdu(batch_stride * batch_count);
+*
+*    // Solve multiple tridiagonal matrix systems:
+*    //
+*    //      4 2 0 0 0 0        5 3 0 0 0 0        6 4 0 0 0 0        7 5 0 0 0 0
+*    //      2 4 2 0 0 0        3 5 3 0 0 0        4 6 4 0 0 0        5 7 5 0 0 0
+*    // A1 = 0 2 4 2 0 0   A2 = 0 3 5 3 0 0   A3 = 0 4 6 4 0 0   A4 = 0 5 7 5 0 0
+*    //      0 0 2 4 2 0        0 0 3 5 3 0        0 0 4 6 4 0        0 0 5 7 5 0
+*    //      0 0 0 2 4 2        0 0 0 3 5 3        0 0 0 4 6 4        0 0 0 5 7 5
+*    //      0 0 0 0 2 4        0 0 0 0 3 5        0 0 0 0 4 6        0 0 0 0 5 7
+*    //
+*    // hdl = 0 2 2 2 2 2 0 3 3 3 3 3 0 4 4 4 4 4 0 5 5 5 5 5
+*    // hd  = 4 4 4 4 4 4 5 5 5 5 5 5 6 6 6 6 6 6 7 7 7 7 7 7
+*    // hdu = 2 2 2 2 2 0 3 3 3 3 3 0 4 4 4 4 4 0 5 5 5 5 5 0
+*    for(int b = 0; b < batch_count; ++b)
+*    {
+*        for(rocsparse_int i = 0; i < m; ++i)
+*        {
+*            hdl[batch_stride * b + i] = 2 + b;
+*            hd[batch_stride * b + i]  = 4 + b;
+*            hdu[batch_stride * b + i] = 2 + b;
+*        }
+*
+*        hdl[batch_stride * b + 0]       = 0.0f;
+*        hdu[batch_stride * b + (m - 1)] = 0.0f;
+*    }
+*
+*    // Host dense rhs
+*    std::vector<float> hx(batch_stride * batch_count);
+*
+*    for(int b = 0; b < batch_count; ++b)
+*    {
+*        for(int i = 0; i < m; ++i)
+*        {
+*            hx[batch_stride * b + i] = static_cast<float>(b + 1);
+*        }
+*    }
+*
+*    float* ddl = nullptr;
+*    float* dd = nullptr;
+*    float* ddu = nullptr;
+*    float* dx = nullptr;
+*    hipMalloc((void**)&ddl, sizeof(float) * batch_stride * batch_count);
+*    hipMalloc((void**)&dd, sizeof(float) * batch_stride * batch_count);
+*    hipMalloc((void**)&ddu, sizeof(float) * batch_stride * batch_count);
+*    hipMalloc((void**)&dx, sizeof(float) * batch_stride * batch_count);
+*
+*    hipMemcpy(ddl, hdl.data(), sizeof(float) * batch_stride * batch_count, hipMemcpyHostToDevice);
+*    hipMemcpy(dd, hd.data(), sizeof(float) * batch_stride * batch_count, hipMemcpyHostToDevice);
+*    hipMemcpy(ddu, hdu.data(), sizeof(float) * batch_stride * batch_count, hipMemcpyHostToDevice);
+*    hipMemcpy(dx, hx.data(), sizeof(float) * batch_stride * batch_count, hipMemcpyHostToDevice);
+*
+*    // rocSPARSE handle
+*    rocsparse_handle handle;
+*    rocsparse_create_handle(&handle);
+*
+*    // Obtain required buffer size
+*    size_t buffer_size;
+*    rocsparse_sgtsv_no_pivot_strided_batch_buffer_size(handle,
+*                                                       m,
+*                                                       ddl,
+*                                                       dd,
+*                                                       ddu,
+*                                                       dx,
+*                                                       batch_count,
+*                                                       batch_stride,
+*                                                       &buffer_size);
+*
+*    void* dbuffer;
+*    hipMalloc(&dbuffer, buffer_size);
+*
+*    rocsparse_sgtsv_no_pivot_strided_batch(handle,
+*                                           m,
+*                                           ddl,
+*                                           dd,
+*                                           ddu,
+*                                           dx,
+*                                           batch_count,
+*                                           batch_stride,
+*                                           dbuffer);
+*
+*    // Copy right-hand side to host
+*    hipMemcpy(hx.data(), dx, sizeof(float) * batch_stride * batch_count, hipMemcpyDeviceToHost);
+*
+*    // Clear rocSPARSE
+*    rocsparse_destroy_handle(handle);
+*
+*    // Clear device memory
+*    hipFree(ddl);
+*    hipFree(dd);
+*    hipFree(ddu);
+*    hipFree(dx);
+*    hipFree(dbuffer);
+*  \endcode
 */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -740,9 +923,9 @@ rocsparse_status rocsparse_zgtsv_no_pivot_strided_batch(rocsparse_handle        
 *  @param[in]
 *  handle      handle to the rocsparse library context queue.
 *  @param[in]
-*  alg         Algorithm to use when solving tridiagonal systems. Options are thomas ( \p rocsparse_gtsv_interleaved_thomas ),
-*              LU ( \p rocsparse_gtsv_interleaved_lu ), or QR ( \p rocsparse_gtsv_interleaved_qr ). Passing
-*              \p rocsparse_gtsv_interleaved_default defaults the algorithm to use QR. Thomas algorithm is the fastest but is not
+*  alg         Algorithm to use when solving tridiagonal systems. Options are thomas ( \ref rocsparse_gtsv_interleaved_alg_thomas ),
+*              LU ( \ref rocsparse_gtsv_interleaved_alg_lu ), or QR ( \ref rocsparse_gtsv_interleaved_alg_qr ). Passing
+*              \ref rocsparse_gtsv_interleaved_alg_default defaults the algorithm to use QR. Thomas algorithm is the fastest but is not
 *              stable while LU and QR are slower but are stable.
 *  @param[in]
 *  m           size of the tri-diagonal linear system.
@@ -757,7 +940,7 @@ rocsparse_status rocsparse_zgtsv_no_pivot_strided_batch(rocsparse_handle        
 *  @param[in]
 *  batch_count The number of systems to solve.
 *  @param[in]
-*  batch_stride The number of elements that separate consecutive elements in a system. Must satisfy \p batch_stride >= batch_count.
+*  batch_stride The number of elements that separate consecutive elements in a system. Must satisfy \p batch_stride >= \p batch_count.
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
 *              rocsparse_sgtsv_interleaved_batch(), rocsparse_dgtsv_interleaved_batch(), rocsparse_cgtsv_interleaved_batch()
@@ -824,11 +1007,61 @@ rocsparse_status rocsparse_zgtsv_interleaved_batch_buffer_size(rocsparse_handle 
 *  \brief Interleaved Batch tridiagonal solver
 *
 *  \details
-*  \p rocsparse_gtsv_interleaved_batch  solves a batched tridiagonal linear system. The routine requires a temporary storage
-*  buffer that must be allocated by the user. The size of this buffer can be determined by first calling
-*  \p rocsparse_gtsv_interleaved_batch_buffer_size. The user can specify different algorithms for \p rocsparse_gtsv_interleaved_batch
-*  to use. Options are thomas ( \p rocsparse_gtsv_interleaved_thomas ), LU ( \p rocsparse_gtsv_interleaved_lu ),
-*  or QR ( \p rocsparse_gtsv_interleaved_qr ). Passing \p rocsparse_gtsv_interleaved_default defaults the algorithm to use QR.
+*  \p rocsparse_gtsv_interleaved_batch solves a batched tridiagonal linear system
+*  \f[
+*    T^{i}*x^{i} = x^{i}
+*  \f]
+*  where for each batch \f$i=0\ldots\f$ \p batch_count, \f$T^{i}\f$ is a sparse tridiagonal matrix and
+*  \f$x^{i}\f$ is a dense right-hand side vector. All of the tridiagonal matrices, \f$T^{i}\f$, are
+*  packed in an interleaved fashion into three vectors: \p dl for the lower diagonals, \p d for the main
+*  diagonals and \p du for the upper diagonals. See below for a description of what this interleaved
+*  memory pattern looks like.
+*
+*  Solving the batched tridiagonal system involves two steps. First, the user calls
+*  \ref rocsparse_sgtsv_interleaved_batch_buffer_size "rocsparse_Xgtsv_interleaved_batch_buffer_size()"
+*  in order to determine the size of the required temporary storage buffer. Once determined, the user allocates
+*  this buffer and passes it to \ref rocsparse_sgtsv_interleaved_batch "rocsparse_Xgtsv_interleaved_batch()"
+*  to perform the actual solve. The \f$x^{i}\f$ vectors, which initially stores the right-hand side values, are
+*  overwritten with the solution after the call to
+*  \ref rocsparse_sgtsv_interleaved_batch "rocsparse_Xgtsv_interleaved_batch()".
+*
+*  The user can specify different algorithms for \p rocsparse_gtsv_interleaved_batch
+*  to use. Options are thomas ( \ref rocsparse_gtsv_interleaved_alg_thomas ),
+*  LU ( \ref rocsparse_gtsv_interleaved_alg_lu ), or QR ( \ref rocsparse_gtsv_interleaved_alg_qr ).
+*  Passing \ref rocsparse_gtsv_interleaved_alg_default defaults the algorithm to use QR.
+*
+*  Unlike the strided batch routines which write each batch matrix one after the other in memory, the interleaved
+*  routines write the batch matrices such that each element from each matrix is written consecutively one after
+*  the other. For example, consider the following batch matrices:
+*
+*  \f[
+*    \begin{bmatrix}
+*    t^{0}_{00} & t^{0}_{01} & 0 \\
+*    t^{0}_{10} & t^{0}_{11} & t^{0}_{12} \\
+*    0 & t^{0}_{21} & t^{0}_{22}
+*    \end{bmatrix}
+*    \begin{bmatrix}
+*    t^{1}_{00} & t^{1}_{01} & 0 \\
+*    t^{1}_{10} & t^{1}_{11} & t^{1}_{12} \\
+*    0 & t^{1}_{21} & t^{1}_{22}
+*    \end{bmatrix}
+*    \begin{bmatrix}
+*    t^{2}_{00} & t^{2}_{01} & 0 \\
+*    t^{2}_{10} & t^{2}_{11} & t^{2}_{12} \\
+*    0 & t^{2}_{21} & t^{2}_{22}
+*    \end{bmatrix}
+*  \f]
+*
+*  In interleaved format, the upper, lower, and diagonal arrays would look like:
+*  \f[
+*    \begin{align}
+*    \text{lower} &= \begin{bmatrix} 0 & 0 & 0 & t^{0}_{10} & t^{1}_{10} & t^{1}_{10} & t^{0}_{21} & t^{1}_{21} & t^{2}_{21} \end{bmatrix} \\
+*    \text{diagonal} &= \begin{bmatrix} t^{0}_{00} & t^{1}_{00} & t^{2}_{00} & t^{0}_{11} & t^{1}_{11} & t^{2}_{11} & t^{0}_{22} & t^{1}_{22} & t^{2}_{22} \end{bmatrix} \\
+*    \text{upper} &= \begin{bmatrix} t^{0}_{01} & t^{1}_{01} & t^{2}_{01} & t^{0}_{12} & t^{1}_{12} & t^{2}_{12} & 0 & 0 & 0 \end{bmatrix} \\
+*    \end{align}
+*  \f]
+*  For the lower array, the first \p batch_count entries are zero and for the upper array the last \p batch_count
+*  entries are zero.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -840,9 +1073,9 @@ rocsparse_status rocsparse_zgtsv_interleaved_batch_buffer_size(rocsparse_handle 
 *  @param[in]
 *  handle      handle to the rocsparse library context queue.
 *  @param[in]
-*  alg         Algorithm to use when solving tridiagonal systems. Options are thomas ( \p rocsparse_gtsv_interleaved_thomas ),
-*              LU ( \p rocsparse_gtsv_interleaved_lu ), or QR ( \p rocsparse_gtsv_interleaved_qr ). Passing
-*              \p rocsparse_gtsv_interleaved_default defaults the algorithm to use QR. Thomas algorithm is the fastest but is not
+*  alg         Algorithm to use when solving tridiagonal systems. Options are thomas ( \ref rocsparse_gtsv_interleaved_alg_thomas ),
+*              LU ( \ref rocsparse_gtsv_interleaved_alg_lu ), or QR ( \ref rocsparse_gtsv_interleaved_alg_qr ). Passing
+*              \ref rocsparse_gtsv_interleaved_alg_default defaults the algorithm to use QR. Thomas algorithm is the fastest but is not
 *              stable while LU and QR are slower but are stable.
 *  @param[in]
 *  m           size of the tri-diagonal linear system.
@@ -857,7 +1090,7 @@ rocsparse_status rocsparse_zgtsv_interleaved_batch_buffer_size(rocsparse_handle 
 *  @param[in]
 *  batch_count The number of systems to solve.
 *  @param[in]
-*  batch_stride The number of elements that separate consecutive elements in a system. Must satisfy \p batch_stride >= batch_count.
+*  batch_stride The number of elements that separate consecutive elements in a system. Must satisfy \p batch_stride >= \p batch_count.
 *  @param[in]
 *  temp_buffer temporary storage buffer allocated by the user.
 *

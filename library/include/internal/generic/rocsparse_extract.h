@@ -76,8 +76,8 @@ rocsparse_status rocsparse_extract_buffer_size(rocsparse_handle            handl
    *  \brief Sparse matrix extraction.
    *
    *  \details
-   *  \p rocsparse_extract_nnz returns the number of non-zeros of the extracted matrix. The value is 
-   *  available after the analysis phase \ref rocsparse_extract_stage_analysis being executed. This routine 
+   *  \p rocsparse_extract_nnz returns the number of non-zeros in the extracted matrix. The value is 
+   *  available after the analysis phase \ref rocsparse_extract_stage_analysis has been executed. This routine 
    *  is used in conjunction with \ref rocsparse_extract_buffer_size and \ref rocsparse_extract to extract a lower 
    *  or upper triangular sparse matrix from an input sparse matrix. See \ref rocsparse_extract for more
    *  details.
