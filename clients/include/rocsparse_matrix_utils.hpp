@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -921,6 +921,9 @@ struct rocsparse_matrix_utils
     template <typename T, typename I, typename J>
     static void host_csrunsort(const I* csr_row_ptr, J* csr_col_ind, J M, rocsparse_index_base base)
     {
+        std::random_device rd;
+        std::mt19937       generator(rd());
+
         for(J i = 0; i < M; i++)
         {
             I start = csr_row_ptr[i] - base;
@@ -928,7 +931,7 @@ struct rocsparse_matrix_utils
 
             if(start < end)
             {
-                std::random_shuffle(&csr_col_ind[start], &csr_col_ind[end]);
+                std::shuffle(&csr_col_ind[start], &csr_col_ind[end], generator);
             }
         }
     }
@@ -938,6 +941,9 @@ struct rocsparse_matrix_utils
     static void host_coounsort(
         const I* coo_row_ind, I* coo_col_ind, I M, int64_t nnz, rocsparse_index_base base)
     {
+        std::random_device rd;
+        std::mt19937       generator(rd());
+
         int64_t index = 0;
 
         for(I i = 0; i < M; i++)
@@ -951,7 +957,7 @@ struct rocsparse_matrix_utils
 
             if(start < end)
             {
-                std::random_shuffle(&coo_col_ind[start], &coo_col_ind[end]);
+                std::shuffle(&coo_col_ind[start], &coo_col_ind[end], generator);
             }
         }
     }

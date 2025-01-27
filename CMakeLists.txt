@@ -60,10 +60,19 @@ else()
   message(FATAL_ERROR "'hip-clang' compiler required to compile for ROCm platform.")
 endif()
 
-# Build flags
-set(CMAKE_CXX_STANDARD 14)
+# Set CXX flags
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Set CXX standard
+if (CMAKE_CXX_STANDARD EQUAL 14)
+  message( DEPRECATION "Builds using the C++14 standard will no longer be supported in the next major release" )
+elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+endif()
 
 # Build options
 option(BUILD_SHARED_LIBS "Build rocSPARSE as a shared library" ON)

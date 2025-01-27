@@ -94,10 +94,19 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
 find_package(HIP REQUIRED CONFIG PATHS ${CMAKE_PREFIX_PATH})
 
-# Build flags
-set(CMAKE_CXX_STANDARD 14)
+# Set CXX flags
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Set CXX standard
+if (CMAKE_CXX_STANDARD EQUAL 14)
+  message( DEPRECATION "Builds using the C++14 standard will no longer be supported in the next major release" )
+elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+endif()
 
 # If OpenMP is available, we can use it to speed up some tests
 find_package(OpenMP QUIET)
