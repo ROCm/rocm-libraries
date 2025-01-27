@@ -1120,7 +1120,7 @@ def generate_kernels(kernels, precisions, stockham_gen):
     proc = subprocess.Popen(args=[stockham_gen],
                             stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE,
-                            text=True)
+                            universal_newlines=True)
 
     # read from subprocess' stdout through another thread
     json_result = [None]

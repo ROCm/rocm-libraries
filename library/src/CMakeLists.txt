@@ -87,7 +87,7 @@ target_link_directories( rocfft_rtc_helper PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 # from shared library
 include( GenerateExportHeader )
 
-find_package (Python3 3.7 COMPONENTS Interpreter REQUIRED)
+find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
 
 if( NOT DEFINED PYTHON3_EXE )
   set(PYTHON3_EXE python3)
