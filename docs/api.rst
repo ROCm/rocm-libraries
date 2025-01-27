@@ -136,6 +136,7 @@ For complex-to-real transforms, the output buffer XXX
 
 .. doxygenfunction:: hipfftXtExec
 		     
+.. _hip-graph-support-for-hipfft:
 
 HIP graph support for hipFFT
 ============================
