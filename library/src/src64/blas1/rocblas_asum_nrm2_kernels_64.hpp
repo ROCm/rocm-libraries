@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -79,13 +79,14 @@ rocblas_status rocblas_internal_asum_nrm2_kernel_launcher(rocblas_handle handle,
                                                           Tr*            result)
 {
     // param REDUCE is always SUM for these kernels so not passed on
+    static constexpr int WIN = rocblas_dot_WIN<To>();
 
-    rocblas_int blocks = rocblas_reduction_kernel_block_count(n, NB);
+    rocblas_int blocks = rocblas_reduction_kernel_block_count(n, NB * WIN);
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
     //Calling the original rocblas_reduction_kernel_part1 kernel in rocbblas_asum_nrm2_kernels.hpp
-    ROCBLAS_LAUNCH_KERNEL((rocblas_reduction_kernel_part1<API_INT, NB, FETCH>),
+    ROCBLAS_LAUNCH_KERNEL((rocblas_reduction_kernel_part1<API_INT, NB, WIN, FETCH>),
                           dim3(blocks, 1, batches),
                           dim3(NB),
                           0,
