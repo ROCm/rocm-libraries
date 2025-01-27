@@ -173,9 +173,9 @@ namespace rocRoller
             /**
              * @brief Return set of Unroll coordinates that are
              * neighbours of ForLoops.
-	     *
-	     * These are "jammed" coordinates.
-	     */
+             *
+             * These are "jammed" coordinates.
+             */
             std::unordered_set<int> jammedColours(KernelGraph const& graph)
             {
                 std::unordered_set<int> rv;
@@ -198,20 +198,20 @@ namespace rocRoller
              * @brief Return mapping of "existing" operation to set of
              * "duplicate" operations (subset of `candidates`) that
              * should be removed from the control graph.
-	     *
-	     * Note that the "existing" operation is
-	     * NoderOrdering::LeftFirst of all members of the
-	     * "duplicate" set.
-	     *
-	     * An operation is a duplicate of another if:
-	     * - they are the same operations (LoadTiled, StoreLDSTile, LoadLDSTile)
-	     * - they have the same body-parent (typically ForLoopOp)
-	     * - they have the same target (User, LDS)
-	     * - they have the same unroll colouring
-	     *
-	     * If `squashJammedColours` is enabled: any colouring
-	     * associated with a JammedWaveTileNumber is squashed (set
-	     * to zero) when comparing unroll colouring.
+             *
+             * Note that the "existing" operation is
+             * NoderOrdering::LeftFirst of all members of the
+             * "duplicate" set.
+             *
+             * An operation is a duplicate of another if:
+             * - they are the same operations (LoadTiled, StoreLDSTile, LoadLDSTile)
+             * - they have the same body-parent (typically ForLoopOp)
+             * - they have the same target (User, LDS)
+             * - they have the same unroll colouring
+             *
+             * If `squashJammedColours` is enabled: any colouring
+             * associated with a JammedWaveTileNumber is squashed (set
+             * to zero) when comparing unroll colouring.
              */
             std::map<int, std::unordered_set<int>> findDuplicates(KernelGraph const&     graph,
                                                                   UnrollColouring const& colouring,
@@ -279,11 +279,11 @@ namespace rocRoller
             /**
              * @brief Remove duplicates from the graph.
              *
-	     * The operation (either the original operation, or it's
-	     * top-most SetCoordinate) is replaced by a NOP.
-	     *
-	     * References to duplicate tiles are updated to the
-	     * non-duplicate tiles.
+             * The operation (either the original operation, or it's
+             * top-most SetCoordinate) is replaced by a NOP.
+             *
+             * References to duplicate tiles are updated to the
+             * non-duplicate tiles.
              */
             KernelGraph removeDuplicates(KernelGraph const& original, auto const& duplicates)
             {

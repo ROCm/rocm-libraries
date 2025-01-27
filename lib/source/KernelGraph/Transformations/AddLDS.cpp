@@ -150,9 +150,9 @@ namespace rocRoller
         using namespace Register;
 
         /**
-	 * @brief For LDS load/stores, follow DataFlow edges from the
-	 * LDS node to find the associated User node.
-	 */
+         * @brief For LDS load/stores, follow DataFlow edges from the
+         * LDS node to find the associated User node.
+         */
         int getLDSOperationTarget(KernelGraph const& k, int opTag)
         {
             auto [target, direction] = getOperationTarget(opTag, k);
@@ -235,13 +235,13 @@ namespace rocRoller
 
         /**
          * Add LDS transformer.
-	 *
-	 * Splits LoadTiled operations into:
-	 * - LoadTiled
-	 * - StoreLDSTile
-	 * - LoadLDSTile
-	 *
-	 * Similarly for StoreTiled operations.
+         *
+         * Splits LoadTiled operations into:
+         * - LoadTiled
+         * - StoreLDSTile
+         * - LoadLDSTile
+         *
+         * Similarly for StoreTiled operations.
          */
         struct AddLDSVisitor
         {
@@ -263,9 +263,9 @@ namespace rocRoller
 
         /**
          * Add Barrier transformer.
-	 *
-	 * Adds Barrier operations for non-prefetched load/store
-	 * operations that go through LDS.
+         *
+         * Adds Barrier operations for non-prefetched load/store
+         * operations that go through LDS.
          */
         struct AddBarrierVisitor
         {

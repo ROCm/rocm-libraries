@@ -28,7 +28,8 @@ namespace rocRoller
          */
         class KernelGraph
         {
-            std::vector<GraphConstraint> m_constraints{&NoDanglingMappings, &SingleControlRoot};
+            std::vector<GraphConstraint> m_constraints{
+                &NoDanglingMappings, &SingleControlRoot, &NoRedundantSetCoordinates};
 
         public:
             ControlGraph::ControlGraph       control;

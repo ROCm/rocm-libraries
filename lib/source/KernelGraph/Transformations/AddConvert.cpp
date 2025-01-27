@@ -168,14 +168,6 @@ namespace rocRoller
         {
             TIMER(t, "KernelGraph::addConvert");
 
-            // XXX REMOVE THIS
-            {
-                std::ofstream dfile;
-                dfile.open("pre-add-convert.dot", std::ofstream::out | std::ofstream::trunc);
-                dfile << k.toDOT();
-                dfile.close();
-            }
-
             auto graph = k;
 
             AddConvertOperations adder;

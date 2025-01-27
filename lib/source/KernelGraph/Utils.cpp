@@ -837,6 +837,37 @@ namespace rocRoller
             }
         }
 
+        bool
+            hasExistingSetCoordinate(KernelGraph const& graph, int op, int coordValue, int coordTag)
+        {
+            int tag = op;
+
+            while(true)
+            {
+                auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
+                if(!parent)
+                    return false;
+
+                tag           = parent.value();
+                auto setCoord = graph.control.get<SetCoordinate>(tag);
+                if(!setCoord)
+                    return false;
+
+                auto valueExpr = setCoord.value().value;
+                AssertFatal(evaluationTimes(valueExpr)[Expression::EvaluationTime::Translate],
+                            "SetCoordinate::value should be a literal.");
+
+                if(getUnsignedInt(evaluate(valueExpr)) == coordValue)
+                {
+                    for(auto const& dst : graph.mapper.getConnections(tag))
+                    {
+                        if(dst.coordinate == coordTag)
+                            return true;
+                    }
+                }
+            }
+        }
+
         unsigned int getUnrollValueForOp(KernelGraph const& graph, int unrollDim, int op)
         {
             auto setCoordTag = getSetCoordinateForDim(graph, unrollDim, op);

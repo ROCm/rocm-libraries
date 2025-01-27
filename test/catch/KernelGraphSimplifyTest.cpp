@@ -130,7 +130,7 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
         /* graph1 should be:
          *
          *          Kernel
-	 *            |
+         *            |
          *          Assign
          */
 
@@ -160,11 +160,11 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
         /* graph0 is:
          *
          *          Kernel
-	 *          /   \
+         *          /   \
          *      LoadA   LoadB
          *          \   /
-	 *           NOP
-	 *            |
+         *           NOP
+         *            |
          *         Assign
          */
 
@@ -199,11 +199,11 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
         /* graph0 is:
          *
          *          Kernel
-	 *          /   \
+         *          /   \
          *        NOP   NOP
          *          \   / \
-	 *           NOP  NOP
-	 *             \  /
+         *           NOP  NOP
+         *             \  /
          *            Assign
          */
 
@@ -212,7 +212,7 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
         /* graph1 should be:
          *
          *          Kernel
-	 *            |
+         *            |
          *          Assign
          */
 

@@ -291,6 +291,21 @@ namespace rocRoller
         int getSetCoordinateForDim(KernelGraph const& graph, int dim, int load);
 
         /**
+         * @brief Determine whether a matching SetCoordinate object exists upstream
+         * from op for a given coordValue and coordTag.
+         *
+         * @param graph
+         * @param op
+         * @param coordValue
+         * @param coordTag
+         * @return bool
+         */
+        bool hasExistingSetCoordinate(KernelGraph const& graph,
+                                      int                op,
+                                      int                coordValue,
+                                      int                coordTag);
+
+        /**
          * Gets the unroll coordinate value that is set by a SetCoordinate node upstream
          * from the operation op, for the dimension unrollDim.
          */

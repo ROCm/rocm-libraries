@@ -1,5 +1,6 @@
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller
 {
@@ -48,6 +49,56 @@ namespace rocRoller
                 msg << ")";
 
                 retval.combine(false, msg.str());
+            }
+
+            return retval;
+        }
+
+        ConstraintStatus NoRedundantSetCoordinates(const KernelGraph& k)
+        {
+            using namespace ControlGraph;
+            using GD = rocRoller::Graph::Direction;
+            ConstraintStatus retval;
+
+            for(const auto& op : k.control.leaves())
+            {
+                std::set<std::pair<int, int>> existingSetCoordData;
+                int                           tag = op;
+
+                while(true)
+                {
+                    auto parent = only(k.control.getInputNodeIndices<Body>(tag));
+                    if(!parent)
+                        break;
+
+                    tag           = parent.value();
+                    auto setCoord = k.control.get<SetCoordinate>(tag);
+                    if(!setCoord)
+                        break;
+
+                    auto valueExpr = setCoord.value().value;
+                    AssertFatal(evaluationTimes(valueExpr)[Expression::EvaluationTime::Translate],
+                                "SetCoordinate::value should be a literal.");
+
+                    auto value = getUnsignedInt(evaluate(valueExpr));
+                    for(auto const& dst : k.mapper.getConnections(tag))
+                    {
+                        auto insertResult = existingSetCoordData.insert({dst.coordinate, value});
+                        if(!insertResult.second)
+                        {
+                            auto setCoordData = insertResult.first;
+                            retval.combine(false,
+                                           concatenate("Redundant SetCoordinate for node ",
+                                                       op,
+                                                       ": SetCoordinate ",
+                                                       tag,
+                                                       " with target coordinate ",
+                                                       setCoordData->first,
+                                                       " and value ",
+                                                       setCoordData->second));
+                        }
+                    }
+                }
             }
 
             return retval;

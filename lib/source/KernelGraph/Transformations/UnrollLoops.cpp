@@ -327,30 +327,31 @@ namespace rocRoller
                     graph.control.addElement(Body(), {tag}, {body});
                     for(auto const& op : findComputeIndexCandidates(graph, body))
                     {
+                        auto pendingOp        = op;
                         auto [required, path] = findAllRequiredCoordinates(op, graph);
                         if(path.count(unrollDimension) > 0)
                         {
-                            auto setCoord = replaceWith(graph,
-                                                        op,
-                                                        graph.control.addElement(SetCoordinate(
-                                                            Expression::literal(coordValue))),
-                                                        false);
-                            graph.mapper.connect<Unroll>(setCoord, unrollDimension);
-                            graph.control.addElement(Body(), {setCoord}, {op});
-                            rv.push_back(setCoord);
+                            if(!hasExistingSetCoordinate(graph, op, coordValue, unrollDimension))
+                            {
+                                auto setCoord = replaceWith(graph,
+                                                            op,
+                                                            graph.control.addElement(SetCoordinate(
+                                                                Expression::literal(coordValue))),
+                                                            false);
+                                graph.mapper.connect<Unroll>(setCoord, unrollDimension);
+                                graph.control.addElement(Body(), {setCoord}, {op});
+                                pendingOp = setCoord;
 
-                            Log::debug("Added SetCoordinate {} for coordinate {} (value {}) above "
-                                       "operation {}",
-                                       setCoord,
-                                       unrollDimension,
-                                       coordValue,
-                                       op);
+                                Log::debug(
+                                    "Added SetCoordinate {} for coordinate {} (value {}) above "
+                                    "operation {}",
+                                    setCoord,
+                                    unrollDimension,
+                                    coordValue,
+                                    op);
+                            }
                         }
-                        else
-                        {
-                            Log::debug("Skipping SetCoordinate for operation {}", op);
-                            rv.push_back(op);
-                        }
+                        rv.push_back(pendingOp);
                     }
                 }
                 return rv;

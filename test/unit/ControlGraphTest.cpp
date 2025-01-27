@@ -527,4 +527,33 @@ namespace rocRollerTest
         EXPECT_EQ((std::set{topSet1, topSet2, topSet3}),
                   getTopSetCoordinates(kg, {load1, load2, load3}));
     }
+
+    TEST_F(ControlGraphTest, hasExistingSetCoordinate)
+    {
+        KernelGraph::KernelGraph kg;
+        using namespace KernelGraph;
+        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
+        int load1 = kg.control.addElement(LoadLDSTile{DataType::Float});
+        int load2 = kg.control.addElement(LoadLDSTile{DataType::Float});
+
+        auto coord1 = 1;
+        auto coord2 = 2;
+        auto coord3 = 3;
+
+        auto unrollDim = 145;
+
+        int set1 = kg.control.addElement(SetCoordinate{Expression::literal(coord1)});
+        kg.mapper.connect<CT::Unroll>(set1, unrollDim);
+        int set2 = kg.control.addElement(SetCoordinate{Expression::literal(coord2)});
+        kg.mapper.connect<CT::Unroll>(set2, unrollDim);
+
+        auto loop = kg.control.addElement(ForLoopOp{});
+
+        kg.control.chain<Body>(loop, set1, set2, load1);
+        kg.control.chain<Sequence>(set1, load2);
+
+        EXPECT_EQ(true, hasExistingSetCoordinate(kg, load1, coord1, unrollDim));
+        EXPECT_EQ(false, hasExistingSetCoordinate(kg, load1, coord3, unrollDim));
+    }
 }
