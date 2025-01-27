@@ -72,9 +72,9 @@ static void impose_hermitian_symmetry_interleaved_1D(std::vector<hostbuf>&     v
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data = ((std::complex<Tfloat>*)vals[0].data()) + ibatch * idist;
+        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ibatch * idist;
 
-        data[0].imag(0.0);
+        data[0].y = 0.0;
 
         if(length[0] % 2 == 0)
         {
@@ -112,7 +112,7 @@ static void impose_hermitian_symmetry_interleaved_2D(std::vector<hostbuf>&     v
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data = ((std::complex<Tfloat>*)vals[0].data()) + ibatch * idist;
+        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ibatch * idist;
 
         data[0].imag(0.0);
 
@@ -204,7 +204,7 @@ static void impose_hermitian_symmetry_interleaved_3D(std::vector<hostbuf>&     v
 {
     for(unsigned int ibatch = 0; ibatch < nbatch; ++ibatch)
     {
-        auto data = ((std::complex<Tfloat>*)vals[0].data()) + ibatch * idist;
+        auto data = ((rocfft_complex<Tfloat>*)vals[0].data()) + ibatch * idist;
 
         data[0].imag(0.0);
 
@@ -514,7 +514,7 @@ static void generate_random_interleaved_data(std::vector<hostbuf>& input,
                                              const Tint1           field_contig_stride,
                                              const size_t          field_contig_dist)
 {
-    auto   idata      = (std::complex<Tfloat>*)input[0].data();
+    auto   idata      = (rocfft_complex<Tfloat>*)input[0].data();
     size_t i_base     = 0;
     auto   partitions = partition_rowmajor(whole_length);
     for(unsigned int b = 0; b < nbatch; b++, i_base += idist)
@@ -534,10 +534,10 @@ static void generate_random_interleaved_data(std::vector<hostbuf>& input,
                 auto write_idx = compute_index(index, whole_stride, i_base);
 
                 // generate number and ensure it is small enough to avoid overflow
-                const Tfloat               x      = (float)gen() / (float)gen.max();
-                const Tfloat               y      = (float)gen() / (float)gen.max();
-                const Tfloat               offset = 0.5;
-                const std::complex<Tfloat> val(x - offset, y - offset);
+                const Tfloat                 x      = (float)gen() / (float)gen.max();
+                const Tfloat                 y      = (float)gen() / (float)gen.max();
+                const Tfloat                 offset = 0.5;
+                const rocfft_complex<Tfloat> val(x - offset, y - offset);
                 idata[write_idx] = val;
             } while(increment_rowmajor(index, length));
         }
@@ -551,7 +551,7 @@ static void generate_interleaved_data(std::vector<hostbuf>& input,
                                       const size_t          idist,
                                       const size_t          nbatch)
 {
-    auto   idata       = (std::complex<Tfloat>*)input[0].data();
+    auto   idata       = (rocfft_complex<Tfloat>*)input[0].data();
     size_t i_base      = 0;
     auto   partitions  = partition_rowmajor(whole_length);
     auto   unit_stride = make_unit_stride(whole_length);
@@ -571,7 +571,7 @@ static void generate_interleaved_data(std::vector<hostbuf>& input,
                     = static_cast<Tfloat>(-0.5)
                       + static_cast<Tfloat>(compute_index(index, unit_stride, 0)) * inv_scale;
 
-                const std::complex<Tfloat> val(val_xy, val_xy);
+                const rocfft_complex<Tfloat> val(val_xy, val_xy);
 
                 const auto i = compute_index(index, whole_stride, i_base);
 
@@ -612,11 +612,11 @@ static void generate_random_planar_data(std::vector<hostbuf>& input,
                 // brick index to write to
                 auto write_idx = compute_index(index, whole_stride, i_base);
 
-                const std::complex<Tfloat> val((float)gen() / (float)gen.max(),
-                                               (float)gen() / (float)gen.max());
-                const Tfloat               offset = 0.5;
-                ireal[write_idx]                  = val.real() - offset;
-                iimag[write_idx]                  = val.imag() - offset;
+                const rocfft_complex<Tfloat> val((float)gen() / (float)gen.max(),
+                                                 (float)gen() / (float)gen.max());
+                const Tfloat                 offset = 0.5;
+                ireal[write_idx]                    = val.real() - offset;
+                iimag[write_idx]                    = val.imag() - offset;
             } while(increment_rowmajor(index, length));
         }
     }

@@ -240,7 +240,7 @@ static inline void compute_interleaved_buffer_hash(const std::vector<hostbuf>& i
 
     size_t max_counter = get_max_counter<Tint1>(whole_length, nbatch);
 
-    auto   idata      = (std::complex<Tfloat>*)ibuffer[0].data();
+    auto   idata      = (rocfft_complex<Tfloat>*)ibuffer[0].data();
     size_t i_base     = 0;
     auto   partitions = partition_rowmajor(whole_length);
 

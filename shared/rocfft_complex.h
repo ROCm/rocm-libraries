@@ -77,6 +77,17 @@ struct rocfft_complex
         return y;
     }
 
+    // Mutators
+    __device__ __host__ void real(const Treal new_x)
+    {
+        x = new_x;
+    }
+
+    __device__ __host__ void imag(const Treal new_y)
+    {
+        y = new_y;
+    }
+
     // Unary operations
     __forceinline__ __device__ __host__ rocfft_complex operator-() const
     {
