@@ -83,11 +83,11 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
                 ss << "hipMemGetInfo failure with error " << hip_status;
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP{std::move(ss)};
+                throw ROCFFT_SKIP{ss.str()};
             }
             else
             {
-                throw ROCFFT_FAIL{std::move(ss)};
+                throw ROCFFT_FAIL{ss.str()};
             }
         }
         vram_avail = total;
@@ -107,7 +107,7 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
         std::stringstream ss;
         ss << "Raw problem size (" << bytes_to_GiB(raw_vram_footprint)
            << " GiB) raw data too large for device";
-        throw ROCFFT_SKIP{std::move(ss)};
+        throw ROCFFT_SKIP{ss.str()};
     }
 
     if(verbose > 2)
@@ -128,7 +128,7 @@ inline void check_problem_fits_device_memory(Tparams& params, const int verbose)
         std::stringstream ss;
         ss << "Problem size (" << bytes_to_GiB(vram_footprint)
            << " GiB) raw data too large for device";
-        throw ROCFFT_SKIP{std::move(ss)};
+        throw ROCFFT_SKIP{ss.str()};
     }
 }
 
@@ -261,13 +261,15 @@ inline void execute_gpu_fft(Tparams&              params,
         if(hip_status != hipSuccess)
         {
             ++n_hip_failures;
+            std::stringstream ss;
+            ss << "Error occurred when allocating device memory for loading callback";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP();
+                throw ROCFFT_SKIP{ss.str()};
             }
             else
             {
-                throw ROCFFT_FAIL();
+                throw ROCFFT_FAIL{ss.str()};
             }
         }
         hip_status = hipMemcpy(load_cb_data_dev.data(),
@@ -277,13 +279,15 @@ inline void execute_gpu_fft(Tparams&              params,
         if(hip_status != hipSuccess)
         {
             ++n_hip_failures;
+            std::stringstream ss;
+            ss << "Error occurred when copying data to device for loading callback";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP();
+                throw ROCFFT_SKIP{ss.str()};
             }
             else
             {
-                throw ROCFFT_FAIL();
+                throw ROCFFT_FAIL{ss.str()};
             }
         }
 
@@ -307,13 +311,15 @@ inline void execute_gpu_fft(Tparams&              params,
         if(hip_status != hipSuccess)
         {
             ++n_hip_failures;
+            std::stringstream ss;
+            ss << "Error occurred when allocating device memory for storing callback";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP();
+                throw ROCFFT_SKIP{ss.str()};
             }
             else
             {
-                throw ROCFFT_FAIL();
+                throw ROCFFT_FAIL{ss.str()};
             }
         }
 
@@ -324,13 +330,15 @@ inline void execute_gpu_fft(Tparams&              params,
         if(hip_status != hipSuccess)
         {
             ++n_hip_failures;
+            std::stringstream ss;
+            ss << "Error occurred when copying data to device for storing callback";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP();
+                throw ROCFFT_SKIP{ss.str()};
             }
             else
             {
-                throw ROCFFT_FAIL();
+                throw ROCFFT_FAIL{ss.str()};
             }
         }
 
@@ -373,11 +381,11 @@ inline void execute_gpu_fft(Tparams&              params,
             ss << "hipMemcpy failure";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP{std::move(ss)};
+                throw ROCFFT_SKIP{ss.str()};
             }
             else
             {
-                throw ROCFFT_FAIL{std::move(ss)};
+                throw ROCFFT_FAIL{ss.str()};
             }
         }
     }
@@ -562,11 +570,11 @@ inline void run_round_trip_inverse(Tparams&              params,
         ++n_hip_failures;
         if(skip_runtime_fails)
         {
-            throw ROCFFT_SKIP{std::move(ss)};
+            throw ROCFFT_SKIP{ss.str()};
         }
         else
         {
-            throw ROCFFT_FAIL{std::move(ss)};
+            throw ROCFFT_FAIL{ss.str()};
         }
     }
     ASSERT_EQ(plan_status, fft_status_success) << "round trip inverse plan creation failed";
@@ -592,11 +600,11 @@ inline void run_round_trip_inverse(Tparams&              params,
                     ss << "hipMemset failure";
                     if(skip_runtime_fails)
                     {
-                        throw ROCFFT_SKIP{std::move(ss)};
+                        throw ROCFFT_SKIP{ss.str()};
                     }
                     else
                     {
-                        throw ROCFFT_FAIL{std::move(ss)};
+                        throw ROCFFT_FAIL{ss.str()};
                     }
                 }
             }
@@ -762,11 +770,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         ss << "Work buffer allocation failed with size: " << params.workbuffersize;
         if(skip_runtime_fails)
         {
-            throw ROCFFT_SKIP{std::move(ss)};
+            throw ROCFFT_SKIP{ss.str()};
         }
         else
         {
-            throw ROCFFT_FAIL{std::move(ss)};
+            throw ROCFFT_FAIL{ss.str()};
         }
     }
     ASSERT_EQ(plan_status, fft_status_success) << "plan creation failed";
@@ -815,11 +823,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             ++n_hip_failures;
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP{std::move(ss)};
+                throw ROCFFT_SKIP{ss.str()};
             }
             else
             {
-                throw ROCFFT_FAIL{std::move(ss)};
+                throw ROCFFT_FAIL{ss.str()};
             }
         }
         pibuffer[i] = ibuffer[i].data();
@@ -994,11 +1002,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                         ss << "hipMemcpy failure with error " << hip_status;
                         if(skip_runtime_fails)
                         {
-                            throw ROCFFT_SKIP{std::move(ss)};
+                            throw ROCFFT_SKIP{ss.str()};
                         }
                         else
                         {
-                            throw ROCFFT_FAIL{std::move(ss)};
+                            throw ROCFFT_FAIL{ss.str()};
                         }
                     }
                 }
@@ -1033,11 +1041,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                         ss << "hipMemcpy failure with error " << hip_status;
                         if(skip_runtime_fails)
                         {
-                            throw ROCFFT_SKIP{std::move(ss)};
+                            throw ROCFFT_SKIP{ss.str()};
                         }
                         else
                         {
-                            throw ROCFFT_FAIL{std::move(ss)};
+                            throw ROCFFT_FAIL{ss.str()};
                         }
                     }
                 }
@@ -1085,11 +1093,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                         ss << "hipMemcpy failure with error " << hip_status;
                         if(skip_runtime_fails)
                         {
-                            throw ROCFFT_SKIP{std::move(ss)};
+                            throw ROCFFT_SKIP{ss.str()};
                         }
                         else
                         {
-                            throw ROCFFT_FAIL{std::move(ss)};
+                            throw ROCFFT_FAIL{ss.str()};
                         }
                     }
                 }
@@ -1149,11 +1157,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                 ss << "hipMemcpy failure with error " << hip_status;
                 if(skip_runtime_fails)
                 {
-                    throw ROCFFT_SKIP{std::move(ss)};
+                    throw ROCFFT_SKIP{ss.str()};
                 }
                 else
                 {
-                    throw ROCFFT_FAIL{std::move(ss)};
+                    throw ROCFFT_FAIL{ss.str()};
                 }
             }
         }
@@ -1215,11 +1223,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                    << " with code " << hipError_to_string(hip_status);
                 if(skip_runtime_fails)
                 {
-                    throw ROCFFT_SKIP{std::move(ss)};
+                    throw ROCFFT_SKIP{ss.str()};
                 }
                 else
                 {
-                    throw ROCFFT_FAIL{std::move(ss)};
+                    throw ROCFFT_FAIL{ss.str()};
                 }
             }
 
@@ -1238,11 +1246,11 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                     ss << "hipMemset failure with error " << hip_status;
                     if(skip_runtime_fails)
                     {
-                        throw ROCFFT_SKIP{std::move(ss)};
+                        throw ROCFFT_SKIP{ss.str()};
                     }
                     else
                     {
-                        throw ROCFFT_FAIL{std::move(ss)};
+                        throw ROCFFT_FAIL{ss.str()};
                     }
                 }
             }
@@ -1457,7 +1465,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
             << "\tcutoff: " << linf_cutoff << params.str();
 
         EXPECT_TRUE(diff.l_2 / cpu_output_norm.l_2
-                    < sqrt(log2(total_length)) * type_epsilon(params.precision))
+                    <= sqrt(log2(total_length)) * type_epsilon(params.precision))
             << "L2 test failed. L2: " << diff.l_2
             << "\tnormalized L2: " << diff.l_2 / cpu_output_norm.l_2
             << "\tepsilon: " << sqrt(log2(total_length)) * type_epsilon(params.precision)

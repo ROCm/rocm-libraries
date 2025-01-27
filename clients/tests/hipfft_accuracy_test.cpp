@@ -91,15 +91,15 @@ TEST_P(accuracy_test, vs_fftw)
             {
                 // explicitly clear cache
                 last_cpu_fft_data = last_cpu_fft_cache();
-                GTEST_SKIP() << e.msg.str();
+                GTEST_SKIP() << e.msg;
             }
             catch(ROCFFT_SKIP& e)
             {
-                GTEST_SKIP() << e.msg.str();
+                GTEST_SKIP() << e.msg;
             }
             catch(ROCFFT_FAIL& e)
             {
-                GTEST_FAIL() << e.msg.str();
+                GTEST_FAIL() << e.msg;
             }
         }
         break;

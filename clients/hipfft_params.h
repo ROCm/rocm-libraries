@@ -209,7 +209,7 @@ public:
             val += workbuffersize;
             std::stringstream msg;
             msg << "Plan work buffer size (" << val << " bytes raw data) too large for device";
-            throw ROCFFT_SKIP{std::move(msg)};
+            throw ROCFFT_SKIP{msg.str()};
         }
         val += workbuffersize;
         return val;

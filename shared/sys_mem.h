@@ -42,10 +42,11 @@ inline size_t bytes_to_GiB(const size_t bytes)
 struct host_memory
 {
 public:
-    host_memory()
+    // acquire a reference to a singleton of this struct
+    static host_memory& singleton()
     {
-        update();
-        set_limit_bytes(total_bytes);
+        static host_memory mem;
+        return mem;
     }
 
     size_t get_total_bytes()
@@ -94,6 +95,12 @@ private:
     size_t free_bytes  = 0;
     size_t limit_bytes = 0;
 
+    host_memory()
+    {
+        update();
+        set_limit_bytes(total_bytes);
+    }
+
     void update()
     {
 #ifdef WIN32
@@ -140,16 +147,21 @@ private:
 
 #endif
 
-        auto deviceProp = get_curr_device_prop();
-        // on integrated APU, we can't expect to reuse "device" memory
-        // for "host" things.
-        if(deviceProp.integrated)
+        try
         {
-            total_bytes -= deviceProp.totalGlobalMem;
+            auto deviceProp = get_curr_device_prop();
+            // on integrated APU, we can't expect to reuse "device" memory
+            // for "host" things.
+            if(deviceProp.integrated)
+            {
+                total_bytes -= deviceProp.totalGlobalMem;
+            }
+        }
+        catch(std::runtime_error&)
+        {
+            // assume we're not on APU, can use full host memory
         }
     }
 };
-
-inline static host_memory host_mem_info;
 
 #endif // SYSMEM_H

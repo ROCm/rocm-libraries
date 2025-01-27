@@ -21,18 +21,34 @@
 #ifndef ROCFFT_CLIENT_EXCEPT_H
 #define ROCFFT_CLIENT_EXCEPT_H
 
-#include <sstream>
+#include <string>
 
 // exception type to throw when we want to skip a problem
 struct ROCFFT_SKIP
 {
-    std::stringstream msg;
+    const std::string msg;
+    ROCFFT_SKIP(std::string&& s)
+        : msg(std::move(s))
+    {
+    }
+    ROCFFT_SKIP(const std::string& s)
+        : msg(s)
+    {
+    }
 };
 
 // exception type to throw when we want to consider a problem failed
 struct ROCFFT_FAIL
 {
-    std::stringstream msg;
+    const std::string msg;
+    ROCFFT_FAIL(std::string&& s)
+        : msg(std::move(s))
+    {
+    }
+    ROCFFT_FAIL(const std::string& s)
+        : msg(s)
+    {
+    }
 };
 
 #endif

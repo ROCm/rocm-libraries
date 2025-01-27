@@ -409,7 +409,7 @@ int main(int argc, char* argv[])
     app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
     app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
     app.add_option("--R", ramgb, "RAM limit in GiB for tests")
-        ->default_val(host_mem_info.get_total_gbytes());
+        ->default_val(host_memory::singleton().get_total_gbytes());
     app.add_option("--V", vramgb, "VRAM limit in GiB for tests")->default_val(0);
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
     app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
@@ -507,7 +507,7 @@ int main(int argc, char* argv[])
 #endif
 
     // Set host memory limit from command-line options
-    host_mem_info.set_limit_gbytes(ramgb);
+    host_memory::singleton().set_limit_gbytes(ramgb);
 
     if(use_fftw_wisdom)
     {
@@ -617,14 +617,14 @@ TEST(manual, vs_fftw)
     {
         // explicitly clear test cache
         last_cpu_fft_data = last_cpu_fft_cache();
-        GTEST_SKIP() << e.msg.str();
+        GTEST_SKIP() << e.msg;
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg.str();
+        GTEST_SKIP() << e.msg;
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg.str();
+        GTEST_FAIL() << e.msg;
     }
 }
