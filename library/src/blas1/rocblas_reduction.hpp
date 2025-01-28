@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -247,6 +247,38 @@ size_t rocblas_reduction_workspace_non_chunked_size(API_INT n, API_INT batch_cou
     // original API
 
     return sizeof(To) * (blocks + 1) * batch_count;
+}
+
+/*! \brief rocblas_reduction_kernel_part2
+    gathers all the partial results in workspace and finishes the final reduction.
+    ********************************************************************/
+template <int NB, int WIN, typename FINALIZE, typename V, typename T = V>
+ROCBLAS_KERNEL(NB)
+rocblas_reduction_kernel_part2(int n_sums, V* __restrict__ in, T* __restrict__ out)
+{
+    V sum = 0;
+
+    size_t offset = size_t(blockIdx.x) * n_sums;
+    in += offset;
+
+    int inc = NB * WIN;
+
+    int i         = threadIdx.x * WIN;
+    int remainder = n_sums % WIN;
+    int end       = n_sums - remainder;
+    for(; i < end; i += inc) // cover all sums as 1 block
+    {
+        for(int j = 0; j < WIN; j++)
+            sum += in[i + j];
+    }
+    if(threadIdx.x < remainder)
+    {
+        sum += in[n_sums - 1 - threadIdx.x];
+    }
+
+    sum = rocblas_dot_block_reduce<NB>(sum);
+    if(threadIdx.x == 0)
+        out[blockIdx.x] = T(FINALIZE{}(sum));
 }
 
 /*! \brief rocblas_reduction_batched_kernel_workspace_size

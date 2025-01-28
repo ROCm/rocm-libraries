@@ -112,40 +112,6 @@ rocblas_reduction_kernel_part1(rocblas_int    n,
 #endif
 }
 
-// kernel 2 is used from non-strided reduction_batched see include file
-// kernel 2 gathers all the partial results in workspace and finishes the final reduction;
-// number of threads (NB) loop blocks
-template <int NB, int WIN, typename FINALIZE, typename To, typename Tr>
-ROCBLAS_KERNEL(NB)
-rocblas_reduction_kernel_part2(rocblas_int nblocks, To* workspace, Tr* result)
-{
-    To sum = 0;
-
-    size_t offset = size_t(blockIdx.x) * nblocks;
-    workspace += offset;
-
-    int inc = NB * WIN;
-
-    int i         = threadIdx.x * WIN;
-    int remainder = nblocks & (WIN - 1);
-    int end       = nblocks - remainder;
-    for(; i < end; i += inc) // cover all sums as 1 block
-    {
-        for(int j = 0; j < WIN; j++)
-            sum += workspace[i + j];
-    }
-    if(threadIdx.x < remainder)
-    {
-        sum += workspace[nblocks - 1 - threadIdx.x];
-    }
-
-    sum = rocblas_dot_block_reduce<NB, To>(sum);
-
-    // Store result on device or in workspace
-    if(threadIdx.x == 0)
-        result[blockIdx.x] = Tr(FINALIZE{}(sum));
-}
-
 /*! \brief
 
     \details

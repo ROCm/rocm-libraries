@@ -305,35 +305,6 @@ rocblas_dot_kernel_magsq(rocblas_int n,
 #endif
 }
 
-template <int NB, int WIN, typename V, typename T = V>
-ROCBLAS_KERNEL(NB)
-rocblas_dot_kernel_reduce(int n_sums, V* __restrict__ in, T* __restrict__ out)
-{
-    V sum = 0;
-
-    size_t offset = size_t(blockIdx.x) * n_sums;
-    in += offset;
-
-    int inc = NB * WIN;
-
-    int i         = threadIdx.x * WIN;
-    int remainder = n_sums % WIN;
-    int end       = n_sums - remainder;
-    for(; i < end; i += inc) // cover all sums as 1 block
-    {
-        for(int j = 0; j < WIN; j++)
-            sum += in[i + j];
-    }
-    if(threadIdx.x < remainder)
-    {
-        sum += in[n_sums - 1 - threadIdx.x];
-    }
-
-    sum = rocblas_dot_block_reduce<NB>(sum);
-    if(threadIdx.x == 0)
-        out[blockIdx.x] = T(sum);
-}
-
 template <typename API_INT, int NB_X, int NB_Y, bool CONJ, typename V, typename T, typename U>
 ROCBLAS_KERNEL(NB_X* NB_Y)
 rocblas_dot_batched_4_kernel(rocblas_int n,
@@ -637,14 +608,15 @@ rocblas_status rocblas_internal_dot_launcher(rocblas_handle __restrict__ handle,
                               workspace,
                               output);
 
-        ROCBLAS_LAUNCH_KERNEL((rocblas_dot_kernel_reduce<DOT_NB, DOT_NELEM>),
-                              dim3(batch_count),
-                              threads,
-                              0,
-                              handle->get_stream(),
-                              blocks,
-                              workspace,
-                              output);
+        ROCBLAS_LAUNCH_KERNEL(
+            (rocblas_reduction_kernel_part2<DOT_NB, DOT_NELEM, rocblas_finalize_identity>),
+            dim3(batch_count),
+            threads,
+            0,
+            handle->get_stream(),
+            blocks,
+            workspace,
+            output);
 
         if(handle->pointer_mode == rocblas_pointer_mode_host)
         {
@@ -733,14 +705,15 @@ rocblas_status rocblas_internal_dot_launcher(rocblas_handle __restrict__ handle,
         }
 
         if(blocks > 1) // if single block first kernel did all work
-            ROCBLAS_LAUNCH_KERNEL((rocblas_dot_kernel_reduce<NB, WIN>),
-                                  dim3(batch_count),
-                                  threads,
-                                  0,
-                                  handle->get_stream(),
-                                  blocks,
-                                  workspace,
-                                  output);
+            ROCBLAS_LAUNCH_KERNEL(
+                (rocblas_reduction_kernel_part2<NB, WIN, rocblas_finalize_identity>),
+                dim3(batch_count),
+                threads,
+                0,
+                handle->get_stream(),
+                blocks,
+                workspace,
+                output);
 
         if(handle->pointer_mode == rocblas_pointer_mode_host)
         {
