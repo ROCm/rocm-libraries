@@ -67,6 +67,9 @@ def parse_args():
     #                     help='Verbose install (optional, default: False)')
     return parser.parse_args()
 
+def arg_into_list(arg) -> list:
+    arg = re.sub(r"['\"]|['\']",'', arg)
+    return arg.split(';')
 
 def vram_detect():
     global OS_info
@@ -322,7 +325,7 @@ def batch(script, xml):
                         raw_cmd = run.firstChild.data
                         var_cmd = raw_cmd.format_map(var_subs)
                         if args.ci_labels:
-                            var_cmd = label_modifiers(var_cmd, args.ci_labels.split(';'))
+                            var_cmd = label_modifiers(var_cmd, arg_into_list(args.ci_labels))
                         error = run_cmd(var_cmd, True, timeout, test_dir)
                         if (error == 2):
                             print( f'***\n*** Timed out when running: {name}\n***')
