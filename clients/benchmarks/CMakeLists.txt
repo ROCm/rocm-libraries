@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -139,8 +139,8 @@ set_target_properties( hipblas_v2-bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
 
-add_dependencies( hipblas-bench hipblas-common )
-add_dependencies( hipblas_v2-bench hipblas-common )
+add_dependencies( hipblas-bench hipblas-clients-common )
+add_dependencies( hipblas_v2-bench hipblas-clients-common )
 
 rocm_install(TARGETS hipblas-bench COMPONENT benchmarks)
 rocm_install(TARGETS hipblas_v2-bench COMPONENT benchmarks)

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -233,7 +233,7 @@ add_custom_command( OUTPUT "${HIPBLAS_GENTEST}"
                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
 
 
-add_custom_target( hipblas-common DEPENDS "${HIPBLAS_COMMON}" "${HIPBLAS_TEMPLATE}" "${HIPBLAS_SMOKE}" "${HIPBLAS_GENTEST}" )
+add_custom_target( hipblas-clients-common DEPENDS "${HIPBLAS_COMMON}" "${HIPBLAS_TEMPLATE}" "${HIPBLAS_SMOKE}" "${HIPBLAS_GENTEST}" )
 
 if( BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   rocm_install(

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -292,8 +292,8 @@ add_custom_command( OUTPUT "${HIPBLAS_V2_TEST_DATA}"
 add_custom_target( hipblas-test-data DEPENDS "${HIPBLAS_TEST_DATA}" )
 add_custom_target( hipblas_v2-test-data DEPENDS "${HIPBLAS_V2_TEST_DATA}" )
 
-add_dependencies( hipblas-test hipblas-test-data hipblas-common )
-add_dependencies( hipblas_v2-test hipblas_v2-test-data hipblas-common )
+add_dependencies( hipblas-test hipblas-test-data hipblas-clients-common )
+add_dependencies( hipblas_v2-test hipblas_v2-test-data hipblas-clients-common )
 
 rocm_install(TARGETS hipblas-test COMPONENT tests)
 rocm_install(TARGETS hipblas_v2-test COMPONENT tests)
