@@ -8,7 +8,7 @@
 rocSPARSE documentation
 ********************************************************************
 
-rocSPARSE is a library that provides basic linear algebra subroutines for sparse matrices and vectors written in HIP and implemented on top of AMD's Radeon Open Compute (ROCm) runtime and toolchains.
+rocSPARSE is a library that provides basic linear algebra subroutines for sparse matrices and vectors written in HIP and implemented on top of AMD's ROCm runtime and toolchains.
 rocSPARSE is created using the HIP programming language and optimized for AMD's latest discrete GPUs.
 
 | The code is open and hosted at: https://github.com/ROCmSoftwarePlatform/rocSPARSE 

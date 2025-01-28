@@ -343,7 +343,7 @@ set(ROCSPARSE_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIB
 
 rocm_create_package(
   NAME ${package_name}
-  DESCRIPTION "Radeon Open Compute SPARSE library"
+  DESCRIPTION "ROCm SPARSE library"
   MAINTAINER "rocSPARSE Maintainer <rocsparse-maintainer@amd.com>"
   LDCONFIG
   LDCONFIG_DIR ${ROCSPARSE_CONFIG_DIR}

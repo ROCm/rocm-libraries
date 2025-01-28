@@ -32,7 +32,7 @@ find_package(ROCM 0.11.0 CONFIG QUIET PATHS "${ROCM_PATH}") # First version with
 if(NOT ROCM_FOUND)
   set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
   set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
-  file(DOWNLOAD https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip
+  file(DOWNLOAD https://github.com/ROCm/rocm-cmake/archive/${rocm_cmake_tag}.zip
        ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}.zip STATUS status LOG log)
 
   list(GET status 0 status_code)
@@ -40,7 +40,7 @@ if(NOT ROCM_FOUND)
 
   if(NOT status_code EQUAL 0)
     message(FATAL_ERROR "error: downloading
-    'https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip' failed
+    'https://github.com/ROCm/rocm-cmake/archive/${rocm_cmake_tag}.zip' failed
     status_code: ${status_code}
     status_string: ${status_string}
     log: ${log}
