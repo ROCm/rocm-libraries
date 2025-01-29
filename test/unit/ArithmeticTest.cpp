@@ -50,7 +50,8 @@ namespace ArithmeticTest
 
             auto k = m_context->kernel();
 
-            if(!m_context->targetArchitecture().target().isCDNAGPU())
+            auto gpu = m_context->targetArchitecture().target();
+            if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
             {
                 GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
             }
@@ -109,6 +110,13 @@ namespace ArithmeticTest
                 co_yield m_context->argLoader()->getValue("a", aArg);
                 co_yield m_context->argLoader()->getValue("b", bArg);
                 co_yield m_context->argLoader()->getValue("shift", shiftArg);
+
+                // TODO: Remove this once we can emit s_waitcnt_X for each counter X
+                if(gpu.isRDNA4GPU())
+                {
+                    co_yield_(Instruction(
+                        "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
+                }
 
                 auto resultPtr = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, {dataType, PointerType::PointerGlobal}, 1);
@@ -511,6 +519,10 @@ namespace ArithmeticTest
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
+        auto       arch          = m_context->targetArchitecture();
+        auto       gpu           = arch.target();
+        auto const wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+
         auto kb = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_result, s_cond_result, s_a, s_b, s_c;
             co_yield m_context->argLoader()->getValue("result", s_result);
@@ -519,6 +531,13 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
             co_yield m_context->argLoader()->getValue("c", s_c);
+
+            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
+            if(gpu.isRDNA4GPU())
+            {
+                co_yield_(Instruction(
+                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
+            }
 
             auto v_result
                 = Register::Value::Placeholder(m_context,
@@ -549,8 +568,9 @@ namespace ArithmeticTest
 
             auto s_r = Register::Value::Placeholder(m_context,
                                                     Register::Type::Scalar,
-                                                    {DataType::Float, PointerType::PointerGlobal},
-                                                    1);
+                                                    {DataType::Float},
+                                                    wavefrontSize == 64 ? 2 : 1,
+                                                    Register::AllocationOptions::FullyContiguous());
 
             co_yield v_a->allocate();
             co_yield v_b->allocate();
@@ -637,7 +657,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().isCDNAGPU())
+        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
@@ -750,10 +770,19 @@ namespace ArithmeticTest
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
+        auto gpu = m_context->targetArchitecture().target();
+
         auto kb = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_result, s_a;
             co_yield m_context->argLoader()->getValue("result", s_result);
             co_yield m_context->argLoader()->getValue("a", s_a);
+
+            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
+            if(gpu.isRDNA4GPU())
+            {
+                co_yield_(Instruction(
+                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
+            }
 
             auto v_result
                 = Register::Value::Placeholder(m_context,
@@ -783,7 +812,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().isCDNAGPU())
+        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
@@ -867,12 +896,21 @@ namespace ArithmeticTest
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
+        auto gpu = m_context->targetArchitecture().target();
+
         auto kb = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_result, s_a, s_b, s_c;
             co_yield m_context->argLoader()->getValue("result", s_result);
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
             co_yield m_context->argLoader()->getValue("c", s_c);
+
+            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
+            if(gpu.isRDNA4GPU())
+            {
+                co_yield_(Instruction(
+                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
+            }
 
             auto v_result
                 = Register::Value::Placeholder(m_context,
@@ -919,6 +957,13 @@ namespace ArithmeticTest
             co_yield m_context->mem()->loadGlobal(v_b, vbPtr, 0, 4);
             co_yield m_context->mem()->loadGlobal(v_c, vcPtr, 0, 8);
 
+            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
+            if(gpu.isRDNA4GPU())
+            {
+                co_yield_(Instruction(
+                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
+            }
+
             // fp32 = fp32 * fp16 + fp32
             co_yield generateOp<Expression::MultiplyAdd>(v_r, s_a, v_b, v_c);
             co_yield m_context->mem()->store(MemoryInstructions::Global, v_result, v_r, 0, 8);
@@ -953,7 +998,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().isCDNAGPU())
+        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
@@ -1075,12 +1120,23 @@ namespace ArithmeticTest
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
+        auto       arch          = m_context->targetArchitecture();
+        auto       gpu           = arch.target();
+        auto const wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+
         auto kb = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_result, s_cond_result, s_a, s_b;
             co_yield m_context->argLoader()->getValue("result", s_result);
             co_yield m_context->argLoader()->getValue("cond_result", s_cond_result);
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
+
+            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
+            if(gpu.isRDNA4GPU())
+            {
+                co_yield_(Instruction(
+                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
+            }
 
             auto v_result
                 = Register::Value::Placeholder(m_context,
@@ -1106,14 +1162,22 @@ namespace ArithmeticTest
             auto v_tmp = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::UInt16, 1);
 
+            auto v_cond
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::UInt32,
+                                               (wavefrontSize == 64) ? 2 : 1,
+                                               Register::AllocationOptions::FullyContiguous());
             auto s_c = Register::Value::Placeholder(m_context,
                                                     Register::Type::Scalar,
-                                                    {DataType::Double, PointerType::PointerGlobal},
-                                                    1);
+                                                    DataType::UInt32,
+                                                    (wavefrontSize == 64) ? 2 : 1,
+                                                    Register::AllocationOptions::FullyContiguous());
 
             co_yield v_a->allocate();
             co_yield v_b->allocate();
             co_yield v_c->allocate();
+            co_yield v_cond->allocate();
             co_yield s_c->allocate();
             co_yield v_result->allocate();
             co_yield v_cond_result->allocate();
@@ -1156,52 +1220,52 @@ namespace ArithmeticTest
                 MemoryInstructions::Global, v_result, v_c, Register::Value::Literal(40), 8);
 
             co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
 
             co_yield m_context->mem()->store(MemoryInstructions::Global,
                                              v_cond_result,
-                                             v_c->subset({0}),
+                                             v_cond->subset({0}),
                                              Register::Value::Literal(0),
                                              4);
 
             co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
 
             co_yield m_context->mem()->store(MemoryInstructions::Global,
                                              v_cond_result,
-                                             v_c->subset({0}),
+                                             v_cond->subset({0}),
                                              Register::Value::Literal(4),
                                              4);
 
             co_yield generateOp<Expression::LessThan>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Global,
                                              v_cond_result,
-                                             v_c->subset({0}),
+                                             v_cond->subset({0}),
                                              Register::Value::Literal(8),
                                              4);
 
             co_yield generateOp<Expression::LessThanEqual>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Global,
                                              v_cond_result,
-                                             v_c->subset({0}),
+                                             v_cond->subset({0}),
                                              Register::Value::Literal(12),
                                              4);
 
             co_yield generateOp<Expression::Equal>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Global,
                                              v_cond_result,
-                                             v_c->subset({0}),
+                                             v_cond->subset({0}),
                                              Register::Value::Literal(16),
                                              4);
 
             co_yield generateOp<Expression::NotEqual>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Global,
                                              v_cond_result,
-                                             v_c->subset({0}),
+                                             v_cond->subset({0}),
                                              Register::Value::Literal(20),
                                              4);
         };
@@ -1210,7 +1274,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().isCDNAGPU())
+        if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }

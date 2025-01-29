@@ -390,6 +390,14 @@ namespace MemoryInstructionsTest
                 Register::ValuePtr s_result;
                 co_yield m_context->argLoader()->getValue("result", s_result);
 
+                // TODO: Remove this once we can emit s_waitcnt_X for each counter X
+                auto gpu = m_context->targetArchitecture().target();
+                if(gpu.isRDNA4GPU())
+                {
+                    co_yield_(Instruction(
+                        "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
+                }
+
                 auto v_result
                     = Register::Value::Placeholder(m_context,
                                                    Register::Type::Vector,
@@ -625,6 +633,14 @@ namespace MemoryInstructionsTest
         auto kb = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_result;
             co_yield m_context->argLoader()->getValue("result", s_result);
+
+            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
+            auto gpu = m_context->targetArchitecture().target();
+            if(gpu.isRDNA4GPU())
+            {
+                co_yield_(Instruction(
+                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
+            }
 
             auto v_result
                 = Register::Value::Placeholder(m_context,

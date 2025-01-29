@@ -62,64 +62,6 @@ namespace rocRollerTest
         EXPECT_EQ(16, rocRoller::PickInstructionWidthBytes(0, 16, gap.begin() + 3, gap.end()));
     }
 
-    TEST_F(ArgumentLoaderTest, loadRangeUnaligned)
-    {
-        Register::ValuePtr r;
-        auto               kernel = m_context->kernel();
-        auto               loader = m_context->argLoader();
-
-        // kernargs: 2, workgroup id: 1, next SGPR: 3
-        kernel->setKernelDimensions(1);
-
-        m_context->schedule(kernel->allocateInitialRegisters());
-        m_context->schedule(loader->loadRange(0, 16, r));
-
-        {
-            std::string expected = R"(
-                s_load_dword s3, s[0:1], 0
-                s_load_dword s4, s[0:1], 4
-                s_load_dword s5, s[0:1], 8
-                s_load_dword s6, s[0:1], 12
-            )";
-
-            EXPECT_EQ(NormalizedSource(expected), NormalizedSource(output()));
-        }
-
-        clearOutput();
-
-        m_context->schedule(loader->loadRange(4, 20, r));
-
-        {
-            std::string expected = R"(
-                s_load_dword s3, s[0:1], 4        // Unaligned
-                s_load_dwordx2 s[4:5], s[0:1], 8  // Aligned
-                s_load_dword s6, s[0:1], 16       // Aligned but only 1 dword left to load.
-            )";
-
-            EXPECT_EQ(NormalizedSource(expected), NormalizedSource(output()));
-        }
-    }
-
-    TEST_F(ArgumentLoaderTest, loadRangeAligned)
-    {
-        Register::ValuePtr r;
-        auto               kernel = m_context->kernel();
-        auto               loader = m_context->argLoader();
-
-        // kernargs: 2, workgroup id: 2, next SGPR: 4
-        kernel->setKernelDimensions(2);
-
-        m_context->schedule(kernel->allocateInitialRegisters());
-        m_context->schedule(loader->loadRange(0, 16, r));
-
-        std::string expected = R"(
-            s_load_dwordx4 s[4:7], s[0:1], 0
-        )";
-
-        EXPECT_EQ(NormalizedSource(expected), NormalizedSource(output()));
-        EXPECT_EQ(DataType::Raw32, r->variableType());
-    }
-
     TEST_F(ArgumentLoaderTest, loadArgExtra)
     {
         auto kernel = m_context->kernel();
@@ -169,7 +111,8 @@ namespace rocRollerTest
         m_context->schedule(loader->loadAllArguments());
 
         std::string expected = R"(
-            s_load_dwordx4 s[4:7], s[0:1], 0
+            s_load_dwordx2 s[4:5], s[0:1], 0
+            s_load_dwordx2 s[6:7], s[0:1], 8
             s_load_dwordx2 s[8:9], s[0:1], 16
         )";
 

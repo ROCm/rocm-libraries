@@ -156,11 +156,12 @@ namespace rocRoller
         return target.name();
     }
 
-    constexpr std::array<rocRoller::GPUArchitectureTarget, 15> SupportedArchitectures
+    constexpr std::array<rocRoller::GPUArchitectureTarget, 16> SupportedArchitectures
         = {GPUArchitectureTarget{GPUArchitectureGFX::GFX908},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX908, {.xnack = true}},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX908, {.sramecc = true}},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX90A},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX90A, {.xnack = true}},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX90A, {.sramecc = true}},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX940},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX941},

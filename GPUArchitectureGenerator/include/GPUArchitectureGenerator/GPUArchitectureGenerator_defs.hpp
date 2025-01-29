@@ -94,6 +94,7 @@ namespace GPUArchitectureGenerator
              {"buffer_atomic_add_f32 v0, v1, s[0:3], 0 offen offset:0", ""}},
 
             {rocRoller::GPUCapability::UnalignedVGPRs, {"v_add_f64 v[0:1], v[0:1], v[3:4]", ""}},
+            {rocRoller::GPUCapability::UnalignedSGPRs, {"s_cmp_eq_u64 s[0:1], s[0:1], s[3:4]", ""}},
     };
 
     // GPUCapability -> <Vector of ISAs That Support It>
@@ -220,9 +221,6 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::CMPXWritesSGPR,
              [](rocRoller::GPUArchitectureTarget x) -> bool { return !x.isRDNAGPU(); }},
-
-            {rocRoller::GPUCapability::UnalignedSGPRs,
-             [](rocRoller::GPUArchitectureTarget x) -> bool { return x.isRDNAGPU(); }},
 
             {rocRoller::GPUCapability::HasWave32,
              [](rocRoller::GPUArchitectureTarget x) -> bool { return x.isRDNAGPU(); }},

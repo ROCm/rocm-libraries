@@ -57,6 +57,7 @@ set(rocroller_src
  source/ExpressionTransformations/RestoreCommandArguments.cpp
  source/ExpressionTransformations/Simplify.cpp
 
+ source/CodeGen/AddInstruction.cpp
  source/CodeGen/ArgumentLoader.cpp
  source/CodeGen/Arithmetic/Add.cpp
  source/CodeGen/Arithmetic/AddShiftL.cpp
@@ -98,6 +99,7 @@ set(rocroller_src
  source/CodeGen/LoadStoreTileGenerator.cpp
  source/CodeGen/LowerFromKernelGraph.cpp
  source/CodeGen/MemoryInstructions.cpp
+ source/CodeGen/SubInstruction.cpp
  source/CodeGen/WaitCount.cpp
 
  source/Costs/Cost.cpp

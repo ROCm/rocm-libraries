@@ -302,13 +302,11 @@ namespace rocRoller
             return 4;
         }
 
-        if(regType == Register::Type::Vector && count * this->getElementSize() > 4
-           && !gpuArch.HasCapability(GPUCapability::UnalignedVGPRs))
+        if(regType == Register::Type::Vector && count > 1)
         {
             return 2;
         }
-        else if(regType == Register::Type::Scalar && count * this->getElementSize() > 4
-                && !gpuArch.HasCapability(GPUCapability::UnalignedSGPRs))
+        else if(regType == Register::Type::Scalar && count > 1)
         {
             return 2;
         }
