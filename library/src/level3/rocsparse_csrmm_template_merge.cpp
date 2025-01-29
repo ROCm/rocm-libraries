@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,254 +25,13 @@
 #include "control.h"
 #include "utility.h"
 
+#include "csrmm/merge_path/kernel_declarations.h"
 #include "csrmm_device_merge.h"
 #include "rocsparse_common.h"
 #include "rocsparse_csrmm.hpp"
 
 namespace rocsparse
 {
-    template <uint32_t WF_SIZE,
-              uint32_t ITEMS_PER_THREAD,
-              uint32_t LOOPS,
-              typename T,
-              typename I,
-              typename J,
-              typename A,
-              typename B,
-              typename C>
-    ROCSPARSE_KERNEL(WF_SIZE)
-    void csrmmnt_merge_path_main_kernel(bool conj_A,
-                                        bool conj_B,
-                                        J    ncol_offset,
-                                        J    ncol,
-                                        J    m,
-                                        J    n,
-                                        J    k,
-                                        I    nnz,
-                                        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                                        const I* __restrict__ csr_row_ptr,
-                                        const J* __restrict__ csr_col_ind,
-                                        const A* __restrict__ csr_val,
-                                        const coordinate_t<uint32_t>* __restrict__ coord0,
-                                        const coordinate_t<uint32_t>* __restrict__ coord1,
-                                        const B* __restrict__ dense_B,
-                                        int64_t ldb,
-                                        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                                        C* __restrict__ dense_C,
-                                        int64_t              ldc,
-                                        rocsparse_order      order_C,
-                                        rocsparse_index_base idx_base,
-                                        bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(alpha != 0 || beta != 1)
-        {
-            rocsparse::csrmmnt_merge_path_main_device<WF_SIZE, ITEMS_PER_THREAD, LOOPS>(conj_A,
-                                                                                        conj_B,
-                                                                                        ncol_offset,
-                                                                                        ncol,
-                                                                                        m,
-                                                                                        n,
-                                                                                        k,
-                                                                                        nnz,
-                                                                                        alpha,
-                                                                                        csr_row_ptr,
-                                                                                        csr_col_ind,
-                                                                                        csr_val,
-                                                                                        coord0,
-                                                                                        coord1,
-                                                                                        dense_B,
-                                                                                        ldb,
-                                                                                        beta,
-                                                                                        dense_C,
-                                                                                        ldc,
-                                                                                        order_C,
-                                                                                        idx_base);
-        }
-    }
-
-    template <uint32_t BLOCKSIZE,
-              uint32_t WF_SIZE,
-              uint32_t ITEMS_PER_THREAD,
-              typename T,
-              typename I,
-              typename J,
-              typename A,
-              typename B,
-              typename C>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnt_merge_path_main_multi_rows_kernel(
-        bool conj_A,
-        bool conj_B,
-        J    ncol_offset,
-        J    ncol,
-        J    m,
-        J    n,
-        J    k,
-        I    nnz,
-        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-        const I* __restrict__ csr_row_ptr,
-        const J* __restrict__ csr_col_ind,
-        const A* __restrict__ csr_val,
-        const coordinate_t<uint32_t>* __restrict__ coord0,
-        const coordinate_t<uint32_t>* __restrict__ coord1,
-        const B* __restrict__ dense_B,
-        int64_t ldb,
-        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-        C* __restrict__ dense_C,
-        int64_t              ldc,
-        rocsparse_order      order_C,
-        rocsparse_index_base idx_base,
-        bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(alpha != 0 || beta != 1)
-        {
-            rocsparse::csrmmnt_merge_path_main_multi_rows_device<BLOCKSIZE,
-                                                                 WF_SIZE,
-                                                                 ITEMS_PER_THREAD>(conj_A,
-                                                                                   conj_B,
-                                                                                   ncol_offset,
-                                                                                   ncol,
-                                                                                   m,
-                                                                                   n,
-                                                                                   k,
-                                                                                   nnz,
-                                                                                   alpha,
-                                                                                   csr_row_ptr,
-                                                                                   csr_col_ind,
-                                                                                   csr_val,
-                                                                                   coord0,
-                                                                                   coord1,
-                                                                                   dense_B,
-                                                                                   ldb,
-                                                                                   beta,
-                                                                                   dense_C,
-                                                                                   ldc,
-                                                                                   order_C,
-                                                                                   idx_base);
-        }
-    }
-
-    template <uint32_t BLOCKSIZE,
-              uint32_t WF_SIZE,
-              uint32_t ITEMS_PER_THREAD,
-              typename T,
-              typename I,
-              typename J,
-              typename A,
-              typename B,
-              typename C>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnt_merge_path_remainder_kernel(bool conj_A,
-                                             bool conj_B,
-                                             J    ncol_offset,
-                                             J    m,
-                                             J    n,
-                                             J    k,
-                                             I    nnz,
-                                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                                             const I* __restrict__ csr_row_ptr,
-                                             const J* __restrict__ csr_col_ind,
-                                             const A* __restrict__ csr_val,
-                                             const coordinate_t<uint32_t>* __restrict__ coord0,
-                                             const coordinate_t<uint32_t>* __restrict__ coord1,
-                                             const B* __restrict__ dense_B,
-                                             int64_t ldb,
-                                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                                             C* __restrict__ dense_C,
-                                             int64_t              ldc,
-                                             rocsparse_order      order_C,
-                                             rocsparse_index_base idx_base,
-                                             bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(alpha != 0 || beta != 1)
-        {
-            rocsparse::csrmmnt_merge_path_remainder_device<BLOCKSIZE, WF_SIZE, ITEMS_PER_THREAD>(
-                conj_A,
-                conj_B,
-                ncol_offset,
-                m,
-                n,
-                k,
-                nnz,
-                alpha,
-                csr_row_ptr,
-                csr_col_ind,
-                csr_val,
-                coord0,
-                coord1,
-                dense_B,
-                ldb,
-                beta,
-                dense_C,
-                ldc,
-                order_C,
-                idx_base);
-        }
-    }
-
-    template <uint32_t BLOCKSIZE,
-              uint32_t WF_SIZE,
-              uint32_t ITEMS_PER_THREAD,
-              typename T,
-              typename I,
-              typename J,
-              typename A,
-              typename B,
-              typename C>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnn_merge_path_kernel(bool conj_A,
-                                   bool conj_B,
-                                   J    m,
-                                   J    n,
-                                   J    k,
-                                   I    nnz,
-                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                                   const I* __restrict__ csr_row_ptr,
-                                   const J* __restrict__ csr_col_ind,
-                                   const A* __restrict__ csr_val,
-                                   const coordinate_t<uint32_t>* __restrict__ coord0,
-                                   const coordinate_t<uint32_t>* __restrict__ coord1,
-                                   const B* __restrict__ dense_B,
-                                   int64_t ldb,
-                                   ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                                   C* __restrict__ dense_C,
-                                   int64_t              ldc,
-                                   rocsparse_order      order_C,
-                                   rocsparse_index_base idx_base,
-                                   bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(alpha != 0 || beta != 1)
-        {
-            rocsparse::csrmmnn_merge_path_device<BLOCKSIZE, WF_SIZE, ITEMS_PER_THREAD>(conj_A,
-                                                                                       conj_B,
-                                                                                       m,
-                                                                                       n,
-                                                                                       k,
-                                                                                       nnz,
-                                                                                       alpha,
-                                                                                       csr_row_ptr,
-                                                                                       csr_col_ind,
-                                                                                       csr_val,
-                                                                                       coord0,
-                                                                                       coord1,
-                                                                                       dense_B,
-                                                                                       ldb,
-                                                                                       beta,
-                                                                                       dense_C,
-                                                                                       ldc,
-                                                                                       order_C,
-                                                                                       idx_base);
-        }
-    }
-
     template <typename T, typename I, typename J, typename A>
     rocsparse_status csrmm_buffer_size_template_merge(rocsparse_handle          handle,
                                                       rocsparse_operation       trans_A,
@@ -483,37 +242,6 @@ namespace rocsparse
         descr->base,                                                                     \
         handle->pointer_mode == rocsparse_pointer_mode_host)
 
-#define LAUNCH_CSRMMNT_MERGE_MAIN_MULTI_ROWS_KERNEL(CSRMMNT_DIM, WF_SIZE, ITEM_PER_THREAD)         \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                            \
-        (rocsparse::                                                                               \
-             csrmmnt_merge_path_main_multi_rows_kernel<CSRMMNT_DIM, WF_SIZE, ITEM_PER_THREAD, T>), \
-        dim3((block_count - 1) / (CSRMMNT_DIM / WF_SIZE) + 1),                                     \
-        dim3(CSRMMNT_DIM),                                                                         \
-        0,                                                                                         \
-        handle->stream,                                                                            \
-        conj_A,                                                                                    \
-        conj_B,                                                                                    \
-        (J)0,                                                                                      \
-        main,                                                                                      \
-        m,                                                                                         \
-        n,                                                                                         \
-        k,                                                                                         \
-        nnz,                                                                                       \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                              \
-        csr_row_ptr,                                                                               \
-        csr_col_ind,                                                                               \
-        csr_val,                                                                                   \
-        coord0,                                                                                    \
-        coord1,                                                                                    \
-        dense_B,                                                                                   \
-        ldb,                                                                                       \
-        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                               \
-        dense_C,                                                                                   \
-        ldc,                                                                                       \
-        order_C,                                                                                   \
-        descr->base,                                                                               \
-        handle->pointer_mode == rocsparse_pointer_mode_host)
-
 #define LAUNCH_CSRMMNT_MERGE_REMAINDER_KERNEL(CSRMMNT_DIM, WF_SIZE, ITEM_PER_THREAD)         \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                      \
         (rocsparse::                                                                         \
@@ -637,6 +365,27 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+#define ROCSPARSE_CSRMM_TEMPLATE_MERGE_PATH_IMPL(NAME) \
+    NAME(handle,                                       \
+         conj_A,                                       \
+         conj_B,                                       \
+         m,                                            \
+         n,                                            \
+         k,                                            \
+         nnz,                                          \
+         alpha_device_host,                            \
+         descr,                                        \
+         csr_val,                                      \
+         csr_row_ptr,                                  \
+         csr_col_ind,                                  \
+         dense_B,                                      \
+         ldb,                                          \
+         beta_device_host,                             \
+         dense_C,                                      \
+         ldc,                                          \
+         order_C,                                      \
+         temp_buffer);
+
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status csrmm_template_merge(rocsparse_handle          handle,
                                           rocsparse_operation       trans_A,
@@ -676,52 +425,16 @@ namespace rocsparse
                || (order_B == rocsparse_order_row
                    && trans_B == rocsparse_operation_conjugate_transpose))
             {
-                RETURN_IF_ROCSPARSE_ERROR((csrmmnn_merge_dispatch<256, T>(handle,
-                                                                          conj_A,
-                                                                          conj_B,
-                                                                          m,
-                                                                          n,
-                                                                          k,
-                                                                          nnz,
-                                                                          alpha_device_host,
-                                                                          descr,
-                                                                          csr_val,
-                                                                          csr_row_ptr,
-                                                                          csr_col_ind,
-                                                                          dense_B,
-                                                                          ldb,
-                                                                          beta_device_host,
-                                                                          dense_C,
-                                                                          ldc,
-                                                                          order_C,
-                                                                          temp_buffer)));
-                return rocsparse_status_success;
+                return ROCSPARSE_CSRMM_TEMPLATE_MERGE_PATH_IMPL(
+                    (rocsparse::csrmmnn_merge_dispatch<256>));
             }
             else if((order_B == rocsparse_order_column && trans_B == rocsparse_operation_transpose)
                     || (order_B == rocsparse_order_column
                         && trans_B == rocsparse_operation_conjugate_transpose)
                     || (order_B == rocsparse_order_row && trans_B == rocsparse_operation_none))
             {
-                RETURN_IF_ROCSPARSE_ERROR((csrmmnt_merge_dispatch<256, T>(handle,
-                                                                          conj_A,
-                                                                          conj_B,
-                                                                          m,
-                                                                          n,
-                                                                          k,
-                                                                          nnz,
-                                                                          alpha_device_host,
-                                                                          descr,
-                                                                          csr_val,
-                                                                          csr_row_ptr,
-                                                                          csr_col_ind,
-                                                                          dense_B,
-                                                                          ldb,
-                                                                          beta_device_host,
-                                                                          dense_C,
-                                                                          ldc,
-                                                                          order_C,
-                                                                          temp_buffer)));
-                return rocsparse_status_success;
+                return ROCSPARSE_CSRMM_TEMPLATE_MERGE_PATH_IMPL(
+                    (rocsparse::csrmmnt_merge_dispatch<256>));
             }
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);

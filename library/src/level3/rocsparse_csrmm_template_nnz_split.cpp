@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #include "control.h"
 #include "utility.h"
 
+#include "csrmm/nnz_split/kernel_declarations.h"
 #include "csrmm_device_nnz_split.h"
 #include "rocsparse_common.h"
 #include "rocsparse_csrmm.hpp"
@@ -33,237 +34,6 @@
 
 namespace rocsparse
 {
-    template <unsigned int BLOCKSIZE,
-              unsigned int WF_SIZE,
-              typename I,
-              typename J,
-              typename A,
-              typename B,
-              typename C,
-              typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnn_nnz_split_main_kernel(bool conj_A,
-                                       bool conj_B,
-                                       J    ncol,
-                                       J    m,
-                                       J    n,
-                                       J    k,
-                                       I    nnz,
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                                       J* __restrict__ row_block_red,
-                                       T* __restrict__ val_block_red,
-                                       const J* __restrict__ row_limits,
-                                       const I* __restrict__ csr_row_ptr,
-                                       const J* __restrict__ csr_col_ind,
-                                       const A* __restrict__ csr_val,
-                                       const B* __restrict__ dense_B,
-                                       int64_t ldb,
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                                       C* __restrict__ dense_C,
-                                       int64_t              ldc,
-                                       rocsparse_order      order_C,
-                                       rocsparse_index_base idx_base,
-                                       bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-
-        if(alpha == 0 && beta == 1)
-        {
-            row_block_red[hipBlockIdx_x] = -1;
-            return;
-        }
-
-        rocsparse::csrmmnn_nnz_split_main_device<BLOCKSIZE, WF_SIZE>(conj_A,
-                                                                     conj_B,
-                                                                     ncol,
-                                                                     m,
-                                                                     n,
-                                                                     k,
-                                                                     nnz,
-                                                                     alpha,
-                                                                     row_block_red,
-                                                                     val_block_red,
-                                                                     row_limits,
-                                                                     csr_row_ptr,
-                                                                     csr_col_ind,
-                                                                     csr_val,
-                                                                     dense_B,
-                                                                     ldb,
-                                                                     beta,
-                                                                     dense_C,
-                                                                     ldc,
-                                                                     order_C,
-                                                                     idx_base);
-    }
-
-    template <unsigned int BLOCKSIZE,
-              unsigned int WF_SIZE,
-              typename I,
-              typename J,
-              typename A,
-              typename B,
-              typename C,
-              typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnn_nnz_split_remainder_kernel(bool conj_A,
-                                            bool conj_B,
-                                            J    offset,
-                                            J    m,
-                                            J    n,
-                                            J    k,
-                                            I    nnz,
-                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                                            J* __restrict__ row_block_red,
-                                            T* __restrict__ val_block_red,
-                                            const J* __restrict__ row_limits,
-                                            const I* __restrict__ csr_row_ptr,
-                                            const J* __restrict__ csr_col_ind,
-                                            const A* __restrict__ csr_val,
-                                            const B* __restrict__ dense_B,
-                                            int64_t ldb,
-                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                                            C* __restrict__ dense_C,
-                                            int64_t              ldc,
-                                            rocsparse_order      order_C,
-                                            rocsparse_index_base idx_base,
-                                            bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-
-        if(alpha == 0 && beta == 1)
-        {
-            row_block_red[hipBlockIdx_x] = -1;
-            return;
-        }
-
-        rocsparse::csrmmnn_nnz_split_remainder_device<BLOCKSIZE, WF_SIZE>(conj_A,
-                                                                          conj_B,
-                                                                          offset,
-                                                                          m,
-                                                                          n,
-                                                                          k,
-                                                                          nnz,
-                                                                          alpha,
-                                                                          row_block_red,
-                                                                          val_block_red,
-                                                                          row_limits,
-                                                                          csr_row_ptr,
-                                                                          csr_col_ind,
-                                                                          csr_val,
-                                                                          dense_B,
-                                                                          ldb,
-                                                                          beta,
-                                                                          dense_C,
-                                                                          ldc,
-                                                                          order_C,
-                                                                          idx_base);
-    }
-
-    template <unsigned int BLOCKSIZE,
-              unsigned int WF_SIZE,
-              unsigned int LOOPS,
-              typename T,
-              typename I,
-              typename J,
-              typename A,
-              typename B,
-              typename C>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnt_nnz_split_main_kernel(bool conj_A,
-                                       bool conj_B,
-                                       J    ncol,
-                                       J    m,
-                                       J    n,
-                                       J    k,
-                                       I    nnz,
-                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                                       const J* __restrict__ row_limits,
-                                       const I* __restrict__ csr_row_ptr,
-                                       const J* __restrict__ csr_col_ind,
-                                       const A* __restrict__ csr_val,
-                                       const B* __restrict__ dense_B,
-                                       int64_t ldb,
-                                       C* __restrict__ dense_C,
-                                       int64_t              ldc,
-                                       rocsparse_order      order_C,
-                                       rocsparse_index_base idx_base,
-                                       bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-
-        rocsparse::csrmmnt_nnz_split_main_device<BLOCKSIZE, WF_SIZE, LOOPS>(conj_A,
-                                                                            conj_B,
-                                                                            ncol,
-                                                                            m,
-                                                                            n,
-                                                                            k,
-                                                                            nnz,
-                                                                            alpha,
-                                                                            row_limits,
-                                                                            csr_row_ptr,
-                                                                            csr_col_ind,
-                                                                            csr_val,
-                                                                            dense_B,
-                                                                            ldb,
-                                                                            dense_C,
-                                                                            ldc,
-                                                                            order_C,
-                                                                            idx_base);
-    }
-
-    template <unsigned int BLOCKSIZE,
-              unsigned int WF_SIZE,
-              typename T,
-              typename I,
-              typename J,
-              typename A,
-              typename B,
-              typename C>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnt_nnz_split_remainder_kernel(bool conj_A,
-                                            bool conj_B,
-                                            J    offset,
-                                            J    m,
-                                            J    n,
-                                            J    k,
-                                            I    nnz,
-                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                                            const J* __restrict__ row_limits,
-                                            const I* __restrict__ csr_row_ptr,
-                                            const J* __restrict__ csr_col_ind,
-                                            const A* __restrict__ csr_val,
-                                            const B* __restrict__ dense_B,
-                                            int64_t ldb,
-                                            C* __restrict__ dense_C,
-                                            int64_t              ldc,
-                                            rocsparse_order      order_C,
-                                            rocsparse_index_base idx_base,
-                                            bool                 is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-
-        rocsparse::csrmmnt_nnz_split_remainder_device<BLOCKSIZE, WF_SIZE>(conj_A,
-                                                                          conj_B,
-                                                                          offset,
-                                                                          m,
-                                                                          n,
-                                                                          k,
-                                                                          nnz,
-                                                                          alpha,
-                                                                          row_limits,
-                                                                          csr_row_ptr,
-                                                                          csr_col_ind,
-                                                                          csr_val,
-                                                                          dense_B,
-                                                                          ldb,
-                                                                          dense_C,
-                                                                          ldc,
-                                                                          order_C,
-                                                                          idx_base);
-    }
-
     template <typename T, typename I, typename J, typename A>
     rocsparse_status csrmm_buffer_size_template_nnz_split(rocsparse_handle          handle,
                                                           rocsparse_operation       trans_A,
@@ -414,7 +184,6 @@ namespace rocsparse
 namespace rocsparse
 {
     template <unsigned int BLOCKSIZE,
-              unsigned int WF_SIZE,
               typename T,
               typename I,
               typename J,
@@ -676,6 +445,27 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+#define ROCSPARSE_CSRMM_TEMPLATE_NNZ_SPLIT_IMPL(NAME) \
+    NAME(handle,                                      \
+         conj_A,                                      \
+         conj_B,                                      \
+         m,                                           \
+         n,                                           \
+         k,                                           \
+         nnz,                                         \
+         alpha_device_host,                           \
+         descr,                                       \
+         csr_val,                                     \
+         csr_row_ptr,                                 \
+         csr_col_ind,                                 \
+         dense_B,                                     \
+         ldb,                                         \
+         beta_device_host,                            \
+         dense_C,                                     \
+         ldc,                                         \
+         order_C,                                     \
+         temp_buffer);
+
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status csrmm_template_nnz_split(rocsparse_handle          handle,
                                               rocsparse_operation       trans_A,
@@ -715,54 +505,8 @@ namespace rocsparse
                || (order_B == rocsparse_order_row
                    && trans_B == rocsparse_operation_conjugate_transpose))
             {
-                if(handle->wavefront_size == 32)
-                {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        (csrmmnn_nnz_split_dispatch<NNZ_PER_BLOCK, 32>(handle,
-                                                                       conj_A,
-                                                                       conj_B,
-                                                                       m,
-                                                                       n,
-                                                                       k,
-                                                                       nnz,
-                                                                       alpha_device_host,
-                                                                       descr,
-                                                                       csr_val,
-                                                                       csr_row_ptr,
-                                                                       csr_col_ind,
-                                                                       dense_B,
-                                                                       ldb,
-                                                                       beta_device_host,
-                                                                       dense_C,
-                                                                       ldc,
-                                                                       order_C,
-                                                                       temp_buffer)));
-                    return rocsparse_status_success;
-                }
-                else if(handle->wavefront_size == 64)
-                {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        (csrmmnn_nnz_split_dispatch<NNZ_PER_BLOCK, 64>(handle,
-                                                                       conj_A,
-                                                                       conj_B,
-                                                                       m,
-                                                                       n,
-                                                                       k,
-                                                                       nnz,
-                                                                       alpha_device_host,
-                                                                       descr,
-                                                                       csr_val,
-                                                                       csr_row_ptr,
-                                                                       csr_col_ind,
-                                                                       dense_B,
-                                                                       ldb,
-                                                                       beta_device_host,
-                                                                       dense_C,
-                                                                       ldc,
-                                                                       order_C,
-                                                                       temp_buffer)));
-                    return rocsparse_status_success;
-                }
+                return ROCSPARSE_CSRMM_TEMPLATE_NNZ_SPLIT_IMPL(
+                    (rocsparse::csrmmnn_nnz_split_dispatch<NNZ_PER_BLOCK>));
             }
             else if((order_B == rocsparse_order_column && trans_B == rocsparse_operation_transpose)
                     || (order_B == rocsparse_order_column
@@ -771,51 +515,13 @@ namespace rocsparse
             {
                 if(handle->wavefront_size == 32)
                 {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        (csrmmnt_nnz_split_dispatch<NNZ_PER_BLOCK, 32>(handle,
-                                                                       conj_A,
-                                                                       conj_B,
-                                                                       m,
-                                                                       n,
-                                                                       k,
-                                                                       nnz,
-                                                                       alpha_device_host,
-                                                                       descr,
-                                                                       csr_val,
-                                                                       csr_row_ptr,
-                                                                       csr_col_ind,
-                                                                       dense_B,
-                                                                       ldb,
-                                                                       beta_device_host,
-                                                                       dense_C,
-                                                                       ldc,
-                                                                       order_C,
-                                                                       temp_buffer)));
-                    return rocsparse_status_success;
+                    return ROCSPARSE_CSRMM_TEMPLATE_NNZ_SPLIT_IMPL(
+                        (rocsparse::csrmmnt_nnz_split_dispatch<NNZ_PER_BLOCK, 32>));
                 }
                 else if(handle->wavefront_size == 64)
                 {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        (csrmmnt_nnz_split_dispatch<NNZ_PER_BLOCK, 64>(handle,
-                                                                       conj_A,
-                                                                       conj_B,
-                                                                       m,
-                                                                       n,
-                                                                       k,
-                                                                       nnz,
-                                                                       alpha_device_host,
-                                                                       descr,
-                                                                       csr_val,
-                                                                       csr_row_ptr,
-                                                                       csr_col_ind,
-                                                                       dense_B,
-                                                                       ldb,
-                                                                       beta_device_host,
-                                                                       dense_C,
-                                                                       ldc,
-                                                                       order_C,
-                                                                       temp_buffer)));
-                    return rocsparse_status_success;
+                    return ROCSPARSE_CSRMM_TEMPLATE_NNZ_SPLIT_IMPL(
+                        (rocsparse::csrmmnt_nnz_split_dispatch<NNZ_PER_BLOCK, 64>));
                 }
             }
         }

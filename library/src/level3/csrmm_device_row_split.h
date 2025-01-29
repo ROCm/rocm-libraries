@@ -267,7 +267,7 @@ namespace rocsparse
               typename A,
               typename B,
               typename C>
-    ROCSPARSE_DEVICE_ILF void csrmmnt_row_split_shared_subwfsize_x_loop_columns_device(
+    ROCSPARSE_DEVICE_ILF void csrmmnt_row_split_subwfsize_x_loop_columns_device(
         T       alpha,
         T       beta,
         J       col_start,
