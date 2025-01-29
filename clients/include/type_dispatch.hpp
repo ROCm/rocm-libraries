@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -440,20 +440,6 @@ auto rocblas_gemv_batched_and_strided_batched_dispatch(const Arguments& arg)
 template <template <typename...> class TEST>
 auto rocblas_gemm_dispatch(const Arguments& arg)
 {
-    int setenv_status;
-    if(arg.use_hipblaslt != -1)
-    {
-        setenv_status
-            = setenv("ROCBLAS_USE_HIPBLASLT", std::to_string(arg.use_hipblaslt).c_str(), true);
-    }
-    else
-    {
-        setenv_status = unsetenv("ROCBLAS_USE_HIPBLASLT");
-    }
-#ifdef GOOGLE_TEST
-    EXPECT_EQ(setenv_status, 0);
-#endif
-
     const auto Ti = arg.a_type, To = arg.c_type, Tc = arg.compute_type;
     const auto Tc_new = arg.composite_compute_type;
 

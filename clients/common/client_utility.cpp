@@ -382,10 +382,30 @@ rocblas_local_handle::rocblas_local_handle()
 }
 
 rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
-    : rocblas_local_handle()
 {
+    if(arg.use_hipblaslt >= 0)
+    {
+        auto hipblaslt_env = getenv("ROCBLAS_USE_HIPBLASLT");
+        if(hipblaslt_env)
+            m_hipblaslt_saved_status = std::string(hipblaslt_env);
+        m_hipblaslt_env_set = true;
+        setenv("ROCBLAS_USE_HIPBLASLT", std::to_string(arg.use_hipblaslt).c_str(), true);
+    }
+
+    auto status = rocblas_create_handle(&m_handle);
+    if(status != rocblas_status_success)
+        throw std::runtime_error(rocblas_status_to_string(status));
+
+#ifdef GOOGLE_TEST
+    if(t_set_stream_callback)
+    {
+        (*t_set_stream_callback)(m_handle);
+        t_set_stream_callback.reset();
+    }
+#endif
+
     // Set the atomics mode
-    auto status = rocblas_set_atomics_mode(m_handle, arg.atomics_mode);
+    status = rocblas_set_atomics_mode(m_handle, arg.atomics_mode);
 
     // The check_numerics mode conditional defeat with "rocblas_check_numerics_mode_no_check"
     // Defeat check numerics when initializing any data with NaN with due to alpha or beta having NaN flags,
@@ -437,6 +457,11 @@ rocblas_local_handle::~rocblas_local_handle()
 
     if(m_memory)
         (hipFree)(m_memory);
+
+    if(m_hipblaslt_env_set)
+    {
+        setenv("ROCBLAS_USE_HIPBLASLT", m_hipblaslt_saved_status.c_str(), true);
+    }
 
     rocblas_destroy_handle(m_handle);
 }
