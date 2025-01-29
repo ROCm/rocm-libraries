@@ -130,6 +130,15 @@ namespace rocRoller
         static inline const SettingsOption<LogLevel> LogLvl{
             "ROCROLLER_LOG_LEVEL", "Log level", LogLevel::None, -1};
 
+        static inline const SettingsOption<LogLevel> LogFileLvl{
+            "ROCROLLER_LOG_FILE_LEVEL", "Log level for output to the log file", LogLevel::None, -1};
+
+        static inline const SettingsOption<LogLevel> LogConsoleLvl{
+            "ROCROLLER_LOG_CONSOLE_LEVEL",
+            "Log level for output to the console",
+            LogLevel::None,
+            -1};
+
         static inline const SettingsOption<int> RandomSeed{"ROCROLLER_RANDOM_SEED",
                                                            "Seed used with RandomGenerator class",
                                                            std::numeric_limits<int>::min(),

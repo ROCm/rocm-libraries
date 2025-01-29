@@ -191,8 +191,8 @@ namespace rocRoller
          * @param args The runtime arguments which will be passed to the kernel.
          * @param level The log level to log any predicate mismatch messages to (defaults to debug)
          */
-        bool matchesPredicates(RuntimeArguments const&   args,
-                               spdlog::level::level_enum level = spdlog::level::debug) const;
+        bool matchesPredicates(RuntimeArguments const& args,
+                               LogLevel                level = LogLevel::Debug) const;
 
         /**
          * @brief Set (manual) launch parameters.

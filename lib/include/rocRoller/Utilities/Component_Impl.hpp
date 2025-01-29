@@ -148,10 +148,10 @@ namespace rocRoller
                     }
                     else
                     {
-                        Log::warn("Multiple suitable components found for {}: {}, {}",
-                                  Base::Basename,
-                                  foundIter->name,
-                                  iter->name);
+                        rocRoller::Log::warn("Multiple suitable components found for {}: {}, {}",
+                                             Base::Basename,
+                                             foundIter->name,
+                                             iter->name);
                     }
                 }
             }

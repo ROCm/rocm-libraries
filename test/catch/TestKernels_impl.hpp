@@ -30,7 +30,7 @@ void AssemblyTestKernel::operator()(rocRoller::KernelInvocation const& invocatio
     REQUIRE_TEST_TAG("gpu");
     auto kernel = getExecutableKernel();
 
-    bool log = rocRoller::Log::getLogger()->should_log(spdlog::level::debug);
+    bool log = rocRoller::Log::getLogger()->should_log(rocRoller::LogLevel::Debug);
 
     rocRoller::KernelArguments kargs(log);
     appendArgs(kargs, std::forward_as_tuple(args...));

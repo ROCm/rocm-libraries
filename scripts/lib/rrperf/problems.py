@@ -197,7 +197,7 @@ class GEMMRun(GEMM):
             "numInner": "num_inner",
         }
 
-        command = "bin/client/gemm"
+        command = "bin/client/rocRoller_gemm"
 
         def argName(key):
             if key in specialNames:
@@ -328,7 +328,7 @@ class CodeGenRun(CodeGen):
 
     def command(self) -> List[str]:
         retval = [
-            "bin/client/codegen_stress",
+            "bin/client/rocRoller_codegen_stress",
             "--inst_count=" + str(self.instCount),
             "--instructions=" + str(self.instructions),
             "--yaml=" + str(self.output),

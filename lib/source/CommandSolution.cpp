@@ -97,7 +97,7 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::getKernelArguments");
 
-        bool            log = Log::getLogger()->should_log(spdlog::level::debug);
+        bool            log = Log::getLogger()->should_log(LogLevel::Debug);
         KernelArguments rv(log);
 
         auto const& argStructs = m_context->kernel()->arguments();
@@ -370,8 +370,7 @@ namespace rocRoller
         m_predicates.push_back(expression);
     }
 
-    bool CommandKernel::matchesPredicates(RuntimeArguments const&   args,
-                                          spdlog::level::level_enum level) const
+    bool CommandKernel::matchesPredicates(RuntimeArguments const& args, LogLevel level) const
     {
         bool retVal = true;
         for(auto predicate : m_predicates)
@@ -438,7 +437,7 @@ namespace rocRoller
         AssertFatal(m_context, "Unable to launch kernel: CommandKernel must have a Context.");
         AssertFatal(m_context->kernel(),
                     "Unable to launch kernel: Context must have an AssemblyKernel.");
-        AssertFatal(matchesPredicates(args, spdlog::level::err),
+        AssertFatal(matchesPredicates(args, LogLevel::Error),
                     "Unable to launch kernel: all CommandKernel predicates must match.");
 
         if(m_launchParameters)

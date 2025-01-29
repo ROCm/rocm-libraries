@@ -7,7 +7,7 @@ library by default.
 
 To run the GEMM client from your build directory::
 
-    ./bin/client/gemm --help
+    ./bin/client/rocRoller_gemm --help
 
 The GEMM client can do a few different things::
 
@@ -31,14 +31,14 @@ To generate a solution and validate it (which runs the solution on the
 local GPU and compares it to a reference solution computed on the CPU
 by OpenBLAS)::
 
-    ./bin/client/gemm --mac_m=128 --mac_n=128 --m 4096 --n 4096 --k 32 generate validate
+    ./bin/client/rocRoller_gemm --mac_m=128 --mac_n=128 --m 4096 --n 4096 --k 32 generate validate
 
 Generating an example configuration
 -----------------------------------
 
 To generate a solution configuration file and save it::
 
-    ./bin/client/gemm example getting-started.yaml
+    ./bin/client/rocRoller_gemm example getting-started.yaml
 
 The `getting-started.yaml` file now contains some tuneable parameters
 that can be used to generate different GEMM kernels.
@@ -51,35 +51,35 @@ GEMM kernel and save it.
 
 To generate a solution, compile, and save it to a code-object::
 
-    ./bin/client/gemm --mac_m=128 --mac_n=128 generate --co sgemm-current.co
+    ./bin/client/rocRoller_gemm --mac_m=128 --mac_n=128 generate --co sgemm-current.co
 
 The architecture can also be specified::
 
-    ./bin/client/gemm --mac_m=128 --mac_n=128 --hgemm generate --arch gfx90a --co hgemm-gfx90a.co
+    ./bin/client/rocRoller_gemm --mac_m=128 --mac_n=128 --hgemm generate --arch gfx90a --co hgemm-gfx90a.co
 
 You can also save the assembly if you'd like to modify it::
 
-    ./bin/client/gemm --mac_m=128 --mac_n=128 generate --asm sgemm-current.s
+    ./bin/client/rocRoller_gemm --mac_m=128 --mac_n=128 generate --asm sgemm-current.s
 
 If you have a configuration YAML file and want to generate a code-object for gfx90a::
 
-    ./bin/client/gemm generate --config sgemm.yaml --arch gfx90a --co sgemm.co
+    ./bin/client/rocRoller_gemm generate --config sgemm.yaml --arch gfx90a --co sgemm.co
 
 Generating a solution and validating it
 ---------------------------------------
 
 To generate a solution, run it once, and compare the result to OpenBLAS::
 
-    ./bin/client/gemm --mac_m=128 --mac_n=128 generate validate --m 4096 --n 4096 --k 128
+    ./bin/client/rocRoller_gemm --mac_m=128 --mac_n=128 generate validate --m 4096 --n 4096 --k 128
 
 Generating a solution, modifying it, and validating it
 ------------------------------------------------------
 
 To hack assembly manually::
 
-    ./bin/client/gemm --mac_m=128 --mac_n=128 generate --asm my-sgemm.s
+    ./bin/client/rocRoller_gemm --mac_m=128 --mac_n=128 generate --asm my-sgemm.s
     emacs my-sgemm.s
-    ./bin/client/gemm --m 4096 --n 4096 --k 128 validate --load my-sgemm.s
+    ./bin/client/rocRoller_gemm --m 4096 --n 4096 --k 128 validate --load my-sgemm.s
 
 Note that in the _generate_ invocation, the problem size does not need
 to be specified.  Only _solution_ and and _type_ parameters are
@@ -93,4 +93,4 @@ Benchmarking
 
 To benchmark a solution::
 
-    ./bin/client/gemm --mac_m=128 --mac_n=128 generate benchmark
+    ./bin/client/rocRoller_gemm --mac_m=128 --mac_n=128 generate benchmark
