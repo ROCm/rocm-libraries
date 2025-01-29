@@ -18,6 +18,7 @@ Documentation for hipFFT is available at
 * Building with the address sanitizer option sets xnack+ for the relevant GPU
   architectures.
 * Use find_package CUDAToolkit instead of CUDA in cmake for modern-cmake compatibility.
+* The `AMDGPU_TARGETS` build variable should be replaced with `GPU_TARGETS`. `AMDGPU_TARGETS` is deprecated.
 
 ### Resolved issues
 

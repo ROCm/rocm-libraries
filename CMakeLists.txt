@@ -133,6 +133,9 @@ if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
   endif()
 endif()
 
+# Dependencies
+include(cmake/dependencies.cmake)
+
 if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
   set (BUILD_WITH_LIB "CUDA")
   set( HIP_PLATFORM "nvidia" )
@@ -165,8 +168,13 @@ if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
 
 else()
   # Define GPU targets
-  set(AMDGPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if AMDGPU_TARGETS is not defined.")
-  #rocm_check_target_ids(AMDGPU_TARGETS TARGETS "${AMDGPU_TARGETS}")
+  if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
+    message( DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS." )
+  endif()
+  set(AMDGPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if AMDGPU_TARGETS is not defined. (Deprecated, prefer GPU_TARGETS)")
+  rocm_check_target_ids(AMDGPU_TARGETS TARGETS "${AMDGPU_TARGETS}")
+  # Don't force, users should be able to override GPU_TARGETS at the command line if desired
+  set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
   if( BUILD_WITH_COMPILER STREQUAL "HIP-CLANG" )
     set( HIP_PLATFORM "amd" )
     set( HIP_COMPILER "clang" )
@@ -175,9 +183,6 @@ endif()
 
 # Show the actual compiler(internal option)
 message(STATUS "BUILD_WITH_COMPILER = " ${BUILD_WITH_COMPILER})
-
-# Dependencies
-include(cmake/dependencies.cmake)
 
 # FOR HANDLING ENABLE/DISABLE OPTIONAL BACKWARD COMPATIBILITY for FILE/FOLDER REORG
 option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
