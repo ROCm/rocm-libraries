@@ -80,6 +80,7 @@
 #if !defined(__cpp_lib_constexpr_dynamic_alloc) || defined(_CCCL_COMPILER_HIPRTC)
 namespace std
 {
+_CCCL_EXEC_CHECK_DISABLE
 template <class _Tp,
           class... _Args,
           class = decltype(::new(_CUDA_VSTD::declval<void*>()) _Tp(_CUDA_VSTD::declval<_Args>()...))>

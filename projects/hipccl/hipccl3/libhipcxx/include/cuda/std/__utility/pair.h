@@ -141,6 +141,7 @@ struct __pair_base
   _T1 first;
   _T2 second;
 
+  _CCCL_EXEC_CHECK_DISABLE
   template <class _Constraints                                               = __pair_constraints<_T1, _T2>,
             enable_if_t<_Constraints::__explicit_default_constructible, int> = 0>
   _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr __pair_base() noexcept(
@@ -149,6 +150,7 @@ struct __pair_base
       , second()
   {}
 
+  _CCCL_EXEC_CHECK_DISABLE
   template <class _Constraints                                               = __pair_constraints<_T1, _T2>,
             enable_if_t<_Constraints::__implicit_default_constructible, int> = 0>
   _LIBCUDACXX_HIDE_FROM_ABI constexpr __pair_base() noexcept(
@@ -157,6 +159,7 @@ struct __pair_base
       , second()
   {}
 
+  _CCCL_EXEC_CHECK_DISABLE
   template <class _U1, class _U2>
   _LIBCUDACXX_HIDE_FROM_ABI constexpr __pair_base(_U1&& __t1, _U2&& __t2) noexcept(
     _CCCL_TRAIT(is_nothrow_constructible, _T1, _U1) && _CCCL_TRAIT(is_nothrow_constructible, _T2, _U2))
@@ -180,6 +183,7 @@ struct __pair_base<_T1, _T2, true>
   _T1 first;
   _T2 second;
 
+  _CCCL_EXEC_CHECK_DISABLE
   template <class _Constraints                                               = __pair_constraints<_T1, _T2>,
             enable_if_t<_Constraints::__explicit_default_constructible, int> = 0>
   _LIBCUDACXX_HIDE_FROM_ABI explicit constexpr __pair_base() noexcept(
@@ -188,6 +192,7 @@ struct __pair_base<_T1, _T2, true>
       , second()
   {}
 
+  _CCCL_EXEC_CHECK_DISABLE
   template <class _Constraints                                               = __pair_constraints<_T1, _T2>,
             enable_if_t<_Constraints::__implicit_default_constructible, int> = 0>
   _LIBCUDACXX_HIDE_FROM_ABI constexpr __pair_base() noexcept(
@@ -196,10 +201,13 @@ struct __pair_base<_T1, _T2, true>
       , second()
   {}
 
+  _CCCL_EXEC_CHECK_DISABLE
   _CCCL_HIDE_FROM_ABI constexpr __pair_base(const __pair_base&) = default;
-  _CCCL_HIDE_FROM_ABI constexpr __pair_base(__pair_base&&)      = default;
+  _CCCL_EXEC_CHECK_DISABLE
+  _CCCL_HIDE_FROM_ABI constexpr __pair_base(__pair_base&&) = default;
 
   // We need to ensure that a reference type, which would inhibit the implicit copy assignment still works
+  _CCCL_EXEC_CHECK_DISABLE
   _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 __pair_base& operator=(
     conditional_t<_CCCL_TRAIT(is_copy_assignable, _T1) && _CCCL_TRAIT(is_copy_assignable, _T2), __pair_base, __nat> const&
       __p) noexcept(_CCCL_TRAIT(is_nothrow_copy_assignable, _T1) && _CCCL_TRAIT(is_nothrow_copy_assignable, _T2))
@@ -210,6 +218,7 @@ struct __pair_base<_T1, _T2, true>
   }
 
   // We need to ensure that a reference type, which would inhibit the implicit move assignment still works
+  _CCCL_EXEC_CHECK_DISABLE
   _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 __pair_base& operator=(
     conditional_t<_CCCL_TRAIT(is_move_assignable, _T1) && _CCCL_TRAIT(is_move_assignable, _T2), __pair_base, __nat>&&
       __p) noexcept(_CCCL_TRAIT(is_nothrow_move_assignable, _T1) && _CCCL_TRAIT(is_nothrow_move_assignable, _T2))
@@ -219,6 +228,7 @@ struct __pair_base<_T1, _T2, true>
     return *this;
   }
 
+  _CCCL_EXEC_CHECK_DISABLE
   template <class _U1, class _U2>
   _LIBCUDACXX_HIDE_FROM_ABI constexpr __pair_base(_U1&& __t1, _U2&& __t2) noexcept(
     _CCCL_TRAIT(is_nothrow_constructible, _T1, _U1) && _CCCL_TRAIT(is_nothrow_constructible, _T2, _U2))
@@ -549,6 +559,7 @@ _CCCL_HOST_DEVICE pair(_T1, _T2) -> pair<_T1, _T2>;
 
 // [pairs.spec], specialized algorithms
 
+_CCCL_EXEC_CHECK_DISABLE
 template <class _T1, class _T2>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 bool operator==(const pair<_T1, _T2>& __x, const pair<_T1, _T2>& __y)
 {
@@ -557,6 +568,7 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 bool operator==(const pair<_T1, 
 
 #ifndef _LIBCUDACXX_HAS_NO_SPACESHIP_OPERATOR
 
+_CCCL_EXEC_CHECK_DISABLE
 template <class _T1, class _T2>
 _LIBCUDACXX_HIDE_FROM_ABI constexpr common_comparison_category_t<__synth_three_way_result<_T1>,
                                                                  __synth_three_way_result<_T2>>
@@ -571,30 +583,35 @@ operator<=>(const pair<_T1, _T2>& __x, const pair<_T1, _T2>& __y)
 
 #else // _LIBCUDACXX_HAS_NO_SPACESHIP_OPERATOR
 
+_CCCL_EXEC_CHECK_DISABLE
 template <class _T1, class _T2>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 bool operator!=(const pair<_T1, _T2>& __x, const pair<_T1, _T2>& __y)
 {
   return !(__x == __y);
 }
 
+_CCCL_EXEC_CHECK_DISABLE
 template <class _T1, class _T2>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 bool operator<(const pair<_T1, _T2>& __x, const pair<_T1, _T2>& __y)
 {
   return __x.first < __y.first || (!(__y.first < __x.first) && __x.second < __y.second);
 }
 
+_CCCL_EXEC_CHECK_DISABLE
 template <class _T1, class _T2>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 bool operator>(const pair<_T1, _T2>& __x, const pair<_T1, _T2>& __y)
 {
   return __y < __x;
 }
 
+_CCCL_EXEC_CHECK_DISABLE
 template <class _T1, class _T2>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 bool operator>=(const pair<_T1, _T2>& __x, const pair<_T1, _T2>& __y)
 {
   return !(__x < __y);
 }
 
+_CCCL_EXEC_CHECK_DISABLE
 template <class _T1, class _T2>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 bool operator<=(const pair<_T1, _T2>& __x, const pair<_T1, _T2>& __y)
 {
