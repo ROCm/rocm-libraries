@@ -3,10 +3,17 @@
 Documentation for TransferBench is available at
 [https://rocm.docs.amd.com/projects/TransferBench](https://rocm.docs.amd.com/projects/TransferBench).
 
+## v1.60.00
+### Modified
+- Reverted GFX_SINGLE_TEAM default back to 1
+
+### Fixed
+- Fixed bug where peer memory access was not enabled for DMA transfers, which would break specific DMA engine transfers
+
 ## v1.59.01
 ### Added
 - The a2a preset A2A_MODE variable has been enhanced to allow for customizing the number of srcs/dsts to use
-  This is specified by setting A2A_MODE to numSrcs:numDsts.  Extra destinations past 1 will be "local" writes (i.e. if one sets A2A_MODE=1:3, then transfers will follow this pattern: Fx Gx FyFxFx) 
+  This is specified by setting A2A_MODE to numSrcs:numDsts.  Extra destinations past 1 will be "local" writes (i.e. if one sets A2A_MODE=1:3, then transfers will follow this pattern: Fx Gx FyFxFx)
   to simulate similar conditions normally used during collective algorithms such as ring-based AllReduce
 
 ## v1.59.00

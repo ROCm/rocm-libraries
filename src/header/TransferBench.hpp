@@ -64,7 +64,7 @@ namespace TransferBench
   using std::set;
   using std::vector;
 
-  constexpr char VERSION[] = "1.59";
+  constexpr char VERSION[] = "1.60";
 
   /**
    * Enumeration of supported Executor types
@@ -2297,7 +2297,7 @@ namespace {
         MemDevice const& srcMemDevice = t.srcs[iSrc];
 
         // Ensure executing GPU can access source memory
-        if (exeDevice.exeType == EXE_GPU_GFX && IsGpuMemType(srcMemDevice.memType) &&
+        if (IsGpuExeType(exeDevice.exeType) && IsGpuMemType(srcMemDevice.memType) &&
             srcMemDevice.memIndex != exeDevice.exeIndex) {
           ERR_CHECK(EnablePeerAccess(exeDevice.exeIndex, srcMemDevice.memIndex));
         }
@@ -2310,7 +2310,7 @@ namespace {
         MemDevice const& dstMemDevice = t.dsts[iDst];
 
         // Ensure executing GPU can access destination memory
-        if (exeDevice.exeType == EXE_GPU_GFX && IsGpuMemType(dstMemDevice.memType) &&
+        if (IsGpuExeType(exeDevice.exeType) && IsGpuMemType(dstMemDevice.memType) &&
             dstMemDevice.memIndex != exeDevice.exeIndex) {
           ERR_CHECK(EnablePeerAccess(exeDevice.exeIndex, dstMemDevice.memIndex));
         }

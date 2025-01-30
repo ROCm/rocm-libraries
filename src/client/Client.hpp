@@ -23,7 +23,7 @@ THE SOFTWARE.
 #pragma once
 
 // TransferBench client version
-#define CLIENT_VERSION "01"
+#define CLIENT_VERSION "00"
 
 #include "TransferBench.hpp"
 #include "EnvVars.hpp"

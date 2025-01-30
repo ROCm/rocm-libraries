@@ -136,7 +136,7 @@ public:
     blockBytes        = GetEnvVar("BLOCK_BYTES"         , 256);
     byteOffset        = GetEnvVar("BYTE_OFFSET"         , 0);
     gfxBlockSize      = GetEnvVar("GFX_BLOCK_SIZE"      , 256);
-    gfxSingleTeam     = GetEnvVar("GFX_SINGLE_TEAM"     , 0);
+    gfxSingleTeam     = GetEnvVar("GFX_SINGLE_TEAM"     , 1);
     gfxUnroll         = GetEnvVar("GFX_UNROLL"          , defaultGfxUnroll);
     gfxWaveOrder      = GetEnvVar("GFX_WAVE_ORDER"      , 0);
     hideEnv           = GetEnvVar("HIDE_ENV"            , 0);
