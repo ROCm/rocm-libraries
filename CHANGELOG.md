@@ -24,6 +24,12 @@ This is a complete list of affected functions and how their default accumulator 
     * past default: `class AccType = detail::input_type_t<InitValueType>>`
     * new default: `class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>`
 
+* Added function `is_build_in` into `rocprim::traits::get`.
+
+### Removed
+* Removed `rocprim::detail::float_bit_mask` and relative tests, use `rocprim::traits::float_bit_mask` instead.
+* Removed `rocprim::traits::is_fundamental`, please use `rocprim::traits::get<T>::is_fundamental()` directly.
+
 ## rocPRIM 3.5.0 for ROCm 6.5.0
 
 ### Removed

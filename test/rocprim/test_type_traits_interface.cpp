@@ -52,9 +52,6 @@ inline std::ostream& operator<<(std::ostream& stream, const custom_float_type& v
     return test_utils::operator<<(stream, value);
 }
 
-struct float_bit_masked_type
-{};
-
 // Custom type to model types like Eigen::half or Eigen::bfloat16, that wrap around floating point
 // types.
 struct custom_int_type
@@ -133,15 +130,6 @@ struct rocprim::traits::define<type_traits_test::custom_int_type>
         = rocprim::traits::number_format::values<number_format::kind::integral_type>;
     using integral_sign
         = rocprim::traits::integral_sign::values<traits::integral_sign::kind::signed_type>;
-};
-
-template<>
-struct rocprim::detail::float_bit_mask<type_traits_test::float_bit_masked_type>
-{
-    static constexpr uint32_t sign_bit = 0x80000000;
-    static constexpr uint32_t exponent = 0x7F800000;
-    static constexpr uint32_t mantissa = 0x007FFFFF;
-    using bit_type                     = uint32_t;
 };
 
 template<class Params>
@@ -247,29 +235,7 @@ TYPED_TEST(RocprimIntegralTests, Integral)
     }
 }
 
-TEST(TraitsInterface, OldType)
-{
-    using input_type = type_traits_test::float_bit_masked_type;
-    using bit_mask   = rocprim::detail::float_bit_mask<type_traits_test::float_bit_masked_type>;
-
-    constexpr auto input_traits = rocprim::traits::get<input_type>();
-    ROCPRIM_STATIC_ASSERT_FALSE(input_traits.is_arithmetic());
-    ROCPRIM_STATIC_ASSERT_FALSE(input_traits.is_fundamental());
-    ROCPRIM_STATIC_ASSERT_TRUE(input_traits.is_compound());
-
-    ROCPRIM_STATIC_ASSERT_TRUE(input_traits.is_compound());
-    ROCPRIM_STATIC_ASSERT_FALSE(input_traits.is_scalar());
-    ROCPRIM_STATIC_ASSERT_FALSE(input_traits.is_floating_point());
-    ROCPRIM_STATIC_ASSERT_FALSE(input_traits.is_integral());
-
-    constexpr auto float_bit_mask = input_traits.float_bit_mask();
-
-    ROCPRIM_STATIC_ASSERT_EQ(float_bit_mask.sign_bit, bit_mask::sign_bit);
-    ROCPRIM_STATIC_ASSERT_EQ(float_bit_mask.exponent, bit_mask::exponent);
-    ROCPRIM_STATIC_ASSERT_EQ(float_bit_mask.mantissa, bit_mask::mantissa);
-}
-
-TEST(TraitsInterface, OtherType)
+TEST(TraitsInterface, AllTypes)
 {
     struct TestT
     {};

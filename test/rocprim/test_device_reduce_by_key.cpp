@@ -31,7 +31,6 @@
 #include "test_seed.hpp"
 #include "test_utils.hpp"
 #include "test_utils_assertions.hpp"
-#include "test_utils_custom_float_traits_type.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"

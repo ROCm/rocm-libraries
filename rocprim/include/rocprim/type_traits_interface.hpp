@@ -54,9 +54,6 @@ namespace detail
 template<class...>
 using void_t = void;
 
-template<class Key>
-struct [[deprecated]] float_bit_mask;
-
 } // namespace detail
 
 namespace traits
@@ -435,14 +432,6 @@ struct float_bit_mask
 
     ROCPRIM_TRAITS_GENERATE_IS_DEFINE(float_bit_mask);
 
-    template<class InputType, class = void>
-    static constexpr bool has_old_float_bit_mask = false;
-    template<class InputType>
-    static constexpr bool has_old_float_bit_mask<
-        InputType,
-        detail::void_t<decltype(rocprim::detail::float_bit_mask<InputType>{})>>
-        = true;
-
     // If this trait is defined, then use the new interface
     template<class InputType, ROCPRIM_REQUIRES(is_defined<InputType>)>
     static constexpr auto get()
@@ -453,20 +442,8 @@ struct float_bit_mask
         return typename define<InputType>::float_bit_mask{};
     }
 
-    // This function acts as a bridge for old interface. Will be removed in certain version
-    // "`rocprim::detail::float_bit_mask` will be deprecated on next main release,"
-    // "`please use rocprim::trait::define` to define tratis for types."
-    template<class InputType,
-             ROCPRIM_REQUIRES(!is_defined<InputType> && has_old_float_bit_mask<InputType>)>
-    static constexpr auto get()
-    {
-        using mask = typename ::rocprim::detail::float_bit_mask<InputType>;
-        return values<typename mask::bit_type, mask::sign_bit, mask::exponent, mask::mantissa>{};
-    }
-
-    // For types that don't have a trait `float_bit_mask` defined neither a rocprim::detail::float_bit_mask specialization
-    template<class InputType,
-             ROCPRIM_REQUIRES(!is_defined<InputType> && !has_old_float_bit_mask<InputType>)>
+    // For types that don't have a trait `float_bit_mask` defined
+    template<class InputType, ROCPRIM_REQUIRES(!is_defined<InputType>)>
     static constexpr auto get()
     {
         ROCPRIM_DO_NOT_COMPILE_IF(
@@ -476,43 +453,6 @@ struct float_bit_mask
                                       == number_format::kind::floating_point_type,
                                   "Trait `float_bit_mask` is required for `floating_point` types");
         return values<int, 0, 0, 0>{};
-    }
-#endif
-};
-
-/// \brief The trait `is_fundamental` is undefinable, as it is the union of `std::is_fundamental`
-/// and `rocprim::traits::is_arithmetic`.
-/// \par Definability
-/// * **Undefinable**: If you attempt to define this trait in any form, a compile-time error will occur.
-/// \par How to use
-/// \parblock
-/// \code{.cpp}
-/// rocprim::traits::get<InputType>().is_fundamental();
-/// rocprim::traits::get<InputType>().is_compound();
-/// \endcode
-/// \endparblock
-struct is_fundamental
-{
-
-    /// \brief Value of this trait
-    template<bool Val>
-    struct values
-    {
-        /// \brief This indicates if the `InputType` is fundamental.
-        static constexpr auto value = Val;
-    };
-
-#ifndef DOXYGEN_DOCUMENTATION_BUILD
-
-    ROCPRIM_TRAITS_GENERATE_IS_DEFINE(is_fundamental);
-
-    // For all types
-    template<class InputType>
-    static constexpr auto get()
-    {
-        ROCPRIM_DO_NOT_COMPILE_IF(is_defined<InputType>, "Trait `is_fundamental` is undefinable");
-        return values < std::is_fundamental<InputType>::value
-               || is_arithmetic::get<InputType>().value > {};
     }
 #endif
 };
@@ -560,15 +500,36 @@ struct get
     /// otherwise, returns `false`.
     constexpr bool is_fundamental() const
     {
-        return rocprim::traits::is_fundamental{}.get<T>().value;
+        return std::is_fundamental<T>::value || rocprim::traits::is_arithmetic{}.get<T>().value;
     };
+
+    /// \brief Check if the type is a `build_in` type, this function is different from `is_fundamental`,
+    /// because, by implementing traits, downstream code can "hack" into rocprim to let a type be `arithmetic`,
+    /// and by following the rules of `std::is_fundamental`, `rocprim::is_fundamental` returns a union set of
+    /// `std::is_fundamental` and `rocprim::is_arithmetic`. So, to check wether a type is a build-in type,
+    /// please use this function.
+    /// \returns `true` if `T` is a `build_in` type (that is, char, unsigned char, short, unsigned short, int
+    /// unsigned int, long long, unsigned long long, rocprim::int128_t, rocprim::uint128_t, rocprim::half,
+    /// float, double);
+    constexpr bool is_build_in() const
+    {
+        return std::is_same<T, bool>::value || std::is_same<T, char>::value
+               || std::is_same<T, unsigned char>::value || std::is_same<T, short>::value
+               || std::is_same<T, unsigned short>::value || std::is_same<T, int>::value
+               || std::is_same<T, unsigned int>::value || std::is_same<T, long long>::value
+               || std::is_same<T, unsigned long long>::value
+               || std::is_same<T, rocprim::int128_t>::value
+               || std::is_same<T, rocprim::uint128_t>::value
+               || std::is_same<T, rocprim::half>::value || std::is_same<T, float>::value
+               || std::is_same<T, rocprim::bfloat16>::value || std::is_same<T, double>::value;
+    }
 
     /// \brief If `T` is fundamental type, then returns `false`.
     /// \returns `false` if `T` is a fundamental type (that is, rocPRIM arithmetic type, void, or nullptr_t);
     /// otherwise, returns `true`.
     constexpr bool is_compound() const
     {
-        return !rocprim::traits::is_fundamental{}.get<T>().value;
+        return !is_fundamental();
     }
 
     /// \brief To check if `T` is floating-point type.
