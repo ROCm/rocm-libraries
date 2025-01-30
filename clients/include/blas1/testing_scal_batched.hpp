@@ -86,7 +86,6 @@ void testing_scal_batched(const Arguments& arg)
     halpha[0] = h_alpha;
 
     // Allocate device memory
-    DEVICE_MEMCHECK(device_batch_vector<T>, dx, (N, incx, batch_count));
     DEVICE_MEMCHECK(device_vector<U>, d_alpha, (1));
 
     // Initialize memory on host.
@@ -96,7 +95,6 @@ void testing_scal_batched(const Arguments& arg)
 
     // copy data from CPU to device
     // 1. User intermediate arrays to access device memory from host
-    CHECK_HIP_ERROR(dx.transfer_from(hx));
 
     double gpu_time_used, cpu_time_used;
     double rocblas_error_host   = 0.0;
@@ -104,6 +102,10 @@ void testing_scal_batched(const Arguments& arg)
 
     if(arg.unit_check || arg.norm_check)
     {
+        DEVICE_MEMCHECK(device_batch_vector<T>, dx, (N, incx, batch_count));
+
+        CHECK_HIP_ERROR(dx.transfer_from(hx));
+
         if(arg.pointer_mode_host)
         {
             // GPU BLAS, rocblas_pointer_mode_host
@@ -214,6 +216,16 @@ void testing_scal_batched(const Arguments& arg)
 
     if(arg.timing)
     {
+        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
+
+        size_t x_cached_size     = N * batch_count * sizeof(T);
+        size_t flush_batch_count = calculate_flush_batch_count(
+            arg.flush_batch_count, arg.flush_memory_size, x_cached_size);
+
+        DEVICE_MEMCHECK(device_batch_vector<T>, dx, (N, incx, batch_count * flush_batch_count));
+
+        CHECK_HIP_ERROR(dx.broadcast_one_batch_vector_from(hx));
+
         int number_cold_calls = arg.cold_iters;
         int total_calls       = number_cold_calls + arg.iters;
 
@@ -227,8 +239,15 @@ void testing_scal_batched(const Arguments& arg)
             if(iter == number_cold_calls)
                 gpu_time_used = get_time_us_sync(stream);
 
+            int flush_index = iter % flush_batch_count;
+
             DAPI_DISPATCH(rocblas_scal_batched_fn,
-                          (handle, N, &h_alpha, dx.ptr_on_device(), incx, batch_count));
+                          (handle,
+                           N,
+                           &h_alpha,
+                           (dx.ptr_on_device() + (flush_index * batch_count)),
+                           incx,
+                           batch_count));
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
