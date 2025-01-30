@@ -9,8 +9,8 @@ Deprecated rocSOLVER components
 ********************************
 
 Originally, rocSOLVER maintained its own types and helpers as aliases to those of rocBLAS.
-These aliases are now deprecated. See the `rocBLAS types <https://rocm.docs.amd.com/projects/rocBLAS/en/latest/API_Reference_Guide.html#rocblas-datatypes>`_
-and `rocBLAS auxiliary functions <https://rocm.docs.amd.com/projects/rocBLAS/en/latest/API_Reference_Guide.html#auxiliary-functions>`_
+These aliases are now deprecated. See the :doc:`rocBLAS types <rocblas:reference/datatypes>`
+and :doc:`rocBLAS auxiliary functions <rocblas:reference/helper-functions>`
 documentation for information on the suggested replacements.
 
 * Deprecated :ref:`deptypes`.
