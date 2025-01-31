@@ -225,30 +225,13 @@ struct invoke_result_impl<decltype(void(INVOKE(std::declval<F>(), std::declval<A
 template<class T>
 struct is_tuple
 {
-public:
     static constexpr bool value = false;
 };
 
 template<class... Args>
 struct is_tuple<::rocprim::tuple<Args...>>
 {
-private:
-    template<size_t Index>
-    ROCPRIM_HOST_DEVICE
-    static constexpr bool is_tuple_impl()
-    {
-        return is_tuple_impl<Index + 1>();
-    }
-
-    template<>
-    ROCPRIM_HOST_DEVICE
-    static constexpr bool is_tuple_impl<sizeof...(Args)>()
-    {
-        return true;
-    }
-
-public:
-    static constexpr bool value = is_tuple_impl<0>();
+    static constexpr bool value = true;
 };
 
 template<class T>
@@ -262,7 +245,8 @@ struct is_tuple_of_references<::rocprim::tuple<Args...>>
 {
 private:
     template<size_t Index>
-    ROCPRIM_HOST_DEVICE static constexpr bool is_tuple_of_references_impl()
+    ROCPRIM_HOST_DEVICE
+    constexpr bool is_tuple_of_references_impl()
     {
         using tuple_t   = ::rocprim::tuple<Args...>;
         using element_t = ::rocprim::tuple_element_t<Index, tuple_t>;
@@ -270,13 +254,14 @@ private:
     }
 
     template<>
-    ROCPRIM_HOST_DEVICE static constexpr bool is_tuple_of_references_impl<sizeof...(Args)>()
+    ROCPRIM_HOST_DEVICE
+    constexpr bool is_tuple_of_references_impl<sizeof...(Args)>()
     {
         return true;
     }
 
 public:
-    static constexpr bool value = is_tuple_of_references_impl<0>();
+    static constexpr bool value = is_tuple_of_references().is_tuple_of_references_impl<0>();
 };
 
 template<typename Iterator>

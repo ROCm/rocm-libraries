@@ -67,28 +67,28 @@ namespace test_utils
 // the results of _two_ sequences of operations with different order
 // For all other operations (i.e. integer arithmetics) default 0 is used
 template<class T>
-static constexpr float precision = 0;
+inline constexpr float precision = 0;
 
 template<>
-static constexpr float precision<double> = 2.0f / (1ll << 52);
+inline constexpr float precision<double> = 2.0f / (1ll << 52);
 
 template<>
-static constexpr float precision<float> = 2.0f / (1ll << 23);
+inline constexpr float precision<float> = 2.0f / (1ll << 23);
 
 template<>
-static constexpr float precision<rocprim::half> = 2.0f / (1ll << 10);
+inline constexpr float precision<rocprim::half> = 2.0f / (1ll << 10);
 
 template<>
-static constexpr float precision<rocprim::bfloat16> = 2.0f / (1ll << 7);
+inline constexpr float precision<rocprim::bfloat16> = 2.0f / (1ll << 7);
 
 template<class T>
-static constexpr float precision<const T> = precision<T>;
+inline constexpr float precision<const T> = precision<T>;
 
 template<class T>
-static constexpr float precision<common::custom_type<T, T, true>> = precision<T>;
+inline constexpr float precision<common::custom_type<T, T, true>> = precision<T>;
 
 template<class T, int N>
-static constexpr float precision<custom_test_array_type<T, N>> = precision<T>;
+inline constexpr float precision<custom_test_array_type<T, N>> = precision<T>;
 
 template<class T>
 struct is_plus_operator : std::false_type
