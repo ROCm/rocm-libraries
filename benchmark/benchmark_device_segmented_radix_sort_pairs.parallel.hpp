@@ -67,8 +67,7 @@ std::string config_name()
     const rocprim::detail::segmented_radix_sort_config_params config = Config();
     return "{bs:" + std::to_string(config.kernel_config.block_size)
            + ",ipt:" + std::to_string(config.kernel_config.items_per_thread)
-           + ",lrb:" + std::to_string(config.long_radix_bits)
-           + ",srb:" + std::to_string(config.short_radix_bits)
+           + ",rb:" + std::to_string(config.radix_bits)
            + ",eupws:" + std::to_string(config.enable_unpartitioned_warp_sort)
            + ",wsc:" + warp_sort_config_name(config.warp_sort_config) + "}";
 }
@@ -298,8 +297,7 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
 template<typename Tp, template<Tp> class T, bool enable, Tp... Idx>
 struct decider;
 
-template<unsigned int LongBits,
-         unsigned int ShortBits,
+template<unsigned int RadixBits,
          unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int WarpSmallLWS,
@@ -324,8 +322,7 @@ struct device_segmented_radix_sort_benchmark_generator
                                  Key,
                                  Value,
                                  rocprim::segmented_radix_sort_config<
-                                     LongBits,
-                                     ShortBits,
+                                     RadixBits,
                                      rocprim::kernel_config<BlockSize, ItemsPerThread>,
                                      rocprim::WarpSortConfig<WarpSmallLWS,
                                                              WarpSmallIPT,

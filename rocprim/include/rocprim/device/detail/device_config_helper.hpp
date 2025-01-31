@@ -479,11 +479,8 @@ struct segmented_radix_sort_config_params
 {
     /// \brief Kernel start parameters.
     kernel_config_params kernel_config{};
-    /// \brief Number of bits in long iterations.
-    unsigned int long_radix_bits = 0;
-    /// \brief Number of bits in short iterations.
-    /// \deprecated The short radix bits parameter is no longer used and will be removed in a future version.
-    unsigned int short_radix_bits = 0;
+    /// \brief Number of bits in iterations.
+    unsigned int radix_bits = 0;
     /// \brief If set to \p true, warp sort can be used to sort the small segments, even if no partitioning happens.
     bool enable_unpartitioned_warp_sort = true;
     /// \brief Warp sort config params
@@ -569,22 +566,19 @@ struct DisabledWarpSortConfig
 //// \brief Configuration of device-level segmented radix sort operation.
 ///
 /// Radix sort is excecuted in a few iterations (passes) depending on total number of bits to be sorted
-/// (`begin_bit` and `end_bit`), each iteration sorts either `LongRadixBits` or `ShortRadixBits` bits
+/// (`begin_bit` and `end_bit`), each iteration sorts `RadixBits` bits
 /// chosen to cover whole bit range in optimal way.
 ///
-/// For example, if `LongRadixBits` is 7, `ShortRadixBits` is 6, `begin_bit` is 0 and `end_bit` is 32
-/// there will be 5 iterations: 7 + 7 + 6 + 6 + 6 = 32 bits.
+/// For example, if `RadixBits` is 7, `begin_bit` is 0 and `end_bit` is 32
+/// there will be 5 iterations: 7 + 7 + 7 + 7 + 4 (still sorting with 7 bits) = 32 bits.
 ///
 /// If a segment's element count is low ( <= warp_sort_config::items_per_thread * warp_sort_config::logical_warp_size ),
 /// it is sorted by a special warp-level sorting method.
 ///
-/// \tparam LongRadixBits number of bits in long iterations.
-/// \tparam ShortRadixBits number of bits in short iterations, must be equal to or less than `LongRadixBits`.
-/// Deprecated and no longer used.
+/// \tparam RadixBits number of bits in long iterations.
 /// \tparam SortConfig configuration of radix sort kernel. Must be `kernel_config`.
 /// \tparam WarpSortConfig configuration of the warp sort that is used on the short segments.
-template<unsigned int LongRadixBits,
-         unsigned int ShortRadixBits,
+template<unsigned int RadixBits,
          class SortConfig,
          class WarpSortConfig             = DisabledWarpSortConfig,
          bool EnableUnpartitionedWarpSort = true>
@@ -594,12 +588,8 @@ struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_
     using tag = detail::segmented_radix_sort_config_tag;
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
-    /// \brief Number of bits in long iterations.
-    static constexpr unsigned int long_radix_bits = LongRadixBits;
-
-    /// \brief Number of bits in short iterations.
-    /// \deprecated The short radix bits parameter is no longer used and will be removed in a future version.
-    static constexpr unsigned int short_radix_bits = ShortRadixBits;
+    /// \brief Number of bits in iterations.
+    static constexpr unsigned int radix_bits = RadixBits;
 
     /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = SortConfig::block_size;
@@ -618,8 +608,7 @@ struct segmented_radix_sort_config : public detail::segmented_radix_sort_config_
     constexpr segmented_radix_sort_config()
         : detail::segmented_radix_sort_config_params{
             SortConfig(),
-            LongRadixBits,
-            ShortRadixBits,
+            RadixBits,
             EnableUnpartitionedWarpSort,
             {warp_sort_config::partitioning_allowed,
               warp_sort_config::logical_warp_size_small,
@@ -638,16 +627,14 @@ namespace detail
 {
 /// \brief Default segmented_radix_sort kernel configurations, such that the maximum shared memory is not exceeded.
 ///
-/// \tparam LongRadixBits Long bits used during the sorting.
-/// \tparam ShortRadixBits Short bits used during the sorting.
+/// \tparam RadixBits Bits used during the sorting.
 /// \tparam ItemsPerThread Items per thread when type Key has size 1.
-template<unsigned int LongRadixBits, unsigned int ShortRadixBits>
+template<unsigned int RadixBits>
 struct default_segmented_radix_sort_config_base
 {
     static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
         sizeof(unsigned int) + sizeof(unsigned int), sizeof(int));
-    using type = segmented_radix_sort_config<LongRadixBits,
-                                             ShortRadixBits,
+    using type = segmented_radix_sort_config<RadixBits,
                                              kernel_config<128, 17u>,
                                              WarpSortConfig<32, 4, 256, 3000, 32, 4, 256>,
                                              true>;

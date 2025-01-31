@@ -25,10 +25,13 @@ This is a complete list of affected functions and how their default accumulator 
     * new default: `class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>`
 
 * Added function `is_build_in` into `rocprim::traits::get`.
+* Changed the parameters `long_radix_bits` and `LongRadixBits` from `segmented_radix_sort` to `radix_bits` and `RadixBits` respectively.
 
 ### Removed
+
 * Removed `rocprim::detail::float_bit_mask` and relative tests, use `rocprim::traits::float_bit_mask` instead.
 * Removed `rocprim::traits::is_fundamental`, please use `rocprim::traits::get<T>::is_fundamental()` directly.
+* Removed the deprecated parameters `short_radix_bits` and `ShortRadixBits` from the `segmented_radix_sort` config. They were unused, it is only an API change.
 
 ## rocPRIM 3.5.0 for ROCm 6.5.0
 
