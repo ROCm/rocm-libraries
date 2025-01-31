@@ -84,10 +84,9 @@ namespace rocRoller
 
                 // TODO: Consider moving numBytes into input of this function.
                 if(offsetInBytes)
-                    co_yield Expression::generate(
-                        dst, m_fastArith(expr * numBytes + offsetInBytes), m_context);
+                    co_yield Expression::generate(dst, expr * numBytes + offsetInBytes, m_context);
                 else
-                    co_yield Expression::generate(dst, m_fastArith(expr * numBytes), m_context);
+                    co_yield Expression::generate(dst, expr * numBytes, m_context);
             }
 
             bool hasGeneratedInputs(int const& tag)
@@ -576,7 +575,7 @@ namespace rocRoller
                     if(dest->name().empty())
                         dest->setName(concatenate("DataFlowTag", dimTag));
                 }
-                co_yield Expression::generate(dest, m_fastArith(assign.expression), m_context);
+                co_yield Expression::generate(dest, assign.expression, m_context);
 
                 if(deferred)
                 {

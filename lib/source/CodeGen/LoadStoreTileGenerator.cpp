@@ -46,7 +46,7 @@ namespace rocRoller
         inline Generator<Instruction> LoadStoreTileGenerator::generate(auto&         dest,
                                                                        ExpressionPtr expr) const
         {
-            co_yield Expression::generate(dest, m_fastArith(expr), m_context);
+            co_yield Expression::generate(dest, expr, m_context);
         }
 
         inline ExpressionPtr L(auto const& x)
@@ -223,8 +223,7 @@ namespace rocRoller
 
             if(rowOffsetExpr)
             {
-                auto unrolledRowOffsetExpr
-                    = m_fastArith(info.rowOffsetReg->expression() + rowOffsetExpr);
+                auto unrolledRowOffsetExpr = info.rowOffsetReg->expression() + rowOffsetExpr;
                 auto tmp = info.rowOffsetReg->placeholder(Register::Type::Vector, {});
                 co_yield generate(tmp, unrolledRowOffsetExpr);
                 info.rowOffsetReg = tmp;
