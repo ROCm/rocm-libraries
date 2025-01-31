@@ -282,11 +282,6 @@ public:
     {
         return !(*this < other);
     }
-
-    [[deprecated]] friend std::ostream& operator<<(std::ostream& os, const zip_iterator& /* iter */)
-    {
-        return os;
-    }
     #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:

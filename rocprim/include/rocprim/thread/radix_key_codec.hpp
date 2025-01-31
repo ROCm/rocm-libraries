@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -652,15 +652,6 @@ private:
         return digit;
     }
 };
-
-namespace detail
-{
-
-template<class Key, bool Descending = false>
-using radix_key_codec [[deprecated("radix_key_codec is now public API.")]]
-= rocprim::radix_key_codec<Key, Descending>;
-
-} // namespace detail
 END_ROCPRIM_NAMESPACE
 
 /// @}

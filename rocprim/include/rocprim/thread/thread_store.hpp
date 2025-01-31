@@ -54,8 +54,7 @@ enum cache_store_modifier
     store_nontemporal = 3, ///< Cache streaming (likely not to be accessed again after storing)
     store_wt          = 4, ///< Cache write-through (to system memory)
     store_volatile    = 5, ///< Volatile (any memory space)
-    store_cs    = store_nontemporal, ///< Alias for store_nontemporal (will be deprecated in 7.0)
-    store_count = 7
+    store_count       = 6
 };
 
 /// @}

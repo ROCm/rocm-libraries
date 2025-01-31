@@ -58,8 +58,7 @@ enum cache_load_modifier : int
     load_cv          = 4, ///< Cache as volatile (including cached system lines)
     load_ldg         = 5, ///< Cache as texture
     load_volatile    = 6, ///< Volatile (any memory space)
-    load_cs          = load_nontemporal, ///< Alias for load_nontemporal (will be deprecated in 7.0)
-    load_count       = 8
+    load_count       = 7
 };
 
 /// @}

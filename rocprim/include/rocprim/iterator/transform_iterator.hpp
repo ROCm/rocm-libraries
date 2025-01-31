@@ -205,12 +205,6 @@ public:
     {
         return iterator_ >= other.iterator_;
     }
-
-    [[deprecated]] friend std::ostream& operator<<(std::ostream& os,
-                                                   const transform_iterator& /* iter */)
-    {
-        return os;
-    }
     #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:

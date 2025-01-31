@@ -208,14 +208,6 @@ public:
         return storage_.threads[src_lane];
     }
 
-protected:
-    [[deprecated]] ROCPRIM_DEVICE ROCPRIM_INLINE void
-        to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
-    {
-        (void) inclusive_input;
-        return to_exclusive(exclusive_output, storage);
-    }
-
 private:
     // Calculate exclusive results base on inclusive scan results in storage.threads[].
     template<class BinaryFunction>

@@ -26,12 +26,26 @@ This is a complete list of affected functions and how their default accumulator 
 
 * Added function `is_build_in` into `rocprim::traits::get`.
 * Changed the parameters `long_radix_bits` and `LongRadixBits` from `segmented_radix_sort` to `radix_bits` and `RadixBits` respectively.
+* Marked the initialisation constructor of `rocprim::reverse_iterator<Iter>` `explicit`, use `rocprim::make_reverse_iterator`.
+* Drop `c++14` support for rocprim.
 
 ### Removed
 
 * Removed `rocprim::detail::float_bit_mask` and relative tests, use `rocprim::traits::float_bit_mask` instead.
 * Removed `rocprim::traits::is_fundamental`, please use `rocprim::traits::get<T>::is_fundamental()` directly.
 * Removed the deprecated parameters `short_radix_bits` and `ShortRadixBits` from the `segmented_radix_sort` config. They were unused, it is only an API change.
+* Removed the deprecated function `rocprim::warp_size()`. Use `rocprim::host_warp_size()` and `rocprim::device_warp_size()` instead.
+* Removed the deprecated `operator<<` from the iterators.
+* Removed the deprecated `TwiddleIn` and `TwiddleOut`. Use `radix_key_codec` instead.
+* Removed the deprecated flags API of `block_adjacent_difference`. Use `subtract_left()` or `block_discontinuity::flag_heads()` instead.
+* Removed the deprecated `to_exclusive` functions in the warp scans.
+* Removed the `rocprim::load_cs` from the `cache_load_modifier` enum. Use `rocprim::load_nontemporal` instead.
+* Removed the `rocprim::store_cs` from the `cache_store_modifier` enum. Use `rocprim::store_nontemporal` instead.
+* Removed the deprecated header file `rocprim/detail/match_result_type.hpp`. Include `rocprim/type_traits.hpp` instead.
+  * This header included `rocprim::detail::invoke_result`. Use `rocprim::invoke_result` instead.
+  * This header included `rocprim::detail::invoke_result_binary_op`. Use `rocprim::invoke_result_binary_op` instead.
+  * This header included `rocprim::detail::match_result_type`. Use `rocprim::invoke_result_binary_op_t` instead.
+* Removed the deprecated `rocprim::detail::radix_key_codec` function. Use `rocprim::radix_key_codec` instead.
 
 ## rocPRIM 3.5.0 for ROCm 6.5.0
 

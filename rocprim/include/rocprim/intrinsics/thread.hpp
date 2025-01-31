@@ -34,19 +34,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 // Sizes
 
-/// \brief Returns a number of threads in a hardware warp.
-///
-/// It is constant for a device.
-///
-/// \warning This function will be removed in a future release.
-[[deprecated(
-    "Use the functions provided in 'rocprim::arch::wavefront' instead.")]]
-ROCPRIM_HOST_DEVICE
-inline constexpr unsigned int warp_size()
-{
-    return ROCPRIM_WAVEFRONT_SIZE;
-}
-
 /// \brief Returns a number of threads in a hardware warp for the actual target.
 /// At device side this constant is available at compile time.
 ///

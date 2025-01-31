@@ -243,10 +243,6 @@ function(add_rocprim_cpp_standard_test STANDARD EXTENSIONS TARGET_SUFFIX TEST_NA
   endif()
 endfunction()
 
-function(add_rocprim_cpp17_test TEST_NAME TEST_SOURCES)
-  add_rocprim_cpp_standard_test(17 OFF "" ${TEST_NAME} ${TEST_SOURCES})
-endfunction()
-
 # ****************************************************************************
 # Tests
 # ****************************************************************************
@@ -289,8 +285,8 @@ add_rocprim_test("rocprim.device_histogram" test_device_histogram.cpp)
 add_rocprim_test("rocprim.device_merge" test_device_merge.cpp)
 add_rocprim_test("rocprim.device_merge_inplace" test_device_merge_inplace.cpp)
 add_rocprim_test("rocprim.device_merge_sort" test_device_merge_sort.cpp)
-add_rocprim_cpp17_test("rocprim.nth_element" test_device_nth_element.cpp)
-add_rocprim_cpp17_test("rocprim.device_partial_sort" test_device_partial_sort.cpp)
+add_rocprim_test("rocprim.nth_element" test_device_nth_element.cpp)
+add_rocprim_test("rocprim.device_partial_sort" test_device_partial_sort.cpp)
 add_rocprim_test("rocprim.device_partition" test_device_partition.cpp)
 add_rocprim_test_parallel("rocprim.device_radix_sort" test_device_radix_sort.cpp.in)
 add_rocprim_test("rocprim.device_reduce_by_key" test_device_reduce_by_key.cpp)
@@ -314,8 +310,6 @@ add_rocprim_test("rocprim.thread" test_thread.cpp)
 add_rocprim_test("rocprim.thread_algos" test_thread_algos.cpp)
 add_rocprim_test("rocprim.utils_sort_checker" test_utils_sort_checker.cpp)
 add_rocprim_test("rocprim.transform_iterator" test_transform_iterator.cpp)
-# add_rocprim_cpp_standard_test(14 OFF "_cpp14" "rocprim.type_traits_interface" test_type_traits_interface.cpp)
-# add_rocprim_cpp_standard_test(14 ON "_gnupp14" "rocprim.type_traits_interface" test_type_traits_interface.cpp)
 add_rocprim_cpp_standard_test(17 OFF "_cpp17" "rocprim.type_traits_interface" test_type_traits_interface.cpp)
 add_rocprim_cpp_standard_test(17 ON "_gnupp17" "rocprim.type_traits_interface" test_type_traits_interface.cpp)
 add_rocprim_cpp_standard_test(20 OFF "_cpp20" "rocprim.type_traits_interface" test_type_traits_interface.cpp)

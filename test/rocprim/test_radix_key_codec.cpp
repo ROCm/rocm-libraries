@@ -94,7 +94,7 @@ struct custom_key_decomposer
 
 TEST_P(RadixKeyCodecTest, ExtractDigit)
 {
-    using codec = rocprim::detail::radix_key_codec<custom_key>;
+    using codec = rocprim::radix_key_codec<custom_key>;
 
     const custom_key key{0xab, 0xcdef, 0x01};
     const auto       digit = codec::extract_digit(key,
@@ -126,7 +126,7 @@ struct custom_key_decomposer_with_unused
 
 TEST_P(RadixKeyCodecUnusedTest, ExtractDigitUnused)
 {
-    using codec = rocprim::detail::radix_key_codec<custom_key>;
+    using codec = rocprim::radix_key_codec<custom_key>;
 
     const custom_key key{0xab, 0xcdef, 0x01};
     const auto       digit = codec::extract_digit(key,
@@ -140,7 +140,7 @@ TEST_P(RadixKeyCodecUnusedTest, ExtractDigitUnused)
 TEST(RadixKeyCodecTest, ExtractCustomTestType)
 {
     using T       = common::custom_type<int, int, true>;
-    using codec_t = rocprim::detail::radix_key_codec<T, true>;
+    using codec_t = rocprim::radix_key_codec<T, true>;
 
     T value{12, 34};
 

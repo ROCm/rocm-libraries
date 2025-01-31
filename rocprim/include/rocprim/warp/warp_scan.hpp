@@ -863,27 +863,12 @@ public:
         return T();
     }
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-protected:
-    // These undocumented functions are used by hipCUB prior to version 3.1
+    /// \brief Broadcasts value from one thread to all threads in logical warp.
+    /// Invalid Warp Size
     template<unsigned int FunctionWarpSize = WarpSize>
-    [[deprecated]] ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage) ->
-        typename std::enable_if<(FunctionWarpSize <= arch::wavefront::min_size()), void>::type
-    {
-        return base_type::to_exclusive(inclusive_input, exclusive_output, storage);
-    }
-
-    template<unsigned int FunctionWarpSize = WarpSize>
-    [[deprecated]] ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto to_exclusive(T, T&, storage_type&) ->
-        typename std::enable_if<(FunctionWarpSize > arch::wavefront::min_size()), void>::type
-    {
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
-    }
-#endif
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto broadcast(T, const unsigned int, storage_type&) ->
+        typename std::enable_if<(!detail::is_power_of_two(FunctionWarpSize)), T>::type = delete;
 };
 
 END_ROCPRIM_NAMESPACE

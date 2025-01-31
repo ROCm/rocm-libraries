@@ -287,14 +287,6 @@ public:
         return warp_shuffle(input, src_lane, WarpSize);
     }
 
-protected:
-    [[deprecated]] ROCPRIM_DEVICE ROCPRIM_INLINE void
-        to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
-    {
-        (void) storage;
-        return to_exclusive(inclusive_input, exclusive_output);
-    }
-
 private:
     // Changes inclusive scan results to exclusive scan results
     template<class BinaryFunction>
