@@ -132,7 +132,10 @@
 #  define _CCCL_HAS_CUDA_COMPILER 1
 #endif
 
-#endif //!defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC_RTC__)
+#if defined(_CCCL_HAS_CUDA_COMPILER) && _CCCL_CUDACC_BELOW(12) && !defined(CCCL_IGNORE_DEPRECATED_CUDA_BELOW_12)
+#  error "CUDA versions below 12 are not supported." \
+"Define CCCL_IGNORE_DEPRECATED_CUDA_BELOW_12 to suppress this message."
+#endif
 
 // Convert parameter to string
 #define _CCCL_TO_STRING2(_STR) #_STR
