@@ -874,7 +874,30 @@ namespace rocRoller
 
     inline Generator<Instruction> MemoryInstructions::barrier()
     {
-        co_yield Instruction("s_barrier", {}, {}, {}, "Memory barrier");
+        const auto& gpu = m_context.lock()->targetArchitecture().target();
+        if(gpu.isCDNAGPU() || (gpu.isRDNAGPU() && gpu.gfx < GPUArchitectureGFX::GFX1200))
+        {
+            co_yield Instruction("s_barrier", {}, {}, {}, "Memory barrier");
+        }
+        else if(gpu.isRDNA4GPU())
+        {
+            const auto normalBarrierID = -1;
+            co_yield_(Instruction("s_barrier_signal",
+                                  {},
+                                  {Register::Value::Literal(normalBarrierID)},
+                                  {},
+                                  "Memory barrier signal"));
+            co_yield_(Instruction("s_barrier_wait",
+                                  {},
+                                  {Register::Value::Literal(normalBarrierID)},
+                                  {},
+                                  "Memory barrier wait"));
+        }
+        else
+        {
+            Throw<FatalError>(
+                std::format("Barriers are not implemented for {}.\n", gpu.toString()));
+        }
     }
 
 }

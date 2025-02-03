@@ -254,7 +254,9 @@ namespace rocRoller
 
             float outOfRegisters = status.outOfRegisters.count();
 
-            if(m_weights.zeroFreeBarriers && inst.getOpCode() == "s_barrier"
+            const auto& gpu            = arch.target();
+            const auto& barrierLiteral = gpu.isRDNA4GPU() ? "s_barrier_wait" : "s_barrier";
+            if(m_weights.zeroFreeBarriers && inst.getOpCode().rfind(barrierLiteral, 0) == 0
                && status.waitCount == WaitCount())
                 return 0;
 

@@ -36,7 +36,7 @@ namespace rocRoller
     {
         return isScalar(opCode)
                && (opCode.find("branch") != std::string::npos //
-                   || opCode == "s_endpgm" || opCode == "s_barrier");
+                   || opCode == "s_endpgm" || opCode.rfind("s_barrier", 0) == 0);
     }
 
     bool GPUInstructionInfo::isSALU(std::string const& opCode)
