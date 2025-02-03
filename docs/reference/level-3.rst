@@ -352,3 +352,13 @@ rocblas_Xtrtri + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_dtrtri_strided_batched
 
+rocblas_Xgemm_kernel_name
+=========================
+
+.. doxygenfunction:: rocblas_hgemm_kernel_name
+   :outline:
+.. doxygenfunction:: rocblas_sgemm_kernel_name
+   :outline:
+.. doxygenfunction:: rocblas_dgemm_kernel_name
+   :outline:
+
