@@ -782,14 +782,6 @@ namespace rocRoller
                 Throw<FatalError>("General contraction not implemented yet.");
             }
 
-            // XXX REMOVE THIS
-            {
-                std::ofstream dfile;
-                dfile.open("tmp.dot", std::ofstream::out | std::ofstream::trunc);
-                dfile << kgraph.toDOT();
-                dfile.close();
-            }
-
             return kgraph;
         }
 
