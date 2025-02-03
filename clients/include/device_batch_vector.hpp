@@ -241,15 +241,12 @@ public:
         {
             if(m_batch_count > 0)
             {
-                if(hipSuccess
-                   != (hip_err
-                       = hipMemcpy((*this)[flush_batch_index * uint64_t(that.batch_count())],
-                                   that[0],
-                                   sizeof(T) * that.nmemb() * that.batch_count(),
-                                   kind)))
-                {
+                hip_err = hipMemcpy((*this)[flush_batch_index * uint64_t(that.batch_count())],
+                                    that[0],
+                                    sizeof(T) * that.nmemb() * that.batch_count(),
+                                    kind);
+                if(hipSuccess != hip_err)
                     return hip_err;
-                }
             }
         }
 
