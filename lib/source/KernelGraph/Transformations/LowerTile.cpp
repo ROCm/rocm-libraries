@@ -1130,14 +1130,14 @@ namespace rocRoller
             std::vector<int> sizes = {macTile.sizes.at(0) / static_cast<int>(numWaveTiles[0]),
                                       macTile.sizes.at(1) / static_cast<int>(numWaveTiles[1])};
 
-            // if(macTile.memoryType == MemoryType::LDS)
-            // {
-            //     auto internalTile       = MacroTile(sizes, MemoryType::VGPR, macTile.subTileSizes);
-            //     internalTile.layoutType = macTile.layoutType;
-            //     if(splitStore)
-            //         internalTile.memoryType = MemoryType::WAVE_SPLIT;
-            //     return graph.coordinates.addElement(internalTile);
-            // }
+            if(macTile.memoryType == MemoryType::LDS)
+            {
+                auto internalTile       = MacroTile(sizes, MemoryType::VGPR, macTile.subTileSizes);
+                internalTile.layoutType = macTile.layoutType;
+                if(splitStore)
+                    internalTile.memoryType = MemoryType::WAVE_SPLIT;
+                return graph.coordinates.addElement(internalTile);
+            }
 
             auto workgroupSizes = context->kernel()->workgroupSize();
 
