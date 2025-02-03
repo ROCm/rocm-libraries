@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -576,6 +576,11 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasSetMathMode(hipblasHandle_t handle, hipbla
 
 /*! \brief Get hipblas math mode */
 HIPBLAS_EXPORT hipblasStatus_t hipblasGetMathMode(hipblasHandle_t handle, hipblasMath_t* mode);
+
+/*! \brief Set hipblas workspace to user-owned device buffer */
+HIPBLAS_EXPORT hipblasStatus_t hipblasSetWorkspace(hipblasHandle_t handle,
+                                                   void*           workspace,
+                                                   size_t          workspaceSizeInBytes);
 
 /*! \brief copy vector from host to device
     @param[in]

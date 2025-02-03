@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -451,6 +451,18 @@ try
     rocblas_status    status = rocblas_get_math_mode((rocblas_handle)handle, &rocblas_mode);
     *mode                    = hipblasConvertMathMode(rocblas_mode);
     return hipblasConvertStatus(status);
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t
+    hipblasSetWorkspace(hipblasHandle_t handle, void* workspace, size_t workspaceSizeInBytes)
+try
+{
+    return hipblasConvertStatus(
+        rocblas_set_workspace((rocblas_handle)handle, workspace, workspaceSizeInBytes));
 }
 catch(...)
 {
