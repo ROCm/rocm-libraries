@@ -39,11 +39,11 @@
 
 #include <cuda/std/__type_traits/integral_constant.h>
 
-#if defined(_CCCL_HAS_NVFP16)
+#if _CCCL_HAS_NVFP16()
 #  include <cuda_fp16.h>
 #endif // _CCCL_HAS_NVFP16
 
-#if defined(_CCCL_HAS_NVBF16)
+#if _CCCL_HAS_NVBF16()
 _CCCL_DIAG_PUSH
 _CCCL_DIAG_SUPPRESS_CLANG("-Wunused-function")
 #  include <cuda_bf16.h>
@@ -70,7 +70,7 @@ _CCCL_INLINE_VAR constexpr bool __is_extended_floating_point_v
 #  endif // !_CCCL_NO_INLINE_VARIABLES
 #endif // !_CCCL_NO_VARIABLE_TEMPLATES
 
-#if defined(_CCCL_HAS_NVFP16)
+#if _CCCL_HAS_NVFP16()
 template <>
 struct __is_extended_floating_point<__half> : true_type
 {};
@@ -81,7 +81,7 @@ _CCCL_INLINE_VAR constexpr bool __is_extended_floating_point_v<__half> = true;
 #  endif // !_CCCL_NO_INLINE_VARIABLES
 #endif // _CCCL_HAS_NVFP16
 
-#if defined(_CCCL_HAS_NVBF16)
+#if _CCCL_HAS_NVBF16()
 template <>
 struct __is_extended_floating_point<__hip_bfloat16> : true_type
 {};
