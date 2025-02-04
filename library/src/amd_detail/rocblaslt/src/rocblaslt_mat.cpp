@@ -389,24 +389,24 @@ rocblaslt_status
     hipDataType            type_c       = matC[0]->type;
     hipDataType            type_d       = matD[0]->type;
 
-    std::vector<const void*>        A_vec, B_vec, C_vec, alpha_vec, beta_vec;
-    std::vector<void*>              D_vec, E_vec, amaxD_vec;
-    std::vector<const void*>        bias_vec;
-    std::vector<const void*>        scaleA_vec;
-    std::vector<const void*>        scaleB_vec;
-    std::vector<const void*>        scaleC_vec;
-    std::vector<const void*>        scaleD_vec;
-    std::vector<const void*>        scaleE_vec;
-    std::vector<const void*>        scaleAlpha_vec;
-    std::vector<hipDataType>        bias_type_vec;
-    std::vector<rocblaslt_epilogue> epilogue_vec;
-    std::vector<int64_t>            m_vec, n_vec, k_vec;
-    std::vector<int64_t>            lda_vec, batch_stride_a_vec, num_batches_a_vec;
-    std::vector<int64_t>            ldb_vec, batch_stride_b_vec, num_batches_b_vec;
-    std::vector<int64_t>            ldc_vec, batch_stride_c_vec, num_batches_c_vec;
-    std::vector<int64_t>            ldd_vec, batch_stride_d_vec, num_batches_d_vec;
-    std::vector<int64_t>            lde_vec, batch_stride_e_vec, num_batches_e_vec;
-    std::vector<std::array<int8_t, 16>>         alpha_1(matmul_descr.size());
+    std::vector<const void*>            A_vec, B_vec, C_vec, alpha_vec, beta_vec;
+    std::vector<void*>                  D_vec, E_vec, amaxD_vec;
+    std::vector<const void*>            bias_vec;
+    std::vector<const void*>            scaleA_vec;
+    std::vector<const void*>            scaleB_vec;
+    std::vector<const void*>            scaleC_vec;
+    std::vector<const void*>            scaleD_vec;
+    std::vector<const void*>            scaleE_vec;
+    std::vector<const void*>            scaleAlpha_vec;
+    std::vector<hipDataType>            bias_type_vec;
+    std::vector<rocblaslt_epilogue>     epilogue_vec;
+    std::vector<int64_t>                m_vec, n_vec, k_vec;
+    std::vector<int64_t>                lda_vec, batch_stride_a_vec, num_batches_a_vec;
+    std::vector<int64_t>                ldb_vec, batch_stride_b_vec, num_batches_b_vec;
+    std::vector<int64_t>                ldc_vec, batch_stride_c_vec, num_batches_c_vec;
+    std::vector<int64_t>                ldd_vec, batch_stride_d_vec, num_batches_d_vec;
+    std::vector<int64_t>                lde_vec, batch_stride_e_vec, num_batches_e_vec;
+    std::vector<std::array<int8_t, 16>> alpha_1(matmul_descr.size());
 
     std::vector<bool> gradient_vec;
 
