@@ -221,19 +221,6 @@ def generate_cpu_function_pool_pieces(functions, num_files):
     return pieces
 
 
-def list_generated_kernels(kernels):
-    """Return list of kernel names."""
-    return [
-        kernel_name(x) for x in kernels
-        if not x.runtime_compile and not is_aot_rtc(x)
-    ]
-
-
-#
-# Main!
-#
-
-
 def kernel_name(ns):
     """Given kernel info namespace, return reasonable file name."""
 
@@ -1246,9 +1233,6 @@ def cli():
     #
     # sub commands
     #
-
-    if args.command == 'list':
-        scprint(set(['function_pool.cpp'] + list_generated_kernels(kernels)))
 
     if args.command == 'generate':
         cpu_functions = generate_kernels(kernels, precisions,

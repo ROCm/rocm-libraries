@@ -59,14 +59,6 @@ endif()
 set( kgen ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py )
 set( kgendeps ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
               ${CMAKE_SOURCE_DIR}/library/src/device/generator.py )
-execute_process(COMMAND ${PYTHON3_EXE} ${kgen}
-  --runtime-compile-default=${ROCFFT_RUNTIME_COMPILE_DEFAULT}
-  list
-  OUTPUT_VARIABLE gen_headers
-  RESULT_VARIABLE STATUS)
-if( STATUS AND NOT STATUS EQUAL 0 )
-  message( FATAL_ERROR "Kernel generator failed (list): ${STATUS}")
-endif()
 
 # create list of all N files that will initialize function pool
 if( ROCFFT_FUNCTION_POOL_N LESS 1 )
@@ -82,7 +74,7 @@ endforeach()
 
 # stockham_gen will be having relative RUNPATH with respect to package install directory
 # Set LD_LIBRARY_PATH for running the executable from build directory
-add_custom_command(OUTPUT ${gen_headers}
+add_custom_command(OUTPUT function_pool.cpp
   OUTPUT ${FUNCTION_POOLS}
   COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}" ${PYTHON3_EXE} ${kgen}
   --runtime-compile-default=${ROCFFT_RUNTIME_COMPILE_DEFAULT}
@@ -94,7 +86,7 @@ add_custom_command(OUTPUT ${gen_headers}
 
 # add virtual build target for generated kernels
 add_custom_target(gen_headers_target
-  DEPENDS ${gen_headers}
+  DEPENDS function_pool.cpp
   VERBATIM
 )
 
