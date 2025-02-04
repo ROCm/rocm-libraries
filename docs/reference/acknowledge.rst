@@ -5,7 +5,7 @@
 .. _acknowledge:
 
 ********************************************************************
-rocBLAS Acknowledgements
+rocBLAS acknowledgements
 ********************************************************************
 
 .. include:: ../../Acknowledgement.rst

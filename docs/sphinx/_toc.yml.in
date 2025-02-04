@@ -2,19 +2,32 @@ defaults:
   numbered: False
 root: index
 subtrees:
+
 - entries:
-  - file: install/install.rst
-    subtrees:
-    - entries:
-      - file: install/Linux_Install_Guide
-      - file: install/Windows_Install_Guide
-  - file: how-to/how-to.rst
-    title: How To
-    subtrees:
-    - entries:
-      - file: how-to/what-is-rocblas.rst
-      - file: how-to/Programmers_Guide.rst
-      - file: how-to/Contributors_Guide.rst
+  - file: how-to/what-is-rocblas.rst
+    title: What is rocBLAS?
+
+- caption: Install 
+  entries:
+  - file: install/Linux_Install_Guide
+    title: Install rocBLAS on Linux
+  - file: install/Windows_Install_Guide
+    title: Install rocBLAS on Windows
+
+- caption: Conceptual 
+  entries:
+  - file: conceptual/rocblas-design-notes
+    title: rocBLAS design notes
+
+- caption: How to 
+  entries:
+  - file: how-to/Programmers_Guide
+    title: Program with rocBLAS
+  - file: how-to/logging-in-rocblas.rst
+    title: Use logging with rocBLAS
+  - file: how-to/Contributors_Guide.rst
+    title: Contribute to rocBLAS
+
   - file: reference/API_Reference-Guide.rst
     title: API Reference
     subtrees:
@@ -28,9 +41,14 @@ subtrees:
       - file: reference/extension.rst
       - file: reference/beta-features.rst
       - file: reference/memory-alloc.rst
-      - file: reference/logging.rst
       - file: reference/deprecations.rst
-      - file: reference/references.rst
-      - file: reference/acknowledge.rst
+
+- caption: About 
+  entries:
   - file: license.rst
+    title: rocBLAS license
+  - file: reference/references.rst
+    title: References
+  - file: reference/acknowledge.rst
+    title: Acknowledgements
 

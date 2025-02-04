@@ -5,12 +5,12 @@
 .. _level-1:
 
 ********************************************************************
-rocBLAS Level-1 Functions
+rocBLAS Level-1 functions
 ********************************************************************
 
 rocBLAS Level-1 functions perform scalar, vector, and vector-vector operations. [Level1]_
 
-Level-1 functions support the ILP64 API.  For more information on these `_64` functions, refer to section :ref:`ILP64 API`.
+Level-1 functions support the ILP64 API.  For more information on these ``_64`` functions, see the :ref:`ILP64 API` section.
 
 rocblas_iXamax + batched, strided_batched
 =========================================
@@ -23,7 +23,7 @@ rocblas_iXamax + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_izamax
 
-The amax functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``amax`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_isamax_batched
    :outline:
@@ -33,7 +33,7 @@ The amax functions support the _64 interface.  Refer to section :ref:`ILP64 API`
    :outline:
 .. doxygenfunction:: rocblas_izamax_batched
 
-The amax_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``amax_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_isamax_strided_batched
    :outline:
@@ -43,7 +43,7 @@ The amax_batched functions support the _64 interface.  Refer to section :ref:`IL
    :outline:
 .. doxygenfunction:: rocblas_izamax_strided_batched
 
-The amax_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``amax_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_iXamin + batched, strided_batched
 ==========================================
@@ -56,7 +56,7 @@ rocblas_iXamin + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_izamin
 
-The amin functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``amin`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_isamin_batched
    :outline:
@@ -66,7 +66,7 @@ The amin functions support the _64 interface.  Refer to section :ref:`ILP64 API`
    :outline:
 .. doxygenfunction:: rocblas_izamin_batched
 
-The amin_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``amin_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_isamin_strided_batched
    :outline:
@@ -76,7 +76,7 @@ The amin_batched functions support the _64 interface.  Refer to section :ref:`IL
    :outline:
 .. doxygenfunction:: rocblas_izamin_strided_batched
 
-The amin_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``amin_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xasum + batched, strided_batched
 ========================================
@@ -89,7 +89,7 @@ rocblas_Xasum + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_dzasum
 
-The asum functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``asum`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sasum_batched
    :outline:
@@ -99,7 +99,7 @@ The asum functions support the _64 interface.  Refer to section :ref:`ILP64 API`
    :outline:
 .. doxygenfunction:: rocblas_dzasum_batched
 
-The asum_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``asum_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sasum_strided_batched
    :outline:
@@ -109,7 +109,7 @@ The asum_batched functions support the _64 interface.  Refer to section :ref:`IL
    :outline:
 .. doxygenfunction:: rocblas_dzasum_strided_batched
 
-The asum_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``asum_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xaxpy + batched, strided_batched
 ========================================
@@ -124,7 +124,7 @@ rocblas_Xaxpy + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_zaxpy
 
-The axpy functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``axpy`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_saxpy_batched
    :outline:
@@ -136,7 +136,7 @@ The axpy functions support the _64 interface.  Refer to section :ref:`ILP64 API`
    :outline:
 .. doxygenfunction:: rocblas_zaxpy_batched
 
-The axpy_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``axpy_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_saxpy_strided_batched
    :outline:
@@ -148,7 +148,7 @@ The axpy_batched functions support the _64 interface.  Refer to section :ref:`IL
    :outline:
 .. doxygenfunction:: rocblas_zaxpy_strided_batched
 
-The axpy_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``axpy_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xcopy + batched, strided_batched
 ========================================
@@ -161,7 +161,7 @@ rocblas_Xcopy + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_zcopy
 
-The copy functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``copy`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_scopy_batched
    :outline:
@@ -171,7 +171,7 @@ The copy functions support the _64 interface.  Refer to section :ref:`ILP64 API`
    :outline:
 .. doxygenfunction:: rocblas_zcopy_batched
 
-The copy_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``copy_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_scopy_strided_batched
    :outline:
@@ -181,7 +181,7 @@ The copy_batched functions support the _64 interface.  Refer to section :ref:`IL
    :outline:
 .. doxygenfunction:: rocblas_zcopy_strided_batched
 
-The copy_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``copy_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xdot + batched, strided_batched
 =======================================
@@ -202,7 +202,7 @@ rocblas_Xdot + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_zdotc
 
-The dot/c/u functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``dot/c/u`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sdot_batched
    :outline:
@@ -220,7 +220,7 @@ The dot/c/u functions support the _64 interface.  Refer to section :ref:`ILP64 A
    :outline:
 .. doxygenfunction:: rocblas_zdotc_batched
 
-The dot/c/u_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``dot/c/u_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sdot_strided_batched
    :outline:
@@ -238,7 +238,7 @@ The dot/c/u_batched functions support the _64 interface.  Refer to section :ref:
    :outline:
 .. doxygenfunction:: rocblas_zdotc_strided_batched
 
-The dot/c/u_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``dot/c/u_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xnrm2 + batched, strided_batched
 ========================================
@@ -251,7 +251,7 @@ rocblas_Xnrm2 + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_dznrm2
 
-The nrm2 functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``nrm2`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_snrm2_batched
    :outline:
@@ -261,7 +261,7 @@ The nrm2 functions support the _64 interface.  Refer to section :ref:`ILP64 API`
    :outline:
 .. doxygenfunction:: rocblas_dznrm2_batched
 
-The nrm2_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``nrm2_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_snrm2_strided_batched
    :outline:
@@ -271,7 +271,7 @@ The nrm2_batched functions support the _64 interface.  Refer to section :ref:`IL
    :outline:
 .. doxygenfunction:: rocblas_dznrm2_strided_batched
 
-The nrm2_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``nrm2_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xrot + batched, strided_batched
 =======================================
@@ -288,7 +288,7 @@ rocblas_Xrot + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_zdrot
 
-The rot functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rot`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_srot_batched
    :outline:
@@ -302,7 +302,7 @@ The rot functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
    :outline:
 .. doxygenfunction:: rocblas_zdrot_batched
 
-The rot_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rot_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_srot_strided_batched
    :outline:
@@ -316,7 +316,7 @@ The rot_batched functions support the _64 interface.  Refer to section :ref:`ILP
    :outline:
 .. doxygenfunction:: rocblas_zdrot_strided_batched
 
-The rot_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rot_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xrotg + batched, strided_batched
 ========================================
@@ -329,7 +329,7 @@ rocblas_Xrotg + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_zrotg
 
-The rotg functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rotg`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_srotg_batched
    :outline:
@@ -339,7 +339,7 @@ The rotg functions support the _64 interface.  Refer to section :ref:`ILP64 API`
    :outline:
 .. doxygenfunction:: rocblas_zrotg_batched
 
-The rotg_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rotg_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_srotg_strided_batched
    :outline:
@@ -349,7 +349,7 @@ The rotg_batched functions support the _64 interface.  Refer to section :ref:`IL
    :outline:
 .. doxygenfunction:: rocblas_zrotg_strided_batched
 
-The rotg_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rotg_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xrotm + batched, strided_batched
 ========================================
@@ -358,19 +358,19 @@ rocblas_Xrotm + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_drotm
 
-The rotm functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rotm`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_srotm_batched
    :outline:
 .. doxygenfunction:: rocblas_drotm_batched
 
-The rotm_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rotm_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_srotm_strided_batched
    :outline:
 .. doxygenfunction:: rocblas_drotm_strided_batched
 
-The rotm_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rotm_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xrotmg + batched, strided_batched
 =========================================
@@ -379,19 +379,19 @@ rocblas_Xrotmg + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_drotmg
 
-The rotmg functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rotmg`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_srotmg_batched
    :outline:
 .. doxygenfunction:: rocblas_drotmg_batched
 
-The rotmg_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rotmg_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_srotmg_strided_batched
    :outline:
 .. doxygenfunction:: rocblas_drotmg_strided_batched
 
-The rotmg_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``rotmg_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xscal + batched, strided_batched
 =========================================
@@ -408,7 +408,7 @@ rocblas_Xscal + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_zdscal
 
-The scal functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``scal`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sscal_batched
    :outline:
@@ -422,7 +422,7 @@ The scal functions support the _64 interface.  Refer to section :ref:`ILP64 API`
    :outline:
 .. doxygenfunction:: rocblas_zdscal_batched
 
-The scal_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``scal_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sscal_strided_batched
    :outline:
@@ -436,7 +436,7 @@ The scal_batched functions support the _64 interface.  Refer to section :ref:`IL
    :outline:
 .. doxygenfunction:: rocblas_zdscal_strided_batched
 
-The scal_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``scal_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 rocblas_Xswap + batched, strided_batched
 =========================================
@@ -449,7 +449,7 @@ rocblas_Xswap + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_zswap
 
-The swap functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``swap`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sswap_batched
    :outline:
@@ -459,7 +459,7 @@ The swap functions support the _64 interface.  Refer to section :ref:`ILP64 API`
    :outline:
 .. doxygenfunction:: rocblas_zswap_batched
 
-The swap_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``swap_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sswap_strided_batched
    :outline:
@@ -469,5 +469,5 @@ The swap_batched functions support the _64 interface.  Refer to section :ref:`IL
    :outline:
 .. doxygenfunction:: rocblas_zswap_strided_batched
 
-The swap_strided_batched functions support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The ``swap_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
