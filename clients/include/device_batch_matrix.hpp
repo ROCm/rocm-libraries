@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -209,7 +209,7 @@ public:
         //
         if(this->m_nmemb != that.nmemb())
         {
-            rocblas_cout << "ERROR: m_nmemb mismatch in broadcast_one_batch_matrix_from"
+            rocblas_cout << "ERROR: m_nmemb mismatch in device_batch_matrix.transfer_from"
                          << std::endl;
             return hipErrorInvalidValue;
         }
