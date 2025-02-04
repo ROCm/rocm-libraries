@@ -496,8 +496,8 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
             //
             // allocate temporary storage
             //
-            rocsparse_hipMallocAsync(
-                &temporary_storage_ptr, temporary_storage_size_bytes, handle->stream);
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+                &temporary_storage_ptr, temporary_storage_size_bytes, handle->stream));
 
             //
             // perform sort

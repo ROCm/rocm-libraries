@@ -125,8 +125,16 @@ inline double get_gpu_time_msec(double gpu_time_used)
 inline bool is_hmm_enabled()
 {
     int deviceID, hmm_enabled;
-    hipGetDevice(&deviceID);
-    hipDeviceGetAttribute(&hmm_enabled, hipDeviceAttributeManagedMemory, deviceID);
+    if(hipGetDevice(&deviceID) != hipSuccess)
+    {
+        std::cout << "Failed to read device id..." << std::endl;
+        return false;
+    }
+    if(hipDeviceGetAttribute(&hmm_enabled, hipDeviceAttributeManagedMemory, deviceID) != hipSuccess)
+    {
+        std::cout << "Failed to read device attribute..." << std::endl;
+        return false;
+    }
 
     return hmm_enabled;
 }

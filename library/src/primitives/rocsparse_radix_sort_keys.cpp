@@ -50,8 +50,8 @@ rocsparse_status rocsparse::primitives::radix_sort_keys(rocsparse_handle  handle
 {
     rocprim::double_buffer<K> rocprim_keys(keys.current(), keys.alternate());
 
-    rocprim::radix_sort_keys(
-        buffer, buffer_size, rocprim_keys, length, startbit, endbit, handle->stream);
+    RETURN_IF_HIP_ERROR(rocprim::radix_sort_keys(
+        buffer, buffer_size, rocprim_keys, length, startbit, endbit, handle->stream));
 
     if(keys.current() != rocprim_keys.current())
     {

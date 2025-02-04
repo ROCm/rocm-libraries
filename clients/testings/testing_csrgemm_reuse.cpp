@@ -831,7 +831,7 @@ void testing_csrgemm_reuse(const Arguments& arg)
             }
         }
         ROCSPARSE_TIMER_OUT(gpu_num_time_used);
-        hipDeviceSynchronize();
+        CHECK_HIP_ERROR(hipDeviceSynchronize());
 
 #undef PARAMS
 #undef PARAM_NNZ

@@ -709,7 +709,7 @@ void testing_bsrgemm(const Arguments& arg)
 
         gpu_solve_time_used = (get_time_us() - gpu_solve_time_used) / number_hot_calls;
 
-        hipDeviceSynchronize();
+        CHECK_HIP_ERROR(hipDeviceSynchronize());
 
         double gflop_count = bsrgemm_gflop_count<T, rocsparse_int, rocsparse_int>(
             Mb, d_A.row_block_dim, h_alpha, h_A.ptr, h_A.ind, h_B.ptr, h_beta, h_D.ptr, h_A.base);
