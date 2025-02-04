@@ -28,6 +28,13 @@ subtrees:
   - file: how-to/Contributors_Guide.rst
     title: Contribute to rocBLAS
 
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocBLAS/tree/develop/clients/samples
+    title: rocBLAS sample code
+
+- caption: API Reference
+  entries:
   - file: reference/API_Reference-Guide.rst
     title: API Reference
     subtrees:

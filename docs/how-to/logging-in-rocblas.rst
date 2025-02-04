@@ -8,7 +8,7 @@
 Logging in rocBLAS
 ********************************************************************
 
-**Note that performance will degrade when logging is enabled.**
+**Performance will degrade when logging is enabled.**
 
 You can set four environment variables to control logging:
 
@@ -76,7 +76,7 @@ If the paths are not set, then the logging output is streamed to standard error.
 
 When profile logging is enabled, memory usage increases. If the
 program exits abnormally, it is possible that profile logging will
-not be outputted before the program exits.
+not sent to the output before the program exits.
 
 
 rocTX support in rocBLAS

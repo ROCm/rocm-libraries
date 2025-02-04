@@ -25,32 +25,67 @@ gemm_ex3 deprecation for all 8 bit float API
 ''''''''''''''''''''''''''''''''''''''''''''
 
 ``rocblas_gemm_ex3``, ``gemm_batched_ex3``, and ``gemm_strided_batched_ex3`` are deprecated and will be removed in the next
-major release of rocBLAS. Please refer to hipBLASLT for future 8 bit float usage https://github.com/ROCm/hipBLASLt.
+major release of rocBLAS. See `hipBLASLt <https://github.com/ROCm/hipBLASLt>`_ for future 8-bit float usage.
 
-Announced in rocBLAS 2.45
-==========================
-
-Replace is_complex by rocblas_is_complex
-''''''''''''''''''''''''''''''''''''''''
-
-From rocBLAS 3.0 the trait ``is_complex`` for rocblas complex types has been removed. Replace with ``rocblas_is_complex``.
-
-Replace truncate with rocblas_truncate
-''''''''''''''''''''''''''''''''''''''
-
-From rocBLAS 3.0 enum ``truncate_t`` and the value truncate has been removed and replaced by ``rocblas_truncate_t``
-and ``rocblas_truncate``, respectively.
-
-Announced in rocBLAS 2.46
+Announced in rocBLAS 4.0
 =========================
 
-Remove ability for hipBLAS to set rocblas_int8_type_for_hipblas
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Atomic operations will be disabled by default
+'''''''''''''''''''''''''''''''''''''''''''''
 
-From rocBLAS 3.0, remove ``enum rocblas_int8_type_for_hipblas`` and the functions ``rocblas_get_int8_type_for_hipblas`` and
-``rocblas_set_int8_type_for_hipblas``. These are used by hipBLAS to select either ``int8_t`` or ``packed_int8x4`` datatype.
-In hipBLAS the option to use ``packed_int8x4`` will be removed, only ``int8_t`` will be available.
+The default :any:`rocblas_atomics_mode` in :any:`rocblas_handle` will change in the future to :any:`rocblas_atomics_not_allowed` from the current :any:`rocblas_atomics_allowed`.
+Thus the default will allow for improved determinism over performance.
+Users can add explicit control and not be affected by this change by calling the function :any:`rocblas_set_atomics_mode`.
 
+Removed in rocBLAS 4.0
+=========================
+
+rocblas_gemm_ext2 removed
+'''''''''''''''''''''''''
+
+``rocblas_gemm_ext2`` API function was removed in 4.0.
+
+rocblas_gemm_flags_pack_int8x4 gemm support removed
+'''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Packed int8x4 support was removed as support for arbitrary dimensioned int8_t data is a superset of this functionality:
+
+* ``rocblas_gemm_flags_pack_int8x4`` enum value in ``rocblas_gemm_flags`` was removed
+* struct ``rocblas_int8x4`` was removed
+* function ``rocblas_query_int8_layout_flag`` was removed
+* enum ``rocblas_int8_type_for_hipblas`` type was removed
+
+Legacy BLAS in-place trmm API removed
+'''''''''''''''''''''''''''''''''''''
+The Legacy BLAS in-place trmm API is removed. It is replaced by an API that supports both in-place and out-of-place trmm.
+The Legacy BLAS in-place trmm calculated
+
+::
+
+   B <- alpha * op(A) * B
+
+The in-place and out-of-place trmm API calculates
+
+::
+
+   C <- alpha * op(A) * B
+
+The in-place functionality is available by setting C the same as B and ``ldb = ldc``. For out-of-place functionality C and B are different.
+
+Removal of __STDC_WANT_IEC_60559_TYPES_EXT__ define
+'''''''''''''''''''''''''''''''''''''''''''''''''''
+
+The #define ``__STDC_WANT_IEC_60559_TYPES_EXT__`` has been removed from ``rocblas-types.h``. Users who want ISO/IEC TS 18661-3:2015 functionality
+must define ``__STDC_WANT_IEC_60559_TYPES_EXT__`` before including ``float.h``, ``math.h``, and ``rocblas.h``.
+
+Announced in rocBLAS 3.1
+========================
+
+Removal of __STDC_WANT_IEC_60559_TYPES_EXT__ define
+'''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Prior to rocBLAS 4.0, ``__STDC_WANT_IEC_60559_TYPES_EXT__`` was defined in ``rocblas.h``, or more specifically ``rocblas-types.h``, before including ``float.h``. From rocBLAS 4.0, this
+define will be removed. Users who want ISO/IEC TS 18661-3:2015 functionality must define ``__STDC_WANT_IEC_60559_TYPES_EXT__`` before including ``float.h`` and ``rocblas.h``.
 
 Announced in rocBLAS 3.0
 =========================
@@ -134,62 +169,28 @@ Due to this the following APIs would be affected:
 * ``rocblas_is_user_managing_device_memory()`` will be removed.
 * ``rocblas_set_device_memory_size()`` will be replaced by a future function ``rocblas_increase_device_memory_size()``, this new API would allow users to increase the device memory pool size at runtime.
 
-Announced in rocBLAS 3.1
-========================
+Announced in rocBLAS 2.45
+==========================
 
-Removal of __STDC_WANT_IEC_60559_TYPES_EXT__ define
-'''''''''''''''''''''''''''''''''''''''''''''''''''
+Replace is_complex by rocblas_is_complex
+''''''''''''''''''''''''''''''''''''''''
 
-Prior to rocBLAS 4.0, ``__STDC_WANT_IEC_60559_TYPES_EXT__`` was defined in ``rocblas.h``, or more specifically ``rocblas-types.h``, before including ``float.h``. From rocBLAS 4.0, this
-define will be removed. Users who want ISO/IEC TS 18661-3:2015 functionality must define ``__STDC_WANT_IEC_60559_TYPES_EXT__`` before including ``float.h`` and ``rocblas.h``.
+From rocBLAS 3.0 the trait ``is_complex`` for rocblas complex types has been removed. Replace with ``rocblas_is_complex``.
 
-Announced in rocBLAS 4.0
+Replace truncate with rocblas_truncate
+''''''''''''''''''''''''''''''''''''''
+
+From rocBLAS 3.0 enum ``truncate_t`` and the value truncate has been removed and replaced by ``rocblas_truncate_t``
+and ``rocblas_truncate``, respectively.
+
+Announced in rocBLAS 2.46
 =========================
 
-Atomic operations will be disabled by default
-'''''''''''''''''''''''''''''''''''''''''''''
+Remove ability for hipBLAS to set rocblas_int8_type_for_hipblas
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-The default :any:`rocblas_atomics_mode` in :any:`rocblas_handle` will change in the future to :any:`rocblas_atomics_not_allowed` from the current :any:`rocblas_atomics_allowed`.
-Thus the default will allow for improved determinism over performance.
-Users can add explicit control and not be affected by this change by calling the function :any:`rocblas_set_atomics_mode`.
+From rocBLAS 3.0, remove ``enum rocblas_int8_type_for_hipblas`` and the functions ``rocblas_get_int8_type_for_hipblas`` and
+``rocblas_set_int8_type_for_hipblas``. These are used by hipBLAS to select either ``int8_t`` or ``packed_int8x4`` datatype.
+In hipBLAS the option to use ``packed_int8x4`` will be removed, only ``int8_t`` will be available.
 
-Removed in rocBLAS 4.0
-^^^^^^^^^^^^^^^^^^^^^^
 
-rocblas_gemm_ext2 removed
-'''''''''''''''''''''''''
-
-``rocblas_gemm_ext2`` API function was removed in 4.0.
-
-rocblas_gemm_flags_pack_int8x4 gemm support removed
-'''''''''''''''''''''''''''''''''''''''''''''''''''
-
-Packed int8x4 support was removed as support for arbitrary dimensioned int8_t data is a superset of this functionality:
-
-* ``rocblas_gemm_flags_pack_int8x4`` enum value in ``rocblas_gemm_flags`` was removed
-* struct ``rocblas_int8x4`` was removed
-* function ``rocblas_query_int8_layout_flag`` was removed
-* enum ``rocblas_int8_type_for_hipblas`` type was removed
-
-Legacy BLAS in-place trmm API removed
-'''''''''''''''''''''''''''''''''''''
-The Legacy BLAS in-place trmm API is removed. It is replaced by an API that supports both in-place and out-of-place trmm.
-The Legacy BLAS in-place trmm calculated
-
-::
-
-   B <- alpha * op(A) * B
-
-The in-place and out-of-place trmm API calculates
-
-::
-
-   C <- alpha * op(A) * B
-
-The in-place functionality is available by setting C the same as B and ``ldb = ldc``. For out-of-place functionality C and B are different.
-
-Removal of __STDC_WANT_IEC_60559_TYPES_EXT__ define
-'''''''''''''''''''''''''''''''''''''''''''''''''''
-
-The #define ``__STDC_WANT_IEC_60559_TYPES_EXT__`` has been removed from ``rocblas-types.h``. Users who want ISO/IEC TS 18661-3:2015 functionality
-must define ``__STDC_WANT_IEC_60559_TYPES_EXT__`` before including ``float.h``, ``math.h``, and ``rocblas.h``.

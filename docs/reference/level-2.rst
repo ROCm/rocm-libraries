@@ -10,7 +10,7 @@ rocBLAS Level-2 functions
 
 rocBLAS Level-2 functions perform matrix-vector operations. [Level2]_
 
-Level-2 functions support the ILP64 API.  For more information on these ``_64`` functions, see the :ref:`ILP64 API` section..
+Level-2 functions support the ILP64 API.  For more information on these ``_64`` functions, see the :ref:`ILP64 API` section.
 
 rocblas_Xgbmv + batched, strided_batched
 ========================================

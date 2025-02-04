@@ -22,6 +22,9 @@ The rocBLAS public repository is located at `<https://github.com/ROCm/rocBLAS>`_
     * :doc:`Install rocBLAS on Linux <./install/Linux_Install_Guide>`
     * :doc:`Install rocBLAS on Windows <./install/Windows_Install_Guide>`
 
+.. grid:: 2
+  :gutter: 3
+
   .. grid-item-card:: Conceptual
 
     * :doc:`rocBLAS design notes <./conceptual/rocblas-design-notes>`
@@ -31,6 +34,10 @@ The rocBLAS public repository is located at `<https://github.com/ROCm/rocBLAS>`_
     * :doc:`Program with rocBLAS <./how-to/Programmers_Guide>`
     * :doc:`Use logging with rocBLAS <./how-to/logging-in-rocblas>`
     * :doc:`Contribute to rocBLAS <./how-to/Contributors_Guide>`
+
+  .. grid-item-card:: Examples
+
+    * `rocBLAS sample code <https://github.com/ROCm/rocBLAS/tree/develop/clients/samples>`_
 
   .. grid-item-card:: Reference
 

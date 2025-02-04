@@ -17,7 +17,7 @@ Use of Tensile and hipBLASLt
 The rocBLAS library uses :doc:`Tensile <tensile:src/index>` and :doc:`hipBLASLt <hipblaslt:index>` internally, which
 supply the high-performance implementation of GEMM. They are installed as part of the rocBLAS package.
 rocBLAS uses CMake for build automation, and CMake downloads Tensile and hipBLASLt during library configuration and automatically
-configures them as part of the build. No further set up is required by the
+configures them as part of the build. No further set-up work is required by the
 user. However, external facing APIs for Tensile or hipBLASLt are not provided.
 
 The choice of whether to use Tensile or hipBLASLt is handled automatically based on the architecture and problem.
@@ -26,11 +26,11 @@ For instance, hipBLASLt is used as the default backend for non-batched and strid
 The environment variable ``ROCBLAS_USE_HIPBLASLT`` is provided to manually control which GEMM backend is used,
 according to the following settings:
 
-*  ``ROCBLAS_USE_HIPBLASLT is not set``: the GEMM backend is automatically selected.
+*  ``ROCBLAS_USE_HIPBLASLT`` is not set: the GEMM backend is automatically selected.
 *  ``ROCBLAS_USE_HIPBLASLT=0``: **Tensile** is always used as the GEMM backend.
 *  ``ROCBLAS_USE_HIPBLASLT=1``: **hipBLASLt** is preferred as the GEMM backend, but the backend will fallback to
-   **Tensile** for problems for which **hipBLASLt** does not provide a solution or if errors are encountered
-   using the **hipBLASLt** backend.
+   Tensile for problems for which hipBLASLt does not provide a solution or if errors are encountered
+   using the hipBLASLt backend.
 
 .. note::
 
@@ -47,15 +47,15 @@ The ``rocblas_handle`` is persistent and contains:
 *  The temporary device workspace
 *  The mode for enabling or disabling logging (the default is logging disabled)
 
-rocBLAS functions run on the host, and they call HIP to launch rocBLAS kernels that run on the device in a HIP stream.
+rocBLAS functions run on the host. They call HIP to launch rocBLAS kernels that run on the device in a HIP stream.
 The kernels are asynchronous unless:
 
 *  The function returns a scalar result from device to host
 *  Temporary device memory is allocated
 
-In both of the cases above, the launch can be made asynchronous by:
+In both cases above, the launch can be made asynchronous by:
 
-*  Using ``rocblas_pointer_mode_device`` to keep the scalar result on the device. Only the following Level1 BLAS functions return a scalar result: ``Xdot``, ``Xdotu``, ``Xnrm2``, ``Xasum``, ``iXamax``, and ``iXamin``.
+*  Using ``rocblas_pointer_mode_device`` to keep the scalar result on the device. Only the following Level-1 BLAS functions return a scalar result: ``Xdot``, ``Xdotu``, ``Xnrm2``, ``Xasum``, ``iXamax``, and ``iXamin``.
 *  Using the device memory functions provided to allocate persistent device memory in the handle. Note that most rocBLAS functions do not allocate temporary device memory.
 
 Before calling a rocBLAS function, arrays must be copied to the device. Integer scalars like m, n, and k are stored on the host. Floating point scalars like alpha and beta can be on the host or device.
@@ -69,7 +69,7 @@ Rules for obtaining the rocBLAS API from legacy BLAS functions
 #. The legacy BLAS routine name is changed to lowercase and prefixed by ``rocblas_<function>``.
    For example, the legacy BLAS routine ``SSCAL``, which scales a vector by a constant value, is replaced with ``rocblas_sscal``.
 
-#. A first argument of ``rocblas_handle`` handle is added to all rocBLAS functions.
+#. An initial argument of ``rocblas_handle`` handle is added to all rocBLAS functions.
 
 #. Input arguments are declared with the ``const`` modifier.
 
@@ -83,7 +83,7 @@ Rules for obtaining the rocBLAS API from legacy BLAS functions
 
    *  Scalar values alpha and beta are passed by reference on either the
       host or the device.
-   *  When Legacy BLAS functions have return values, the return value is
+   *  When legacy BLAS functions have return values, the return value is
       instead added as the last function argument. It is returned by
       reference on either the host or the device. This applies to the
       following functions: ``xDOT``, ``xDOTU``, ``xNRM2``, ``xASUM``, ``IxAMAX``, and ``IxAMIN``.
@@ -95,7 +95,7 @@ Rules for obtaining the rocBLAS API from legacy BLAS functions
 rocBLAS example code
 ====================
 
-Below is a simple example for calling function ``rocblas_sscal``:
+Below is a simple example for calling the function ``rocblas_sscal``:
 
 .. code-block:: c++
 
@@ -166,10 +166,10 @@ ILP64 interface
 
 The rocBLAS library Level-1 functions are also available with ILP64 interfaces. With these interfaces,
 all ``rocblas_int`` arguments are replaced by the type name
-``int64_t``.  These ILP64 function names all end with the suffix ``_64``. The only output arguments that change are for the
+``int64_t``.  These ILP64 function names all end with the suffix ``_64``. The only output arguments that change are for
 ``xMAX`` and ``xMIN``, where the index is now ``int64_t``. Performance should match the LP64 API when problem sizes don't require the additional
 precision. Function-level documentation is not repeated for these APIs because they are identical in behavior to the LP64 versions.
-However functions which support this alternate API include the line:
+However, functions which support this alternate API include the line:
 ``This function supports the 64-bit integer interface (ILP64)``.
 
 Column-major storage and 1-based indexing
@@ -200,9 +200,9 @@ There are two types of scalar parameters:
 *  Scaling parameters like alpha and beta used in functions like ``axpy``, ``gemv``, and ``gemm 2``
 *  Scalar results from the functions ``amax``, ``amin``, ``asum``, ``dot``, and ``nrm2``
 
-Scalar parameters like alpha and beta when ``rocblas_pointer_mode ==
-rocblas_pointer_mode_host`` can be allocated on the host heap or
-stack. The kernel launch is asynchronous, so if the parameters are on the heap,
+Scalar parameters like alpha and beta can be allocated on the host heap or
+stack when ``rocblas_pointer_mode == rocblas_pointer_mode_host``.
+The kernel launch is asynchronous, so if the parameters are on the heap,
 they can be freed after the return from the kernel launch. When
 ``rocblas_pointer_mode == rocblas_pointer_mode_device``, they must not be
 changed until the kernel completes.
@@ -211,7 +211,7 @@ For scalar results when ``rocblas_pointer_mode ==
 rocblas_pointer_mode_host``, the function blocks the CPU until the GPU
 has copied the result back to the host. When ``rocblas_pointer_mode ==
 rocblas_pointer_mode_device``, the function returns after the
-asynchronous launch. Similarly to the vector and matrix results, the scalar
+asynchronous launch. Similar to the vector and matrix results, the scalar
 result is only available when the kernel has completed execution.
 
 Asynchronous API
@@ -236,14 +236,14 @@ the next instructions.
    Order of operations in asynchronous functions
 
 
-The order of operations above will change if there is logging or the
+The order of operations above will change if logging is enabled or the
 function is synchronous. Logging requires system calls, and the program
 must wait for them to complete before executing the next instruction.
-For more information, see the Logging section.
+For more information, see :doc:`Logging in rocBLAS <../how-to/logging-in-rocblas>`.
 
 .. note::
 
-   The default setting is no logging.
+   The default setting has logging disabled.
 
 If the CPU needs to allocate device memory, it must wait until memory allocation is complete before
 executing the next instruction. For more detailed information, refer to the sections :ref:`Device Memory Allocation Usage` and :ref:`Device Memory allocation in detail`.
@@ -293,7 +293,7 @@ that if the previous last error from another kernel launch or HIP call is the sa
 as the error from the current kernel, no error is reported.
 In this case, only the first error would be reported.
 
-You can avoid this behaviour by flushing any previous HIP error before calling a rocBLAS function
+You can avoid this behavior by flushing any previous HIP error before calling a rocBLAS function
 by calling ``hipGetLastError()``. Both ``hipPeekAtLastError()`` and ``hipGetLastError()`` run
 synchronously on the CPU and only verify the kernel
 launch, not the asynchronous work done by the kernel. rocBLAS does not clear the last error
@@ -336,7 +336,7 @@ and ``gemm`` can use atomic operations to increase performance.
 By using atomics, functions might not give bit-wise reproducible results.
 Differences between multiple runs should not be significant and the results will
 remain accurate, but if users require identical results across multiple runs,
-atomics should be turned off. Fore mor information, see :any:`rocblas_atomics_mode`,
+atomics should be turned off. For more information, see :any:`rocblas_atomics_mode`,
 :any:`rocblas_set_atomics_mode`, and :any:`rocblas_get_atomics_mode`.
 
 In addition to the API above, rocBLAS also provides the environment variable ``ROCBLAS_DEFAULT_ATOMICS_MODE``,
@@ -405,12 +405,12 @@ On nodes using the MI100 (gfx908) GPU, Matrix-Fused-Multiply-Add (MFMA)
 instructions are available to substantially speed up matrix operations.
 This hardware feature is used in all GEMM and GEMM-based functions in
 rocBLAS with 32-bit or shorter base data types with an associated 32-bit
-``compute_type`` (``f32_r``, ``i32_r``, or ``f32_c`` as appropriate).
+``compute_type`` (``f32_r``, ``i32_r``, or ``f32_c`` as applicable).
 
 Specifically, rocBLAS takes advantage of MI100's MFMA instructions for
-three real base types ``f16_r``, ``bf16_r``, and ``f32_r`` with compute_type ``f32_r``,
-one integral base type ``i8_r`` with compute_type ``i32_r``, and one complex
-base type ``f32_c`` with compute_type ``f32_c``.  In summary, all GEMM APIs and
+three real base types ``f16_r``, ``bf16_r``, and ``f32_r`` with ``compute_type`` ``f32_r``,
+one integral base type ``i8_r`` with ``compute_type`` ``i32_r``, and one complex
+base type ``f32_c`` with ``compute_type`` ``f32_c``. In summary, all GEMM APIs and
 APIs for GEMM-based functions using these five base types and their
 associated ``compute_type`` (explicit or implicit) take advantage of MI100's
 MFMA instructions.

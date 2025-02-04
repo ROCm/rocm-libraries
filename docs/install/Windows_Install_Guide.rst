@@ -72,7 +72,7 @@ do not include these files directly into source code.
 Building and installing rocBLAS
 ===============================
 
-Most users do not need to build rocBLAS from source because it can be used after installing the pre-built packages as described above.
+Most users do not need to build rocBLAS from source because it can be used after installing the prebuilt packages as described above.
 If necessary, users can follow these instructions to build rocBLAS from source.
 The rocBLAS codebase for the HIP SDK is the same as the one used for the Linux ROCm distribution.
 However, because these two distributions have different stacks, the code and build process have subtle variations.
@@ -89,8 +89,8 @@ could potentially increase in the future as more functions are added to rocBLAS 
 Download rocBLAS
 ----------------
 
-The rocBLAS source code, which is the same as the ROCm Linux version, is available at the `rocBLAS github page <https://github.com/ROCm/rocBLAS>`_.
-The version of the ROCm HIP SDK might be shown in the default installation path,
+The rocBLAS source code, which is the same as the ROCm Linux version, is available at the `rocBLAS GitHub page <https://github.com/ROCm/rocBLAS>`_.
+The version of the ROCm HIP SDK might appear in the default installation path,
 but you can run the HIP SDK compiler to display the version from the ``bin/`` folder:
 
 ::
@@ -129,8 +129,8 @@ You can build either:
 
 You only need the dependencies and library to call rocBLAS from your code.
 The client contains the test and benchmark code.
-``rmake.py`` prints the full cmake command being used to configure rocBLAS to the screen
-based on your rmake command line options.
+``rmake.py`` prints the full ``cmake`` command being used to configure rocBLAS to the screen
+based on your ``rmake`` command line options.
 The full ``cmake`` command can be used in build scripts to bypass the
 Python helper script and use a fixed set of build options.
 
@@ -152,12 +152,12 @@ The ``vcpkg`` version tag is specified at the top of the ``rdeps.py`` file.
 However, for the host reference BLAS test and benchmark clients,
 it is recommended that you manually download and install AMD's `ILP64 version of
 AOCL-BLAS 4.2 <https://www.amd.com/en/developer/aocl.html>`_.
-If you download and run the full Windows AOCL installer into their default locations
-( ``C:\Program Files\AMD\AOCL-Windows\`` ), then the client's ``CMakeLists.txt`` should find the reference BLAS.
+If you download and run the full Windows AOCL installer into the default location
+(``C:\Program Files\AMD\AOCL-Windows\``), then the ``CMakeLists.txt`` file for the client can find the reference BLAS.
 
 .. note::
 
-   If instead of using the AOCL reference library you use OpenBLAS with the ``vcpkg`` version
+   If instead of using the AOCL reference library, you use OpenBLAS with the ``vcpkg`` version
    from ``rdeps.py``, you might experience ``rocblas-test`` stress test failures due to 32-bit integer overflow
    on the host reference code. If this occurs, exclude the ILP64 stress tests
    using the command line argument ``--gtest_filter=-*stress*``.
@@ -183,7 +183,7 @@ shown in the table below:
 Building the library, client, and all dependencies
 -------------------------------------------------------------------
 
-The client executables (``.exe``) are listed in the table below:
+The client executables (``.exe`` files) are listed in the table below:
 
 ====================== ========================================================
 Executable name        Description
@@ -203,7 +203,7 @@ listed in this table.
    "``./rmake.py -h``", "Help information."
    "``./rmake.py -dc``", "Build the library dependencies, client dependencies, library, and client in your local directory. The ``-d`` flag only needs to be used once. For subsequent invocations of ``rmake.py``, it is not necessary to rebuild the dependencies."
    "``./rmake.py -c``", "Build the library and client in your local directory. It is assumed the dependencies have been installed."
-   "``./rmake.py -idc``", "Build the library dependencies, client dependencies, library, client, then build and install the rocBLAS package. To keep rocBLAS in your local directory, do not use the ``-i`` flag."
+   "``./rmake.py -idc``", "Build the library dependencies, client dependencies, library, and client, then build and install the rocBLAS package. To keep rocBLAS in your local directory, do not use the ``-i`` flag."
    "``./rmake.py -ic``", "Build and install the rocBLAS package and build the client. To keep rocBLAS in your local directory, do not use the ``-i`` flag."
 
 Building the clients without the library
@@ -220,7 +220,7 @@ rocBLAS directory where you are building the clients.
 
 .. csv-table::
    :header: "Command","Description"
-   :widths: 33, 97
+   :widths: 53, 77
 
-   "``./rmake.py --clients-only``", "Build the rocBLAS clients and use the installed rocBLAS library at ``HIP_PATH`` if no ``--library-path`` is specified"
+   "``./rmake.py --clients-only``", "Build the rocBLAS clients and use the installed rocBLAS library at ``HIP_PATH`` if no ``--library-path`` is specified."
    "``./rmake.py --clients-only --library-path /path/to/rocBLAS``", "Build the rocBLAS clients and use the rocBLAS library at the specified location."

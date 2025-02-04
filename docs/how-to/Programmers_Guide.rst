@@ -10,7 +10,7 @@ Programmers guide
 
 This topic covers internal details that are required to program with rocBLAS. It includes
 a discussion of the source code organization, stream and device management, device
-memory allocation, and other technical consdierations.
+memory allocation, and other technical considerations.
 
 ================================
 Source code organization
@@ -19,8 +19,8 @@ Source code organization
 The rocBLAS code can be found at the `rocBLAS GitHub <https://github.com/ROCm/rocBLAS>`_.
 It is split into three major parts:
 
-* The ``library`` directory contains all source code for the library.
-* The ``clients`` directory contains all test code and code to build clients.
+* The ``library`` directory contains all the source code for the library.
+* The ``clients`` directory contains all the test code and code to build clients.
 * Infrastructure such as ``docs`` and ``cmake`` to support the library.
 
 The library directory
@@ -48,7 +48,7 @@ This includes source code for Level 1, 2, and 3 BLAS functions in ``.cpp`` and `
 *  The ``*_imp.hpp`` files contain:
  
    *  ``_template`` functions that can be exported to rocSOLVER. They usually call the ``_launcher`` functions.
-   *  API implementations that can be instantiated for the original APIs with integer args using ``rocblas_int`` and
+   *  API implementations that can be instantiated for the original APIs with integer arguments using ``rocblas_int`` and
       again for the ILP64 API with integer arguments as ``int64_t``.
 
 *  The ``*_kernels.cpp`` files contain:
@@ -59,15 +59,15 @@ This includes source code for Level 1, 2, and 3 BLAS functions in ``.cpp`` and `
 library/src/blas_ex
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-This contains the source code for mixed precision BLAS.
+This contains the source code for mixed-precision BLAS.
 
 library/src/src64
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-This directory contains the ILP64 source code for Level 1, 2, and 3 BLAS and mixed precision functions in ``blas_ex``.
+This directory contains the ILP64 source code for Level 1, 2, and 3 BLAS and mixed-precision functions in ``blas_ex``.
 The files normally end with ``_64`` before the file type extension, for example, ``_64.cpp``.
 The API integers are ``int64_t`` instead of ``rocblas_int``.
-The function behaviour is kept identical at the higher level by instantiable macros and C++ templates.
+The function behavior is kept identical at the higher level by instantiable macros and C++ templates.
 Only at the kernel dispatch level does the code diverge by
 providing a ``_64`` version, in which the invocation is controlled using the ``ROCBLAS_API`` macro.
 The directory structure mirrors the level organization used for the parent directory ``library/src``.
@@ -81,7 +81,7 @@ and the duplicates are ignored. LLVM device code instantiations, however, are no
 so you must avoid duplicate instantiations in multiple code units.
 Kernel templates should therefore only be provided as C++ template prototypes in the include files
 unless they must be instantiated. Try to instantiate all forms in a single
-unit, for example, a ``.cpp`` file, and expose a launcher C++ interface to invoke the device calls where possible.
+unit, for example, in a ``.cpp`` file, and expose a launcher C++ interface to invoke the device calls where possible.
 This is especially important for ILP64 implementations where it's best to
 reuse the LP64 instantiations without any duplication to avoid bloating the library size.
 
@@ -101,7 +101,7 @@ This includes the internal include files for:
 *  Numerical checking
 *  Utility code
 
-The clients Directory
+The clients directory
 -----------------------
 
 The ``clients`` directory contains all test code and code to build clients.
@@ -123,7 +123,7 @@ This contains code for testing and benchmarking individual rocBLAS functions and
 The test harness functions are templated by data type and are defined in separate files for
 each function form: non-batched, batched, and strided_batched.
 When a function also supports the ILP64 API, then both forms can be tested by the same
-template and are controlled by the Arguments API member variable.
+template and are controlled by the ``Arguments`` API member variable.
 This follows the pattern for Fortran API testing and includes ``FORTRAN_64`` for the ILP64 format.
 
 The code for benchmarking ``gemm_ex`` (in ``testing_gemm_ex.hpp``) using rocblas-bench tries to reuse device memory between consecutive calls.
@@ -201,7 +201,7 @@ The device in the host thread must not be changed between ``hipStreamCreate`` an
 If the device in the host thread is changed between creating and destroying the stream, then the behavior is undefined.
 
 If you create a non-default stream, it is your responsibility to synchronize the old non-default stream
-and update the rocblas handle with the default or new non-default stream before destroying the old non-default stream.
+and update the rocBLAS handle with the default or new non-default stream before destroying the old non-default stream.
 
 .. code-block:: cpp
 
@@ -215,11 +215,11 @@ and update the rocblas handle with the default or new non-default stream before 
 
 .. note::
 
-   It is essential to reset the rocblas handle stream reference to avoid a ``hipErrorContextIsDestroyed`` error, which is handled internally.
+   It is essential to reset the rocBLAS handle stream reference to avoid a ``hipErrorContextIsDestroyed`` error, which is handled internally.
    If this step is skipped, you might encounter this error with ``AMD_LOG_LEVEL`` logging or when using ``hipPeekAtLastError( )``.
 
 When switching from one non-default stream to another, you must complete
-all rocblas operations previously submitted with this handle on the old stream using
+all rocBLAS operations previously submitted with this handle on the old stream using
 the ``hipStreamSynchronize(old_stream)`` API before setting the new stream.
 
 .. code-block:: cpp
@@ -251,7 +251,7 @@ because the synchronization is implicit.
 Creating the handle incurs a startup cost. There is an additional startup cost for
 GEMM functions to load GEMM kernels for a specific device. You can shift the
 GEMM startup cost to occur later after setting the device by calling ``rocblas_initialize()``
-after calling ``hipSetDevice()``. This needs to be happen once for each device.
+after calling ``hipSetDevice()``. This needs to happen once for each device.
 If you have two rocBLAS handles which use the same device, then you only need to call ``rocblas_initialize()``
 once. If ``rocblas_initialize()`` is not called, then the first GEMM call incurs
 the startup cost.
@@ -276,11 +276,11 @@ launched in the handle's stream to run on that stream's device.
 If you do not create a stream, the ``rocBLAS_handle`` uses the default or ``NULL``
 stream, which is maintained by the system. You cannot create or destroy the default
 stream. However, you can create a new non-default stream and bind it to the ``rocBLAS_handle`` using the
-two commands ``hipStreamCreate()`` and ``rocblas_set_stream()``.
+commands ``hipStreamCreate()`` and ``rocblas_set_stream()``.
 
-rocBLAS supports the use of non-blocking stream for functions requiring synchronization to guarantee results on the host.
+rocBLAS supports the use of non-blocking streams for functions requiring synchronization to guarantee results on the host.
 For functions like ``rocblas_Xnrm2``, the scalar result is copied from device to host when ``rocblas_pointer_mode == rocblas_pointer_mode_host``.
-This is accomplished by using ``hipMemcpyAsync()`` followed by ``hipStreamSynchronize()``.
+This is accomplished by using ``hipMemcpyAsync()``, followed by ``hipStreamSynchronize()``.
 The stream that is synchronized is the stream in the ``rocBLAS_handle``.
 
 .. note::
@@ -299,7 +299,7 @@ HIP has two important device management functions:
 *  ``hipGetDevice()``: Returns the default device ID for the calling host thread.
 
 The device which was set using ``hipSetDevice()`` when ``hipStreamCreate()`` was called 
-is the one that is associated with a stream. If the device was not set using ``hipSetDevice()`` then the default device is used.
+is the one that is associated with a stream. If the device was not set using ``hipSetDevice()``, then the default device is used.
 
 You cannot switch the device in a stream between ``hipStreamCreate()`` and ``hipStreamDestroy()``.
 To use another device, create another stream.
@@ -387,8 +387,8 @@ Here is an example:
         //  rest of function
     }
 
-Function
-^^^^^^^^
+is_device_memory_size_query function
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: c++
 
@@ -398,11 +398,11 @@ Indicates if the current function call is collecting information about the optim
 
 Return value:
 
-*  **true**: if information is being collected
-*  **false**: if information is not being collected
+*  **true**: Information is being collected
+*  **false**: Information is not being collected
 
-Function
-^^^^^^^^
+set_optimal_device_memory_size function
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: c++
 
@@ -412,12 +412,12 @@ Sets the optimal sizes of device memory buffers in bytes for this function. The 
 
 Return value:
 
-*  **rocblas_status_size_unchanged**: If the maximum optimal device memory size did not change. This is the case where the function does not use device memory.
-*  **rocblas_satus_size_increased**: If the maximum optimal device memory size increased.
-*  **rocblas_status_internal_error**: If this function is not supposed to be collecting size information.
+*  **rocblas_status_size_unchanged**: The maximum optimal device memory size did not change. This is the case where the function does not use device memory.
+*  **rocblas_satus_size_increased**: The maximum optimal device memory size increased.
+*  **rocblas_status_internal_error**: This function is not supposed to be collecting size information.
 
-Function
-^^^^^^^^
+rocblas_sizeof_datatype function
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: c++
 
@@ -442,8 +442,8 @@ Here is an example:
     //  rest of function
     }
 
-Macro
-^^^^^
+RETURN_ZERO_DEVICE_MEMORY_SIZE_IF_QUERIED macro
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: c++
 
@@ -454,7 +454,7 @@ This is a convenience macro that returns ``rocblas_status_size_unchanged`` if th
 rocBLAS kernel device memory allocation
 -----------------------------------------
 
-Device memory can be allocated for ``n``` floats using ``device_malloc`` as follows in this example:
+Device memory can be allocated for ``n`` floats using ``device_malloc`` as in this example:
 
 .. code-block:: c++
 
@@ -480,8 +480,8 @@ To allocate multiple buffers:
     w_buf2 = workspace[1];
 
 
-Function
-^^^^^^^^
+device_malloc function
+^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: c++
 
@@ -497,16 +497,16 @@ Function
 
 Parameters:
 
-- **size**: size in bytes of memory to be allocated.
+- **size**: The size in bytes of memory to be allocated.
 
 Return value:
 
-- **On success**, returns an opaque RAII object that evaluates to ``true`` when converted to ``bool``.
-- **On failure**, returns an opaque RAII object that evaluates to ``false`` when converted to ``bool``.
+- **On success**: Returns an opaque RAII object that evaluates to ``true`` when converted to ``bool``.
+- **On failure**: Returns an opaque RAII object that evaluates to ``false`` when converted to ``bool``.
 
 
-Performance degrade
---------------------
+Performance degradation
+-----------------------
 
 The ``rocblas_status`` enum value ``rocblas_status_perf_degraded`` indicates that a slower algorithm was used because of insufficient device memory for the optimal algorithm.
 
@@ -541,14 +541,14 @@ Example
 
 
 ===================
-Thread safe logging
+Thread-safe logging
 ===================
 
-rocBLAS has thread safe logging. This prevents garbled output when multiple threads are writing to the same file.
+rocBLAS has thread-safe logging. This prevents garbled output when multiple threads are writing to the same file.
 
-Thread safe logging is achieved by using ``rocblas_internal_ostream``, a class that can be used similarly to ``std::ostream``.
+Thread-safe logging is achieved by using ``rocblas_internal_ostream``, a class that can be used similarly to ``std::ostream``.
 It provides standardized methods for formatted output to either strings or files.
-The default constructor for ``rocblas_internal_ostream`` writes to strings, which are thread-safe because they are owned by the calling thread.
+The default constructor for ``rocblas_internal_ostream`` writes to strings, which are thread safe because they are owned by the calling thread.
 There are also ``rocblas_internal_ostream`` constructors for writing to files.
 The ``rocblas_internal_ostream::yaml_on`` and ``rocblas_internal_ostream::yaml_off`` I/O modifiers turn YAML formatting mode on and off.
 
@@ -567,29 +567,31 @@ to avoid imposing restrictions on the use of these symbols on outside users.
 
 The user can also create ``rocblas_internal_ostream`` pointers and objects outside the handle.
 
-Each ``rocblas_internal_ostream`` associated with a file points to a single ``rocblas_internal_ostream::worker``
-with a ``std::shared_ptr`` for writing to the file. The worker is mapped from the device ID and ``inode`` corresponding to the file.
-More than one ``rocblas_internal_ostream`` can point to the same worker.
+The following usage notes apply to ``rocblas_internal_ostream``:
 
-This means that if more than one ``rocblas_internal_ostream`` is writing to a single output file,
-they will share the same ``rocblas_internal_ostream::worker``.
+*  Each ``rocblas_internal_ostream`` associated with a file points to a single ``rocblas_internal_ostream::worker``
+   with a ``std::shared_ptr`` for writing to the file. The worker is mapped from the device ID and ``inode`` corresponding to the file.
+   More than one ``rocblas_internal_ostream`` can point to the same worker.
 
-The ``<<`` operator for ``rocblas_internal_ostream`` is overloaded. Output is first accumulated
-in ``rocblas_internal_ostream::os``, a ``std::ostringstream`` buffer. Each ``rocblas_internal_ostream`` has
-its own ``os`` ``std::ostringstream`` buffer, so strings in ``os`` are not garbled.
+*  This means that if more than one ``rocblas_internal_ostream`` is writing to a single output file,
+   they will share the same ``rocblas_internal_ostream::worker``.
 
-When ``rocblas_internal_ostream.os`` is flushed with either a ``std::endl`` or an explicit flush
-of ``rocblas_internal_ostream``, then ``rocblas_internal_ostream::worker::send`` pushes the string contents
-of ``rocblas_internal_ostream.os`` and a promise, which together are called a task, onto ``rocblas_internal_ostream.worker.queue``.
+*  The ``<<`` operator for ``rocblas_internal_ostream`` is overloaded. Output is first accumulated
+   in ``rocblas_internal_ostream::os``, a ``std::ostringstream`` buffer. Each ``rocblas_internal_ostream`` has
+   its own ``os`` ``std::ostringstream`` buffer, so strings in ``os`` are not garbled.
 
-The ``send`` function uses the promise/future to asynchronously transfer data from ``rocblas_internal_ostream.os`` to
-``rocblas_internal_ostream.worker.queue`` and wait for the worker to finish writing the string to the file.
-It also locks a mutex to ensure pushing the task onto the queue is atomic.
+*  When ``rocblas_internal_ostream.os`` is flushed with either a ``std::endl`` or an explicit flush
+   of ``rocblas_internal_ostream``, then ``rocblas_internal_ostream::worker::send`` pushes the string contents
+   of ``rocblas_internal_ostream.os`` and a promise, which together are called a task, onto ``rocblas_internal_ostream.worker.queue``.
 
-The ``ostream.worker.queue`` contains a number of tasks. When ``rocblas_internal_ostream`` is destroyed,
-all the ``tasks.string`` in ``rocblas_internal_ostream.worker.queue`` are printed to the ``rocblas_internal_ostream`` file and
-the ``std::shared_ptr`` to the ``ostream.worker`` is destroyed. If the reference count to the worker becomes 0,
-the worker's thread is sent a zero-length string telling it to exit.
+*  The ``send`` function uses the promise to asynchronously transfer data from ``rocblas_internal_ostream.os`` to
+   ``rocblas_internal_ostream.worker.queue`` and wait for the worker to finish writing the string to the file.
+   It also locks a mutex to ensure pushing the task onto the queue is atomic.
+
+*  The ``ostream.worker.queue`` contains a number of tasks. When ``rocblas_internal_ostream`` is destroyed,
+   all the ``tasks.string`` in ``rocblas_internal_ostream.worker.queue`` are printed to the ``rocblas_internal_ostream`` file and
+   the ``std::shared_ptr`` to the ``ostream.worker`` is destroyed. If the reference count to the worker becomes ``0``,
+   the worker's thread is sent a zero-length string telling it to exit.
 
 ===========================
 rocBLAS numerical checking
@@ -597,8 +599,8 @@ rocBLAS numerical checking
 
 rocBLAS provides the environment variable ``ROCBLAS_CHECK_NUMERICS``, which allows users to debug numerical abnormalities.
 Setting a value for ``ROCBLAS_CHECK_NUMERICS`` enables checks on the input and the output vectors/matrices
-of the rocBLAS functions for NaNs (not-a-number), zeros, infinities, and denormal/subnormal values.
-Numerical checking is available for the input and the output vectors for all level 1 and 2 functions.
+of the rocBLAS functions for NaN (not-a-number), zero, infinity, and denormal/subnormal values.
+Numerical checking is available for the input and the output vectors for all level-1 and level-2 functions.
 In level 2 functions, only the general (ge) type input and the output matrix can be checked for numerical abnormalities.
 In level 3, GEMM is the only function to have numerical checking.
 
@@ -627,7 +629,7 @@ Here is an example showing how to use ``ROCBLAS_CHECK_NUMERICS``:
     ROCBLAS_CHECK_NUMERICS=4 ./rocblas-bench -f gemm -i 1 -j 0
 
 This command returns ``rocblas_status_check_numeric_fail`` if the input and the output matrices
-of a BLAS level 3 GEMM function have a NaN, infinity, or denormal value.
+of a BLAS level-3 GEMM function have a NaN, infinity, or denormal value.
 If there are no numerical abnormalities, then ``rocblas_status_success`` is returned.
 
 .. note::
@@ -645,24 +647,24 @@ Legacy BLAS
 
 Legacy BLAS has two types of argument checking:
 
-*  Error-return for incorrect argument. Legacy BLAS implement this with a call to the function ``XERBLA``.
+*  Error-return for an incorrect argument. Legacy BLAS implements this with a call to the function ``XERBLA``.
 *  Quick-return-success when an argument allows for the subprogram to be a no-operation or a constant result.
 
-Level 2 and Level 3 BLAS subprograms have both error-return and quick-return-success.
-Level 1 BLAS subprograms have only quick-return-success.
+Level-2 and Level-3 BLAS subprograms have both error-return and quick-return-success.
+Level-1 BLAS subprograms have only quick-return-success.
 
 rocBLAS
 --------
 
-rocBLAS has 5 types of argument checking:
+rocBLAS has five types of argument checking:
 
 *  ``rocblas_status_invalid_handle``: If the handle is a NULL pointer.
-*  ``rocblas_status_invalid_size``: For invalid size, increment, or leading dimension argument.
+*  ``rocblas_status_invalid_size``: For an invalid size, increment, or leading dimension argument.
 *  ``rocblas_status_invalid_value``: For unsupported enum values.
 *  ``rocblas_status_success``: For quick-return-success.
 *  ``rocblas_status_invalid_pointer``: For NULL argument pointers.
 
-Differences between rocBLAS and Legacy BLAS
+Differences between rocBLAS and legacy BLAS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 rocBLAS has the following differences from legacy BLAS:
@@ -677,7 +679,7 @@ rocBLAS has the following differences from legacy BLAS:
    the function returns ``rocblas_status_invalid_pointer``.
 *  Vector and matrix arguments are always pointers to device memory.
 *  When ``rocblas_pointer_mode == rocblas_pointer_mode_host``, the alpha and beta values are inspected. Based on their
-   values a decision is made regarding which vector and matrix pointers must be dereferenced.
+   values, a decision is made regarding which vector and matrix pointers must be dereferenced.
    If any of the dereferenced pointers is a NULL pointer, ``rocblas_status_invalid_pointer`` is returned.
 *  If ``rocblas_pointer_mode == rocblas_pointer_mode_device``, rocBLAS does NOT check if the vector or matrix pointers will dereference a NULL pointer.
    This is to avoid slowing down execution to fetch and inspect alpha and beta values.
@@ -690,14 +692,14 @@ rocBLAS has the following differences from legacy BLAS:
 
 The following changes were made to accommodate the new features:
 
-*  Changes to the logging functionality. See the section below for more details.
+*  Changes to the logging functionality. See the Logging section below for more details.
 *  For batched and strided_batched L2 and L3 functions, there is a quick-return-success for ``batch_count == 0``
    and an invalid-size error for ``batch_count < 0``.
 *  For batched and strided_batched L1 functions, there is a quick-return-success for ``batch_count <= 0``.
 *  When ``rocblas_pointer_mode == rocblas_pointer_mode_device``, alpha and beta are not copied 
    from the device to host for quick-return-success checks. In this case, the quick-return-success checks are omitted.
    This still provides a correct result, but the operation is slower.
-*  For strided_batched functions there is no argument checking for the stride.
+*  For strided_batched functions, there is no argument checking for the stride.
    To access elements in a strided_batched_matrix, for example, the C matrix in GEMM, the zero-based index is calculated
    as ``i1 + i2 * ldc + i3 * stride_c``, where ``i1 = 0, 1, 2, ..., m-1``, ``i2 = 0, 1, 2, ..., n-1``, and ``i3 = 0, 1, 2, ..., batch_count -1``.
    An incorrect stride can result in a core dump due a segmentation fault.
@@ -708,9 +710,9 @@ Device memory size queries
 
 The following details apply when performing queries on the memory size:
 
-*  When ``handle->is_device_memory_size_query()`` is true, the call is a device memory size query, not a normal call.
+*  When ``handle->is_device_memory_size_query()`` is ``true``, the call is a device memory size query, not a normal call.
 *  No logging should be performed during device memory size queries.
-*  If the rocBLAS kernel requires no temporary device memory, the macro ``RETURN_ZERO_DEVICE_MEMORY_SIZE_IF_QUERIED(handle)`` can be called after checking that ``handle != nullptr``.
+*  If the rocBLAS kernel doesn't require temporary device memory, the macro ``RETURN_ZERO_DEVICE_MEMORY_SIZE_IF_QUERIED(handle)`` can be called after checking that ``handle != nullptr``.
 *  If the rocBLAS kernel requires temporary device memory, then it should be set, and the kernel returned, by calling ``return handle->set_optimal_device_memory_size(size...)``,
    where ``size...`` is a list of one or more sizes for different sub-problems. The sizes are rounded up and added.
 
@@ -743,17 +745,17 @@ rocBLAS control flow
 
 5. Check for unsupported enum values. Return ``rocblas_status_invalid_value`` if an enum value is invalid.
 
-6. Check for invalid sizes. Return ``rocblas_status_invalid_size`` if size arguments are invalid.
+6. Check for invalid sizes. Return ``rocblas_status_invalid_size`` if the size arguments are invalid.
 
 7. Return ``rocblas_status_invalid_pointer`` if any pointers used to determine quick return conditions are ``NULL``.
 
-8. If quick return conditions are met:
+8. If the quick return conditions are met:
 
    *  If there is no return value, return ``rocblas_status_success``.
    *  If there is a return value:
   
-     - If the return value pointer argument is a ``NULL`` pointer, return ``rocblas_status_invalid_pointer``.
-     - Otherwise, return ``rocblas_status_success``
+      * If the return value pointer argument is a ``NULL`` pointer, return ``rocblas_status_invalid_pointer``.
+      * Otherwise, return ``rocblas_status_success``
 
 9.  If any pointers not checked in step 7 are ``NULL`` but must be dereferenced, return ``rocblas_status_invalid_pointer``.
     Only when ``rocblas_pointer_mode == rocblas_pointer_mode_host`` can it be efficiently determined whether some vector/matrix arguments
@@ -767,7 +769,7 @@ rocBLAS control flow
 Legacy L1 BLAS "single vector"
 -------------------------------
 
-Below are four code snippets from NETLIB for "single vector" legacy L1 BLAS. They have quick-return-success for
+Below are four code snippets from NETLIB for "single vector" legacy Level-1 BLAS. They have quick-return-success for
 ``(n <= 0) || (incx <= 0)``:
 
 .. code-block:: bash
@@ -791,8 +793,8 @@ Below are four code snippets from NETLIB for "single vector" legacy L1 BLAS. The
 Legacy L1 BLAS "two vector"
 ---------------------------
 
-Below are seven legacy L1 BLAS codes from NETLIB. They have quick-return-success for ``(n <= 0)``.
-In addition, for DAXPY, there is quick-return-success for ``(alpha == 0)``:
+Below are seven legacy Level-1 BLAS codes from NETLIB. They have quick-return-success for ``(n <= 0)``.
+In addition, for ``DAXPY``, there is quick-return-success for ``(alpha == 0)``:
 
 .. code-block::
 
@@ -822,7 +824,7 @@ In addition, for DAXPY, there is quick-return-success for ``(alpha == 0)``:
 Legacy L2 BLAS
 -----------------
 
-Below are the code snippets from NETLIB for legacy L2 BLAS. They have both argument checking and quick-return-success:
+Below are the code snippets from NETLIB for legacy Level-2 BLAS. They have both argument checking and quick-return-success:
 
 .. code-block::
 
@@ -920,7 +922,7 @@ Below are the code snippets from NETLIB for legacy L2 BLAS. They have both argum
 Legacy L3 BLAS
 ----------------
 
-Below is a code snippet from NETLIB for legacy L3 BLAS dgemm. It has both argument checking and quick-return-success:
+Below is a code snippet from NETLIB for legacy Level-3 BLAS dgemm. It has both argument checking and quick-return-success:
 
 .. code-block::
 
@@ -1089,7 +1091,7 @@ GEMM functions can be divided into two main categories.
    The ``gemm_ex`` function name consists of three letters: A/B data type, C/D data type, and compute data type.
 
 *  Non-HPA functions where the input (A/B), output (C/D), and compute data types are all the same:
-   Non-HPA cases can be called using ``gemm`` or ``gemm_ex``, but using ``gemm`` is recommended.
+   Non-HPA cases can be called using ``gemm`` or ``gemm_ex`` but ``gemm`` is recommended.
 
 The following table shows all possible GEMM functions in rocBLAS.
 
@@ -1353,7 +1355,7 @@ involved with loading the GEMM library that rocBLAS links to.
 The batch call takes a YAML file with a list of all problem sizes.
 You can have multiple sizes of different types in one YAML file.
 The benchmark setting is different from the direct call to rocblas-bench.
-A sample setting for each function is listed below. After you have created the yaml file, benchmark the sizes as follows:
+A sample setting for each function is listed below. After you have created the YAML file, benchmark the sizes as follows:
 
 .. code-block:: bash
 
@@ -1490,10 +1492,10 @@ then run the command without logging to measure performance.
 Benchmarking special case gemv_batched and gemv_strided_batched functions using rocblas-bench
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-This covers how to benchmark the performance special case gemv_batched and gemv_strided_batched functions
+This covers how to benchmark the performance of special case ``gemv_batched`` and ``gemv_strided_batched`` functions
 for mixed precision (HSH, HSS, TST, TSS).
 The following command launches rocblas-bench for ``rocblas_hshgemv_batched`` with half-precision input,
-single precision compute, and half-precision output (HSH):
+single-precision compute, and half-precision output (HSH):
 
 .. code-block:: bash
 
@@ -1501,7 +1503,7 @@ single precision compute, and half-precision output (HSH):
 
 For the above command, instead of using the ``-r`` parameter to specify the precision, pass three additional arguments (``a_type``, ``c_type``, and ``compute_type``) to resolve the ambiguity of using mixed-precision compute.
 
-This mixed-precision support is only available for gemv_batched, gemv_strided_batched, and rocBLAS extension
+This mixed-precision support is only available for ``gemv_batched``, ``gemv_strided_batched``, and rocBLAS extension
 functions (for example, ``axpy_ex``, ``scal_ex``, and ``gemm_ex``). For more information, see the :ref:`api-reference-guide`.
 
 rocblas-gemm-tune
@@ -1576,15 +1578,15 @@ For example, to run all quick tests for the function ``rocblas_saxpy``, use this
 
 The default verbosity shows test category totals and specific test failure details, matching an implicit environment
 variable setting of ``GTEST_LISTENER=NO_PASS_LINE_IN_LOG``.
-To generate output listing each individual test that is run, use the following command:
+To generate output listing each individual test that runs, use the following command:
 
 .. code-block:: bash
 
    GTEST_LISTENER=PASS_LINE_IN_LOG ./rocblas-test --gtest_filter=*quick*
 
 ``rocblas-test`` can be driven by tests specified in a YAML file using the ``--yaml`` argument.
-As the test categories ``pre_checkin`` and ``nightly`` can require hours to run, a short smoke test set is provided using a YAML file.
-This ``rocblas_smoke.yaml`` test set only requires a few minutes to test a few small problem sizes for every function:
+As the pre_checkin and nightly test categories can require hours to run, a short smoke test set is provided using a YAML file.
+This ``rocblas_smoke.yaml`` test set only takes a few minutes to test a few small problem sizes for every function:
 
 .. code-block:: bash
 
@@ -1592,61 +1594,61 @@ This ``rocblas_smoke.yaml`` test set only requires a few minutes to test a few s
 
 The following test situations require additional consideration:
 
-* YAML extension for lock-step multiple variable scanning
+*  YAML extension for lock-step multiple variable scanning
 
-Both rocblas-test and rocblas-bench can use an extension to scan over multiple variables in lock step implemented by the ``Arguments`` class.
-For this purpose, set the ``Arugments`` member variable
-``scan`` to the range to scan over and use ``*c_scan_value`` to retrieve the values. This can be used to avoid
-all combinations of YAML variable values that are normally generated,
-for example, ``- { scan: [32..256..32], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value }``.
+   Both rocblas-test and rocblas-bench can use an extension to scan over multiple variables in lock step implemented by the ``Arguments`` class.
+   For this purpose, set the ``Arguments`` member variable
+   ``scan`` to the range to scan over and use ``*c_scan_value`` to retrieve the values. This can be used to avoid
+   all combinations of YAML variable values that are normally generated,
+   for example, ``- { scan: [32..256..32], M: *c_scan_value, N: *c_scan_value, lda: *c_scan_value }``.
 
-* Large memory tests (stress category)
+*  Large memory tests (stress category)
 
-Some tests in the stress category might attempt to allocate more RAM than available.
-While these tests should automatically get skipped, in some cases, such
-as when running in a Docker container, they could result in a process termination.
-To limit the peak RAM allocations in GB, use this environment variable:
+   Some tests in the stress category might attempt to allocate more RAM than available.
+   While these tests should automatically get skipped, in some cases, such
+   as when running in a Docker container, they could result in a process termination.
+   To limit the peak RAM allocation in GB, use this environment variable:
 
-.. code-block:: bash
+   .. code-block:: bash
 
-   ROCBLAS_CLIENT_RAM_GB_LIMIT=32 ./rocblas-test --gtest_filter=*stress*
+      ROCBLAS_CLIENT_RAM_GB_LIMIT=32 ./rocblas-test --gtest_filter=*stress*
 
-* Long-running tests
+*  Long-running tests
 
-The rocblas-test process will be terminated if a single test takes longer than the configured timeout.
-To change the timeout, use the environment variable ``ROCBLAS_TEST_TIMEOUT``,
-which takes a value in seconds (with a default of 600 seconds):
+   The rocblas-test process will be terminated if a single test takes longer than the configured timeout.
+   To change the timeout, use the environment variable ``ROCBLAS_TEST_TIMEOUT``,
+   which takes a value in seconds (with a default of 600 seconds):
 
-  .. code-block:: bash
+   .. code-block:: bash
 
-     ROCBLAS_TEST_TIMEOUT=900 ./rocblas-test --gtest_filter=*stress*
+      ROCBLAS_TEST_TIMEOUT=900 ./rocblas-test --gtest_filter=*stress*
 
-* debugging rocblas-test
+*  Debugging rocblas-test
 
-The rocblas-test process internally catches signals which might interfere with debugger use. To disable this feature,
-set the environment variable ``ROCBLAS_TEST_NO_SIGACTION``:
+   The rocblas-test process internally catches signals which might interfere with debugger use. To disable this feature,
+   set the environment variable ``ROCBLAS_TEST_NO_SIGACTION``:
 
-  .. code-block:: bash
+   .. code-block:: bash
 
-     ROCBLAS_TEST_NO_SIGACTION=1 rocgdb ./rocblas-test --gtest_filter=*stress*
+      ROCBLAS_TEST_NO_SIGACTION=1 rocgdb ./rocblas-test --gtest_filter=*stress*
 
 
 Adding a new rocBLAS unit test
 -------------------------------
 
-To add new data-driven tests to the rocBLAS Google Test Framework:
+To add new data-driven tests to the rocBLAS GoogleTest Framework, follow these steps:
 
 #. Create a C++ header file with the name ``testing_<function>.hpp`` in the
    ``include`` subdirectory, with templated functions for a specific rocBLAS
    routine. Some examples include:
 
-   * testing_gemm.hpp
-   * testing_gemm_ex.hpp
+   *  ``testing_gemm.hpp``
+   *  ``testing_gemm_ex.hpp``
 
    In the new ``testing_*.hpp`` file, create a templated function which returns ``void``
    and accepts a ``const Arguments&`` parameter, for example:
 
-   .. code-block::
+   .. code-block:: cpp
 
       template<typename Ti, typename To, typename Tc>
       void testing_gemm_ex(const Arguments& arg)
@@ -1655,9 +1657,9 @@ To add new data-driven tests to the rocBLAS Google Test Framework:
       }
 
    This function is used for a YAML file-driven argument testing. It will be invoked by the dispatch code for each permutation of the YAML-driven parameters.
-   Additionally, a template function for tests handling bad arguments should be created, as follows:
+   Additionally, a template function for tests that handle bad arguments should be created, as follows:
 
-   .. code-block::
+   .. code-block:: cpp
 
       template <typename T>
       void testing_gemv_bad_arg(const Arguments& arg)
@@ -1665,7 +1667,7 @@ To add new data-driven tests to the rocBLAS Google Test Framework:
       // ...
       }
 
-   These ``bad_arg`` test function templates should be used to set arguments programmatically when it is simpler than the YAML approach,
+   These ``bad_arg`` test function templates can be used to set arguments programmatically when it is simpler than the YAML approach,
    for example, to pass NULL pointers.
    It is expected that the member variable values in the ``Arguments`` parameter will not be utilized with the common
    exception of the ``api`` member variable of ``Arguments`` which can drive selection of C, FORTRAN,
@@ -1676,7 +1678,7 @@ To add new data-driven tests to the rocBLAS Google Test Framework:
 
    In this function, use the following macros and functions to check results:
 
-   .. code-block::
+   .. code-block:: cpp
 
       HIP_CHECK_ERROR             Verifies that a HIP call returns success
       ROCBLAS_CHECK_ERROR         Verifies that a rocBLAS call returns success
@@ -1684,16 +1686,16 @@ To add new data-driven tests to the rocBLAS Google Test Framework:
       unit_check_general          Check that two answers agree (see unit.hpp)
       near_check_general          Check that two answers are close (see near.hpp)
 
-   .. code-block::
+   .. code-block:: cpp
 
-      DAPI_CHECK                  Verifies either LP64 or ILP64 function form returns success (based on Arguments member variable api)
+      DAPI_CHECK                  Verifies either LP64 or ILP64 function form returns success (based on Arguments member variable API)
       DAPI_EXPECT                 Verifies either LP64 or ILP64 function form returns a certain status
       DAPI_DISPATCH               Invoke either LP64 or ILP64 function form
 
-   In addition, you can use Google Test Macros such as theones  below, provided they are
-   guarded by ``#ifdef GOOGLE_TEST``\ :
+   In addition, you can use GoogleTest macros such as the ones below, provided they are
+   guarded by ``#ifdef GOOGLE_TEST``:
 
-   .. code-block::
+   .. code-block:: cpp
 
       EXPECT_EQ
       ASSERT_EQ
@@ -1705,9 +1707,9 @@ To add new data-driven tests to the rocBLAS Google Test Framework:
 
       The ``device_vector`` template allocates memory on the device. You must check whether
       converting the ``device_vector`` to ``bool`` returns ``false``\ . If so, report a HIP memory
-      error and then exit the current function, as follows:
+      error and then exit the current function, following this example:
 
-      .. code-block::
+      .. code-block:: cpp
 
          // allocate memory on device
          device_vector<T> dx(size_x);
@@ -1728,272 +1730,272 @@ To add new data-driven tests to the rocBLAS Google Test Framework:
    #. Call a CBLAS or other reference implementation on the host arrays.
    #. Call rocBLAS using both device pointer mode and host pointer mode, verifying that
       every rocBLAS call is successful by wrapping it in ``ROCBLAS_CHECK_ERROR()``.
-   #. If ``arg.unit_check`` is enabled, use ``unit_check_general`` or ``near_check_general`` to validate results.
+   #. If ``arg.unit_check`` is enabled, use ``unit_check_general`` or ``near_check_general`` to validate the results.
    #. If ``arg.norm_check`` is enabled, calculate and print out norms. (This is now deprecated.)
    #. If ``arg.timing`` is enabled, perform benchmarking (currently under refactoring).
 
 #. Create a C++ file with the name ``<function>_gtest.cpp`` in the ``gtest``
    subdirectory, where ``<function>`` is a non-type-specific shorthand for the
-   function(s) being tested. Here are some example:
+   function(s) being tested. Here are some examples:
 
-   *  gemm_gtest.cpp
-   *  trsm_gtest.cpp
-   *  blas1_gtest.cpp
+   *  ``gemm_gtest.cpp``
+   *  ``trsm_gtest.cpp``
+   *  ``blas1_gtest.cpp``
 
    In the C++ file, follow these steps:
 
    A. Include the header files related to the tests, as well as ``type_dispatch.hpp``, for example:
 
-   .. code-block:: c++
+      .. code-block:: c++
 
-      #include "testing_syr.hpp"
-      #include "type_dispatch.hpp"
+         #include "testing_syr.hpp"
+         #include "type_dispatch.hpp"
 
    B. Wrap the body with an anonymous namespace, to minimize namespace collisions:
 
-   .. code-block:: c++
+      .. code-block:: c++
 
-      namespace {
+         namespace {
 
    C. Create a templated class which accepts any number of type parameters followed by one anonymous trailing type
-   parameter defaulted to ``void`` (to be used with ``enable_if``\ ).
+      parameter defaulted to ``void`` (to be used with ``enable_if``\ ).
 
-   Choose the number of type parameters based on how likely it is in the future that
-   the function will support a mixture of that many different types,for example, input
-   type (\ ``Ti``\ ), output type (\ ``To``\ ),and compute type (\ ``Tc``\ ). If the function will
-   never support more than one or two type parameters, then that many can be used.
-   If the function might be expanded later to support mixed types, then those
-   should be planned for ahead of time and placed in the template parameters.
+      Choose the number of type parameters based on how likely it is in the future that
+      the function will support a mixture of that many different types, for example, input
+      type (\ ``Ti``\ ), output type (\ ``To``\ ), and compute type (\ ``Tc``\ ). If the function will
+      never support more than one or two type parameters, then that many can be used.
+      If the function might be expanded later to support mixed types, then those
+      should be planned for ahead of time and placed in the template parameters.
 
-   Unless the number of type parameters is greater than one and is always
-   fixed, later type parameters should default to earlier ones. This is so that
-   a subset of type arguments can used and that code which works for
-   functions which take one type parameter can be used for functions which
-   take one or more type parameters. Here is an example:
+      Unless the number of type parameters is greater than one and is always
+      fixed, later type parameters should default to earlier ones. This is so that
+      a subset of type arguments can used and that code which works for
+      functions that take one type parameter can be used for functions that
+      take one or more type parameters. Here is an example:
 
-   .. code-block:: c++
+      .. code-block:: c++
 
-      template< typename Ti, typename To = Ti, typename Tc = To, typename = void>
+         template< typename Ti, typename To = Ti, typename Tc = To, typename = void>
 
-   Have the primary definition of this class template derive from the ``rocblas_test_invalid`` class, for example:
+      Have the primary definition of this class template derive from the ``rocblas_test_invalid`` class, for example:
 
-   .. code-block:: c++
+      .. code-block:: c++
 
-      template <typename T, typename = void>
-      struct syr_testing : rocblas_test_invalid
-      {
-      };
+         template <typename T, typename = void>
+         struct syr_testing : rocblas_test_invalid
+         {
+         };
 
    D. Create one or more partial specializations of the class template conditionally enabled by the type parameters
-   matching legal combinations of types.
+      matching legal combinations of types.
 
-   If the first type argument is ``void``\ , then these partial specializations must not apply.
-   This is so the default based on ``rocblas_test_invalid`` can behave correctly when ``void`` is passed to indicate failure.
+      If the first type argument is ``void``\ , then these partial specializations must not apply.
+      This is so the default based on ``rocblas_test_invalid`` can behave correctly when ``void`` is passed to indicate failure.
 
-   In the partial specializations, derive from the ``rocblas_test_valid`` class.
+      In the partial specializations, derive from the ``rocblas_test_valid`` class.
 
-   In the partial specializations, create a functional ``operator()`` which takes a ``const Arguments&`` parameter
-   and calls the templated test functions (usually in ``include/testing_*.hpp``\ ) with the specialization's template arguments
-   when the ``arg.function`` string matches the function name. If ``arg.function`` does not match any function related
-   to this test, mark it as a test failure. Follow this example:
+      In the partial specializations, create a functional ``operator()`` which takes a ``const Arguments&`` parameter
+      and calls the templated test functions (usually in ``include/testing_*.hpp``\ ) with the specialization's template arguments
+      when the ``arg.function`` string matches the function name. If ``arg.function`` does not match any function related
+      to this test, mark it as a test failure. Follow this example:
 
-   .. code-block:: c++
+      .. code-block:: c++
 
-      template <typename T>
-      struct syr_testing<T,
-                        std::enable_if_t<std::is_same_v<T, float> || std::is_same_v<T, double>>
-                        > : rocblas_test_valid
-      {
-         void operator()(const Arguments& arg)
+         template <typename T>
+         struct syr_testing<T,
+                           std::enable_if_t<std::is_same_v<T, float> || std::is_same_v<T, double>>
+                           > : rocblas_test_valid
          {
-            if(!strcmp(arg.function, "syr"))
-                  testing_syr<T>(arg);
-            else
-                  FAIL() << "Internal error: Test called with unknown function: "
-                        << arg.function;
-         }
-      };
+            void operator()(const Arguments& arg)
+            {
+               if(!strcmp(arg.function, "syr"))
+                     testing_syr<T>(arg);
+               else
+                     FAIL() << "Internal error: Test called with unknown function: "
+                           << arg.function;
+            }
+         };
 
    E. If necessary, create a type dispatch function for this function (or group of functions it belongs to) in ``include/type_dispatch.hpp``.
-   If possible, use one of the existing dispatch functions, even if it covers a superset of the allowable types.
-   The purpose of ``type_dispatch.hpp`` is to perform runtime type dispatch in a single place, rather than
-   copying it across several test files.
+      If possible, use one of the existing dispatch functions, even if it covers a superset of the allowable types.
+      The purpose of ``type_dispatch.hpp`` is to perform runtime type dispatch in a single place, rather than
+      copying it across several test files.
 
-   The type dispatch function takes a ``template`` template parameter of ``template<typename...> class`` and a function parameter
-   of type ``const Arguments&``. It looks at the runtime type values in ``Arguments``\  and instantiates the template with one
-   or more static type arguments, corresponding to the dynamic runtime type arguments.
+      The type dispatch function takes a ``template`` template parameter of ``template<typename...> class`` and a function parameter
+      of type ``const Arguments&``. It looks at the runtime type values in ``Arguments``\  and instantiates the template with one
+      or more static type arguments, corresponding to the dynamic runtime type arguments.
 
-   It treats the passed template as a functor, passing the ``Arguments`` argument to a particular instantiation of it.
+      It treats the passed template as a functor, passing the ``Arguments`` argument to a particular instantiation of it.
 
-   The combinations of types handled by this "runtime type to template type instantiation mapping" function can be general
-   because the type combinations which do not apply to a particular test case will have the template argument set
-   to derive from ``rocblas_test_invalid``\ , which will not create any unresolved instantiations.
-   If unresolved instantiation compile or link errors occur, then the ``enable_if<>`` condition in step D needs to be
-   reworked to indicate ``false`` for type combinations which do not apply.
+      The combinations of types handled by this "runtime type to template type instantiation mapping" function can be general
+      because the type combinations which do not apply to a particular test case will have the template argument set
+      to derive from ``rocblas_test_invalid``\ , which will not create any unresolved instantiations.
+      If unresolved instantiation compile or link errors occur, then the ``enable_if<>`` condition in step D needs to be
+      reworked to indicate ``false`` for type combinations which do not apply.
 
-   The return type of this function needs to be ``auto``\ , picking up the return type of the functor.
+      The return type of this function needs to be ``auto``\ , picking up the return type of the functor.
 
-   If the runtime type combinations do not apply, then this function should return ``TEST<void>{}(arg)``\ , where ``TEST`` is the template
-   parameter. However, this is less important than step D above in excluding invalid type
-   combinations with ``enable_if``\ , since this only excludes them at run-time and they need to be excluded at compile-time by step D
-   to avoid unresolved references or invalid instantiations, for example:
+      If the runtime type combinations do not apply, then this function should return ``TEST<void>{}(arg)``\ , where ``TEST`` is the template
+      parameter. However, this is less important than step D above in excluding invalid type
+      combinations with ``enable_if``\ , since this only excludes them at run-time and they need to be excluded at compile-time by step D
+      to avoid unresolved references or invalid instantiations, for example:
 
-   .. code-block:: c++
+      .. code-block:: c++
 
-      template <template <typename...> class TEST>
-      auto rocblas_simple_dispatch(const Arguments& arg)
-      {
-         switch(arg.a_type)
+         template <template <typename...> class TEST>
+         auto rocblas_simple_dispatch(const Arguments& arg)
          {
-            case rocblas_datatype_f16_r: return TEST<rocblas_half>{}(arg);
-            case rocblas_datatype_f32_r: return TEST<float>{}(arg);
-            case rocblas_datatype_f64_r: return TEST<double>{}(arg);
-            case rocblas_datatype_bf16_r: return TEST<rocblas_bfloat16>{}(arg);
-            case rocblas_datatype_f16_c: return TEST<rocblas_half_complex>{}(arg);
-            case rocblas_datatype_f32_c: return TEST<rocblas_float_complex>{}(arg);
-            case rocblas_datatype_f64_c: return TEST<rocblas_double_complex>{}(arg);
-            default: return TEST<void>{}(arg);
+            switch(arg.a_type)
+            {
+               case rocblas_datatype_f16_r: return TEST<rocblas_half>{}(arg);
+               case rocblas_datatype_f32_r: return TEST<float>{}(arg);
+               case rocblas_datatype_f64_r: return TEST<double>{}(arg);
+               case rocblas_datatype_bf16_r: return TEST<rocblas_bfloat16>{}(arg);
+               case rocblas_datatype_f16_c: return TEST<rocblas_half_complex>{}(arg);
+               case rocblas_datatype_f32_c: return TEST<rocblas_float_complex>{}(arg);
+               case rocblas_datatype_f64_c: return TEST<rocblas_double_complex>{}(arg);
+               default: return TEST<void>{}(arg);
+            }
          }
-      }
 
    F. Create a (possibly-templated) test implementation class which derives from the ``RocBLAS_Test`` template class and
-   passes itself to ``RocBLAS_Test`` (the CRTP pattern) as well as the template class defined above, for example:
-
-   .. code-block:: c++
-
-      struct syr : RocBLAS_Test<syr, syr_testing>
-      {
-         // ...
-      };
-
-   In this class, implement three static functions:
-
-   *  ``static bool type_filter(const Arguments& arg)``: returns ``true`` if the types described by ``*_type`` in the ``Arguments`` structure
-      match a valid type combination.
-
-      This is usually implemented by calling the dispatch function in step E, passing it the helper ``type_filter_functor`` template class
-      defined in ``RocBLAS_Test``. This functor uses the same runtime type checks that are used to instantiate test functions
-      with particular type arguments, but it instead returns ``true`` or ``false`` depending on whether a function would have been called.
-      It is used to filter out tests whose runtime parameters do not match a valid test.
-
-      ``RocBLAS_Test`` is a dependent base class if this test implementation class is templated, so you might need to use a
-      fully-qualified name (\ ``A::B``\ ) to resolve ``type_filter_functor``\ .
-      In the last part of this name, the keyword ``template`` needs to precede ``type_filter_functor``. The first half of the fully
-      qualified name can be this class itself, or the full instantation of ``RocBLAS_Test<...>``, for example:
+      passes itself to ``RocBLAS_Test`` (the CRTP pattern) as well as the template class defined above, for example:
 
       .. code-block:: c++
 
-         static bool type_filter(const Arguments& arg)
+         struct syr : RocBLAS_Test<syr, syr_testing>
          {
-            return rocblas_blas1_dispatch<
-               blas1_test_template::template type_filter_functor>(arg);
-         }
+            // ...
+         };
+
+      In this class, implement three static functions:
+
+      *  ``static bool type_filter(const Arguments& arg)``: returns ``true`` if the types described by ``*_type`` in the ``Arguments`` structure
+         match a valid type combination.
+
+         This is usually implemented by calling the dispatch function in step E, passing it the helper ``type_filter_functor`` template class
+         defined in ``RocBLAS_Test``. This functor uses the same runtime type checks that are used to instantiate test functions
+         with particular type arguments, but it instead returns ``true`` or ``false`` depending on whether a function would have been called.
+         It is used to filter out tests whose runtime parameters do not match a valid test.
+
+         ``RocBLAS_Test`` is a dependent base class if this test implementation class is templated, so you might need to use a
+         fully-qualified name (\ ``A::B``\ ) to resolve ``type_filter_functor``\ .
+         In the last part of this name, the keyword ``template`` needs to precede ``type_filter_functor``. The first half of the fully
+         qualified name can be this class itself, or the full instantiation of ``RocBLAS_Test<...>``, for example:
+
+         .. code-block:: c++
+
+            static bool type_filter(const Arguments& arg)
+            {
+               return rocblas_blas1_dispatch<
+                  blas1_test_template::template type_filter_functor>(arg);
+            }
 
 
-   *  ``static bool function_filter(const Arguments& arg)``: returns ``true`` if the function name in ``Arguments`` matches one of
-      the functions handled by this test, for example:
+      *  ``static bool function_filter(const Arguments& arg)``: returns ``true`` if the function name in ``Arguments`` matches one of
+         the functions handled by this test, for example:
 
-      .. code-block:: c++
+         .. code-block:: c++
 
-         // Filter for which functions apply to this suite
-         static bool function_filter(const Arguments& arg)
-         {
-         return !strcmp(arg.function, "ger") || !strcmp(arg.function, "ger_bad_arg");
-         }
+            // Filter for which functions apply to this suite
+            static bool function_filter(const Arguments& arg)
+            {
+            return !strcmp(arg.function, "ger") || !strcmp(arg.function, "ger_bad_arg");
+            }
 
 
-   *  ``static std::string name_suffix(const Arguments& arg)``: returns a string which is used as the suffix for the GoogleTest name.
-      It provides an alphanumeric representation of the test arguments.
+      *  ``static std::string name_suffix(const Arguments& arg)``: returns a string which is used as the suffix for the GoogleTest name.
+         It provides an alphanumeric representation of the test arguments.
 
-      Use the ``RocBLAS_TestName`` helper class template to create the name. It accepts ``ostream`` output (like ``std::cout``\ )
-      and can be automatically converted to ``std::string`` after all the text of the name has been streamed to it.
+         Use the ``RocBLAS_TestName`` helper class template to create the name. It accepts ``ostream`` output (like ``std::cout``\ )
+         and can be automatically converted to ``std::string`` after all the text of the name has been streamed to it.
 
-      The ``RocBLAS_TestName`` helper class constructor accepts a string argument which is included in the test name.
-      It is generally passed the ``Arguments`` structure's ``name`` member.
+         The ``RocBLAS_TestName`` helper class constructor accepts a string argument which is included in the test name.
+         It is generally passed the ``Arguments`` structure's ``name`` member.
 
-      The ``RocBLAS_TestName`` helper class template should be passed the name of this test implementation class,
-      including any implicit template arguments, as a template argument, so that every instantiation of this
-      test implementation class creates a unique instantiation of ``RocBLAS_TestName``. ``RocBLAS_TestName`` has
-      some static data that needs to be kept local to each test.
+         The ``RocBLAS_TestName`` helper class template should be passed the name of this test implementation class,
+         including any implicit template arguments, as a template argument, so that every instantiation of this
+         test implementation class creates a unique instantiation of ``RocBLAS_TestName``. ``RocBLAS_TestName`` has
+         some static data that needs to be kept local to each test.
 
-      ``RocBLAS_TestName`` converts non-alphanumeric characters into suitable replacements and disambiguates test names
-      when the same arguments appear more than once.
+         ``RocBLAS_TestName`` converts non-alphanumeric characters into suitable replacements and disambiguates test names
+         when the same arguments appear more than once.
 
-      Since the conversion of the stream into a ``std::string`` is a destructive one-time operation,
-      the ``RocBLAS_TestName`` value converted to ``std::string`` needs to be an rvalue, for example:
+         The conversion of the stream into a ``std::string`` is a destructive one-time operation, so
+         the ``RocBLAS_TestName`` value converted to ``std::string`` must be an rvalue, for example:
 
-      .. code-block:: c++
+         .. code-block:: c++
 
-         static std::string name_suffix(const Arguments& arg)
-         {
-            // Okay: rvalue RocBLAS_TestName object streamed to and returned
-            return RocBLAS_TestName<syr>() << rocblas_datatype2string(arg.a_type)
-               << '_' << (char) std::toupper(arg.uplo) << '_' << arg.N
-               << '_' << arg.alpha << '_' << arg.incx << '_' << arg.lda;
-         }
+            static std::string name_suffix(const Arguments& arg)
+            {
+               // Okay: rvalue RocBLAS_TestName object streamed to and returned
+               return RocBLAS_TestName<syr>() << rocblas_datatype2string(arg.a_type)
+                  << '_' << (char) std::toupper(arg.uplo) << '_' << arg.N
+                  << '_' << arg.alpha << '_' << arg.incx << '_' << arg.lda;
+            }
 
-         static std::string name_suffix(const Arguments& arg)
-         {
-            RocBLAS_TestName<gemm_test_template> name;
-            name << rocblas_datatype2string(arg.a_type);
-            if(GEMM_TYPE == GEMM_EX || GEMM_TYPE == GEMM_STRIDED_BATCHED_EX)
-               name << rocblas_datatype2string(arg.b_type)
-                     << rocblas_datatype2string(arg.c_type)
-                     << rocblas_datatype2string(arg.d_type)
-                     << rocblas_datatype2string(arg.compute_type);
-            name << '_' << (char) std::toupper(arg.transA)
-                        << (char) std::toupper(arg.transB) << '_' << arg.M
-                        << '_' << arg.N << '_' << arg.K << '_' << arg.alpha << '_'
-                        << arg.lda << '_' << arg.ldb << '_' << arg.beta << '_'
-                        << arg.ldc;
-            // name is an lvalue: Must use std::move to convert it to rvalue.
-            // name cannot be used after it's converted to a string, which is
-            // why it must be "moved" to a string.
-            return std::move(name);
-         }
+            static std::string name_suffix(const Arguments& arg)
+            {
+               RocBLAS_TestName<gemm_test_template> name;
+               name << rocblas_datatype2string(arg.a_type);
+               if(GEMM_TYPE == GEMM_EX || GEMM_TYPE == GEMM_STRIDED_BATCHED_EX)
+                  name << rocblas_datatype2string(arg.b_type)
+                        << rocblas_datatype2string(arg.c_type)
+                        << rocblas_datatype2string(arg.d_type)
+                        << rocblas_datatype2string(arg.compute_type);
+               name << '_' << (char) std::toupper(arg.transA)
+                           << (char) std::toupper(arg.transB) << '_' << arg.M
+                           << '_' << arg.N << '_' << arg.K << '_' << arg.alpha << '_'
+                           << arg.lda << '_' << arg.ldb << '_' << arg.beta << '_'
+                           << arg.ldc;
+               // name is an lvalue: Must use std::move to convert it to rvalue.
+               // name cannot be used after it's converted to a string, which is
+               // why it must be "moved" to a string.
+               return std::move(name);
+            }
 
    G. Choose a non-type-specific shorthand name for the test, which is displayed as part of the test name in the GoogleTest output
-   and is stringified. Create a type alias for this name, unless the name is already the name of the class defined in step F
-   and is not templated. For example, for a templated class defined in step F, create an alias for one of its instantiations:
+      and is stringified. Create a type alias for this name, unless the name is already the name of the class defined in step F
+      and is not templated. For example, for a templated class defined in step F, create an alias for one of its instantiations:
 
-   .. code-block:: c++
+      .. code-block:: c++
 
-      using gemm = gemm_test_template<gemm_testing, GEMM>;
+         using gemm = gemm_test_template<gemm_testing, GEMM>;
 
-   H. Pass the name created in step G to the ``TEST_P`` macro, along with a broad test category name that this test belongs to
-   so that GoogleTest filtering can be used to select all tests in a category. The broad test category suffix should be ``_tensile``
-   if it requires Tensile.
+   H. Pass the name created in step G to the ``TEST_P`` macro, along with a broad test category name for the test to belong to
+      so that GoogleTest filtering can be used to select all tests in a category. The broad test category suffix should be ``_tensile``
+      if it requires Tensile.
 
-   In the body following this ``TEST_P`` macro, call the dispatch function from step E, passing it the class from step C
-   as a template template argument, passing the result of ``GetParam()`` as an ``Arguments`` structure, and wrapping the call
-   in the ``CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES()`` macro. Here is an example:
+      In the body following this ``TEST_P`` macro, call the dispatch function from step E, passing it the class from step C
+      as a template template argument, passing the result of ``GetParam()`` as an ``Arguments`` structure, and wrapping the call
+      in the ``CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES()`` macro. Here is an example:
 
-   .. code-block:: c++
+      .. code-block:: c++
 
-      TEST_P(gemm, blas3_tensile) { CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(rocblas_gemm_dispatch<gemm_testing>(GetParam())); }
+         TEST_P(gemm, blas3_tensile) { CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(rocblas_gemm_dispatch<gemm_testing>(GetParam())); }
 
-   The ``CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES()`` macro detects signals such as ``SIGSEGV`` and uncaught C++ exceptions returned from
-   rocBLAS C APIs as failures, without terminating the test program.
+      The ``CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES()`` macro detects signals such as ``SIGSEGV`` and uncaught C++ exceptions returned from
+      rocBLAS C APIs as failures, without terminating the test program.
 
    I. Call the ``INSTANTIATE_TEST_CATEGORIES`` macro which instantiates the GoogleTests across all test
-   categories (\ ``quick``\ , ``pre_checkin``\ , ``nightly``\ , ``known_bug``\ ), passing it the same test name as in steps G and H, for example:
+      categories (\ ``quick``\ , ``pre_checkin``\ , ``nightly``\ , ``known_bug``\ ), passing it the same test name as in steps G and H, for example:
 
-   .. code-block:: c++
+      .. code-block:: c++
 
-      INSTANTIATE_TEST_CATEGORIES(gemm);
+         INSTANTIATE_TEST_CATEGORIES(gemm);
 
    J. Close the anonymous namespace:
 
-   .. code-block:: c++
+      .. code-block:: c++
 
-      } // namespace
+         } // namespace
 
 #. Create a ``<function>.yaml`` file with the same name as the C++ file, but with a ``.yaml`` extension.
 
    In the YAML file, define tests with combinations of parameters.
 
-   The YAML files are organized as files which ``include:`` each other (an extension to YAML).
-   Define anchors for the data types and data structures, list of test parameters or subsets thereof, and ``Tests`` which describe
+   The YAML files are organized as files which include each other (an extension to YAML).
+   Define anchors for the data types and data structures, list of test parameters or subsets thereof, and ``Tests``, which describe
    a combination of parameters including ``category`` and ``function``.
 
    The ``category`` must be one of ``quick``\ , ``pre_checkin``\ , ``nightly``\ , or ``known_bug``.
@@ -2039,7 +2041,7 @@ To add new data-driven tests to the rocBLAS Google Test Framework:
          trtri_gtest.cpp
          )
 
-#. Aim for a function to have tests in each of the categorie: quick, pre_checkin, and nightly.
+#. Aim for a function to have tests in each of the categories: quick, pre_checkin, and nightly.
    Aim for tests for each function to have the runtime fall within the parameters in the table below:
 
    .. csv-table::
@@ -2047,7 +2049,7 @@ To add new data-driven tests to the rocBLAS Google Test Framework:
       :widths: 20, 30, 30, 30
    
       "Level 1", "2 - 12 sec", "20 - 36 sec", "70 - 200 sec"
-      "Level 2", "6 - 36 sec", " 35 - 100 sec", "200 - 650 sec"
+      "Level 2", "6 - 36 sec", "35 - 100 sec", "200 - 650 sec"
       "Level 3", "20 sec - 2 min", "2 - 6 min", "12 - 24 min"
 
    Many examples are available in ``gtest/*_gtest.{cpp,yaml}``.
@@ -2056,17 +2058,18 @@ Testing during development
 --------------------------
 
 ILP64 APIs require such large problem sizes that getting code coverage during tests is cost prohibitive.
-Therefore there are some hooks to help with early developer testing using smaller sizes.
+Therefore, there are some hooks to help with early developer testing using smaller sizes.
 You can compile with ``-DROCBLAS_DEV_TEST_ILP64`` to test ILP64 code when it would otherwise not be invoked.
 For example, a ``scal`` implementation can call the original 32-bit API code when ``N`` and ``incx`` are less than ``c_ILP64_i32_max``.
 ``c_ILP64_i32_max`` is usually defined as ``std::numeric_limits<int32_t>::max()``,
 but with ``ROCBLAS_DEV_TEST_ILP64`` defined, then ``c_ILP64_i32_max`` is defined as zero.
-Therefore for small sizes it branches and uses ILP64 support code instead of the 32-bit original API.
-The specifics vary for each implementation and require YAML configuration to test C_64 APIs with small sizes.
+Therefore, for small sizes it branches and uses ILP64 support code instead of the 32-bit original API.
+
+The specifics vary for each implementation and require a YAML configuration to test ``C_64`` APIs with small sizes.
 This is intended as a by-pass for when early detection of small sizes invokes the 32-bit APIs.
 This is for developer testing only and should not be used for production code.
 
 Test coverage during development should be much more exhaustive than the final versions of test sets.
 Test times are limited, so a trade-off between coverage and test duration must be made.
 During development, it is expected that the problem space will be covered in more depth to look for potential anomalies.
-Any special cases should be analyzed, reduced in scope, and represented in the the final test category.
+Any special cases should be analyzed, reduced in scope, and represented in the final test category.

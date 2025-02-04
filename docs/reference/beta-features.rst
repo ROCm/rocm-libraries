@@ -66,11 +66,11 @@ Functions unsupported with Graph Capture
 
 The following Level-1 functions place results into host buffers (in pointer mode host) which enforces synchronization.
 
-   *  ``dot``
-   *  ``asum``
-   *  ``nrm2``
-   *  ``imax``
-   *  ``imin``
+*  ``dot``
+*  ``asum``
+*  ``nrm2``
+*  ``imax``
+*  ``imin``
 
 BLAS Level-3 and BLAS-EX functions in pointer mode device do not support HIP Graph. Support will be added in a future release.
 
