@@ -83,6 +83,16 @@ Tests:
   transA: [rocsparse_operation_none]
 
 - name: spvv
+  category: quick
+  function: spvv
+  indextype: *i32_i64
+  precision: *float16_float16_float32_xyt_precision
+  M: [121, 155, 201, 546]
+  nnz: [61]
+  baseA: [rocsparse_index_base_zero]
+  transA: [rocsparse_operation_none]
+
+- name: spvv
   category: pre_checkin
   function: spvv
   indextype: *i32_i64
@@ -99,6 +109,16 @@ Tests:
   precision: *int8_int8_float32_xyt_precision
   M: [1207, 3452, 28375, 77824]
   nnz: [128, 500, 1100]
+  baseA: [rocsparse_index_base_zero]
+  transA: [rocsparse_operation_none]
+
+- name: spvv
+  category: pre_checkin
+  function: spvv
+  indextype: *i32_i64
+  precision: *float16_float16_float32_xyt_precision
+  M: [1423, 3425, 26578, 55678]
+  nnz: [444, 632, 999]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
 
@@ -122,6 +142,15 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
 
+- name: spvv
+  category: nightly
+  function: spvv
+  indextype: *i32_i64
+  precision: *float16_float16_float32_xyt_precision
+  M: [1000000, 2000000, 4000000]
+  nnz: [30000, 50000, 90000]
+  baseA: [rocsparse_index_base_zero]
+  transA: [rocsparse_operation_none]
 
 - name: spvv_graph_test
   category: pre_checkin

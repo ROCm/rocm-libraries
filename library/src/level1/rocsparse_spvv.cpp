@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -180,6 +180,14 @@ try
 #define PARAMS handle, trans, x, y, result, compute_type, buffer_size, temp_buffer
 
     if(ctype == rocsparse_datatype_f32_r && itype == rocsparse_indextype_i32
+       && xtype == rocsparse_datatype_f16_r && ytype == rocsparse_datatype_f16_r)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::spvv_template_real<float, int32_t, _Float16, _Float16>(PARAMS)));
+        return rocsparse_status_success;
+    }
+
+    if(ctype == rocsparse_datatype_f32_r && itype == rocsparse_indextype_i32
        && xtype == rocsparse_datatype_f32_r && ytype == rocsparse_datatype_f32_r)
     {
         RETURN_IF_ROCSPARSE_ERROR(
@@ -195,6 +203,13 @@ try
         return rocsparse_status_success;
     }
 
+    if(ctype == rocsparse_datatype_f32_r && itype == rocsparse_indextype_i64
+       && xtype == rocsparse_datatype_f16_r && ytype == rocsparse_datatype_f16_r)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::spvv_template_real<float, int64_t, _Float16, _Float16>(PARAMS)));
+        return rocsparse_status_success;
+    }
     if(ctype == rocsparse_datatype_f32_r && itype == rocsparse_indextype_i64
        && xtype == rocsparse_datatype_f32_r && ytype == rocsparse_datatype_f32_r)
     {

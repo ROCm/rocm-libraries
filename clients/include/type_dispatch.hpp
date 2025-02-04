@@ -255,36 +255,43 @@ auto rocsparse_ixyt_dispatch(const Arguments& arg)
     bool i8r_i8r_f32r_case = (X == rocsparse_datatype_i8_r && Y == rocsparse_datatype_i8_r
                               && T == rocsparse_datatype_f32_r);
 
-#define DISPATCH_TEST(ITYPE)                                \
-    if(f32r_case)                                           \
-    {                                                       \
-        return TEST<ITYPE, float, float, float>{}(arg);     \
-    }                                                       \
-    else if(f64r_case)                                      \
-    {                                                       \
-        return TEST<ITYPE, double, double, double>{}(arg);  \
-    }                                                       \
-    else if(f32c_case)                                      \
-    {                                                       \
-        return TEST<ITYPE,                                  \
-                    rocsparse_float_complex,                \
-                    rocsparse_float_complex,                \
-                    rocsparse_float_complex>{}(arg);        \
-    }                                                       \
-    else if(f64c_case)                                      \
-    {                                                       \
-        return TEST<ITYPE,                                  \
-                    rocsparse_double_complex,               \
-                    rocsparse_double_complex,               \
-                    rocsparse_double_complex>{}(arg);       \
-    }                                                       \
-    else if(i8r_i8r_i32r_case)                              \
-    {                                                       \
-        return TEST<ITYPE, int8_t, int8_t, int32_t>{}(arg); \
-    }                                                       \
-    else if(i8r_i8r_f32r_case)                              \
-    {                                                       \
-        return TEST<ITYPE, int8_t, int8_t, float>{}(arg);   \
+    bool f16r_f16r_f32r_case = (X == rocsparse_datatype_f16_r && Y == rocsparse_datatype_f16_r
+                                && T == rocsparse_datatype_f32_r);
+
+#define DISPATCH_TEST(ITYPE)                                  \
+    if(f32r_case)                                             \
+    {                                                         \
+        return TEST<ITYPE, float, float, float>{}(arg);       \
+    }                                                         \
+    else if(f64r_case)                                        \
+    {                                                         \
+        return TEST<ITYPE, double, double, double>{}(arg);    \
+    }                                                         \
+    else if(f32c_case)                                        \
+    {                                                         \
+        return TEST<ITYPE,                                    \
+                    rocsparse_float_complex,                  \
+                    rocsparse_float_complex,                  \
+                    rocsparse_float_complex>{}(arg);          \
+    }                                                         \
+    else if(f64c_case)                                        \
+    {                                                         \
+        return TEST<ITYPE,                                    \
+                    rocsparse_double_complex,                 \
+                    rocsparse_double_complex,                 \
+                    rocsparse_double_complex>{}(arg);         \
+    }                                                         \
+    else if(i8r_i8r_i32r_case)                                \
+    {                                                         \
+        return TEST<ITYPE, int8_t, int8_t, int32_t>{}(arg);   \
+    }                                                         \
+    else if(i8r_i8r_f32r_case)                                \
+    {                                                         \
+        return TEST<ITYPE, int8_t, int8_t, float>{}(arg);     \
+    }                                                         \
+    else if(f16r_f16r_f32r_case)                              \
+    {                                                         \
+        return TEST<ITYPE, _Float16, _Float16, float>{}(arg); \
     }
 
     switch(I)

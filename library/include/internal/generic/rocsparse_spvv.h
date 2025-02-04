@@ -75,9 +75,10 @@ extern "C" {
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="spvv_mixed">Mixed Precisions</caption>
-*  <tr><th>X / Y                   <th>compute_type / result
-*  <tr><td>rocsparse_datatype_i8_r <td>rocsparse_datatype_i32_r
-*  <tr><td>rocsparse_datatype_i8_r <td>rocsparse_datatype_f32_r
+*  <tr><th>X / Y                    <th>compute_type / result
+*  <tr><td>rocsparse_datatype_i8_r  <td>rocsparse_datatype_i32_r
+*  <tr><td>rocsparse_datatype_i8_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r
 *  </table>
 *
 *  \note
