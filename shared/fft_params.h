@@ -2239,19 +2239,28 @@ public:
         scale_factor = 1 / params_forward.scale_factor;
     }
 
-    // prepare for multi-GPU transform.  Generated input is in ibuffer.
-    // pibuffer, pobuffer are the pointers that will be passed to the
-    // FFT library's "execute" API.
-    virtual void multi_gpu_prepare(std::vector<gpubuf>& ibuffer,
-                                   std::vector<void*>&  pibuffer,
-                                   std::vector<void*>&  pobuffer)
+    // prepare for multi-GPU transform.  cpu_input has contiguous
+    // input on the host, ibuffer has device input, which can be
+    // discarded if it's turned into multi-GPU bricks.  pibuffer,
+    // pobuffer are the pointers that will be passed to the FFT
+    // library's "execute" API.
+    virtual void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
+                                   std::vector<gpubuf>&  ibuffer,
+                                   std::vector<void*>&   pibuffer,
+                                   std::vector<void*>&   pobuffer)
     {
     }
 
     // finalize multi-GPU transform.  pobuffers are the pointers
     // provided to the FFT library's "execute" API.  obuffer is the
-    // buffer where transform output needs to go for validation
-    virtual void multi_gpu_finalize(std::vector<gpubuf>& obuffer, std::vector<void*>& pobuffer) {}
+    // normal GPU buffer that is used for single-device FFTs.
+    // gpu_output is the host buffer where transform output needs to
+    // go for validation
+    virtual void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
+                                    std::vector<gpubuf>&  obuffer,
+                                    std::vector<void*>&   pobuffer)
+    {
+    }
 
     // Create bricks in the specified field.  brick_grid has an
     // integer per dimension (batch and FFT dimensions), with the
@@ -2831,6 +2840,26 @@ inline void copy_buffers(const std::vector<hostbuf>& input,
                             odist,
                             ioffset,
                             ooffset);
+    case 4:
+    {
+        // treat 4D brick as 3D + batch, but this needs to be
+        // unbatched until we add 4D support for copy_buffers
+        if(nbatch != 1)
+            throw std::runtime_error("cannot copy batched 4D bricks");
+        return copy_buffers(input,
+                            output,
+                            std::make_tuple(length[1], length[2], length[3]),
+                            length[0],
+                            precision,
+                            itype,
+                            std::make_tuple(istride[1], istride[2], istride[3]),
+                            istride[0],
+                            otype,
+                            std::make_tuple(ostride[1], ostride[2], istride[3]),
+                            ostride[0],
+                            ioffset,
+                            ooffset);
+    }
     default:
         abort();
     }
@@ -3730,6 +3759,118 @@ inline size_t twiddle_table_vram_footprint(const fft_params& params)
     }
 
     return vram_footprint;
+}
+
+// set input for a brick in a field
+// functor to search for bricks on a rank, in a container of bricks
+// sorted by rank
+struct match_rank
+{
+    bool operator()(const fft_params::fft_brick& b, int rank) const
+    {
+        return b.rank < rank;
+    }
+    bool operator()(int rank, const fft_params::fft_brick& b) const
+    {
+        return rank < b.rank;
+    }
+};
+
+// Initialize input for the bricks on the specified comm rank
+// (assumed to be the local rank)
+template <typename Tparams, typename Tbuff>
+void init_local_input(int                                       comm_rank,
+                      const Tparams&                            params,
+                      const std::vector<fft_params::fft_brick>& bricks,
+                      size_t                                    elem_size,
+                      const std::vector<void*>&                 input_ptrs)
+{
+    // get bricks for this rank
+    auto range = std::equal_range(bricks.begin(), bricks.end(), comm_rank, match_rank());
+
+    const bool is_planar = params.itype == fft_array_type_complex_planar
+                           || params.itype == fft_array_type_hermitian_planar;
+
+    size_t ptr_idx = 0;
+    for(auto brick = range.first; brick != range.second; ++brick, ++ptr_idx)
+    {
+        rocfft_scoped_device dev(brick->device);
+
+        // some utility code below needs batch separated from brick lengths
+        std::vector<size_t> brick_len_nobatch = brick->length();
+        auto                brick_batch       = brick_len_nobatch.front();
+        brick_len_nobatch.erase(brick_len_nobatch.begin());
+        std::vector<size_t> brick_stride_nobatch = brick->stride;
+        auto                brick_dist           = brick_stride_nobatch.front();
+        brick_stride_nobatch.erase(brick_stride_nobatch.begin());
+        std::vector<size_t> brick_lower_nobatch = brick->lower;
+        auto                brick_lower_batch   = brick_lower_nobatch.front();
+        brick_lower_nobatch.erase(brick_lower_nobatch.begin());
+
+        auto contiguous_stride = params.compute_stride(params.ilength());
+        auto contiguous_dist   = params.compute_idist();
+
+        std::vector<Tbuff> bufvec(1);
+        size_t brick_size_bytes = compute_ptrdiff(brick->length(), brick->stride, 0, 0) * elem_size
+                                  / (is_planar ? 2 : 1);
+        bufvec.back() = Tbuff::make_nonowned(input_ptrs[ptr_idx], brick_size_bytes);
+        // grab a second pointer for planar
+        if(is_planar)
+        {
+            ++ptr_idx;
+            bufvec.push_back(Tbuff::make_nonowned(input_ptrs[ptr_idx], brick_size_bytes));
+        }
+
+        // generate data (in device mem)
+        switch(params.precision)
+        {
+        case fft_precision_half:
+            set_input<Tbuff, rocfft_fp16>(bufvec,
+                                          fft_input_random_generator_device,
+                                          params.itype,
+                                          brick_len_nobatch,
+                                          brick_len_nobatch,
+                                          brick_stride_nobatch,
+                                          brick_dist,
+                                          brick_batch,
+                                          get_curr_device_prop(),
+                                          brick_lower_nobatch,
+                                          brick_lower_batch,
+                                          contiguous_stride,
+                                          contiguous_dist);
+            break;
+        case fft_precision_single:
+            set_input<Tbuff, float>(bufvec,
+                                    fft_input_random_generator_device,
+                                    params.itype,
+                                    brick_len_nobatch,
+                                    brick_len_nobatch,
+                                    brick_stride_nobatch,
+                                    brick_dist,
+                                    brick_batch,
+                                    get_curr_device_prop(),
+                                    brick_lower_nobatch,
+                                    brick_lower_batch,
+                                    contiguous_stride,
+                                    contiguous_dist);
+            break;
+        case fft_precision_double:
+            set_input<Tbuff, double>(bufvec,
+                                     fft_input_random_generator_device,
+                                     params.itype,
+                                     brick_len_nobatch,
+                                     brick_len_nobatch,
+                                     brick_stride_nobatch,
+                                     brick_dist,
+                                     brick_batch,
+                                     get_curr_device_prop(),
+                                     brick_lower_nobatch,
+                                     brick_lower_batch,
+                                     contiguous_stride,
+                                     contiguous_dist);
+            break;
+        }
+    }
 }
 
 #endif

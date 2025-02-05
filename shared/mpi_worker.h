@@ -31,109 +31,6 @@
 #include <chrono>
 #include <mpi.h>
 
-// functor to search for bricks on a rank, in a container of bricks
-// sorted by rank
-struct match_rank
-{
-    bool operator()(const fft_params::fft_brick& b, int rank) const
-    {
-        return b.rank < rank;
-    }
-    bool operator()(int rank, const fft_params::fft_brick& b) const
-    {
-        return rank < b.rank;
-    }
-};
-
-// Initialize input for the bricks on the current rank.
-template <typename Tparams>
-void init_local_input(MPI_Comm                  mpi_comm,
-                      const Tparams&            params,
-                      size_t                    elem_size,
-                      const std::vector<void*>& input_ptrs)
-{
-    int mpi_rank = 0;
-    MPI_Comm_rank(mpi_comm, &mpi_rank);
-
-    // get bricks for this rank
-    auto range = std::equal_range(params.ifields.front().bricks.begin(),
-                                  params.ifields.front().bricks.end(),
-                                  mpi_rank,
-                                  match_rank());
-
-    size_t ptr_idx = 0;
-    for(auto brick = range.first; brick != range.second; ++brick, ++ptr_idx)
-    {
-        // some utility code below needs batch separated from brick lengths
-        std::vector<size_t> brick_len_nobatch = brick->length();
-        auto                brick_batch       = brick_len_nobatch.front();
-        brick_len_nobatch.erase(brick_len_nobatch.begin());
-        std::vector<size_t> brick_stride_nobatch = brick->stride;
-        auto                brick_dist           = brick_stride_nobatch.front();
-        brick_stride_nobatch.erase(brick_stride_nobatch.begin());
-        std::vector<size_t> brick_lower_nobatch = brick->lower;
-        auto                brick_lower_batch   = brick_lower_nobatch.front();
-        brick_lower_nobatch.erase(brick_lower_nobatch.begin());
-
-        auto contiguous_stride = params.compute_stride(params.ilength());
-        auto contiguous_dist   = params.compute_idist();
-
-        std::vector<gpubuf> bufvec(1);
-        bufvec.back() = gpubuf::make_nonowned(
-            input_ptrs[ptr_idx], compute_ptrdiff(brick->length(), brick->stride, 0, 0) * elem_size);
-
-        // generate data (in device mem)
-        switch(params.precision)
-        {
-        case fft_precision_half:
-            set_input<gpubuf, rocfft_fp16>(bufvec,
-                                           fft_input_random_generator_device,
-                                           params.itype,
-                                           brick_len_nobatch,
-                                           brick_len_nobatch,
-                                           brick_stride_nobatch,
-                                           brick_dist,
-                                           brick_batch,
-                                           get_curr_device_prop(),
-                                           brick_lower_nobatch,
-                                           brick_lower_batch,
-                                           contiguous_stride,
-                                           contiguous_dist);
-            break;
-        case fft_precision_single:
-            set_input<gpubuf, float>(bufvec,
-                                     fft_input_random_generator_device,
-                                     params.itype,
-                                     brick_len_nobatch,
-                                     brick_len_nobatch,
-                                     brick_stride_nobatch,
-                                     brick_dist,
-                                     brick_batch,
-                                     get_curr_device_prop(),
-                                     brick_lower_nobatch,
-                                     brick_lower_batch,
-                                     contiguous_stride,
-                                     contiguous_dist);
-            break;
-        case fft_precision_double:
-            set_input<gpubuf, double>(bufvec,
-                                      fft_input_random_generator_device,
-                                      params.itype,
-                                      brick_len_nobatch,
-                                      brick_len_nobatch,
-                                      brick_stride_nobatch,
-                                      brick_dist,
-                                      brick_batch,
-                                      get_curr_device_prop(),
-                                      brick_lower_nobatch,
-                                      brick_lower_batch,
-                                      contiguous_stride,
-                                      contiguous_dist);
-            break;
-        }
-    }
-}
-
 static MPI_Datatype get_mpi_type(size_t elem_size)
 {
     MPI_Datatype mpi_type;
@@ -464,7 +361,8 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
     {
         alloc_local_bricks(
             mpi_comm, params.ifields.back().bricks, in_elem_size, local_input, local_input_ptrs);
-        init_local_input(mpi_comm, params, in_elem_size, local_input_ptrs);
+        init_local_input<decltype(params), gpubuf>(
+            mpi_rank, params, params.ifields.back().bricks, in_elem_size, local_input_ptrs);
 
         // allocate local output bricks
         if(params.placement == fft_placement_inplace)
@@ -547,7 +445,8 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
         {
             // reinit input for tests after the first one
             if(i > 0)
-                init_local_input(mpi_comm, params, in_elem_size, local_input_ptrs);
+                init_local_input<decltype(params), gpubuf>(
+                    mpi_rank, params, params.ifields.back().bricks, in_elem_size, local_input_ptrs);
 
             // ensure plan is finished building, synchronize all devices
             // in the input bricks

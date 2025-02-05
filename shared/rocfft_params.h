@@ -470,9 +470,10 @@ public:
     }
 
     // scatter data to multiple GPUs and adjust I/O buffers to match
-    void multi_gpu_prepare(std::vector<gpubuf>& ibuffer,
-                           std::vector<void*>&  pibuffer,
-                           std::vector<void*>&  pobuffer) override
+    virtual void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
+                                   std::vector<gpubuf>&  ibuffer,
+                                   std::vector<void*>&   pibuffer,
+                                   std::vector<void*>&   pobuffer) override
     {
         auto alloc_fields = [&](const fft_params::fft_field& field,
                                 fft_array_type               array_type,
@@ -485,17 +486,11 @@ public:
             // we'll be allocating new ones for each brick
             pbuffer.clear();
 
-            auto length_with_batch = copy_input ? length : olength();
-            length_with_batch.insert(length_with_batch.begin(), nbatch);
-            const auto   splitDims       = get_split_dimensions(field, length_with_batch);
-            const auto   splitDimIdx     = splitDims.back();
             const size_t elem_size_bytes = var_size<size_t>(precision, array_type);
 
-            for(auto b : field.bricks)
+            for(const auto& b : field.bricks)
             {
-                const auto   whole_brick_len = b.length();
-                const size_t brick_size_elems
-                    = product(whole_brick_len.begin(), whole_brick_len.end());
+                const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
                 const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
 
                 // set device for the alloc, but we want to return to the
@@ -508,48 +503,44 @@ public:
                     pbuffer.push_back(multi_gpu_data.back().data());
                 }
 
-                const auto   batch_increment  = splitDims.size() == 1 ? b.upper[0] - b.lower[0] : 1;
-                const size_t batch_upper_orig = b.upper[0];
-
-                for(auto batchIdx = b.lower[0]; batchIdx < batch_upper_orig;
-                    batchIdx += batch_increment)
+                if(copy_input)
                 {
-                    b.lower[0] = batchIdx;
-                    b.upper[0] = b.lower[0] + batch_increment;
+                    // get this brick's starting offset in the field
+                    const size_t brick_offset_elems = b.lower_field_offset(istride, idist);
 
-                    // get brick's length now - might be just a single batch's worth
-                    const auto brick_len    = b.length();
-                    const auto brick_stride = b.stride;
+                    // transpose input data to the brick's shape in
+                    // host memory, then memcpy
 
-                    if(copy_input)
+                    // alloc a host-side brick that's the right shape
+                    std::vector<hostbuf> host_brick(1);
+                    host_brick.front().alloc(brick_size_bytes);
+
+                    std::vector<size_t> istride_with_batch{idist};
+                    std::copy(
+                        istride.begin(), istride.end(), std::back_inserter(istride_with_batch));
+
+                    copy_buffers(cpu_input,
+                                 host_brick,
+                                 b.length(),
+                                 1,
+                                 precision,
+                                 array_type,
+                                 istride_with_batch,
+                                 0,
+                                 array_type,
+                                 b.stride,
+                                 0,
+                                 {brick_offset_elems},
+                                 {0});
+
+                    // memcpy the transposed brick to the device
+                    if(hipMemcpy(pbuffer.back(),
+                                 host_brick.front().data(),
+                                 brick_size_bytes,
+                                 hipMemcpyHostToDevice)
+                       != hipSuccess)
                     {
-                        // get contiguous elems before and after the split
-                        const auto brick_length_before_split
-                            = product(brick_len.begin() + splitDimIdx, brick_len.end());
-                        const auto fft_length_with_split = product(
-                            length_with_batch.begin() + splitDimIdx, length_with_batch.end());
-                        const auto length_after_split
-                            = product(brick_len.begin(), brick_len.begin() + splitDimIdx);
-
-                        // get this brick's starting offset in the field
-                        const size_t brick_offset
-                            = b.lower_field_offset(istride, idist) * elem_size_bytes;
-
-                        // copy from original input - note that we're
-                        // assuming interleaved data so ibuffer has only one
-                        // gpubuf
-                        if(hipMemcpy2D(ptr_offset(pbuffer.back(),
-                                                  batchIdx * b.stride[0],
-                                                  rocfft_precision_from_fftparams(precision),
-                                                  rocfft_array_type_from_fftparams(array_type)),
-                                       brick_length_before_split * elem_size_bytes,
-                                       ibuffer.front().data_offset(brick_offset),
-                                       fft_length_with_split * elem_size_bytes,
-                                       brick_length_before_split * elem_size_bytes,
-                                       length_after_split,
-                                       hipMemcpyHostToDevice)
-                           != hipSuccess)
-                            throw std::runtime_error("hipMemcpy failure");
+                        throw std::runtime_error("hipMemcpy failure");
                     }
                 }
             }
@@ -578,68 +569,56 @@ public:
     std::vector<gpubuf> multi_gpu_data;
 
     // gather data after multi-GPU FFT for verification
-    void multi_gpu_finalize(std::vector<gpubuf>& obuffer, std::vector<void*>& pobuffer) override
+    void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
+                            std::vector<gpubuf>&  obuffer,
+                            std::vector<void*>&   pobuffer) override
     {
         if(ofields.empty())
             return;
 
-        auto length_with_batch = olength();
-        length_with_batch.insert(length_with_batch.begin(), nbatch);
-        const auto   splitDims       = get_split_dimensions(ofields.front(), length_with_batch);
-        const auto   splitDimIdx     = splitDims.back();
         const size_t elem_size_bytes = var_size<size_t>(precision, otype);
 
-        for(size_t i = 0; i < ofields.front().bricks.size(); ++i)
+        for(size_t i = 0; i < pobuffer.size(); ++i)
         {
-            auto b = ofields.front().bricks[i];
+            const auto& b = ofields.front().bricks[i];
 
-            const auto   batch_increment  = splitDims.size() == 1 ? b.upper[0] - b.lower[0] : 1;
-            const size_t batch_upper_orig = b.upper[0];
+            const size_t brick_size_elems = compute_ptrdiff(b.length(), b.stride, 0, 0);
+            const size_t brick_size_bytes = brick_size_elems * elem_size_bytes;
 
-            for(auto batchIdx = b.lower[0]; batchIdx < batch_upper_orig;
-                batchIdx += batch_increment)
+            // get this brick's starting offset in the field
+            const size_t brick_offset_elems = b.lower_field_offset(ostride, odist);
+
+            // switch device to where we're copying from
+            rocfft_scoped_device dev(b.device);
+
+            // copy the brick to host, then copy to output
+            std::vector<hostbuf> host_brick(1);
+            host_brick.front().alloc(brick_size_bytes);
+            if(hipMemcpy(
+                   host_brick.front().data(), pobuffer[i], brick_size_bytes, hipMemcpyDeviceToHost)
+               != hipSuccess)
             {
-                b.lower[0] = batchIdx;
-                b.upper[0] = b.lower[0] + batch_increment;
-
-                const auto& brick_ptr = pobuffer[i];
-                const auto  brick_len = b.length();
-
-                // get contiguous elems before and after the split
-                const auto brick_length_before_split
-                    = product(brick_len.begin() + splitDimIdx, brick_len.end());
-                const auto fft_length_with_split
-                    = product(length_with_batch.begin() + splitDimIdx, length_with_batch.end());
-                const auto length_after_split
-                    = product(brick_len.begin(), brick_len.begin() + splitDimIdx);
-
-                // get this brick's starting offset in the field
-                const size_t brick_offset = b.lower_field_offset(ostride, odist) * elem_size_bytes;
-
-                // switch device to where we're copying from
-                rocfft_scoped_device dev(b.device);
-
-                // copy to original output buffer - note that
-                // we're assuming interleaved data so obuffer
-                // has only one gpubuf
-                if(hipMemcpy2D(obuffer.front().data_offset(brick_offset),
-                               fft_length_with_split * elem_size_bytes,
-                               ptr_offset(brick_ptr,
-                                          batchIdx * b.stride[0],
-                                          rocfft_precision_from_fftparams(precision),
-                                          rocfft_array_type_from_fftparams(otype)),
-                               brick_length_before_split * elem_size_bytes,
-                               brick_length_before_split * elem_size_bytes,
-                               length_after_split,
-                               hipMemcpyDeviceToDevice)
-                   != hipSuccess)
-                    throw std::runtime_error("hipMemcpy failure");
-
-                // device-to-device transfers don't synchronize with the
-                // host, add explicit sync
-                (void)hipDeviceSynchronize();
+                throw std::runtime_error("hipMemcpy failed");
             }
+
+            std::vector<size_t> ostride_with_batch{odist};
+            std::copy(ostride.begin(), ostride.end(), std::back_inserter(ostride_with_batch));
+
+            copy_buffers(host_brick,
+                         gpu_output,
+                         b.length(),
+                         1,
+                         precision,
+                         otype,
+                         b.stride,
+                         0,
+                         otype,
+                         ostride_with_batch,
+                         0,
+                         {0},
+                         {brick_offset_elems});
         }
+        // set pobuffer back to a single-device transform
         pobuffer.clear();
         pobuffer.push_back(obuffer.front().data());
     }

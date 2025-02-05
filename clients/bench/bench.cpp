@@ -333,92 +333,37 @@ int main(int argc, char* argv[])
         LIB_V_THROW(rocfft_status_failure, "Plan creation failed");
 
     // GPU input buffer:
-    auto                ibuffer_sizes = params.ibuffer_sizes();
-    std::vector<gpubuf> ibuffer(ibuffer_sizes.size());
-    std::vector<void*>  pibuffer(ibuffer_sizes.size());
-    for(unsigned int i = 0; i < ibuffer.size(); ++i)
-    {
-        try
-        {
-            HIP_V_THROW(ibuffer[i].alloc(ibuffer_sizes[i]), "Creating input Buffer failed");
-        }
-        catch(rocfft_hip_runtime_error)
-        {
-            return ignore_hip_runtime_failures ? EXIT_SUCCESS : EXIT_FAILURE;
-        }
-        pibuffer[i] = ibuffer[i].data();
-    }
-
+    std::vector<gpubuf> ibuffer;
+    std::vector<void*>  pibuffer;
     // CPU-side input buffer
     std::vector<hostbuf> ibuffer_cpu;
 
     auto is_host_gen = (params.igen == fft_input_generator_host
                         || params.igen == fft_input_random_generator_host);
 
-#ifdef USE_HIPRAND
-    if(!is_host_gen)
+    auto ibricks = get_input_bricks(params);
+    auto obricks = get_output_bricks(params);
+
+    alloc_bench_bricks(params, ibricks, params.itype, ibuffer, ibuffer_cpu, is_host_gen);
+    init_bench_input(params, ibricks, ibuffer, ibuffer_cpu, is_host_gen);
+
+    pibuffer.resize(ibuffer.size());
+    for(unsigned int i = 0; i < ibuffer.size(); ++i)
     {
-        // Input data:
-        params.compute_input(ibuffer);
-
-        if(verbose > 1)
-        {
-            // Copy input to CPU
-            try
-            {
-                ibuffer_cpu = allocate_host_buffer(params.precision, params.itype, params.isize);
-            }
-            catch(rocfft_hip_runtime_error)
-            {
-                return ignore_hip_runtime_failures ? EXIT_SUCCESS : EXIT_FAILURE;
-            }
-            for(unsigned int idx = 0; idx < ibuffer.size(); ++idx)
-            {
-                try
-                {
-                    HIP_V_THROW(hipMemcpy(ibuffer_cpu.at(idx).data(),
-                                          ibuffer[idx].data(),
-                                          ibuffer_sizes[idx],
-                                          hipMemcpyDeviceToHost),
-                                "hipMemcpy failed");
-                }
-                catch(rocfft_hip_runtime_error)
-                {
-                    return ignore_hip_runtime_failures ? EXIT_SUCCESS : EXIT_FAILURE;
-                }
-            }
-
-            std::cout << "GPU input:\n";
-            params.print_ibuffer(ibuffer_cpu);
-        }
+        pibuffer[i] = ibuffer[i].data();
     }
-#endif
-    if(is_host_gen)
-    {
-        // Input data:
-        ibuffer_cpu = allocate_host_buffer(params.precision, params.itype, params.isize);
-        params.compute_input(ibuffer_cpu);
 
-        if(verbose > 1)
+    // print input if requested
+    if(verbose > 1)
+    {
+        if(is_host_gen)
         {
-            std::cout << "GPU input:\n";
+            // data is already on host
             params.print_ibuffer(ibuffer_cpu);
         }
-
-        for(unsigned int idx = 0; idx < ibuffer_cpu.size(); ++idx)
+        else
         {
-            try
-            {
-                HIP_V_THROW(hipMemcpy(pibuffer[idx],
-                                      ibuffer_cpu[idx].data(),
-                                      ibuffer_cpu[idx].size(),
-                                      hipMemcpyHostToDevice),
-                            "hipMemcpy failed");
-            }
-            catch(rocfft_hip_runtime_error)
-            {
-                return ignore_hip_runtime_failures ? EXIT_SUCCESS : EXIT_FAILURE;
-            }
+            print_device_buffer(params, ibuffer, true);
         }
     }
 
@@ -431,21 +376,13 @@ int main(int argc, char* argv[])
     }
     else
     {
-        auto obuffer_sizes = params.obuffer_sizes();
-        obuffer_data.resize(obuffer_sizes.size());
-        for(unsigned int i = 0; i < obuffer_data.size(); ++i)
-        {
-            HIP_V_THROW(obuffer_data[i].alloc(obuffer_sizes[i]), "Creating output Buffer failed");
-        }
+        alloc_bench_bricks(params, obricks, params.otype, obuffer_data, ibuffer_cpu, false);
     }
     std::vector<void*> pobuffer(obuffer->size());
     for(unsigned int i = 0; i < obuffer->size(); ++i)
     {
         pobuffer[i] = obuffer->at(i).data();
     }
-
-    // Scatter input out to other devices and adjust I/O buffers to match requested transform
-    params.multi_gpu_prepare(ibuffer, pibuffer, pobuffer);
 
     // Execute a warm-up call
     params.execute(pibuffer.data(), pobuffer.data());
@@ -459,34 +396,13 @@ int main(int argc, char* argv[])
     for(unsigned int itrial = 0; itrial < gpu_time.size(); ++itrial)
     {
         // Create input at every iteration to avoid overflow
-        if(params.ifields.empty())
+        if(is_host_gen)
         {
-#ifdef USE_HIPRAND
-            // Compute input on default device
-            if(!is_host_gen)
-                params.compute_input(ibuffer);
-#endif
-            if(is_host_gen)
-            {
-                for(unsigned int idx = 0; idx < ibuffer_cpu.size(); ++idx)
-                {
-                    try
-                    {
-                        HIP_V_THROW(hipMemcpy(pibuffer[idx],
-                                              ibuffer_cpu[idx].data(),
-                                              ibuffer_cpu[idx].size(),
-                                              hipMemcpyHostToDevice),
-                                    "hipMemcpy failed");
-                    }
-                    catch(rocfft_hip_runtime_error)
-                    {
-                        return ignore_hip_runtime_failures ? EXIT_SUCCESS : EXIT_FAILURE;
-                    }
-                }
-            }
-
-            // Scatter input out to other devices if this is a multi-GPU test
-            params.multi_gpu_prepare(ibuffer, pibuffer, pobuffer);
+            copy_host_input_to_dev(ibuffer_cpu, ibuffer);
+        }
+        else
+        {
+            init_bench_input(params, ibricks, ibuffer, ibuffer_cpu, is_host_gen);
         }
 
         HIP_V_THROW(hipEventRecord(start), "hipEventRecord failed");
@@ -503,27 +419,7 @@ int main(int argc, char* argv[])
         // Print result after FFT transform
         if(verbose > 2)
         {
-            // Gather data to default GPU if this is a multi-GPU test
-            params.multi_gpu_finalize(*obuffer, pobuffer);
-
-            auto output = allocate_host_buffer(params.precision, params.otype, params.osize);
-            for(unsigned int idx = 0; idx < output.size(); ++idx)
-            {
-                try
-                {
-                    HIP_V_THROW(hipMemcpy(output[idx].data(),
-                                          pobuffer.at(idx),
-                                          output[idx].size(),
-                                          hipMemcpyDeviceToHost),
-                                "hipMemcpy failed");
-                }
-                catch(rocfft_hip_runtime_error)
-                {
-                    return ignore_hip_runtime_failures ? EXIT_SUCCESS : EXIT_FAILURE;
-                }
-            }
-            std::cout << "GPU output:\n";
-            params.print_obuffer(output);
+            print_device_buffer(params, *obuffer, false);
         }
     }
 
