@@ -29,6 +29,7 @@
 #include <rocprim/block/block_run_length_decode.hpp>
 #include <rocprim/block/block_store_func.hpp>
 
+#include <chrono>
 #include <random>
 #include <vector>
 

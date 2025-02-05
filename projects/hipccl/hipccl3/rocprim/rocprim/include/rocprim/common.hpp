@@ -21,6 +21,11 @@
 
 #ifndef ROCPRIM_COMMON_HPP_
 #define ROCPRIM_COMMON_HPP_
+
+#include <hip/hip_runtime.h>
+#include <iostream>
+#include <chrono>
+
 namespace detail
 {
 #ifndef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
