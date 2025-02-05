@@ -54,7 +54,6 @@ __host__ __device__ constexpr bool tests()
     assert(arr[2] == 3);
   }
 
-#if !defined(TEST_COMPILER_MSVC_2017)
   {
     const long l1 = 42;
     auto arr      = cuda::std::to_array({1L, 4L, 9L, l1});
@@ -65,7 +64,6 @@ __host__ __device__ constexpr bool tests()
     assert(arr[2] == 9);
     assert(arr[3] == l1);
   }
-#endif // !TEST_COMPILER_MSVC_2017
 
   {
     auto arr = cuda::std::to_array("meow");
@@ -95,7 +93,6 @@ __host__ __device__ constexpr bool tests()
     assert(arr[2] == 6.0);
   }
 
-#if !defined(TEST_COMPILER_MSVC_2017)
   {
     MoveOnly source[] = {MoveOnly{0}, MoveOnly{1}, MoveOnly{2}};
 
@@ -106,7 +103,6 @@ __host__ __device__ constexpr bool tests()
       assert(arr[i].get() == i && source[i].get() == 0);
     }
   }
-#endif // !TEST_COMPILER_MSVC_2017
 
 #if (defined(TEST_COMPILER_NVRTC) || defined(TEST_COMPILER_HIPRTC)) && defined(TEST_COMPILER_MSVC)
   // Test C99 compound literal.

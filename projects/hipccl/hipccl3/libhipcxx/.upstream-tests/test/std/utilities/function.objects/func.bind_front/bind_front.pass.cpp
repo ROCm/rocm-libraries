@@ -338,9 +338,7 @@ __host__ __device__ constexpr bool test()
       using X = decltype(cuda::std::bind_front(F{}));
       static_assert(cuda::std::is_invocable_v<X&>);
       static_assert(cuda::std::is_invocable_v<X const&>);
-#  ifndef TEST_COMPILER_MSVC_2017 // ICE during invoke check
       static_assert(!cuda::std::is_invocable_v<X>);
-#  endif // !TEST_COMPILER_MSVC_2017
       static_assert(cuda::std::is_invocable_v<X const>);
     }
 
@@ -357,15 +355,12 @@ __host__ __device__ constexpr bool test()
       static_assert(cuda::std::is_invocable_v<X&>);
       static_assert(cuda::std::is_invocable_v<X const&>);
       static_assert(cuda::std::is_invocable_v<X>);
-#  ifndef TEST_COMPILER_MSVC_2017 // ICE during invoke check
       static_assert(!cuda::std::is_invocable_v<X const>);
-#  endif // !TEST_COMPILER_MSVC_2017
     }
   }
 #endif
 
   // Some examples by Tim Song
-#ifndef TEST_COMPILER_MSVC_2017 // ICE during invoke check
   {
     {
       struct T
@@ -391,7 +386,6 @@ __host__ __device__ constexpr bool test()
       static_assert(!cuda::std::is_invocable_v<X>);
     }
   }
-#endif // !TEST_COMPILER_MSVC_2017
 
   // Test properties of the constructor of the unspecified-type returned by bind_front.
   {
@@ -479,7 +473,6 @@ __host__ __device__ constexpr bool test()
     takeAnything();
   }
 
-#if !defined(TEST_COMPILER_MSVC_2017)
   // Make sure bind_front's unspecified type's operator() is SFINAE-friendly
   {
     using T = decltype(cuda::std::bind_front(cuda::std::declval<int (*)(int, int)>(), 1));
@@ -488,7 +481,6 @@ __host__ __device__ constexpr bool test()
     static_assert(!cuda::std::is_invocable<T, void*>::value);
     static_assert(!cuda::std::is_invocable<T, int, int>::value);
   }
-#endif // !TEST_COMPILER_MSVC_2017
 
   return true;
 }

@@ -105,7 +105,7 @@ __host__ __device__ constexpr bool test_swap_constexpr()
 
 __host__ __device__ void test_ambiguous_std()
 {
-#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC) && !defined(TEST_COMPILER_MSVC_2017)
+#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
   // clang-format off
   NV_IF_TARGET(NV_IS_HOST, (
     cuda::std::pair<::std::pair<int, int>, int> i[3] = {};
@@ -113,7 +113,7 @@ __host__ __device__ void test_ambiguous_std()
     swap(i,j);
   ))
   // clang-format on
-#endif // !TEST_COMPILER_NVRTC && !TEST_COMPILER_MSVC_2017
+#endif // !TEST_COMPILER_NVRTC
 }
 
 int main(int, char**)
