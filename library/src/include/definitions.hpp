@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -102,5 +102,18 @@
                          << "':" << TMP_STATUS_FOR_CHECK << " at " << __FILE__ << ":" << __LINE__ \
                          << std::endl;                                                            \
             return TMP_STATUS_FOR_CHECK;                                                          \
+        }                                                                                         \
+    } while(0)
+
+#define PRINT_AND_RETURN_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK)                                     \
+    do                                                                                            \
+    {                                                                                             \
+        hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                               \
+        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                                    \
+        {                                                                                         \
+            rocblas_cerr << "hip error code: '" << hipGetErrorName(TMP_STATUS_FOR_CHECK)          \
+                         << "':" << TMP_STATUS_FOR_CHECK << " at " << __FILE__ << ":" << __LINE__ \
+                         << std::endl;                                                            \
+            return rocblas_internal_convert_hip_to_rocblas_status(TMP_STATUS_FOR_CHECK);          \
         }                                                                                         \
     } while(0)
