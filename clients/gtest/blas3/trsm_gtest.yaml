@@ -23,6 +23,7 @@ Tests:
     matrix_size: *size_range
     alpha_beta: *alpha_range
     api: [ FORTRAN, C, FORTRAN_64, C_64]
+    user_allocated_workspace: [0, 8388608]
 
   - name: trsm_batched_general
     category: quick

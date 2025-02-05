@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -148,6 +148,8 @@ struct Arguments
     hipblasStride stride_x;
     hipblasStride stride_y;
 
+    size_t user_allocated_workspace;
+
     int start = 1024;
     int end   = 10240;
     int step  = 1000;
@@ -233,6 +235,7 @@ struct Arguments
     OPER(stride_d) SEP               \
     OPER(stride_x) SEP               \
     OPER(stride_y) SEP               \
+    OPER(user_allocated_workspace) SEP \
     OPER(start) SEP                  \
     OPER(end) SEP                    \
     OPER(step) SEP                   \

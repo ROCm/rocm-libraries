@@ -490,6 +490,7 @@ Arguments:
   - stride_d: c_int64
   - stride_x: c_int64
   - stride_y: c_int64
+  - user_allocated_workspace: c_size_t
   - start: int
   - end: int
   - step: int
@@ -576,6 +577,7 @@ Defaults:
   incy: 1
   incd: 0
   incb: 0
+  user_allocated_workspace: 0
   stride_scale: 1.0
   start: 1024
   end: 10240
