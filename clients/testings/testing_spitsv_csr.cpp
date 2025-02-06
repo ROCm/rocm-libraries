@@ -95,7 +95,7 @@ void testing_spitsv_csr_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_spitsv_csr(const Arguments& arg)
 {
-
+    auto tol = get_near_check_tol<T>(arg);
     //
     // Set nmaxiter.
     //
@@ -330,8 +330,8 @@ void testing_spitsv_csr(const Arguments& arg)
                 rocsparse_reproducibility::save(
                     "Y pointe mode host", hy_1, "Y pointe mode device", hy_2);
             }
-            hy_gold.near_check(hy_1);
-            hy_gold.near_check(hy_2);
+            hy_gold.near_check(hy_1, tol);
+            hy_gold.near_check(hy_2, tol);
         }
     }
 

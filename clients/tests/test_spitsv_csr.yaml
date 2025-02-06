@@ -183,7 +183,24 @@ Tests:
   category: nightly
   function: spitsv_csr
   indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex
+  precision: *single_precision_complex
+  M: 1
+  N: 1
+  tolm: 4
+  alpha_alphai: *alpha_range_nightly
+  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spitsv_alg: [rocsparse_spitsv_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron4]
+
+- name: spitsv_csr_file
+  category: nightly
+  function: spitsv_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *double_precision_complex
   M: 1
   N: 1
   alpha_alphai: *alpha_range_nightly
