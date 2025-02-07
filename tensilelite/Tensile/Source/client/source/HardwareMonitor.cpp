@@ -139,7 +139,7 @@ namespace TensileLite
 #if rocm_smi_VERSION_MAJOR >= 7
             auto status2 = rsmi_dev_metrics_xcd_counter_get(m_smiDeviceIndex, &m_XCDCount);
 
-            if(status2 != RSMI_STATUS_SUCCESS)
+            if(status2 != RSMI_STATUS_SUCCESS || m_XCDCount == 0)
             {
                 m_XCDCount = 1;
             }
@@ -159,7 +159,7 @@ namespace TensileLite
 #if rocm_smi_VERSION_MAJOR >= 7
             auto status2 = rsmi_dev_metrics_xcd_counter_get(m_smiDeviceIndex, &m_XCDCount);
 
-            if(status2 != RSMI_STATUS_SUCCESS)
+            if(status2 != RSMI_STATUS_SUCCESS || m_XCDCount == 0)
             {
                 m_XCDCount = 1;
             }
