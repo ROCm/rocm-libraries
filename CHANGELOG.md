@@ -55,6 +55,10 @@ Documentation for rocSPARSE is available at
 * Deprecated `rocsparse_[s|d|c|z]csritsv_solve` routines. Users should use the newly added `rocsparse_[s|d|c|z]csritsv_solve_ex` routines going forward.
 * Deprecated `AMDGPU_TARGETS` using in cmake files. Users should use `GPU_TARGETS` going forward.
 
+### Known issues
+
+* Under certain conditions, rocSPARSE might fail to compile with ASAN on Ubuntu 22.04.
+
 ## rocSPARSE 3.3.0 for ROCm 6.3.0
 
 ### Added
