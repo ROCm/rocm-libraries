@@ -41,6 +41,9 @@
 #include <rocprim/types.hpp>
 #include <rocprim/types/tuple.hpp>
 
+// CmdParser
+#include "cmdparser.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -83,6 +86,8 @@ public:
             seq.generate(seeds.begin(), seeds.end());
         }
     }
+
+    managed_seed() {}
 
     unsigned int get_0() const
     {
@@ -1145,5 +1150,313 @@ inline std::string partition_config_name<rocprim::default_config>()
 {
     return "default_config";
 }
+
+namespace benchmark_utils
+{
+
+constexpr size_t KiB = 1024;
+constexpr size_t MiB = 1024 * KiB;
+constexpr size_t GiB = 1024 * MiB;
+
+class state
+{
+public:
+    state() {}
+
+    state(hipStream_t         stream,
+          size_t              size,
+          const managed_seed& seed,
+          size_t              batch_iterations,
+          size_t              warmup_iterations,
+          bool                cold)
+        : stream(stream)
+        , size(size)
+        , bytes(size)
+        , seed(seed)
+        , batch_iterations(batch_iterations)
+        , warmup_iterations(warmup_iterations)
+        , cold(cold)
+        , events(batch_iterations * 2)
+    {}
+
+    void run(benchmark::State& gbench_state, std::function<void()> kernel)
+    {
+        for(size_t i = 0; i < batch_iterations * 2; i++)
+        {
+            HIP_CHECK(hipEventCreate(&events[i]));
+        }
+
+        // Warm-up
+        for(size_t i = 0; i < warmup_iterations; ++i)
+        {
+            kernel();
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Run
+        for(auto _ : gbench_state)
+        {
+            for(size_t i = 0; i < batch_iterations; ++i)
+            {
+                if(cold)
+                {
+                    clear_gpu_cache(stream);
+                }
+
+                HIP_CHECK(hipEventRecord(events[i * 2], stream));
+                kernel();
+                HIP_CHECK(hipEventRecord(events[i * 2 + 1], stream));
+            }
+
+            // Wait until the last record event has completed
+            HIP_CHECK(hipEventSynchronize(events[batch_iterations * 2 - 1]));
+
+            // Accumulate the total elapsed time
+            double elapsed_mseconds = 0.0;
+            for(size_t i = 0; i < batch_iterations; i++)
+            {
+                float iteration_mseconds;
+                HIP_CHECK(
+                    hipEventElapsedTime(&iteration_mseconds, events[i * 2], events[i * 2 + 1]));
+                elapsed_mseconds += iteration_mseconds;
+            }
+            gbench_state.SetIterationTime(elapsed_mseconds / 1000);
+        }
+
+        for(size_t i = 0; i < batch_iterations * 2; i++)
+        {
+            HIP_CHECK(hipEventDestroy(events[i]));
+        }
+    }
+
+    template<typename T>
+    void set_items_processed_per_iteration(benchmark::State& gbench_state, size_t actual_size)
+    {
+        gbench_state.SetBytesProcessed(gbench_state.iterations() * batch_iterations * actual_size
+                                       * sizeof(T));
+        gbench_state.SetItemsProcessed(gbench_state.iterations() * batch_iterations * actual_size);
+    }
+
+    hipStream_t  stream;
+    size_t       size;
+    size_t       bytes;
+    managed_seed seed;
+
+private:
+    // Zeros a 256 MiB buffer, used to clear the cache before each kernel call.
+    // 256 MiB is the size of the largest cache on any AMD GPU.
+    // It is currently not possible to fetch the L3 cache size from the runtime.
+    inline void clear_gpu_cache(hipStream_t stream)
+    {
+        constexpr size_t l2_size = 256 * MiB;
+        static void*     l2_buf  = nullptr;
+        if(!l2_buf)
+        {
+            HIP_CHECK(hipMalloc(&l2_buf, l2_size));
+        }
+        HIP_CHECK(hipMemsetAsync(l2_buf, 0, l2_size, stream));
+    }
+
+    size_t                  batch_iterations;
+    size_t                  warmup_iterations;
+    bool                    cold;
+    std::vector<hipEvent_t> events;
+};
+
+struct autotune_interface
+{
+    virtual std::string name() const = 0;
+    virtual std::string sort_key() const
+    {
+        return name();
+    };
+    virtual ~autotune_interface()                                        = default;
+    virtual void run(benchmark::State& gbench_state, state& state) const = 0;
+};
+
+class executor
+{
+public:
+    executor(int    argc,
+             char*  argv[],
+             size_t default_bytes,
+             size_t default_batch_iterations  = 10,
+             size_t default_warmup_iterations = 5,
+             bool   default_cold              = true)
+    {
+        cli::Parser parser(argc, argv);
+
+        set_optional_parser_flags(parser,
+                                  default_bytes,
+                                  default_batch_iterations,
+                                  default_warmup_iterations,
+                                  default_cold);
+
+        parser.run_and_exit_if_error();
+
+        benchmark::Initialize(&argc, argv);
+
+        parse(parser);
+
+        add_common_benchmark_info();
+    }
+
+    template<typename T>
+    void queue_fn(const std::string& name, T bench_fn)
+    {
+        apply_settings(benchmark::RegisterBenchmark(
+            name,
+            [bench_fn](benchmark::State& gbench_state, state state)
+            { bench_fn(gbench_state, state); },
+            m_state));
+    }
+
+    template<typename Benchmark>
+    void queue_instance()
+    {
+        static_assert(std::is_base_of<autotune_interface, Benchmark>::value,
+                      "Benchmark must be a specialization of autotune_interface");
+
+        Benchmark instance;
+
+        apply_settings(benchmark::RegisterBenchmark(
+            instance.name().c_str(),
+            [instance](benchmark::State& gbench_state, benchmark_utils::state state)
+            { instance.run(gbench_state, state); },
+            m_state));
+    }
+
+    template<typename Benchmark>
+    void queue_sorted_instance()
+    {
+        sorted_benchmarks().push_back(std::make_unique<Benchmark>());
+    }
+
+    template<typename BulkCreateFunction>
+    static bool queue_autotune(BulkCreateFunction&& f)
+    {
+        std::forward<BulkCreateFunction>(f)(sorted_benchmarks());
+        return true; // Must return something, as this function gets called in global scope.
+    }
+
+    // Register a subset of all benchmarks for the current parallel instance.
+    void register_sorted_subset(int parallel_instance_index, int parallel_instance_count)
+    {
+        // Sort to get a consistent order, because the order of static variable initialization is undefined by the C++ standard.
+        std::sort(sorted_benchmarks().begin(),
+                  sorted_benchmarks().end(),
+                  [](const auto& l, const auto& r) { return l->sort_key() < r->sort_key(); });
+
+        size_t configs_per_instance
+            = (sorted_benchmarks().size() + parallel_instance_count - 1) / parallel_instance_count;
+        size_t start
+            = std::min(parallel_instance_index * configs_per_instance, sorted_benchmarks().size());
+        size_t end = std::min((parallel_instance_index + 1) * configs_per_instance,
+                              sorted_benchmarks().size());
+
+        for(size_t i = start; i < end; ++i)
+        {
+            autotune_interface* benchmark = sorted_benchmarks().at(i).get();
+
+            apply_settings(benchmark::RegisterBenchmark(
+                benchmark->name().c_str(),
+                [benchmark](benchmark::State& gbench_state, state state)
+                { benchmark->run(gbench_state, state); },
+                m_state));
+        }
+    }
+
+    void run()
+    {
+        register_sorted_subset(parallel_instance, parallel_instances);
+
+        benchmark::RunSpecifiedBenchmarks();
+    }
+
+private:
+    static std::vector<std::unique_ptr<autotune_interface>>& sorted_benchmarks()
+    {
+        static std::vector<std::unique_ptr<autotune_interface>> sorted_benchmarks;
+        return sorted_benchmarks;
+    }
+
+    void apply_settings(benchmark::internal::Benchmark* b)
+    {
+        b->UseManualTime();
+        b->Unit(benchmark::kMillisecond);
+
+        // trials is -1 by default.
+        if(trials > 0)
+        {
+            b->Iterations(trials);
+        }
+    }
+
+    void set_optional_parser_flags(cli::Parser& parser,
+                                   size_t       default_bytes,
+                                   size_t       default_batch_iterations,
+                                   size_t       default_warmup_iterations,
+                                   bool         default_cold)
+    {
+        parser.set_optional<size_t>("size", "size", default_bytes, "size in bytes");
+        parser.set_optional<size_t>("batch_iterations",
+                                    "batch_iterations",
+                                    default_batch_iterations,
+                                    "number of batch iterations");
+        parser.set_optional<size_t>("warmup_iterations",
+                                    "warmup_iterations",
+                                    default_warmup_iterations,
+                                    "number of warmup iterations");
+        parser.set_optional<bool>("hot",
+                                  "hot",
+                                  !default_cold,
+                                  "don't clear the gpu cache on every batch iteration");
+
+        parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
+        parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+        parser.set_optional<std::string>("name_format",
+                                         "name_format",
+                                         "human",
+                                         "either: json,human,txt");
+
+        // Optionally run an evenly split subset of benchmarks for autotuning.
+        parser.set_optional<int>("parallel_instance",
+                                 "parallel_instance",
+                                 0,
+                                 "parallel instance index");
+        parser.set_optional<int>("parallel_instances",
+                                 "parallel_instances",
+                                 1,
+                                 "total parallel instances");
+    }
+
+    void parse(cli::Parser& parser)
+    {
+        size_t size = parser.get<size_t>("size");
+
+        const std::string seed_type = parser.get<std::string>("seed");
+        managed_seed      seed      = managed_seed(seed_type);
+
+        size_t batch_iterations  = parser.get<size_t>("batch_iterations");
+        size_t warmup_iterations = parser.get<size_t>("warmup_iterations");
+
+        bool cold = !parser.get<bool>("hot");
+
+        m_state = state(hipStreamDefault, size, seed, batch_iterations, warmup_iterations, cold);
+
+        trials             = parser.get<int>("trials");
+        parallel_instance  = parser.get<int>("parallel_instance");
+        parallel_instances = parser.get<int>("parallel_instances");
+
+        bench_naming::set_format(parser.get<std::string>("name_format"));
+    }
+
+    state m_state;
+    int   trials;
+    int   parallel_instance;
+    int   parallel_instances;
+};
+
+} // namespace benchmark_utils
 
 #endif // ROCPRIM_BENCHMARK_UTILS_HPP_

@@ -65,9 +65,8 @@ template<typename T                   = int,
          bool                Left     = false,
          common::api_variant Aliasing = common::api_variant::no_alias,
          typename Config              = rocprim::default_config>
-struct device_adjacent_difference_benchmark : public config_autotune_interface
+struct device_adjacent_difference_benchmark : public benchmark_utils::autotune_interface
 {
-
     std::string name() const override
     {
 
@@ -78,14 +77,12 @@ struct device_adjacent_difference_benchmark : public config_autotune_interface
             + std::string(Traits<T>::name()) + ",cfg:" + config_name<Config>() + "}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 5;
-
-    void run(benchmark::State&   state,
-             const std::size_t   bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using output_type = T;
 
         static constexpr bool debug_synchronous = false;
@@ -132,44 +129,9 @@ struct device_adjacent_difference_benchmark : public config_autotune_interface
         HIP_CHECK(launch());
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            HIP_CHECK(launch());
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state, [&] { HIP_CHECK(launch()); });
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        // Run
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
-            {
-                HIP_CHECK(launch());
-            }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<T>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_input));
         if ROCPRIM_IF_CONSTEXPR(Aliasing == common::api_variant::no_alias)
@@ -195,7 +157,7 @@ struct device_adjacent_difference_benchmark_generator
     struct create_ipt
     {
         template<int ipt_num = primes[IptValueIndex]>
-        auto operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        auto operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
             -> std::enable_if_t<(ipt_num < max_items_per_thread_arg)>
         {
             using generated_config = rocprim::adjacent_difference_config<BlockSize, ipt_num>;
@@ -206,12 +168,12 @@ struct device_adjacent_difference_benchmark_generator
         }
 
         template<int ipt_num = primes[IptValueIndex]>
-        auto operator()(std::vector<std::unique_ptr<config_autotune_interface>>&)
+        auto operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>&)
             -> std::enable_if_t<!(ipt_num < max_items_per_thread_arg)>
         {}
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static_for_each<make_index_range<unsigned int, 0, primes.size() - 1>, create_ipt>(storage);
     }

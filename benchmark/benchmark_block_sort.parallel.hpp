@@ -159,7 +159,7 @@ template<typename KeyType,
          unsigned int                  ItemsPerThread,
          rocprim::block_sort_algorithm block_sort_algorithm,
          const bool                    stable = false>
-struct block_sort_benchmark : public config_autotune_interface
+struct block_sort_benchmark : public benchmark_utils::autotune_interface
 {
 private:
     static constexpr bool with_values = !std::is_same<ValueType, rocprim::empty_type>::value;
@@ -195,25 +195,14 @@ public:
             + ",method:" + std::string(get_block_sort_method_name(block_sort_algorithm)) + "}}");
     }
 
-    static constexpr unsigned int batch_size        = 10;
-    static constexpr unsigned int warmup_size       = 5;
-    static constexpr bool         debug_synchronous = false;
-
     static auto dispatch_block_sort(std::false_type /*stable_sort*/,
                                     size_t            size,
                                     const hipStream_t stream,
                                     KeyType*          d_input,
                                     KeyType*          d_output)
     {
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                sort_kernel<KeyType, ValueType, BlockSize, ItemsPerThread, block_sort_algorithm>),
-            dim3(size / items_per_block),
-            dim3(BlockSize),
-            0,
-            stream,
-            d_input,
-            d_output);
+        sort_kernel<KeyType, ValueType, BlockSize, ItemsPerThread, block_sort_algorithm>
+            <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
     }
 
     static auto dispatch_block_sort(std::true_type /*stable_sort*/,
@@ -222,24 +211,16 @@ public:
                                     KeyType*          d_input,
                                     KeyType*          d_output)
     {
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(stable_sort_kernel<KeyType,
-                                                              ValueType,
-                                                              BlockSize,
-                                                              ItemsPerThread,
-                                                              block_sort_algorithm>),
-                           dim3(size / items_per_block),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_output);
+        stable_sort_kernel<KeyType, ValueType, BlockSize, ItemsPerThread, block_sort_algorithm>
+            <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         // Calculate the number of elements N
         size_t N = bytes / sizeof(KeyType);
 
@@ -260,42 +241,15 @@ public:
 
         static constexpr auto stable_tag = rocprim::detail::bool_constant<stable>{};
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
+        state.run(gbench_state,
+                  [&] { dispatch_block_sort(stable_tag, size, stream, d_input, d_output); });
 
-        // Run
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
+        state.set_items_processed_per_iteration<KeyType>(gbench_state, size);
 
-            for(size_t i = 0; i < batch_size; ++i)
-            {
-                dispatch_block_sort(stable_tag, size, stream, d_input, d_output);
-            }
-            HIP_CHECK(hipGetLastError());
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(KeyType));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        state.counters["sorted_size"] = benchmark::Counter(BlockSize * ItemsPerThread,
-                                                           benchmark::Counter::kDefaults,
-                                                           benchmark::Counter::OneK::kIs1024);
+        gbench_state.counters["sorted_size"]
+            = benchmark::Counter(BlockSize * ItemsPerThread,
+                                 benchmark::Counter::kDefaults,
+                                 benchmark::Counter::OneK::kIs1024);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
