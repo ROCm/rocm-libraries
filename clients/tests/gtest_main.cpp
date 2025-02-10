@@ -758,6 +758,10 @@ int main(int argc, char* argv[])
     std::cout << "double precision max l-inf epsilon: " << max_linf_eps_double << "\n";
     std::cout << "double precision max l2 epsilon:     " << max_l2_eps_double << "\n";
     std::cout << "Number of runtime issues: " << n_hip_failures << "\n";
+    std::cout << "Number of successful tests: "
+              << ::testing::UnitTest::GetInstance()->successful_test_count() << "\n";
+    std::cout << "Number of skipped tests: "
+              << ::testing::UnitTest::GetInstance()->skipped_test_count() << "\n";
 
     std::cout << "\nRandom seed: " << random_seed << "\n";
 
