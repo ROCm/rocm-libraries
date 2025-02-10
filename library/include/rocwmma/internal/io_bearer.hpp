@@ -62,8 +62,14 @@ namespace rocwmma
     protected:
         // Outer loop = index 0,
         // Inner loop = index N-1
-        // Assumption: MatrixLayout provides constexpr strideCounts and strides.
-        // We can then use static unroll to eliminate looping.
+        // Notes:
+        // - Assumption: MatrixLayout provides constexpr strideCounts and strides.
+        //   We can then use static unroll to eliminate looping.
+        // - Unroll model will use vector_mutate_for_each because the current bearers are implemented
+        //   as visitor patterns. They either write to, or read from an input vector object.
+        //   The vector needs to be mutable for loads, but the stores will cast as const reference.
+        //   vector_mutate_for_each provides a reference to raw vector data it is operating on, which
+        //   will satisfy both loading and storing visitation needs.
         template <size_t Depth = 0, typename BuffT, typename ExternDataT>
         ROCWMMA_DEVICE static inline auto
             unroll_impl(BuffT&& buff, ExternDataT* dataPtr, uint32_t ldm)
@@ -83,12 +89,11 @@ namespace rocwmma
             // Last depth layer will invoke the chunk transfer
             if constexpr((VecTraits<decay_t<decltype(StrideSpace)>>::size()) == 1u)
             {
-                auto res = vector_mutate_for_each<ChunkSize>(
+                vector_mutate_for_each<ChunkSize>(
                     forward<BuffT>(buff),
                     [](auto&& v, auto idx, auto* dataPtr, auto dataStride) {
                         uint32_t dataOffset = decay_t<decltype(idx)>::value * dataStride;
                         Bearer::exec(v, dataPtr + dataOffset);
-                        return v;
                     },
                     dataPtr,
                     currentDataStride);
@@ -99,12 +104,11 @@ namespace rocwmma
                 constexpr auto NextStrideSpace  = pop_front(StrideSpace);
                 constexpr auto NextBufferStride = reduce_mult(NextStrideSpace) * ChunkSize;
 
-                auto res = vector_mutate_for_each<NextBufferStride>(
+                vector_mutate_for_each<NextBufferStride>(
                     forward<BuffT>(buff),
                     [](auto&& v, auto idx, auto* dataPtr, auto ldm, auto dataStride) {
                         uint32_t dataOffset = decay_t<decltype(idx)>::value * dataStride;
                         unroll_impl<Depth + 1u>(v, dataPtr + dataOffset, ldm);
-                        return v;
                     },
                     dataPtr,
                     ldm,

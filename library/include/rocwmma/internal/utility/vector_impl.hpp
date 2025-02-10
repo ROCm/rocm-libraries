@@ -210,9 +210,29 @@ namespace rocwmma
             auto writeIt = makeVectorIterator<SubVecSize>(forward<VecT0>(vOut)).begin();
             auto readIt  = makeVectorIterator<SubVecSize>(forward<VecT1>(vIn)).begin();
 
-            // Fold over each subvector
-            ((*writeIt = func(*readIt, I<Indices>{}, forward<ArgsT>(args)...), readIt++, writeIt++),
-             ...);
+            // Check the return type of the given func
+            using RetT = decltype(func(*readIt, I<0>{}, forward<ArgsT>(args)...));
+
+            // Fold over each subvector, in order
+            if constexpr(!is_same_v<RetT, void>)
+            {
+                // Write result if the fwded function has a result
+                ((*writeIt = func(*readIt, I<Indices>{}, forward<ArgsT>(args)...),
+                  readIt++,
+                  writeIt++),
+                 ...);
+
+                // Propagate a non-void return type
+                return true;
+            }
+            else
+            {
+                // Skip write if the fwded function doesn't have a result
+                ((func(*readIt, I<Indices>{}, forward<ArgsT>(args)...), readIt++), ...);
+
+                // Propagate void return type;
+                return;
+            }
         }
 
     } // namespace detail
@@ -232,13 +252,27 @@ namespace rocwmma
 
         static_assert(VecSize >= SubVecSize, "SubVecSize exceeds VecSize");
 
-        // Feed-fwd with index sequence
-        detail::vector_for_each_impl(forward<add_lvalue_reference_t<ResultT>>(result),
-                                     forward<VecT>(v),
-                                     forward<Func>(func),
-                                     detail::Seq<VecSize / SubVecSize>{},
-                                     forward<ArgsT>(args)...);
-        return result;
+// Setup an impl call
+#define INVOKE_IMPL                                                                \
+    detail::vector_for_each_impl(forward<add_lvalue_reference_t<ResultT>>(result), \
+                                 forward<VecT>(v),                                 \
+                                 forward<Func>(func),                              \
+                                 detail::Seq<VecSize / SubVecSize>{},              \
+                                 forward<ArgsT>(args)...)
+
+        // Let the impl function tell us if the function has a returnable value
+        using RetT = decltype(INVOKE_IMPL);
+
+        // Invoke the actual function
+        INVOKE_IMPL;
+
+// Cleanup symbol
+#undef INVOKE_IMPL
+
+        if constexpr(!is_same_v<RetT, void>)
+        {
+            return result;
+        }
     }
 
     template <uint32_t SubVecSize /*= 1u*/, typename VecT, class Func, typename... ArgsT>
@@ -249,16 +283,33 @@ namespace rocwmma
         constexpr uint32_t VecSize = VecTraits::size();
 
         static_assert(VecSize >= SubVecSize, "SubVecSize exceeds VecSize");
-        static_assert(is_lvalue_reference_v<VecT>, "Mutate requires lvalue reference input");
 
-        // Feed-fwd with index sequence
-        detail::vector_for_each_impl(forward<VecT>(v),
-                                     forward<VecT>(v),
-                                     forward<Func>(func),
-                                     detail::Seq<VecSize / SubVecSize>{},
-                                     forward<ArgsT>(args)...);
+// Setup an impl call
+#define INVOKE_IMPL                                                   \
+    detail::vector_for_each_impl(forward<VecT>(v),                    \
+                                 forward<VecT>(v),                    \
+                                 forward<Func>(func),                 \
+                                 detail::Seq<VecSize / SubVecSize>{}, \
+                                 forward<ArgsT>(args)...)
 
-        return forward<VecT>(v);
+        // Let the impl function tell us if the function has a returnable value
+        using RetT = decltype(INVOKE_IMPL);
+
+        // Invoke the actual function
+        INVOKE_IMPL;
+
+// Cleanup symbol
+#undef INVOKE_IMPL
+
+        constexpr bool has_return_value = !is_same_v<RetT, void>;
+
+        static_assert(!has_return_value || is_lvalue_reference_v<VecT>,
+                      "Mutate requires lvalue reference input");
+
+        if constexpr(has_return_value)
+        {
+            return forward<VecT>(v);
+        }
     }
 
     namespace detail
