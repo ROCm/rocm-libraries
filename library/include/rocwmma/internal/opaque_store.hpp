@@ -63,11 +63,11 @@ namespace rocwmma
             using Base = detail::amdgcn_opaque_store<DataT, VectorWidth>;
 
         public:
-            template <typename BufferT, typename DataPtrT>
+            template <typename BufferT, typename ExternDataT>
             ROCWMMA_DEVICE static inline void
-                exec(BufferT&& data, DataPtrT&& dataPtr, index_t offset = 0)
+                exec(BufferT&& data, ExternDataT* dataPtr, index_t offset = 0)
             {
-                Base::exec(forward<DataPtrT>(dataPtr), forward<BufferT>(data), offset);
+                Base::exec(dataPtr, forward<BufferT>(data), offset);
             }
         };
 
@@ -80,10 +80,10 @@ namespace rocwmma
         using Base = IOBearer<DataLayout, MatrixLayout, detail::OpaqueStoreBearer>;
 
     public:
-        template <typename DataPtrT, typename BufferT>
-        ROCWMMA_DEVICE static void exec(DataPtrT&& dataPtr, BufferT&& buff, uint32_t ldm)
+        template <typename ExternDataT, typename BufferT>
+        ROCWMMA_DEVICE static void exec(ExternDataT* dataPtr, BufferT&& buff, uint32_t ldm)
         {
-            Base::exec(forward<BufferT>(buff), forward<DataPtrT>(dataPtr), ldm);
+            Base::exec(forward<BufferT>(buff), dataPtr, ldm);
         }
     };
 
