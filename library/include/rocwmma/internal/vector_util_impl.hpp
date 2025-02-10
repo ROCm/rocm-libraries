@@ -30,8 +30,8 @@
 #include "blend.hpp"
 #include "types.hpp"
 #include "utility/algorithm.hpp"
-#include "utility/vector.hpp"
 #include "utility/type_traits.hpp"
+#include "utility/vector.hpp"
 
 namespace rocwmma
 {
@@ -419,11 +419,11 @@ namespace rocwmma
     }
 
     // Interleaving index transform
-    template<uint32_t GatherSize, uint32_t ElementStride, uint32_t ElementCount>
+    template <uint32_t GatherSize, uint32_t ElementStride, uint32_t ElementCount>
     struct interleave_idx
     {
         // Uses Number<I> abstraction for indices
-        template<typename NumberT>
+        template <typename NumberT>
         constexpr static inline auto exec(NumberT&& Idx)
         {
             // Calculates offsets in interleave transform.
@@ -437,137 +437,117 @@ namespace rocwmma
             constexpr auto Index   = decay_t<decltype(Idx)>::value % ElementCount;
             constexpr auto Offset0 = (Index / GatherSize) * ElementStride % ElementCount;
             constexpr auto Offset1 = Index % GatherSize;
-            constexpr auto Offset2 = (Index * ElementStride) / (ElementCount * GatherSize) * GatherSize;
+            constexpr auto Offset2
+                = (Index * ElementStride) / (ElementCount * GatherSize) * GatherSize;
             constexpr auto Offset3 = decay_t<decltype(Idx)>::value / ElementCount * ElementCount;
             return I<Offset0 + Offset1 + Offset2 + Offset3>{};
         }
     };
 
-    template<typename IdXform>
+    template <typename IdXform>
     struct interleave_idx_traits;
 
-    template<uint32_t GatherSizeIn, uint32_t ElementStrideIn, uint32_t ElementCountIn>
+    template <uint32_t GatherSizeIn, uint32_t ElementStrideIn, uint32_t ElementCountIn>
     struct interleave_idx_traits<interleave_idx<GatherSizeIn, ElementStrideIn, ElementCountIn>>
     {
-        static constexpr uint32_t GatherSize = GatherSizeIn;
+        static constexpr uint32_t GatherSize    = GatherSizeIn;
         static constexpr uint32_t ElementStride = ElementStrideIn;
-        static constexpr uint32_t ElementCount = ElementCountIn;
+        static constexpr uint32_t ElementCount  = ElementCountIn;
 
         // NOP means transform is pass-through (no change)
-        static constexpr bool IsNop = (GatherSize == ElementStride) || (ElementStride == ElementCount);
+        static constexpr bool IsNop
+            = (GatherSize == ElementStride) || (ElementStride == ElementCount);
 
         // Sanity check for params
-        static constexpr bool IsValid = (GatherSize > 0u)
-            && (ElementStride > 0u)
-            && (ElementCount > 0u)
-            && (GatherSize <= ElementStride)
-            && (GatherSize <= ElementCount)
-            && (ElementStride <= ElementCount)
-            && (ElementStride % GatherSize == 0u)
-            && (ElementCount % GatherSize == 0u);
+        static constexpr bool IsValid
+            = (GatherSize > 0u) && (ElementStride > 0u) && (ElementCount > 0u)
+              && (GatherSize <= ElementStride) && (GatherSize <= ElementCount)
+              && (ElementStride <= ElementCount) && (ElementStride % GatherSize == 0u)
+              && (ElementCount % GatherSize == 0u);
     };
 
-    template<typename IdXForm>
+    template <typename... IdXForms>
     constexpr static inline bool test_interleave_idx_nop()
     {
-        using Traits = interleave_idx_traits<IdXForm>;
-        return Traits::IsNop;
+        // Default value for && in fold is 'true', so this
+        // also covers the <> case, where nop is assumed.
+        return (interleave_idx_traits<IdXForms>::IsNop && ...);
     }
 
-    // No xform - default to NOP
-    constexpr static inline bool test_interleave_idx_nop()
-    {
-        return true;
-    }
-
-    // Test a list of xforms for NOP.
-    template<typename IdXForm, typename... IdXForms>
-    constexpr static inline bool test_interleave_idx_nop()
-    {
-        return test_interleave_idx_nop<IdXForm>()
-            && test_interleave_idx_nop<IdXForms...>();
-    }
-
-    template<typename IdXForm>
+    template <typename... IdXForms>
     constexpr static inline bool test_interleave_idx_valid()
     {
-        using Traits = interleave_idx_traits<IdXForm>;
-        return Traits::IsValid;
+        // Default value for && in fold is 'true', which
+        // is not what we want in the <> case - it should be false
+        if constexpr(sizeof...(IdXForms) == 0u)
+        {
+            return false;
+        }
+        else
+        {
+            return (interleave_idx_traits<IdXForms>::IsValid && ...);
+        }
     }
-
-    constexpr static inline bool test_interleave_idx_valid()
-    {
-        return false;
-    }
-
-    template<typename IdXForm, typename... IdXForms>
-    constexpr static inline bool test_interleave_idx_valid()
-    {
-        return test_interleave_idx_valid<IdXForm>()
-            && test_interleave_idx_valid<IdXForms...>();
-    }
-
-    template<typename... IdXForms>
-    struct idx_generator_fwd;
 
     // Given a set of interleave id xforms, combine them in the order given
-    template<typename... IdXForms>
+    template <typename... IdXForms>
     struct idx_generator_fwd;
 
-    template<typename IdXForm, typename... IdXForms>
+    template <typename IdXForm, typename... IdXForms>
     struct idx_generator_fwd<IdXForm, IdXForms...>
     {
-        template<typename IdT>
+        template <typename IdT>
         constexpr static inline auto exec(IdT&& Idx)
         {
             return IdXForm::exec(idx_generator_fwd<IdXForms...>::exec(forward<IdT>(Idx)));
         }
     };
 
-    template<typename IdXForm>
+    template <typename IdXForm>
     struct idx_generator_fwd<IdXForm>
     {
-        template<typename IdT>
+        template <typename IdT>
         constexpr static inline auto exec(IdT&& Idx)
         {
-            return IdXForm::exec(forward<IdT>(Idx));
+            return IdXForm::exec(rocwmma::forward<IdT>(Idx));
         }
     };
 
     // Given a set of interleave id xforms, combine them in the reverse of the order given
-    template<typename... IdXForms>
+    template <typename... IdXForms>
     struct idx_generator_bwd;
 
-    template<typename IdXForm, typename... IdXForms>
+    template <typename IdXForm, typename... IdXForms>
     struct idx_generator_bwd<IdXForm, IdXForms...>
     {
-        template<typename IdT>
+        template <typename IdT>
         constexpr static inline auto exec(IdT&& Idx)
         {
             return idx_generator_bwd<IdXForms...>::exec(IdXForm::exec(forward<IdT>(Idx)));
         }
     };
 
-    template<typename IdXForm>
+    template <typename IdXForm>
     struct idx_generator_bwd<IdXForm>
     {
-        template<typename IdT>
+        template <typename IdT>
         constexpr static inline auto exec(IdT&& Idx)
         {
             return IdXForm::exec(forward<IdT>(Idx));
         }
     };
 
-    template <template<typename...> class IdxGenerator, typename... IdXForms, typename VecT>
+    template <template <typename...> class IdxGenerator, typename... IdXForms, typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) interleave_internal(VecT&& v0)
     {
         // Sanity check
-        static_assert(test_interleave_idx_valid<IdXForms...>(), "Invalid interleave xform provided");
+        static_assert(test_interleave_idx_valid<IdXForms...>(),
+                      "Invalid interleave xform provided");
 
-        if constexpr (test_interleave_idx_nop<IdXForms...>())
+        if constexpr(test_interleave_idx_nop<IdXForms...>())
         {
             // If nop, don't make a copy
-            return v0;
+            return forward<VecT>(v0);
         }
         else
         {
@@ -575,8 +555,8 @@ namespace rocwmma
             using GenIdx = IdxGenerator<IdXForms...>;
 
             // Extract vector traits
-            using VecTraits = VecTraits<decay_t<decltype(v0)>>;
-            using DataT = typename VecTraits::DataT;
+            using VecTraits            = VecTraits<decay_t<decltype(v0)>>;
+            using DataT                = typename VecTraits::DataT;
             constexpr uint32_t VecSize = VecTraits::size();
 
             // Apply index generator
@@ -602,7 +582,6 @@ namespace rocwmma
         return interleave_internal<idx_generator_bwd, IdXForms...>(forward<VecT>(v0));
     }
 
-
     // A permutation of vector indices, given a gather size and a stride
     // Examples:
     //                                     row_major               col_major
@@ -615,12 +594,15 @@ namespace rocwmma
     //       [4, 5]
     //       [6, 7]
     //
-    template <uint32_t GatherSize, uint32_t ElementStride, uint32_t ElementCount = 0u, typename VecT>
+    template <uint32_t GatherSize,
+              uint32_t ElementStride,
+              uint32_t ElementCount = 0u,
+              typename VecT>
     ROCWMMA_DEVICE constexpr static inline decltype(auto) interleave(VecT&& v0)
     {
         // If unspecified, ElementCount can be derived from the input vector size
-        using VecTraits = VecTraits<decay_t<decltype(v0)>>;
-        constexpr uint32_t VecSize = ElementCount > 0u  ? ElementCount : VecTraits::size();
+        using VecTraits            = VecTraits<decay_t<decltype(v0)>>;
+        constexpr uint32_t VecSize = ElementCount > 0u ? ElementCount : VecTraits::size();
 
         // Build interleaved index generator
         using IdXForm = interleave_idx<GatherSize, ElementStride, VecSize>;
